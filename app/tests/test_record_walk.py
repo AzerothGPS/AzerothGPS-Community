@@ -294,3 +294,30 @@ def test_the_record_button_sits_with_the_road_tools(game):
 
     assert "AZEROTHGPS_RECORD_STAIRS" in (ADDON_DIR / "Bindings.xml").read_text(encoding="utf-8")
     assert lua.eval("BINDING_NAME_AZEROTHGPS_RECORD_STAIRS")
+
+
+def test_a_portals_short_hop_starts_a_new_walk(rec):
+    # (Stormwind's Wizard's Sanctum, 2026-11-17: the tower's top and the trainers' room 9 yd apart on the map, under
+    # REC_JUMP_YD; recorded as one walk, its floors dropped into the room halfway up the stairs). A hop onto where a
+    # portal puts you is a new walk; walking over that spot isn't.
+    lua, ns = rec
+    R, w = ns.Record, Walker(*rec)
+    T = ns.Transports
+    key = "agps_test_portal"
+    T[key] = lua.eval(f"""{{ 0, {X0 + 30}, {Y0}, 0, {X0 + 50}, {Y0}, 5, "teleporter", "A", "B", "teleporter",
+                             land1 = {{ {X0 + 40}, {Y0 + 20} }}, land2 = {{ {X0 + 21}, {Y0} }} }}""")
+    try:
+        R.StartRecording(True)
+        w.walk(12, 0)
+        w.put(w.x + 9, w.y)  # (through the portal: onto land2, 9 yd on)
+        w.tick()
+        w.walk(12, 0)
+        w.walk(-14, 0)  # (and back on foot over land2's spot: the same walk)
+        R.StopRecording()
+        ts = tracks(lua, ns)
+        assert len(ts) == 2
+        assert max(x for x, _y in points(ts[0])) < X0 + 13 and min(x for x, _y in points(ts[1])) > X0 + 19
+        assert not R.PortalHop(0, X0 + 18, Y0, X0 + 21, Y0)  # (a step onto it: no hop)
+        assert R.PortalHop(0, X0 + 12, Y0, X0 + 21, Y0) and not R.PortalHop(1, X0 + 12, Y0, X0 + 21, Y0)
+    finally:
+        T[key] = None

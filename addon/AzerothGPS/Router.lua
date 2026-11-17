@@ -1103,7 +1103,13 @@ function R.WithTracks(roads, tracks, cont)
         for _, ce in ipairs(cutEnds) do
           if not joined[ce[1]] and degree(ce[1], ce[2], ce[3], mine) == 1 then
             joined[ce[1]] = true
+            -- (onto the drawn road at the cut end's own height: Stormwind's Wizard's Sanctum, 2026-11-17, a street's
+            -- end cut at the spiral's foot was joined up onto the turn over it, 22 yd up, and the route skipped the
+            -- spiral the player walked)
+            local cz = (zs and zs[ce[1]]) or (nzs and nzs[ce[1]])
+            if fl and cz then fl.at = cz end
             local nm, mx, my = attach(ce[2], ce[3], over + 4, mine)
+            if fl then fl.at = nil end
             if nm and nm ~= ce[1] then
               -- (a shipped one's: shipped too, source 2, as its own pieces)
               local ed = MakeEdge(ce[1], nm, { ce[2], ce[3], mx, my }, t.shipped and 2 or R.SOURCE_RECORDED)
@@ -1162,11 +1168,19 @@ R.BRIDGE_FAR_EXTRA_YD = 3000 -- ... no longer than this
 R.BRIDGE_FAR_ALTS = 4 -- ... and between two groups, from this many places of the smaller one
 R.BRIDGE_SAMPLE = 60 -- nodes per group of pieces tried when joining groups far apart
 R.BRIDGE_SAMPLE_YD = 250 -- ... about that many, a node per square these yards wide or a multiple (by place)
+-- (between two nodes with floors on a continent, `nz`: a capital's, a building's, a drawn road's with its heights, only
+-- when about as near in height as a walk that long can climb: LAYER_Z and this a yard. Stormwind's Wizard's Sanctum,
+-- 2026-11-17: the trainers' room under the city, 76 yd down, was linked to the tower's stairs and the street over it)
+R.BRIDGE_FLOOR_SLOPE = 1
+local function FloorsNear(nz, a, b, d2)
+  local za, zb = nz and nz[a], nz and nz[b]
+  return not (za and zb) or math.abs(za - zb) <= R.LAYER_Z + math.sqrt(d2) * R.BRIDGE_FLOOR_SLOPE
+end
 -- `short`: the short links' reach (0 for none: a city's own level, joined by its stairs);
 -- `nearOverlay(x, y)`: whether a spot is inside a city's ruins (short links shorter there);
 -- `skip[n]`: nodes left out (true: inside a cave, joined to the rest by its way out), or
 -- only in short links ("short": a cave's mouth, not a way to join pieces of road up).
-local function Bridges(nodes, adj, short, nearOverlay, skip, zs)
+local function Bridges(nodes, adj, short, nearOverlay, skip, zs, nz)
   -- (roads with heights, a dungeon's floors: only between roads on about the same floor)
   local function zok(a, b)
     return not zs or not zs[a] or not zs[b] or math.abs(zs[a] - zs[b]) <= R.LAYER_Z
@@ -1232,6 +1246,7 @@ local function Bridges(nodes, adj, short, nearOverlay, skip, zs)
     if pa == pb or not zok(a, b) then return end
     local dx, dy = nodes[b * 2 - 1] - ax, nodes[b * 2] - ay
     local d2 = dx * dx + dy * dy
+    if not FloorsNear(nz, a, b, d2) then return end
     local lo, hi = pa, pb
     if lo > hi then lo, hi = hi, lo end
     local row = best[lo]
@@ -1415,7 +1430,7 @@ R.DEAD_END_LINK_YD = 700
 R.DEAD_END_LINKS = 2
 R.DEAD_END_ROAD_FACTOR = 2.5
 R.DEAD_END_SOURCES = { [2] = true, [9] = true } -- (the shipped drawn roads, and the player's own: R.SOURCE_RECORDED)
-function R.DeadEndLinks(nodes, adj, bridges, skip, nearOverlay, zs, edges)
+function R.DeadEndLinks(nodes, adj, bridges, skip, nearOverlay, zs, edges, nz)
   local B = R.DEAD_END_LINK_YD
   local function zok(a, b)
     return not zs or not zs[a] or not zs[b] or math.abs(zs[a] - zs[b]) <= R.LAYER_Z
@@ -1474,7 +1489,7 @@ function R.DeadEndLinks(nodes, adj, bridges, skip, nearOverlay, zs, edges)
         for _, m in ipairs(buckets[kx * 65536 + ky] or {}) do
           local dx, dy = nodes[m * 2 - 1] - x, nodes[m * 2] - y
           local d2 = dx * dx + dy * dy
-          if m ~= n and d2 <= B2 and zok(n, m) then
+          if m ~= n and d2 <= B2 and zok(n, m) and FloorsNear(nz, n, m, d2) then
             local d = math.sqrt(d2)
             if not dist[m] or dist[m] > d * R.DEAD_END_ROAD_FACTOR then near[#near + 1] = { d, m } end
           end
@@ -2104,8 +2119,9 @@ function BuildGraph(cont)
     end or nil
   P1("router: build roads: costs", pt)
   pt = P0()
-  local bridges = Bridges(nodes, adj, grid and grid.slack and 0 or nil, nearOverlay, noBridge, zs)
-  if not (grid and grid.slack) then R.DeadEndLinks(nodes, adj, bridges, noBridge, nearOverlay, zs, edges) end -- (#411)
+  local nzB = not zs and next(nodeZ) and nodeZ or nil
+  local bridges = Bridges(nodes, adj, grid and grid.slack and 0 or nil, nearOverlay, noBridge, zs, nzB)
+  if not (grid and grid.slack) then R.DeadEndLinks(nodes, adj, bridges, noBridge, nearOverlay, zs, edges, nzB) end -- (#411)
   for ei in pairs(drops) do
     local e = edges[ei]
     if e then adj[e[1]][#adj[e[1]] + 1] = { e[2], e[3], ei, true } end

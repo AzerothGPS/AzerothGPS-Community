@@ -69,8 +69,8 @@ ns.Terrain["capital_stormwind_city_under7"] = { tx0 = 30.800985, ty0 = 48.689630
   rows = "QjJ/OlJ/MmFjI/MnJ/KrH/GvH/tHkG/rJkG/qLkF/FnNkF/FmOl/GlOkF/GlR/HkR/HlHlK/IoM/ImO/JjQ" }
 ns.Terrain["capital_stormwind_city_under8"] = { tx0 = 30.035985, ty0 = 48.798380, cell = 2, w = 9, h = 10, short = 15, long = 2, slack = 0, overlay = true, cave = true, capital = true, split = 61.5,
   rows = "JjH/HmG/GoF/r/r/qF/pG/GmH/GmH/GmH" }
-ns.Terrain["capital_stormwind_city_under9"] = { tx0 = 30.324735, ty0 = 48.835880, cell = 2, w = 17, h = 21, short = 15, long = 2, slack = 0, overlay = true, cave = true, capital = true, split = 111.5,
-  rows = "LoI/JsG/IlKlF/HlNjF/GlOk/GkQj/FlQj/FkRj/FkRj/kRk/lQjF/lS/FkS/FkS/FlR/FmQ/FnP/GnO/HmO/IlO/LmK" }
+ns.Terrain["capital_stormwind_city_under9"] = { tx0 = 30.324735, ty0 = 48.835880, cell = 2, w = 17, h = 17, short = 15, long = 2, slack = 0, overlay = true, cave = true, capital = true, split = 112.0,
+  rows = "LoI/JsG/IlKlF/HlNjF/GlOk/GkQj/FlQj/FkRj/FkRj/kRk/lQjF/lS/FkS/FkS/FlR/FmQ/FjT" }
 ns.Terrain["capital_stormwind_city_under10"] = { tx0 = 31.198485, ty0 = 48.940880, cell = 2, w = 20, h = 15, short = 15, long = 2, slack = 0, overlay = true, cave = true, capital = true, split = 106.5,
   rows = "KrJ/KrJ/IuI/_30IG/_30JF/FjF_30GF/I_30G/I_30G/IxF/KuG/JjFoIjG/KjFmM/LmN/MlN/NjO" }
 ns.Terrain["capital_stormwind_city_under11"] = { tx0 = 31.082235, ty0 = 48.989630, cell = 2, w = 25, h = 23, short = 15, long = 2, slack = 0, overlay = true, cave = true, capital = true, split = 106.5,

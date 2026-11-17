@@ -278,11 +278,14 @@ function T.Stairs(path, horizon)
   for _, st in ipairs(out) do
     local f0, f1 = fz[st.j0], fz[st.j1]
     if not st.dz and f0 and f1 and math.abs(f1 - f0) >= 1 then st.dir = f1 > f0 and 1 or -1 end
+    -- (and no flight where the floors across it are level: the way beside the stairs, at their top. 2026-11-17, the
+    -- Wizard's Sanctum's portal: "Take the stairs up" in front of it, the walk to it 2 yd off the stairs' last turn)
+    if not st.dz and f0 and f1 and math.abs(f1 - f0) < 1 then st.level = true end
   end
   -- (by heights: only a flight rising or falling STAIR_RISE in all, not a bump)
   local kept = {}
   for _, st in ipairs(out) do
-    if not st.dz or math.abs(st.dz) >= T.STAIR_RISE then kept[#kept + 1] = st end
+    if not st.level and (not st.dz or math.abs(st.dz) >= T.STAIR_RISE) then kept[#kept + 1] = st end
   end
   return kept
 end
