@@ -451,6 +451,25 @@ R.REC_STEP_YD = 2 -- a point at least this far from the last
 R.REC_TURN = math.rad(25) -- and at a corner: the way turning this much there (its sample REC_TURN_MIN_YD on, at least)
 R.REC_TURN_MIN_YD = 1
 R.REC_JUMP_YD = 30 -- moved this far between two samples: a new walk (a teleport)
+-- ... and a shorter hop onto where a portal puts you (ns.Transports' `land1`/`land2`): Stormwind's Wizard's Sanctum, the
+-- tower's top and the trainers' room 9 yd apart on the map (2026-11-17: one walk, and its floors dropped into the room
+-- halfway up the stairs)
+R.REC_PORTAL_YD = 5
+R.REC_PORTAL_LAND_YD = 4
+
+-- Whether a hop of a sample from (ax, ay) to (x, y) on `level` was a portal's (R.REC_PORTAL_YD).
+function R.PortalHop(level, ax, ay, x, y)
+  if (x - ax) ^ 2 + (y - ay) ^ 2 < R.REC_PORTAL_YD ^ 2 then return false end
+  local r2 = R.REC_PORTAL_LAND_YD ^ 2
+  for _, t in pairs(ns.Transports or {}) do
+    if type(t) == "table" and t[8] == "teleporter" then
+      for side, l in ipairs({ t.land1 or false, t.land2 or false }) do
+        if l and t[side == 1 and 1 or 4] == level and (x - l[1]) ^ 2 + (y - l[2]) ^ 2 <= r2 then return true end
+      end
+    end
+  end
+  return false
+end
 R.REC_RESUME_YD = 3 -- moved this far while paused: a new walk on going on (else the same one)
 R.REC_MIN_YD = 8 -- a walk shorter than this isn't saved (as a stroke)
 R.REC_MAX_POINTS = 1000 -- a walk this long is saved, and the next goes on from its last point
@@ -556,7 +575,7 @@ function R.RecordSample(x, y, level, now, indoors, zt, fz, force)
   local s = { x, y, now, indoors, zt, fz }
   if n > 0 then
     local c = r.cand or { pts[2 * n - 1], pts[2 * n] }
-    if level ~= r.level or (x - c[1]) ^ 2 + (y - c[2]) ^ 2 > R.REC_JUMP_YD ^ 2 then
+    if level ~= r.level or (x - c[1]) ^ 2 + (y - c[2]) ^ 2 > R.REC_JUMP_YD ^ 2 or R.PortalHop(level, c[1], c[2], x, y) then
       R.FinishWalk()
       n = 0
     end

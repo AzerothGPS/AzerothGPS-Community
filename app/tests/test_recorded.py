@@ -372,3 +372,43 @@ def test_a_recorded_walk_in_a_saved_file_ships_with_its_floors(client, tmp_path)
     up = statistics.median(_upstairs_heights())
     last = [f for f in floor_tracks(ov)[0] if not f["stair"]][-1]
     assert abs(last["zs"][-1] - up) <= 1.0  # (the walk ends upstairs, at the upstairs roads' height)
+
+
+def test_a_walk_through_a_portal_gets_its_floors_either_side_on_their_own(monkeypatch):
+    # (Stormwind's Wizard's Sanctum, 2026-11-17: up the tower's stairs, through the portal at the top into the trainers'
+    # room under the city, 9 yd on on the map. As one walk its floors dropped into the room halfway up the stairs, and
+    # its roads joined the stairs to the room)
+    land = (-9017.46, 885.90)  # (addon_data.TELEPORTERS: where #704 puts you)
+    up = [(-9010.0 + k, 870.0) for k in range(8)]  # (the stairs, points 1-8; marked 2-7)
+    room = [(land[0] + 1.0, land[1] - k) for k in range(5)]  # (a 9-yd hop onto the landing, then the room)
+    pts = up + room
+    assert R.portal_steps(pts) == [7]
+    assert R.portal_steps(up) == [] and R.portal_steps(room) == []
+    seen = []
+
+    def candidates(cd, cont, ps, ground=None, placements=None, log=print):
+        return [[R.Cand(0.0, "model")] for _ in ps]
+
+    def assign(cands, indoors, stairs, picked=None, pts=None):
+        seen.append((len(cands), list(stairs), indoors, picked))
+        z0 = 130.0 if len(seen) == 1 else 30.0
+        return [z0 + k for k in range(len(cands))], ["model"] * len(cands), []
+
+    monkeypatch.setattr(R, "candidates", candidates)
+    monkeypatch.setattr(R, "assign", assign)
+    monkeypatch.setattr(R, "Ground", lambda cd, cont: None)
+    monkeypatch.setattr(R.I, "placements", lambda cd, cont: None)
+    w = R.Walks(lambda: object(), log=lambda *a: None)
+    t = {"time": 1, "continent": 0, "coords": [list(p) for p in pts], "stairs": [(2, 7)],
+         "ind": "0" * 8 + "1" * 5, "pk": [(1, 120.0), (10, 31.0)]}
+    out = w(t)
+    # (each side worked out alone: the stairs and picks with it, counted from its own first point)
+    assert [s[0] for s in seen] == [8, 5]
+    assert seen[0][1] == [(1, 6)] and seen[1][1] == []
+    assert seen[0][2] == "0" * 8 and seen[1][2] == "1" * 5
+    assert seen[0][3][0] == 120.0 and seen[1][3] == [120.0, 31.0, 31.0, 31.0, 31.0]
+    # (and no road across the hop)
+    ups, rooms = {tuple(p) for p in up}, {tuple(p) for p in room}
+    assert out and all({tuple(q) for q in pc["coords"]} <= ups or {tuple(q) for q in pc["coords"]} <= rooms
+                       for pc in out)
+    assert any(pc["coords"][0] == list(room[0]) for pc in out)

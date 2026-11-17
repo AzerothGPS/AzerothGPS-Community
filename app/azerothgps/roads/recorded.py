@@ -67,6 +67,39 @@ AMBIG_Z = 2.0  # (another floor: this far from the one chosen)
 
 DOORMAT_YD = 3.0  # a model's stretch shorter than this between the ground's is the ground (a doorstep, a slab)
 
+# A portal taken on the walk (Stormwind's Wizard's Sanctum, 2026-11-17: the tower's top and the trainers' room under the
+# city, 9 yd apart on the map, too near for Record's REC_JUMP_YD): a step at least PORTAL_STEP_YD long ending within
+# PORTAL_LAND_YD of where a portal puts you (addon_data.TELEPORTERS' `land`). The walk's floors are worked out either
+# side of it on their own, and no road joins the two (the floors had one drop, from the stairs' middle into the room).
+PORTAL_STEP_YD = 5.0
+PORTAL_LAND_YD = 4.0
+
+
+def _picks_from(pk, a: int, b: int):
+    """Record's floor picks (where the pick changed, points from 1) for points a..b-1 (from 0) as their own walk's: the
+    pick in force at its first point, then the changes in it."""
+    if not pk:
+        return None
+    marks = sorted(pk, key=lambda m: m[0])
+    before = [z for i, z in marks if i - 1 < a]
+    out = [(1, before[-1])] if before else []
+    out += [(i - a, z) for i, z in marks if a <= i - 1 < b]
+    return out or None
+
+
+def portal_steps(pts) -> list:
+    """The steps i (point i to i + 1, from 0) where the walk went through a portal (PORTAL_STEP_YD, PORTAL_LAND_YD)."""
+    from ..addon_data import TELEPORTERS
+
+    lands = [xy for row in TELEPORTERS for opts in row[2:3] for xy in opts.get("land", ())]
+    out = []
+    for i in range(len(pts) - 1):
+        (ax, ay), (bx, by) = pts[i], pts[i + 1]
+        if math.hypot(bx - ax, by - ay) >= PORTAL_STEP_YD and any(
+                math.hypot(bx - lx, by - ly) <= PORTAL_LAND_YD for lx, ly in lands):
+            out.append(i)
+    return out
+
 
 @dataclass
 class Cand:
@@ -536,6 +569,24 @@ class Walks:
             return None
         pts = [(float(p[0]), float(p[1])) for p in t["coords"]]
         stairs = [(a - 1, b - 1) for a, b in t.get("stairs") or ()]  # (Record's marks count points from 1)
+        # (through a portal: each side its own walk, no road across; portal_steps)
+        cuts = portal_steps(pts)
+        if cuts:
+            out = []
+            ind, pk = t.get("ind"), t.get("pk")
+            for a, b in zip([0] + [c + 1 for c in cuts], [c + 1 for c in cuts] + [len(pts)]):
+                if b - a < 2:
+                    continue
+                part = dict(t, coords=t["coords"][a:b],
+                            stairs=[(max(s0, a) - a + 1, min(s1, b - 1) - a + 1) for s0, s1 in stairs
+                                    if s1 > a and s0 < b - 1],
+                            ind=ind[a:b] if isinstance(ind, (str, list)) else ind,
+                            pk=_picks_from(pk, a, b))
+                got = self(part)
+                if got is None:
+                    return None
+                out += got
+            return out
         try:
             if self.cd is None:
                 self.cd = self.client()

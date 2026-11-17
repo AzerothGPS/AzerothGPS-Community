@@ -11012,3 +11012,96 @@ def test_the_mage_trainer_route_goes_up_the_wizards_sanctum_and_through_its_port
             ns.CharDB().faction = was_faction
         lua.globals().AGPS_POS = was_pos
         lua.execute("UnitFactionGroup = AGPS_UFG")
+
+
+def test_the_mage_trainer_route_climbs_the_walk_recorded_up_the_wizards_sanctum(game):
+    # (asked 2026-11-17: "The mage tower path doesn't follow my route I saved, spiraling around the tower on the way up
+    # to the portal": a street's end cut at the stairs' foot was joined onto the turn 22 yd over it, the room under the
+    # city was linked to the stairs by the map's distance, and the walk's floors dropped into the room halfway up)
+    lua, ns = game
+    N = ns.Nav
+    lua.execute("AGPS_UFG = UnitFactionGroup UnitFactionGroup = function() return 'Alliance', 'Alliance' end")
+    was_pos = lua.eval("{ AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] }")
+    try:
+        N.roomIn = None
+        was_faction = ns.CharDB().faction
+        ns.CharDB().faction = 'Alliance'
+        lua.execute("AGPS_POS = { -8990.0, 830.0, 0 }")
+        N.SetStops(lua.eval("{ { x = -8990.0, y = 862.9, cont = 0, z = 29.6, name = 'Stormwind Mage Trainer' } }"), False,
+                   "red")
+        for t in range(6):
+            lua.execute(f"AGPS_T = {900000 + t * 2}")
+            _redraw(lua, ns)
+            N.Status(-8990.0, 830.0, 0)
+        first = N.route.parts[1]
+        pts = [(first.pts[k], first.pts[k + 1]) for k in range(1, len(first.pts), 2)]
+        fz = [first.fz[k] for k in range(1, len(first.fz) + 1)]
+        # (in at the stairs' foot by the door, round both turns of the walk, to the portal at the top)
+        assert min(math.dist(p, (-9010.2, 853.7)) for p in pts) < 1.5
+        for spot in [(-8999.8, 889.0), (-8980.7, 874.5), (-9007.0, 877.9), (-9017.0, 876.6)]:
+            assert min(math.dist(p, spot) for p in pts) < 1.5, spot
+        # (climbing all the way: never a floor's jump between two points, never down into the room)
+        assert max(abs(b - a) for a, b in zip(fz, fz[1:])) < 5
+        assert min(fz) > 100 and fz[-1] > 140
+    finally:
+        N.Clear()
+        N.roomIn = None
+        if "was_faction" in locals():
+            ns.CharDB().faction = was_faction
+        lua.globals().AGPS_POS = was_pos
+        lua.execute("UnitFactionGroup = AGPS_UFG")
+
+
+def test_at_the_wizards_sanctum_portal_it_says_the_portal_and_through_it_youve_arrived(game):
+    # (2026-11-17, in game: in front of the portal "Take the stairs up", the walk to it 2 yd off the stairs' last turn;
+    # then through it, still "Take the teleporter": put 1.4 yd off the server's landing and running on, the landing's
+    # exact spot and facing were never seen. "Also once going through the portal technically the player has arrived")
+    lua, ns = game
+    N = ns.Nav
+    lua.execute("AGPS_UFG = UnitFactionGroup UnitFactionGroup = function() return 'Alliance', 'Alliance' end")
+    was_pos = lua.eval("{ AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] }")
+    was_time = lua.eval("GetTime")
+    clock = [900000.0]
+    try:
+        N.roomIn = None
+        was_faction = ns.CharDB().faction
+        ns.CharDB().faction = 'Alliance'
+
+        def at(x, y, dt=0.25, frames=1):
+            for _ in range(frames):
+                clock[0] += dt
+                lua.execute(f"AGPS_NOW = {clock[0]} AGPS_T = {clock[0]} AGPS_POS = {{ {x}, {y}, 0 }}")
+                _redraw(lua, ns)
+                N.Status(x, y, 0)
+
+        lua.execute("GetTime = function() return AGPS_NOW end")
+        at(-8990.0, 830.0, frames=1)
+        N.SetStops(lua.eval("{ { x = -8990.0, y = 862.9, cont = 0, z = 29.6, name = 'Stormwind Mage Trainer' } }"), False,
+                   "red")
+        at(-8990.0, 830.0, dt=2, frames=6)
+        # (up the walk as drawn, to the top, on the way from the stairs to the portal: the portal, not stairs)
+        first = N.route.parts[1]
+        walk = [(first.pts[k], first.pts[k + 1]) for k in range(1, len(first.pts), 2)]
+        for x, y in walk[:next(i for i, p in enumerate(walk) if math.dist(p, (-9014.6, 873.0)) < 0.5) + 1]:
+            at(x, y, dt=0.5)
+        at(-9014.6, 873.0, dt=0.5, frames=2)
+        _path, man = ns.Turns.Ahead(N.route, "stop")
+        assert man[1].kind == "board", man[1].text
+        # (through it: 9 yd on in a quarter of a second, 1.4 yd from the landing, the facing anything; arrived)
+        at(-9017.0, 876.6, frames=2)
+        at(-9016.1, 886.0)
+        assert N.roomIn is not None
+        assert N.dest is None or N.arrivedAt, str(N.StepsText(9))
+        # (walking by the landing at the same pace isn't a hop: on foot over the street's same spot)
+        N.roomIn = None
+        at(-9016.1, 880.0, frames=1)
+        at(-9016.1, 886.0, dt=1.0)
+        assert N.roomIn is None
+    finally:
+        N.Clear()
+        N.roomIn = None
+        lua.globals().GetTime = was_time
+        if "was_faction" in locals():
+            ns.CharDB().faction = was_faction
+        lua.globals().AGPS_POS = was_pos
+        lua.execute("UnitFactionGroup = AGPS_UFG")

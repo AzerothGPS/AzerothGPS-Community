@@ -1451,6 +1451,12 @@ N.ROOM_YD, N.ROOM_Z = 60, 15
 -- the room from the street over it; out again by the portal back up, or ROOM_YD from its end)
 N.ROOM_LAND_YD, N.ROOM_FACE = 1.5, 0.01
 N.roomIn = nil -- (the row the player is in the room of, or nil)
+-- (or a hop there: moved ROOM_HOP_YD or more faster than ROOM_HOP_SPEED yd/s (an epic mount runs 14; the text looks every
+-- 0.25 s), onto within ROOM_HOP_LAND_YD of its landing.
+-- 2026-11-17, the player through the portal and still told to take it: put 1.4 yd off the server's spot, and running
+-- on, the landing's exact spot and facing were never seen)
+N.ROOM_HOP_YD, N.ROOM_HOP_SPEED, N.ROOM_HOP_LAND_YD = 5, 25, 6
+local roomLast -- ({ x, y, cont, time }: the player's spot when RoomWatch last looked)
 local function RoomEnd(t)
   local s = t.room
   if s == 1 then return t[1], t[2], t[3], t.z1, t.land1, t.land2 end
@@ -1471,15 +1477,22 @@ end
 function N.RoomWatch(px, py, cont)
   if not px then return end
   local face
+  local now = GetTime and GetTime() or 0
+  local last = roomLast
+  roomLast = { px, py, cont, now }
+  local hop = last and last[3] == cont and now > last[4] and (px - last[1]) ^ 2 + (py - last[2]) ^ 2 >= N.ROOM_HOP_YD ^ 2
+    and math.sqrt((px - last[1]) ^ 2 + (py - last[2]) ^ 2) >= N.ROOM_HOP_SPEED * (now - last[4])
+  local hop2 = N.ROOM_HOP_LAND_YD ^ 2
   for i, t in ipairs(ns.Transports or {}) do
     if t.room and t.face then
       local c, x, y, _, inLand, outLand = RoomEnd(t)
       if c == cont and inLand and outLand and (x - px) ^ 2 + (y - py) ^ 2 <= (N.ROOM_YD * 2) ^ 2 then
         face = face or (Geo.Facing and Geo.Facing()) or false
         local faced = face and math.abs(face - t.face) <= N.ROOM_FACE
-        if faced and (px - inLand[1]) ^ 2 + (py - inLand[2]) ^ 2 <= N.ROOM_LAND_YD ^ 2 then
+        local dIn, dOut = (px - inLand[1]) ^ 2 + (py - inLand[2]) ^ 2, (px - outLand[1]) ^ 2 + (py - outLand[2]) ^ 2
+        if (faced and dIn <= N.ROOM_LAND_YD ^ 2) or (hop and dIn <= hop2) then
           if N.roomIn ~= i then N.roomIn = i Changed() end
-        elseif faced and N.roomIn == i and (px - outLand[1]) ^ 2 + (py - outLand[2]) ^ 2 <= N.ROOM_LAND_YD ^ 2 then
+        elseif N.roomIn == i and ((faced and dOut <= N.ROOM_LAND_YD ^ 2) or (hop and dOut <= hop2)) then
           N.roomIn = nil
           Changed()
         end
@@ -4578,6 +4591,9 @@ local function CheckArrival(px, py, cont)
       local room = N.StopRoom(d)
       if room and N.roomIn ~= room then at = false end
     end
+    -- (and in it, the stop's room: there. Asked 2026-11-17: "once going through the portal technically the player has
+    -- arrived", the trainers in sight from its landing)
+    if not at and cont == d.cont and N.roomIn and N.StopRoom(d) == N.roomIn then at = true end
     if d.quest and QuestingOn() and not d.questDone then
       -- a quest route stop: done by its quest (QuestCheck), not by getting there; there, it waits
       if N.QuestStopDone(d) then

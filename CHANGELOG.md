@@ -11,6 +11,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 ### Fixed
 
 - Stormwind's mage trainers: the route goes up the Wizard's Sanctum and through its portal, not "below you".
+- Stormwind's mage trainers: the route follows the Wizard's Sanctum's stairs all the way up, says the portal in front of it, and you've arrived once through it.
 - Roads drawn or recorded in a city with no floor picked now take the height of the roads they join, rising evenly between them, so routes use them.
 - Stormwind: routes from Cut-Throat Alley leave by its west door and cross the plaza to the bridge, not round the canals.
 
