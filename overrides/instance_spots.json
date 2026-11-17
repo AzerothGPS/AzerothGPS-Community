@@ -1,0 +1,69 @@
+{
+ "2999": {
+  "name": "Ruins of Lordaeron",
+  "source": "https://www.icy-veins.com/wow-forever/ruins-of-lordaeron-guide",
+  "in": [
+   1803.2,
+   139.3
+  ],
+  "near": 300,
+  "zmin": 40,
+  "bosses": {
+   "Witherfang": [
+    1632.5,
+    73.6
+   ],
+   "The Butcher": [
+    1468.0,
+    174.8
+   ],
+   "The Abandoned": [
+    1600.3,
+    363.3
+   ],
+   "Bjork": [
+    1752.4,
+    347.7
+   ],
+   "Rath'mael": [
+    1540.9,
+    312.3
+   ],
+   "Viktor the Vile": [
+    1527.4,
+    394.5
+   ],
+   "Lordaeron Captain": [
+    1694.1,
+    419.5
+   ]
+  }
+ },
+ "3065": {
+  "name": "The Hall of Thanes",
+  "source": "https://www.icy-veins.com/wow-forever/hall-of-thanes-guide",
+  "in": [
+   -105.5,
+   0.8
+  ],
+  "bosses": {
+   "Faldrim Anvilmar": [
+    50.7,
+    25.9
+   ],
+   "Infurnus": [
+    183.0,
+    -181.4
+   ],
+   "Plunder": [
+    144.5,
+    0.8
+   ],
+   "Durgen Dirgehammer": [
+    351.6,
+    0.8
+   ]
+  },
+  "ground": false
+ }
+}

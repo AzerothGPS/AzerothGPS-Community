@@ -1,0 +1,101 @@
+## Interface: 16001
+## Title: AzerothGPS
+## Notes: Car-GPS style navigation: a square map with routes and turn-by-turn directions. Display only; never automates anything.
+## Category: Map
+## Author: AzerothGPS
+## X-License: All Rights Reserved
+## X-Copyright: Copyright (c) 2026 AzerothGPS
+## Version: 1.3.6
+## IconTexture: Interface\AddOns\AzerothGPS\Media\Device
+## SavedVariables: AzerothGPSDB
+## LoadSavedVariablesFirst: 1
+
+Locales\Locales.lua
+Locales\deDE.lua
+Locales\esES.lua
+Locales\esMX.lua
+Locales\frFR.lua
+Locales\itIT.lua
+Locales\koKR.lua
+Locales\ptBR.lua
+Locales\ruRU.lua
+Locales\zhCN.lua
+Locales\zhTW.lua
+Core.lua
+Geo.lua
+Debug.lua
+Data\Minimap.lua
+Data\Coast.lua
+Data\Maps.lua
+Data\Roads.lua
+Data\Interiors.lua
+Data\Pois.lua
+Data\Terrain.lua
+Data\Buildings.lua
+Data\Bridges.lua
+Data\TerrainHPA.lua
+Data\Transports.lua
+Data\Flights.lua
+Data\Cities.lua
+Data\Caves.lua
+Data\Capitals.lua
+Data\Indoors.lua
+Data\Instances.lua
+Data\Transit.lua
+Data\DungeonMaps.lua
+Data\InteriorMaps.lua
+Data\CityPlaces.lua
+Data\Hostile.lua
+Data\Zones.lua
+Data\Pins.lua
+Data\GuideFloors.lua
+Data\NpcFloors.lua
+Data\Npcs.lua
+Data\VendorItems.lua
+Data\IconSizes.lua
+Passability.lua
+Router.lua
+Nav.lua
+Turns.lua
+MapText.lua
+Import.lua
+RestedXP.lua
+Zygor.lua
+Polestar.lua
+Questify.lua
+Layers.lua
+GPSFrame.lua
+OtherPins.lua
+Arrow.lua
+Looks.lua
+Taxi.lua
+Teleports.lua
+Record.lua
+Pins.lua
+Feedback.lua
+Searches.lua
+Pad.lua
+Options.lua
+PadOptions.lua
+Config.lua
+Api.lua
+Tutorial.lua
+
+# The seamless map (issues #49, #57, #60, #61): its data and engine, run only when it's on (Atlas/Atlas.lua)
+Atlas\Data\BakedZones.lua
+Atlas\Data\BorderTints.lua
+Atlas\Data\CaveMaps.lua
+Atlas\Data\CityBanners.lua
+Atlas\Data\CleanArt.lua
+Atlas\Data\Lettering.lua
+Atlas\Data\MiniMipmaps.lua
+Atlas\Data\MiniTiles.lua
+Atlas\Data\Pieces.lua
+Atlas\Data\Unmapped.lua
+Atlas\Data\ZoneTones.lua
+Atlas\Engine\Base.lua
+Atlas\Engine\Backdrop.lua
+Atlas\Engine\Zones.lua
+Atlas\Engine\Detail.lua
+Atlas\Engine\Engine.lua
+Atlas\Atlas.lua

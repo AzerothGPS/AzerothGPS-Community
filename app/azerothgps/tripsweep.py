@@ -1,0 +1,352 @@
+"""Trip sweep (`agps trip-sweep`): random trips planned and followed as in the game, the whole addon
+running (app/azerothgps/gameharness.py: every file under Lua 5.1, the game's UI stood in for), with
+what `route-sweep` doesn't reach: flights, the zones too high for the level, the detours to flight
+masters not learned, and the frame budget while the player runs along.
+
+Each trip: a random faction and level (low levels see many zones too high), a random share of that
+faction's flight masters on the continent known, a start and a stop at towns and places far apart.
+The route is worked out with the terrain searches in the background (the roads built in the
+background too, the first time), then the player runs along it for a while. Flagged:
+
+  * frame:     a redraw (the route worked out in it) over FRAME_MS, after the first route
+  * slice:     a slice of background work over SLICE_MS
+  * longwalk:  running along a route with a ride, a whole walk (over LONG_YD) routed in the frame
+  * noroute:   no route at all
+  * slowride:  the route flies or rides, and walking all the way is clearly faster (RIDE_SHARE, RIDE_SLACK)
+  * missedride: the route walks all the way, and the best way with a ride is clearly faster
+               (both weighed as the addon does: the zones too high for the level count extra)
+  * detour:    a detour to a flight master that shouldn't be one (known already, the other faction's,
+               out of reach, an obsolete "zz" one), or one missing from the steps
+  * blocked:   the route walks BLOCKED_YD or more in straight pieces over ground the terrain blocks (Nav.BlockedYards:
+               a line over the mountains, which should be "No way there found" or a walk; a stop out at sea too)
+  * wallcut:   one straight piece off the roads runs WALLCUT_YD or more through blocked ground in one go (or crosses a
+               drawn wall): a line through a mountain or a building, not a pass the grid is strict about. The clear-cut
+               ones among the blocked (the user's wall check, 2026-10-07: they stand out from the data's flags)
+
+Writes data/debug/trip-sweep/report.json (flagged trips, worst first, with everything to replay them).
+`--replay report.json` runs an earlier report's flagged trips again (after a fix), into replay.json.
+"""
+
+from __future__ import annotations
+
+import json
+import math
+import random
+import time
+from pathlib import Path
+
+FRAME_MS = 50  # (lupa's Lua 5.1: about the game's speed)
+SLICE_MS = 40
+LONG_YD = 3000
+BLOCKED_YD = 250  # (gap links over passes the grid is too strict about: up to about 200)
+WALLCUT_YD = 200  # (blocked ground crossed in one go by one straight piece: wallcut; a pass the grid is strict about
+#                   is up to about 200, as BLOCKED_YD's note)
+WALLCUT_STEP = 2.0
+RIDE_SHARE, RIDE_SLACK = 1.2, 60  # clearly faster: by this share and this many seconds
+LEVELS = (5, 10, 14, 20, 30, 40, 50, 60)
+TRIP_MIN_YD, TRIP_MAX_YD = 1500, 9000
+RUN_FRAMES = 300  # 15 s at 20 redraws a second
+WALK = 7.0  # yards a second on foot
+
+
+def _places(ns, cont):
+    """Towns and named places on continent `cont`: (x, y, name)."""
+    out = []
+    for p in (ns.Pois[cont] or {}).values():
+        if p[1] in (2, 3):
+            out.append((float(p[2]), float(p[3]), str(p[4])))
+    return out
+
+
+def _masters(ns, cont, fac):
+    """The flight masters of faction `fac` ("H" / "A") on continent `cont`: [node id]."""
+    out = []
+    for p in (ns.Pois[cont] or {}).values():
+        if p[1] == 1 and p[6] and fac in str(p[6]) and not str(p[4]).startswith("zz"):
+            out.append(int(p[5]))
+    return out
+
+
+def _secs(r):
+    return (r.totalYards or 0) / WALK + (r.totalRide or 0) if r else math.inf
+
+
+def _weighed(lua, ns, r, cont, a, b):
+    """Seconds for route `r` as the addon weighs it (Nav.WeighedWalk: the zones too high for the level
+    counted extra, not the trip's own ends; water at swimming's cost), plus its rides."""
+    if not r:
+        return math.inf
+    R, N = ns.Router, ns.Nav
+    exempt = lua.table()
+    exempt[R.ZoneAt(cont, a[0], a[1])] = True
+    exempt[R.ZoneAt(cont, b[0], b[1])] = True
+    secs = 0.0
+    for part in r.parts.values():
+        pts, kinds = part.pts, part.kinds
+        if all(kinds[i] != N.KIND_TRANSPORT for i in range(1, len(kinds) + 1)):
+            if N.Unwalkable(part):  # (no way on foot found: a line across the sea or the mountains)
+                return math.inf
+            secs += N.WeighedWalk(part.cont, pts, WALK, exempt, part.blocked)
+    return secs + (r.totalRide or 0)
+
+
+def install_helpers(lua) -> None:
+    """The sweep's Lua helpers: AGPS_LONGEST_BLOCKED(route) (_longest_blocked)."""
+    lua.execute("""
+      function AGPS_LONGEST_BLOCKED(r)
+        local P, R = AGPS_NS.Passability, AGPS_NS.Router
+        local most = 0
+        for _, part in ipairs(r.parts or {}) do
+          local pts, kinds = part.pts, part.kinds
+          if part.leg and pts and kinds then
+            for i, k in ipairs(kinds) do
+              if k == R.KIND_OFFROAD then
+                local x1, y1, x2, y2 = pts[2 * i - 1], pts[2 * i], pts[2 * i + 1], pts[2 * i + 2]
+                if x2 and P.CrossesWall(part.cont, x1, y1, x2, y2) then return math.huge end
+                local d = x2 and math.sqrt((x2 - x1) ^ 2 + (y2 - y1) ^ 2) or 0
+                local n, run = math.floor(d / STEP), 0
+                for s = 0, n do
+                  local t = n > 0 and s / n or 0
+                  if P.At(part.cont, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t) == 2 then
+                    run = run + (n > 0 and d / n or 0)
+                    if run > most then most = run end
+                  else
+                    run = 0
+                  end
+                end
+              end
+            end
+          end
+        end
+        return most
+      end
+    """.replace("STEP", str(WALLCUT_STEP)))
+
+
+def _longest_blocked(lua, r) -> float:
+    """The most blocked ground (yards) one straight piece of `r`'s walks off the roads crosses in one go (a drawn wall
+    crossed: infinite), sampled every WALLCUT_STEP yards over the grids (Passability.At: 2 blocked)."""
+    return float(lua.globals().AGPS_LONGEST_BLOCKED(r))
+
+
+def _rides(r):
+    return bool(r and r.legs and any(r.legs[i].ride for i in range(1, len(r.legs) + 1)))
+
+
+def sweep(trips: int = 20, minutes: float | None = None, seed: int | None = None, log=print,
+          replay: list[dict] | None = None) -> dict:
+    """`replay`: trips to run again (a report's flagged ones), in place of random ones."""
+    from .gameharness import start
+
+    seed = seed if seed is not None else random.randrange(1 << 30)
+    rnd = random.Random(seed)
+    lua, ns = start()
+    R, N, G = ns.Router, ns.Nav, ns.GPS
+    lua.execute("""
+      AGPS_LONG = 0
+      local route = AGPS_NS.Router.Route
+      AGPS_NS.Router.Route = function(cont, sx, sy, tx, ty, opts)
+        local r = route(cont, sx, sy, tx, ty, opts)
+        if not coroutine.running() and r and r.length > AGPS_LONG_YD then AGPS_LONG = AGPS_LONG + 1 end
+        return r
+      end
+    """.replace("AGPS_LONG_YD", str(LONG_YD)))
+    install_helpers(lua)
+    clock = lua.eval("function() return os.clock() * 1000 end")
+    ns.settings.gps.zoom = 800
+    deadline = time.time() + minutes * 60 if minutes else None
+    flagged, done = [], 0
+    while (done < len(replay) if replay is not None
+           else (done < trips and not deadline) or (deadline and time.time() < deadline)):
+        done += 1
+        if replay is not None:
+            old = replay[done - 1]
+            cont, faction, level, known = old["cont"], old["faction"], old["level"], list(old["known"])
+            a, b, c2 = tuple(old["from"]), tuple(old["to"]), tuple(old["then"]) if old.get("then") else None
+        else:
+            cont = rnd.choice((0, 1))
+            faction = rnd.choice(("Horde", "Alliance"))
+            level = rnd.choice(LEVELS)
+            places = _places(ns, cont)
+            for _ in range(200):
+                a, b = rnd.choice(places), rnd.choice(places)
+                if TRIP_MIN_YD <= math.hypot(a[0] - b[0], a[1] - b[1]) <= TRIP_MAX_YD:
+                    break
+            # (half the trips with a second stop: the stretch between stops is planned on its own)
+            c2 = None
+            if rnd.random() < 0.5:
+                for _ in range(200):
+                    c = rnd.choice(places)
+                    if TRIP_MIN_YD <= math.hypot(c[0] - b[0], c[1] - b[1]) <= TRIP_MAX_YD:
+                        c2 = c
+                        break
+            masters = _masters(ns, cont, faction[0])
+            known = [m for m in masters if rnd.random() < rnd.uniform(0.2, 0.9)] or masters[:1]
+        trip = {"cont": cont, "faction": faction, "level": level, "from": a, "to": b, "then": c2, "known": known, "issues": []}
+        issues = trip["issues"]
+        # the character
+        lua.execute(f"AGPS_LEVEL = {level}; UnitFactionGroup = function() return '{faction}' end")
+        cdb = ns.CharDB()
+        cdb.faction = faction
+        cdb.taxiNodes = lua.eval("{ [1415] = { nodes = { " + "".join(f"{{ nodeID = {n}, known = true }}," for n in known) + " } } }")
+        ns.Teleports.Changed()
+        N.FlightsChanged()
+        # the route, as in the game: searches (and the roads, the first time) in the background. A new route each
+        # (N.Clear: SetStops' "red", which asks nothing about the zones too high, keeps what the last trip's planning
+        # left out and kept, N.noWalk / N.walkKept, as a new route in the game doesn't)
+        N.Clear()
+        lua.execute(f"AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = {a[0]}, {a[1]}, {cont}")
+        R.WARM, R.SYNC_WALKS = True, False
+        more = f", {{ x = {c2[0]}, y = {c2[1]}, cont = {cont}, name = 'stop 2' }}" if c2 else ""
+        N.SetStops(lua.eval(f"{{ {{ x = {b[0]}, y = {b[1]}, cont = {cont}, name = 'stop' }}{more} }}"), False, "red")
+        t = float(lua.eval("AGPS_T")) + 10
+        first, worst_frame, worst_slice = None, 0.0, 0.0
+        try:
+            for f in range(900):
+                t += 0.05
+                lua.execute(f"AGPS_T = {t}")
+                s0 = time.perf_counter()
+                G.Update()
+                ms = (time.perf_counter() - s0) * 1000
+                if R.HasWork():
+                    c0 = clock()
+                    R.Pump(clock() + 5, clock)
+                    worst_slice = max(worst_slice, clock() - c0)
+                if N.route and first is None:
+                    first = ms
+                elif first is not None:
+                    worst_frame = max(worst_frame, ms)
+                if N.route and not R.HasWork() and f > 20:
+                    break
+            if not N.route:
+                issues.append({"kind": "noroute"})
+            else:
+                # running along it, weaving a little
+                lua.execute("AGPS_LONG = 0")
+                r = N.route
+                pts = [(r.pts[i], r.pts[i + 1]) for i in range(1, len(r.pts) + 1, 2)]
+                x, y, k = a[0], a[1], 1
+                for step in range(RUN_FRAMES):
+                    t += 0.05
+                    while k < len(pts) - 1 and math.hypot(pts[k][0] - x, pts[k][1] - y) < 2:
+                        k += 1
+                    tx, ty = pts[min(k, len(pts) - 1)]
+                    d = math.hypot(tx - x, ty - y) or 1
+                    side = 0.15 if step % 60 < 30 else -0.15
+                    x, y = x + (tx - x) / d * 0.35 - (ty - y) / d * side, y + (ty - y) / d * 0.35 + (tx - x) / d * side
+                    lua.execute(f"AGPS_T = {t}; AGPS_POS[1], AGPS_POS[2] = {x}, {y}")
+                    s0 = time.perf_counter()
+                    G.Update()
+                    worst_frame = max(worst_frame, (time.perf_counter() - s0) * 1000)
+                    if R.HasWork():
+                        c0 = clock()
+                        R.Pump(clock() + 1, clock)
+                        worst_slice = max(worst_slice, clock() - c0)
+                if int(lua.eval("AGPS_LONG")) > 0 and _rides(N.route):  # (walking all the way: the walk is the route)
+                    issues.append({"kind": "longwalk", "count": int(lua.eval("AGPS_LONG"))})
+            if worst_frame > FRAME_MS:
+                issues.append({"kind": "frame", "ms": round(worst_frame)})
+            if worst_slice > SLICE_MS:
+                issues.append({"kind": "slice", "ms": round(worst_slice)})
+            trip.update(first_ms=round(first or 0), worst_frame_ms=round(worst_frame), worst_slice_ms=round(worst_slice))
+            # the settled routes from the start: as chosen, and on foot all the way. The stops in the order they're in
+            # now for both (the fastest order on: worked out again on foot, the stops were put in another, and the
+            # stretches compared and N.stops[1] were another stop's)
+            ns.settings.gps.fastestOrder = False
+            R.WARM, R.SYNC_WALKS = False, True
+            lua.execute(f"AGPS_POS[1], AGPS_POS[2] = {a[0]}, {a[1]}")
+            N.Invalidate(True, True)
+            chosen = N.Route(a[0], a[1], cont)
+            if chosen:
+                # (the stops as they are now: put in the fastest order on the way, the trip's own second stop may
+                # come first, and the stretches, their ends and the zones each leaves out go by these)
+                s1 = (float(N.stops[1].x), float(N.stops[1].y))
+                s2 = (float(N.stops[2].x), float(N.stops[2].y)) if c2 and N.stops[2] else None
+                steps = [N.Steps()[i] for i in range(1, len(N.Steps()) + 1)]
+                trip["steps"] = steps
+                ns.settings.gps.useFlights = False
+                N.FlightsChanged()
+                walk = N.Route(a[0], a[1], cont)
+                ns.settings.gps.useFlights = True
+                N.FlightsChanged()
+                cs, ws = _weighed(lua, ns, chosen, cont, a, s1), _weighed(lua, ns, walk, cont, a, s1)
+                # (straight over blocked ground, the trip's own ends too: a line over the mountains, from a cave or not)
+                blocked = 0.0
+                for part in chosen.parts.values():
+                    if part.leg and part.pts:
+                        blocked += N.BlockedYards(part.cont, part)
+                if math.inf > blocked >= BLOCKED_YD:
+                    issues.append({"kind": "blocked", "yd": round(blocked)})
+                cut = _longest_blocked(lua, chosen)
+                if cut >= WALLCUT_YD:
+                    issues.append({"kind": "wallcut", "yd": round(cut) if cut < math.inf else "a drawn wall"})
+                trip.update(chosen_s=None if cs == math.inf else round(cs), walk_s=None if ws == math.inf else round(ws),
+                            rides=_rides(chosen), plain_chosen_s=round(_secs(chosen)))
+                if _rides(chosen) and not _rides(walk) and ws < math.inf and cs > ws * RIDE_SHARE + RIDE_SLACK:
+                    issues.append({"kind": "slowride", "chosen_s": round(cs), "walk_s": round(ws)})
+                # (the stretch between the stops, planned on its own: the same check)
+                if s2 and chosen.stretches[2] and walk and walk.stretches[2]:
+                    def st_secs(st, frm, to):
+                        return _weighed(lua, ns, lua.table(parts=st.parts, totalRide=st.ride), cont, frm, to)
+                    c2s, w2s = st_secs(chosen.stretches[2], s1, s2), st_secs(walk.stretches[2], s1, s2)
+                    rides2 = any(chosen.stretches[2].legs[i].ride for i in range(1, len(chosen.stretches[2].legs) + 1))
+                    if rides2 and w2s < math.inf and c2s > w2s * RIDE_SHARE + RIDE_SLACK:
+                        issues.append({"kind": "slowride", "stretch": 2, "chosen_s": round(c2s), "walk_s": round(w2s)})
+                st1 = chosen.stretches[1]
+                rides1 = st1 and any(st1.legs[i].ride for i in range(1, len(st1.legs) + 1))
+                to1 = s1
+                cs1 = _weighed(lua, ns, lua.table(parts=st1.parts, totalRide=st1.ride), cont, a, to1) if st1 else math.inf
+                if st1 and not rides1 and cs1 < math.inf:  # (the stretch to the next stop, as the addon plans it)
+                    legs, _ = N.Plan(cont, a[0], a[1], WALK, N.stops[1], None, 1e9)
+                    if legs and any(legs[i].ride for i in range(1, len(legs) + 1)):
+                        secs = 0.0
+                        for i in range(1, len(legs) + 1):
+                            leg = legs[i]
+                            if leg.ride:
+                                secs += leg.ride[7] or 0
+                            else:
+                                rr = R.Route(leg.cont, leg.x1, leg.y1, leg.x2, leg.y2, lua.table(offroad=False))
+                                secs += _weighed(lua, ns, lua.table(parts=lua.table(lua.table(
+                                    cont=leg.cont, pts=rr.pts, kinds=rr.kinds, blocked=rr.blocked, unconnected=rr.unconnected)),
+                                    totalRide=0), leg.cont, a, to1) if rr else math.inf
+                        trip["ride_s"] = None if secs == math.inf else round(secs)
+                        if secs * RIDE_SHARE + RIDE_SLACK < cs1:
+                            issues.append({"kind": "missedride", "chosen_s": round(cs1), "ride_s": round(secs)})
+                # the detours
+                known_set = set(known)
+                for h in (N.LearnOnRoute(N.route) or lua.table()).values():
+                    bad = []
+                    if h.off > N.LEARN_NEAR_YD:
+                        bad.append("out of reach")
+                    if int(h.node) in known_set:
+                        bad.append("known already")
+                    if str(h.name).startswith("zz"):
+                        bad.append("obsolete")
+                    if int(h.node) not in _masters(ns, cont, faction[0]):
+                        bad.append("not their faction's")
+                    if not any(f"at {h.name}" in s for s in steps):
+                        bad.append("not in the steps")
+                    if bad:
+                        issues.append({"kind": "detour", "name": str(h.name), "why": bad})
+            elif not any(i["kind"] == "noroute" for i in issues):
+                issues.append({"kind": "noroute"})
+        except Exception as e:  # (a failure in the addon's Lua: that's a finding too)
+            issues.append({"kind": "error", "error": str(e)[:500]})
+        finally:
+            R.WARM, R.SYNC_WALKS = False, True
+            ns.settings.gps.fastestOrder = ns.DEFAULTS.gps.fastestOrder
+        if issues:
+            flagged.append(trip)
+        log(f"  trip {done}: {'Horde' if faction == 'Horde' else 'Alliance'} {level}, {a[2]} -> {b[2]}: "
+            + (", ".join(i["kind"] for i in issues) if issues else "ok"))
+    weight = {"error": 9, "noroute": 8, "wallcut": 8, "blocked": 7, "missedride": 7, "slowride": 6, "longwalk": 5, "frame": 4, "slice": 3,
+              "detour": 2}
+    flagged.sort(key=lambda tr: -max(weight.get(i["kind"], 1) for i in tr["issues"]))
+    return {"seed": seed, "trips": done, "flagged": flagged}
+
+
+def write_report(result: dict, out_dir: Path, name: str = "report.json") -> Path:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out = out_dir / name
+    out.write_text(json.dumps(result, indent=1), encoding="utf-8")
+    return out

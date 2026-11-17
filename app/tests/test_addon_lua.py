@@ -1,0 +1,7713 @@
+"""Run the addon's pure Lua (layout math, generated data) under a standalone Lua."""
+
+import math
+import time
+from pathlib import Path
+
+import pytest
+
+lupa = pytest.importorskip("lupa")
+
+ADDON = Path(__file__).resolve().parents[2] / "addon" / "AzerothGPS"
+TILE = 1600 / 3
+
+PRELUDE = """
+issecretvalue = nil
+CreateFrame = function() error("no frames in tests") end
+"""
+
+
+# (files that read map data's lines with MapText.lua, loaded before them in the toc)
+NEEDS_MAPTEXT = {"Import.lua", "Pins.lua", "Feedback.lua", "Record.lua", "Layers.lua"}
+
+
+def load(lua, ns, *names, data=None):
+    loader = lua.eval("function(src, name) return assert(load(src, '@' .. name)) end")
+    if NEEDS_MAPTEXT & set(names) and ns.MapText is None and "MapText.lua" not in names:
+        names = ("MapText.lua",) + names
+    for name in names:
+        src = (ADDON / name).read_text(encoding="utf-8")
+        loader(src, name)("AzerothGPS", ns)
+        if name == "Data/Terrain.lua":  # (the buildings and the grids by blocks with them, as the toc loads them)
+            for extra in ("Data/Buildings.lua", "Data/TerrainHPA.lua"):
+                loader((ADDON / extra).read_text(encoding="utf-8"), extra)("AzerothGPS", ns)
+
+
+@pytest.fixture
+def env():
+    lua = lupa.LuaRuntime()
+    lua.execute(PRELUDE)
+    ns = lua.table()
+    ns.IsSecret = lua.eval("function(v) return false end")
+    load(lua, ns, "Geo.lua")
+    # GPSFrame.lua only builds frames in G.Init(), so loading it is safe.
+    load(lua, ns, "GPSFrame.lua")
+    return lua, ns
+
+
+def quads(lua, t):
+    out = []
+    for i in range(1, len(t) + 1):
+        q = t[i]
+        out.append([q[j] for j in range(1, 12)])
+    return out
+
+
+def centre_of_tile(tx, ty):
+    return (32 - (ty + 0.5)) * TILE, (32 - (tx + 0.5)) * TILE  # world X, Y
+
+
+def test_generated_data_loads(env):
+    lua, ns = env
+    load(lua, ns, "Data/Minimap.lua", "Data/Maps.lua")
+    assert len(list(ns.MinimapTiles[1].keys())) > 900
+    durotar = ns.Maps[1411]
+    assert durotar.name == "Durotar" and durotar.artW == 1002
+    assert len(durotar.overlays) > 5
+
+
+def minimap_env(lua, ns):
+    ns.MinimapTiles = lua.eval("{ [1] = {} }")
+    for tx in range(38, 43):
+        for ty in range(31, 36):
+            ns.MinimapTiles[1][tx * 64 + ty] = 1000 * tx + ty
+
+
+def by_fid(qs):
+    return {int(q[0]): q for q in qs}
+
+
+def test_north_up_tiles(env):
+    lua, ns = env
+    minimap_env(lua, ns)
+    half, zoom = 100.0, 1000.0  # far enough out that neighbouring tiles aren't cropped
+    s = half / zoom
+    px, py = centre_of_tile(40, 33)
+    qs = by_fid(quads(lua, ns.GPS.LayoutMinimap(px, py, 1, 0, zoom, half)))
+    assert qs[40033][1:3] == pytest.approx([0, 0], abs=1e-6)
+    assert qs[41033][1:3] == pytest.approx([TILE * s, 0])  # next tile east -> right
+    assert qs[40034][1:3] == pytest.approx([0, -TILE * s])  # next tile south -> down
+    assert qs[40033][3] == pytest.approx(TILE * s + 1)
+
+
+def test_heading_up_puts_facing_direction_on_top(env):
+    lua, ns = env
+    minimap_env(lua, ns)
+    half, zoom = 100.0, 1000.0
+    s = half / zoom
+    px, py = centre_of_tile(40, 33)
+    facing_west = math.pi / 2  # WoW facing: counter-clockwise from north
+    qs = by_fid(quads(lua, ns.GPS.LayoutMinimap(px, py, 1, -facing_west, zoom, half)))
+    assert qs[39033][1:3] == pytest.approx([0, TILE * s], abs=1e-6)  # west tile now straight up
+    assert qs[40032][1:3] == pytest.approx([TILE * s, 0], abs=1e-6)  # north tile now to the right
+    assert qs[39033][5] == pytest.approx(-facing_west)
+
+
+def test_only_nearby_tiles(env):
+    lua, ns = env
+    minimap_env(lua, ns)
+    px, py = centre_of_tile(40, 33)
+    qs = quads(lua, ns.GPS.LayoutMinimap(px, py, 1, 0, 100.0, 100.0))
+    assert 1 <= len(qs) <= 9
+    assert quads(lua, ns.GPS.LayoutMinimap(px, py, 0, 0, 100.0, 100.0)) == []  # no tiles for continent 0
+
+
+def test_zone_art_placement(env):
+    lua, ns = env
+    load(lua, ns, "Data/Maps.lua")
+    m = ns.Maps[1411]
+    minX, minY, maxX, maxY = (m.bounds[i] for i in range(1, 5))
+    # Player at the world point under art pixel (128, 128): centre of the first base tile.
+    px = maxX - 128 * (maxX - minX) / m.artH
+    py = maxY - 128 * (maxY - minY) / m.artW
+    qs = quads(lua, ns.GPS.LayoutZone(px, py, 1411, 0, 3000.0, 100.0))
+    first_tile_fid = m.tiles[1][1]
+    q = next(q for q in qs if q[0] == first_tile_fid and q[10] == 0)
+    assert q[1:3] == pytest.approx([0, 0], abs=0.01)
+    assert any(q[10] == 1 for q in qs)  # explored overlays included, drawn above
+
+
+def test_generated_roads_load(env):
+    lua, ns = env
+    load(lua, ns, "Data/Roads.lua")
+    kal = ns.Roads[1]
+    assert len(kal.e) > 100
+    e = kal.e[1]
+    assert (len(e) - 4) % 2 == 0 and len(e) >= 8  # a, b, len, src, then x/y pairs
+
+
+def test_layout_roads_in_view_only(env):
+    lua, ns = env
+    ns.Roads = lua.eval("""{ [1] = { n = {0,0, 0,-100, 5000,5000, 5000,5100},
+        e = { {1,2,100,0, 0,0, 0,-50, 0,-100}, {3,4,100,0, 5000,5000, 5000,5100} } } }""")
+    segs = quads(lua, ns.GPS.LayoutRoads(0.0, 0.0, 1, 0, 200.0, 100.0))
+    assert len(segs) == 2  # only the nearby edge (two segments)
+    # Road runs from the player due east (world Y decreasing): screen +x.
+    s1 = segs[0]
+    assert s1[0:2] == pytest.approx([0, 0]) and s1[2] == pytest.approx(25) and s1[3] == pytest.approx(0)
+
+
+@pytest.mark.parametrize("name", sorted(str(p.relative_to(ADDON)) for p in ADDON.rglob("*.lua")))
+def test_every_addon_file_compiles(name):
+    lua = lupa.LuaRuntime()
+    ok, err = lua.eval("function(src, n) local f, e = load(src, '@' .. n); return f ~= nil, e end")(
+        (ADDON / name).read_text(encoding="utf-8"), name)
+    assert ok, err
+
+
+def test_the_addon_list_shows_it_under_map():
+    # (asked 2026-11-16: AzerothGPS, StreetView and RaiseTheRoof "should be under the Map category" in the game's addon
+    # list; the plain "Map" the other map addons use, no translated names, so they share one group)
+    toc = (ADDON / "AzerothGPS.toc").read_text(encoding="utf-8").splitlines()
+    assert "## Category: Map" in toc and not any(l.startswith("## Category-") for l in toc)
+
+
+def test_toc_lists_every_file():
+    toc = (ADDON / "AzerothGPS.toc").read_text(encoding="utf-8").splitlines()
+    listed = {l.strip().replace("\\", "/") for l in toc if l.strip() and not l.startswith("#")}
+    files = {str(p.relative_to(ADDON)).replace("\\", "/") for p in ADDON.rglob("*.lua")}
+    assert listed == files
+
+
+def test_pan_north_up(env):
+    lua, ns = env
+    # Drag the map 10 UI units right at 2 units/yd: the view moves 5 yd west (world Y +5).
+    x, y = ns.GPS.PanCenter(100.0, 200.0, 10.0, 0.0, 0.0, 2.0)
+    assert (x, y) == pytest.approx((100.0, 205.0))
+    # Drag up: the view moves south (world X -5).
+    x, y = ns.GPS.PanCenter(100.0, 200.0, 0.0, 10.0, 0.0, 2.0)
+    assert (x, y) == pytest.approx((95.0, 200.0))
+
+
+def test_pan_heading_up(env):
+    lua, ns = env
+    # Facing west (west is up on screen, rot = -pi/2). Dragging the map up moves the
+    # view "down" on screen, which is east in the world (world Y decreases).
+    x, y = ns.GPS.PanCenter(0.0, 0.0, 0.0, 10.0, -math.pi / 2, 1.0)
+    assert (x, y) == pytest.approx((0.0, -10.0), abs=1e-9)
+
+
+INTERIOR = """
+ns.WMOs = { [42] = { groups = {
+  { -50, -50, -20, 50, 50, 0, n = "Lower Hall", ["in"] = true, blocks = { {111, 0, 0, 200, 200} } },
+  { 60, -10, -18, 90, 10, -2, n = "", ["in"] = true, blocks = { {444, 0, 0, 60, 40} } },
+  { -50, -50, 10, 50, 50, 30, n = "Upper Hall", ["in"] = true, blocks = { {222, 0, 0, 200, 200} } },
+  { -10, -10, -20, 10, 10, 0, n = "Closet", ["in"] = true, blocks = { {333, 0, 0, 40, 40} } },
+} } }
+ns.Interiors = { [0] = { {42, 1000, 2000, 50, math.pi, 900, 1900, 1100, 2100} } }
+"""
+
+
+@pytest.fixture
+def interior_env(env):
+    lua, ns = env
+    lua.eval("function(ns, src) return assert(load(src))(nil, ns) end")
+    loader = lua.eval("function(src) return assert(load('local _, ns = ...; ' .. src)) end")
+    loader(INTERIOR)(None, ns)
+    return lua, ns
+
+
+def test_find_interior_in_a_city_by_its_floor_height(interior_env):
+    # (reported) no room name, the game says outdoors: down in a city its floor height finds the room
+    lua, ns = interior_env
+    assert ns.GPS.FindInterior(970.0, 1970.0, 0, 0, "", False)[0] is None
+    place, wmo, room = ns.GPS.FindInterior(970.0, 1970.0, 0, 0, "", False, -15, 42)
+    assert room.n == "Lower Hall"
+    place, wmo, room = ns.GPS.FindInterior(970.0, 1970.0, 0, 0, "", False, 19, 42)
+    assert room.n == "Upper Hall"
+
+
+def test_find_interior_by_zone_text(interior_env):
+    lua, ns = interior_env
+    place, wmo, room = ns.GPS.FindInterior(1000 - 30.0, 2000 - 30.0, 0, 0, "Upper Hall", True)
+    assert room.n == "Upper Hall"
+    place, wmo, room = ns.GPS.FindInterior(1000 - 30.0, 2000 - 30.0, 0, 0, "Lower Hall", True)
+    assert room.n == "Lower Hall"
+    # Game says outdoors (as it does all over Undercity), but the minimap names the room.
+    place, wmo, room = ns.GPS.FindInterior(1000 - 30.0, 2000 - 30.0, 0, 0, "Lower Hall", False)
+    assert room.n == "Lower Hall"
+    # No name match but the game says indoors: smallest indoor room containing the point.
+    place, wmo, room = ns.GPS.FindInterior(1000.0, 2000.0, 0, 0, "", True)
+    assert room.n == "Closet"
+    # Neither a name match nor indoors: not inside (e.g. walking past a building).
+    assert ns.GPS.FindInterior(1000.0, 2000.0, 0, 0, "Durotar", False)[0] is None
+    assert ns.GPS.FindInterior(5000.0, 5000.0, 0, 0, "", True)[0] is None
+
+
+def test_find_interior_uses_height_when_known(interior_env):
+    lua, ns = interior_env
+    place, wmo, room = ns.GPS.FindInterior(1000 - 30.0, 2000 - 30.0, 50 + 20.0, 0, "")
+    assert room.n == "Upper Hall"
+
+
+def test_a_city_model_s_streets_are_outside_with_the_height_known(interior_env):
+    # (reported: Stormwind's map switched between its own art and the terrain with the zoom) with the
+    # player's height known, a model's outdoor pieces (a city's streets) aren't "inside": only its
+    # indoor rooms, or where the game says indoors
+    lua, ns = interior_env
+    loader = lua.eval("function(src) return assert(load('local _, ns = ...; ' .. src)) end")
+    loader("""
+      ns.WMOs[43] = { groups = {
+        { -100, -100, -5, 100, 100, 30, n = "", ["in"] = false, blocks = { {555, 0, 0, 400, 400} } },
+        { 20, 20, -2, 40, 40, 10, n = "The Gilded Rose", ["in"] = true, blocks = { {666, 0, 0, 40, 40} } },
+      } }
+      table.insert(ns.Interiors[0], { 43, 3000, 3000, 0, 0, 2900, 2900, 3100, 3100 })
+    """)(None, ns)
+    G = ns.GPS
+    assert G.FindInterior(3050.0, 3060.0, 2.0, 0, "Trade District", False)[0] is None  # a street
+    place, _w, room = G.FindInterior(3030.0, 3030.0, 2.0, 0, "The Gilded Rose", True)  # in the inn
+    assert place and room.n == "The Gilded Rose"
+    # (the game says indoors: its indoor rooms and, as ever, whatever it's in there)
+    assert G.FindInterior(3050.0, 3060.0, 2.0, 0, "", True)[0] is not None
+
+
+def test_stormwind_keeps_the_terrain_map(env):
+    # (reported twice: zoomed in on Stormwind's streets the map switched to the city's own art; then
+    # asked: no inside map from Stormwind's model at all, it looks worse than the terrain) every piece
+    # of its model has art and a district's name, so the minimap's zone text matched
+    lua, ns = env
+    load(lua, ns, "Data/Interiors.lua")
+    G = ns.GPS
+    street = (-8832.0, 625.0)  # (the Trade District)
+    for z in (0, 97.0):  # (the height unknown, or known)
+        for indoors in (False, True):
+            place = G.FindInterior(*street, z, 0, "Trade District", indoors)[0]
+            assert place is None or place[1] not in G.NO_INSIDE_MAP, (z, indoors)
+
+
+def test_an_open_city_s_streets_keep_the_terrain_map(env):
+    # (asked 2026-11-14 with a screenshot of Orgrimmar's streets drawn as its model's art, black between the pieces:
+    # "for cities that are outside don't do this") a city in the open built as one model gets its inside map only
+    # where the game says indoors; Ironforge (indoors though the game says outdoors) and Undercity keep theirs
+    lua, ns = env
+    load(lua, ns, "Data/Interiors.lua")
+    G = ns.GPS
+    for (x, y, zone, model) in ((1630.0, -4420.0, "Valley of Strength", 7964229), (9950.0, 2316.7, "Warrior's Terrace", 113359)):
+        if model == 7964229:  # (indoors, Orgrimmar's map as before)
+            assert G.FindInterior(x, y, 0, 1, zone, True)[0] is not None
+        place = G.FindInterior(x, y, 0, 1, zone, False)[0]
+        assert place is None or place[1] != model, zone
+    place = G.FindInterior(-4900.0, -950.0, 0, 0, "The Great Forge", False)[0]
+    assert place is not None and place[1] == 7801267  # Ironforge
+    place = G.FindInterior(1527.6, 223.9, 0, 0, "Trade Quarter", False)[0]
+    assert place is not None and place[1] == 7675285  # Undercity
+
+
+def test_indoors_in_an_open_city_its_building_alone(env):
+    # (asked 2026-11-14 with a screenshot from a building in Orgrimmar: the whole city's model art came over the
+    # terrain; wanted: the building's map alone with a thin dark border round it, as Tarren Mill's inn) nearly all of
+    # Orgrimmar's rooms are flagged indoors, so every room at the building's height was drawn
+    lua, ns = env
+    load(lua, ns, "Data/Interiors.lua")
+    G = ns.GPS
+    org = next(ns.Interiors[1][i] for i in range(1, len(ns.Interiors[1]) + 1) if ns.Interiors[1][i][1] == 7964229)
+    groups = ns.WMOs[7964229].groups
+    rooms = [groups[i] for i in range(1, len(groups) + 1)
+             if groups[i]["in"] and groups[i].blocks and len(groups[i].blocks) > 0
+             and 100 <= (groups[i][4] - groups[i][1]) * (groups[i][5] - groups[i][2]) <= 2500]
+    assert rooms
+    c, sn = math.cos(org[5]), math.sin(org[5])
+    checked = 0
+    for g in rooms[:10]:
+        lx, ly = (g[1] + g[4]) / 2, (g[2] + g[5]) / 2
+        x, y = org[2] + lx * c - ly * sn, org[3] + lx * sn + ly * c
+        place, wmo, room = G.FindInterior(x, y, 0, 1, "Valley of Strength", True)
+        if place is None or place[1] != 7964229:
+            continue
+        area = (room[4] - room[1]) * (room[5] - room[2])
+        assert area <= 5000, area  # (a small room round the spot, not the valley the zone text names)
+        qs = quads(lua, G.LayoutInterior(x, y, place, wmo, room, 0, 100.0, 100.0))
+        drawn = set(int(q[0]) for q in qs)
+        allowed = set()
+        m = G.OPEN_CITY_ROOM_YD
+        for i in range(1, len(groups) + 1):
+            h = groups[i]
+            if h == room or (h[1] >= room[1] - m and h[4] <= room[4] + m and h[2] >= room[2] - m and h[5] <= room[5] + m):
+                for j in range(1, len(h.blocks) + 1):
+                    allowed.add(int(h.blocks[j][1]))
+        assert drawn and drawn <= allowed
+        checked += 1
+    assert checked
+
+
+def test_zoomed_in_over_an_inn_its_inside_map_and_its_npcs(env):
+    # (asked 2026-11-14: a slider for how far zoomed in over a building or cave its inside map shows; a dot for every
+    # NPC in it who offers something, its service's icon beside it, "only special NPCs, no common name mob enemies")
+    lua, ns = env
+    load(lua, ns, "Data/Interiors.lua", "Data/Npcs.lua", "Layers.lua", "Pins.lua")
+    G = ns.GPS
+    x, y = 2269.5, 244.9  # (Innkeeper Renee, Brill's Gallows' End Tavern)
+    place, wmo, room = G.ZoomedInterior(x, y, 0)
+    assert place is not None and math.hypot(place[2] - x, place[3] - y) < 60
+    npcs = G.InteriorNpcs(place, wmo, room, 0)
+    names = [npcs[i].name for i in range(1, len(npcs) + 1)]
+    assert "Innkeeper Renee" in names, names
+    renee = next(npcs[i] for i in range(1, len(npcs) + 1) if npcs[i].name == "Innkeeper Renee")
+    assert renee.icon == ns.Pins.NPC_ICONS.inn
+    # (Stormwind's and Ironforge's city models never come up by the zoom; a spot in the open, nothing)
+    assert G.ZoomedInterior(-8832.0, 625.0, 0)[0] is None or G.ZoomedInterior(-8832.0, 625.0, 0)[0][1] != 7962574
+    # (Ironforge's: hovered since 2026-11-15, "allow ironforge to show from zoom in"; no NPC dots on it)
+    assert G.WholeCityPlace(G.ZoomedInterior(-4900.0, -950.0, 0)[0], 0)
+    assert G.ZoomedInterior(2400.0, 0.0, 0)[0] is None
+
+
+def test_layout_interior_floor_and_rotation(interior_env):
+    lua, ns = interior_env
+    place, wmo, room = ns.GPS.FindInterior(1000 - 30.0, 2000 - 30.0, 0, 0, "Lower Hall", True)
+    qs = quads(lua, ns.GPS.LayoutInterior(1000.0, 2000.0, place, wmo, room, 0, 100.0, 100.0))
+    fids = sorted(int(q[0]) for q in qs)
+    assert fids == [111, 333, 444]  # the lower floor (incl. its corridor), not the upper hall
+    lower = next(q for q in qs if q[0] == 111)
+    # Block covers local x,y in [-50, 50]: centred on the building origin.
+    assert lower[1:3] == pytest.approx([0, 0], abs=1e-6)
+    assert lower[3] == pytest.approx(100 + 0.5)  # 200 px at 2 px/yd = 100 yd at 1 unit/yd
+    assert lower[5] == pytest.approx(math.pi + math.pi / 2)  # building turned 180 degrees
+
+
+def test_undercity_rooms_match_in_game_readings(env):
+    """Positions and minimap zone texts reported in game (/agps debug interior)."""
+    lua, ns = env
+    load(lua, ns, "Data/Interiors.lua")
+    for x, y, zone in ((1527.6, 223.9, "Trade Quarter"), (1643.8, 245.7, "Ruins of Lordaeron")):
+        place, wmo, room = ns.GPS.FindInterior(x, y, 0, 0, zone, False)
+        assert place is not None and place[1] == 7675285
+        assert room.n == zone
+
+
+def test_generated_interiors_include_undercity(env):
+    lua, ns = env
+    load(lua, ns, "Data/Interiors.lua")
+    uc = [ns.Interiors[0][i] for i in range(1, len(ns.Interiors[0]) + 1) if ns.Interiors[0][i][1] == 7675285]
+    assert uc, "Forever's Undercity placement missing"
+    groups = ns.WMOs[7675285].groups
+    assert any(groups[i].n == "War Quarter" for i in range(1, len(groups) + 1))
+
+
+def test_screen_to_world_inverts_layout(env):
+    lua, ns = env
+    # A point 30 yd north and 40 yd east of the centre, drawn heading-up facing west.
+    rot, s = -math.pi / 2, 2.0
+    dx, dy = ns.Geo.ScreenOffset(100.0, 200.0, 130.0, 160.0)  # world (130, 160): +30 X (north), -40 Y (east)
+    sx, sy = ns.Geo.Rotate(dx * s, dy * s, rot)
+    x, y = ns.GPS.ScreenToWorld(100.0, 200.0, sx, sy, rot, s)
+    assert (x, y) == pytest.approx((130.0, 160.0))
+
+
+def test_zone_at_and_fit(env):
+    lua, ns = env
+    load(lua, ns, "Data/Maps.lua")
+    durotar = ns.Maps[1411]
+    b = durotar.bounds
+    assert ns.GPS.ZoneAt((b[1] + b[3]) / 2, (b[2] + b[4]) / 2, 1414) == 1411
+    assert ns.GPS.MapFitZoom(durotar) == pytest.approx(max(b[3] - b[1], b[4] - b[2]) / 2 * 1.02)
+    assert ns.GPS.DisplayMap(1411) == 1411
+
+
+# ---- Router -------------------------------------------------------------------------
+
+L_ROADS = """
+-- An L: A(0,0) -> B(0,-1000) -> C(1000,-1000) in world X/Y (B is 1000 yd east of A, C 1000 yd north of B).
+ns.Roads = { [1] = { n = { 0,0, 0,-1000, 1000,-1000 },
+  e = { {1,2,1000,0, 0,0, 0,-500, 0,-1000}, {2,3,1000,0, 0,-1000, 500,-1000, 1000,-1000} } } }
+"""
+
+
+@pytest.fixture
+def router(env):
+    lua, ns = env
+    load(lua, ns, "Router.lua")
+    lua.eval("function(src) return assert(load('local _, ns = ...; ' .. src)) end")(L_ROADS)(None, ns)
+    ns.Router.Reset()
+    return lua, ns
+
+
+def route_pts(r):
+    pts = [r.pts[i] for i in range(1, len(r.pts) + 1)]
+    return list(zip(pts[0::2], pts[1::2])), [r.kinds[i] for i in range(1, len(r.kinds) + 1)]
+
+
+def test_route_follows_roads(router):
+    lua, ns = router
+    # From 30 yd west of A to 30 yd north of C: along both legs of the L.
+    r = ns.Router.Route(1, 0.0, 30.0, 1030.0, -1000.0)
+    pts, kinds = route_pts(r)
+    assert kinds[0] == 1 and kinds[-1] == 1  # off-road legs at both ends
+    assert all(k == 0 for k in kinds[1:-1])  # road in between
+    assert pts[1] == pytest.approx((0, 0), abs=1e-6)  # joins the road at the nearest point
+    assert (0, -1000) in [tuple(round(v) for v in p) for p in pts]  # passes the corner B
+    assert r.length == pytest.approx(30 + 1000 + 1000 + 30, abs=0.5)
+    assert r.road == pytest.approx(2000, abs=0.5)
+
+
+def test_route_exits_at_closest_point(router):
+    lua, ns = router
+    # Destination beside the middle of the second leg: leave the road there.
+    r = ns.Router.Route(1, 0.0, 30.0, 500.0, -1040.0)
+    pts, kinds = route_pts(r)
+    assert pts[-2] == pytest.approx((500, -1000), abs=1e-6)
+    assert pts[-1] == pytest.approx((500, -1040))
+
+
+def test_a_route_into_a_tower_goes_in_by_its_door_not_straight_onto_its_top_floor(router):
+    # (indoor routes phase 6, 2026-10-06: from the road outside Sentinel Hill's tower, the route went straight onto its
+    # top floor's road, 80 yd through the wall, not in by the door and up the stairs: a building's cells give an end
+    # inside one slack, so the grid can't tell its walls) legs onto a building's own roads are dearer past
+    # INSIDE_LEG_FREE, from anywhere, as legs to a stop in one are
+    lua, ns = router
+    lua.eval("function(src) return assert(load('local _, ns = ...; ' .. src)) end")("""
+      -- a tower by the L's first leg (x = 0): its door (20, -500) joined onto the road at (0, -500), the hall, stairs
+      -- going round twice up to the top floor (90 yd), the top floor's road to (45, -500)
+      ns.RoadOverlays = { [1] = { { indoor = true,
+        n = { 20,-500, 0,-500, 30,-500, 30,-500, 45,-500 },
+        nz = { 10, 0, 10, 40, 40 },
+        e = { { 1,2,20,0, 20,-500, 0,-500 }, { 1,3,10,0, 20,-500, 30,-500 },
+              { 3,4,90,6, 30,-500, 38,-492, 46,-500, 38,-508, 30,-500, 38,-492, 46,-500, 38,-508, 30,-500 },
+              { 4,5,15,0, 30,-500, 45,-500 } },
+        joins = { 2 }, bridge = { 1 } } } }
+      ns.Nav = { InBuilding = function(level, x, y)
+        if level == 1 and math.abs(x - 38) <= 25 and math.abs(y + 500) <= 25 then return { "Tower" } end
+      end }
+    """)(None, ns)
+    ns.Router.Reset()
+    r = ns.Router.Route(1, -5.0, -440.0, 46.0, -500.0, lua.table_from({"tz": 40}))
+    pts, kinds = route_pts(r)
+    assert kinds[0] == 1 and kinds[-1] == 1 and all(k == 0 for k in kinds[1:-1])  # (on the roads all the way in)
+    assert math.dist(pts[0], pts[1]) <= 10 and math.dist(pts[-2], pts[-1]) <= 2  # (not 70 yd through the wall)
+    assert (0.0, -500.0) in [(round(x, 1), round(y, 1)) for x, y in pts]  # (by the door's way off the road)
+    assert r.length > 150  # (up the stairs, round twice)
+
+
+def test_the_road_index_is_numbers_and_a_leg_beside_a_road_counts_as_road(router):
+    # (memory, 2026-10-06: a table per segment in the segment index, 13 MB, and OnRoad's own padded index of them, 13 MB
+    # more, were half the continents' routing graphs, 54 MB under the game's Lua 5.1) the index's buckets are flat,
+    # three numbers a segment, and OnRoad reads them: a straight leg 5 yd beside a road is still road, 40 yd off it not
+    lua, ns = router
+    R = ns.Router
+    r = R.Route(1, 5.0, -100.0, 5.0, -900.0, lua.table_from({"offroad": True}))
+    assert r.road == pytest.approx(r.length, abs=1)
+    far = R.Route(1, 40.0, -100.0, 40.0, -900.0, lua.table_from({"offroad": True}))
+    assert far.road == 0
+    g = R.DebugGraph(1)
+    assert g.buckets is None and g.segIndex
+    for b in g.segIndex.values():
+        vals = list(b.values())
+        assert len(vals) % 3 == 0 and all(isinstance(v, (int, float)) for v in vals)
+    # (and the adjacency, 2026-10-07: a table per node and per directed edge were 4.4 MB of the two
+    # graphs; packed into flat lists, node n at adjIdx[n] .. adjIdx[n + 1] - 1)
+    assert g.adj is None and g.adjIdx is not None
+    n_entries = int(g.adjIdx[int(g.count) + 1]) - 1
+    assert n_entries > 0 and len(list(g.adjTo.values())) == n_entries
+    for name in ("adjTo", "adjLen", "adjE", "adjCost"):
+        vals = list(g[name].values())[:50]
+        assert all(isinstance(v, (int, float)) for v in vals), name
+
+
+def test_straight_line_when_shorter(router):
+    lua, ns = router
+    # Both points far from any road and close together: no detour to the road.
+    r = ns.Router.Route(1, 500.0, 500.0, 520.0, 480.0)
+    pts, kinds = route_pts(r)
+    assert kinds == [1] and len(pts) == 2
+
+
+def test_same_edge(router):
+    lua, ns = router
+    r = ns.Router.Route(1, 10.0, -100.0, 10.0, -900.0)  # both beside the first leg
+    pts, kinds = route_pts(r)
+    assert kinds[0] == 1 and kinds[-1] == 1
+    assert r.road == pytest.approx(800, abs=0.5)
+
+
+def test_real_route_razor_hill_to_crossroads(env):
+    lua, ns = env
+    load(lua, ns, "Data/Roads.lua", "Router.lua")
+    # South of Razor Hill (Durotar) -> the Crossroads (Barrens): north to Razor Hill,
+    # west over the Southfury bridge, then the Barrens road.
+    r = ns.Router.Route(1, -440.0, -4700.0, -450.0, -2640.0)
+    straight = math.hypot(-440 + 450, -4700 + 2640)
+    assert r.road > 0.8 * r.length  # mostly on roads
+    assert straight < r.length < straight * 2.2
+
+
+def test_destination_survives_reload(env):
+    lua, ns = env
+    lua.execute("GetTime = function() return 0 end")
+    store = lua.eval("{}")
+    ns.db = lua.eval("{}")
+    ns.CharDB = lua.eval("function(store) return function() return store end end")(store)
+    load(lua, ns, "Router.lua", "Nav.lua")
+    ns.Nav.SetDestination(-600.0, -4180.0, 1, "Sen'jin Village")
+    assert store.stops[1].x == -600.0 and store.stops[1].name == "Sen'jin Village"
+    # Simulate /reload: fresh Nav module, same saved variables.
+    load(lua, ns, "Nav.lua")
+    assert ns.Nav.dest is None
+    ns.Nav.Restore()
+    assert ns.Nav.dest.y == -4180.0 and ns.Nav.dest.cont == 1
+    ns.Nav.Clear()
+    assert store.stops is None
+    # a save from before multi-stop routes (single `dest`) still loads
+    store.dest = lua.eval("{ x = 1, y = 2, cont = 0, name = 'old' }")
+    ns.Nav.Restore()
+    assert ns.Nav.dest.name == "old" and len(ns.Nav.stops) == 1
+
+
+def test_unnamed_corridor_on_the_named_floor(interior_env):
+    lua, ns = interior_env
+    # Local (75, 0) is only inside the unnamed corridor, which is on the "Lower Hall" floor.
+    # Building turned 180 degrees: world = origin - local.
+    place, wmo, room = ns.GPS.FindInterior(1000 - 75.0, 2000 - 0.0, 0, 0, "Lower Hall", False)
+    assert room.n == "" and room[1] == 60
+    # Same spot, but the minimap names the upper floor: the corridor is not on it.
+    place, wmo, room = ns.GPS.FindInterior(1000 - 75.0, 2000 - 0.0, 0, 0, "Upper Hall", False)
+    assert room.n == "Upper Hall"  # nearest room on that floor
+
+
+def test_no_interior_without_any_signal(interior_env):
+    lua, ns = interior_env
+    assert ns.GPS.FindInterior(1000 - 75.0, 2000 - 0.0, 0, 0, "Durotar", False)[0] is None
+
+
+def test_locate_world(env):
+    lua, ns = env
+    load(lua, ns, "Data/Maps.lua")
+    # Durotar map coordinates of the in-game UnitPosition sample (0.46798, 0.674273).
+    mid, name, mx, my = ns.GPS.LocateWorld(1, -568.5, -4436.9)
+    assert name == "Durotar"
+    assert (mx, my) == pytest.approx((0.46798, 0.674273), abs=1e-4)
+    # Inside Orgrimmar the city map wins over Durotar (smallest containing map).
+    b = ns.Maps[1454].bounds
+    assert ns.GPS.LocateWorld(1, (b[1] + b[3]) / 2, (b[2] + b[4]) / 2)[1] == "Orgrimmar"
+
+
+def test_layout_pois_faction_and_view(env):
+    lua, ns = env
+    ns.Pois = lua.eval("""{ [1] = {
+      {1, 100, 0, "Horde FM", 23, "H"}, {1, 0, 100, "Alliance FM", 26, "A"}, {1, -100, 0, "Neutral FM", 80, "AH"},
+      {2, 0, -100, "A cave", 3}, {3, 50, 50, "Some Farm", 14}, {1, 9000, 9000, "Far away", 99, "H"} } }""")
+    show = lua.table(True, True, False)
+    pois = quads(lua, ns.GPS.LayoutPois(0.0, 0.0, 1, 0, 200.0, 100.0, show, "H"))
+    names = {p[3] for p in pois}
+    assert names == {"Horde FM", "Neutral FM", "A cave"}  # other faction, labels off, out of view
+    hfm = next(p for p in pois if p[3] == "Horde FM")
+    assert hfm[1:3] == pytest.approx([0, 50])  # 100 yd north at 0.5 units/yd -> straight up
+    assert hfm[4:6] == pytest.approx([100, 0])  # world position kept for routing
+
+
+def test_generated_pois(env):
+    lua, ns = env
+    load(lua, ns, "Data/Pois.lua")
+    kal = [ns.Pois[1][i] for i in range(1, len(ns.Pois[1]) + 1)]
+    assert any(p[1] == 1 and p[4].startswith("Orgrimmar") and "H" in p[6] for p in kal)
+    assert any(p[1] == 3 and p[4] == "Razor Hill" for p in kal)
+
+
+def test_no_stray_globals(env):
+    """Locals used before their declaration silently become globals in Lua."""
+    lua, ns = env
+    before = set(lua.globals().keys())
+    ns.GPS.Follow()
+    ns.GPS.CancelTour()
+    ns.GPS.SetZoom = ns.GPS.SetZoom  # touch
+    leaked = set(lua.globals().keys()) - before
+    assert not leaked, leaked
+
+
+def test_close_zoom_crops_tiles_to_the_view(env):
+    lua, ns = env
+    minimap_env(lua, ns)
+    half, zoom = 130.0, 60.0  # closest zoom
+    px, py = centre_of_tile(40, 33)
+    qs = quads(lua, ns.GPS.LayoutMinimap(px, py, 1, 0, zoom, half))
+    assert len(qs) == 1  # only the tile under the player
+    q = qs[0]
+    s = half / zoom
+    R = zoom * 1.42
+    assert q[3] == pytest.approx(2 * R * s + 1) and q[4] == pytest.approx(2 * R * s + 1)  # small region
+    assert q[6] == pytest.approx(0.5 - R / TILE) and q[7] == pytest.approx(0.5 + R / TILE)  # centre of the texture
+    assert q[1:3] == pytest.approx([0, 0], abs=1e-6)
+
+
+def test_crop_edge_tile_texcoords(env):
+    lua, ns = env
+    minimap_env(lua, ns)
+    # Player on the boundary between tile (40, 33) and the tile east of it: the east part of
+    # the western tile shows on the left, the west part of the eastern tile on the right.
+    cx, cy = centre_of_tile(40, 33)
+    edge_y = cy - TILE / 2  # eastern boundary (Y decreases eastwards)
+    qs = by_fid(quads(lua, ns.GPS.LayoutMinimap(cx, edge_y, 1, 0, 100.0, 100.0)))
+    left, right = qs[40033], qs[41033]
+    assert left[6] > 0.5 and left[7] == pytest.approx(1.0)  # eastern part of the west tile
+    assert right[6] == pytest.approx(0.0) and right[7] < 0.5  # western part of the east tile
+    assert left[1] < 0 < right[1]
+
+
+# ---- Offroad ------------------------------------------------------------------------
+
+def test_row_encoding_roundtrip(env):
+    import numpy as np
+    from azerothgps.roads.terrain import decode_row, encode_row
+
+    lua, ns = env
+    load(lua, ns, "Passability.lua")
+    rng = np.random.default_rng(1)
+    for k in range(40):
+        # (the continent's rows, and a cave's: values up to 3, short runs up to 15, 2-digit long ones)
+        short, long = (21, 3) if k < 20 else (15, 2)
+        row = np.repeat(rng.integers(0, 5 if k < 20 else 4, 40), rng.integers(1, 100, 40)).astype(np.uint8)
+        text = encode_row(row, short, long)
+        assert decode_row(text, short, long) == row.tolist()
+        runs = ns.Passability.DecodeRow(text, short, long)
+        flat = []
+        prev = 0
+        for i in range(1, len(runs) + 1, 2):
+            flat += [runs[i + 1]] * (runs[i] - prev)
+            prev = runs[i]
+        assert flat == row.tolist()
+
+
+def wall_terrain_lua():
+    """3x3 tiles around the origin; a cliff wall at world X 290..310 except a pass at |Y| < 60."""
+    import numpy as np
+    from azerothgps.roads.terrain import QUAD_YD, encode_row
+
+    cell = QUAD_YD * 2
+    tx0 = ty0 = 30
+    n = int(3 * TILE / cell)
+    rows = []
+    for r in range(n):
+        x = (32 - ty0) * TILE - (r + 0.5) * cell  # world X of the row centre
+        row = np.zeros(n, np.uint8)
+        if 290 <= x <= 310:
+            for c in range(n):
+                y = (32 - tx0) * TILE - (c + 0.5) * cell
+                if abs(y) >= 60:
+                    row[c] = 2
+        rows.append('"' + encode_row(row) + '"')
+    return (f"ns.Terrain = {{ [1] = {{ tx0 = {tx0}, ty0 = {ty0}, cell = {cell}, w = {n}, h = {n}, "
+            f"rows = {{ {', '.join(rows)} }} }} }}\n"
+            "ns.Roads = { [1] = { n = { 100,0, 500,0 }, e = { {1,2,400,0, 100,0, 300,0, 500,0} } } }")
+
+
+@pytest.fixture
+def offroad(env):
+    lua, ns = env
+    load(lua, ns, "Passability.lua", "Router.lua")
+    lua.eval("function(src) return assert(load('local _, ns = ...; ' .. src)) end")(wall_terrain_lua())(None, ns)
+    ns.Router.Reset()
+    ns.Router.SYNC_WALKS = True  # terrain searches right away (the game runs them in the background)
+    ns.Passability.ClearCache()
+    return lua, ns
+
+
+def test_passability_lookup(offroad):
+    lua, ns = offroad
+    P = ns.Passability
+    assert P.At(1, 300.0, 400.0) == 2  # on the wall
+    assert P.At(1, 300.0, 0.0) == 0  # in the pass
+    assert P.At(1, 0.0, 400.0) == 0  # open ground
+    assert P.SegmentCost(1, 0.0, 400.0, 600.0, 400.0) is None  # straight through the wall
+    assert P.SegmentCost(1, 0.0, 400.0, 0.0, -400.0) == pytest.approx(800)
+
+
+def test_offroad_straight_when_open(offroad):
+    lua, ns = offroad
+    r = ns.Router.Route(1, 0.0, 400.0, 0.0, -400.0, lua.table(offroad=True))
+    pts, kinds = route_pts(r)
+    assert kinds == [1] and len(pts) == 2
+
+
+def test_offroad_uses_the_pass(offroad):
+    lua, ns = offroad
+    # South of the wall to north of it: straight is blocked, so cut to the road, take it
+    # through the pass, then cut straight to the destination. (Walking around on foot is
+    # turned off here; test_offroad_walks_around covers it.)
+    ns.Router.OFFROAD_WALK_AROUND = 0
+    r = ns.Router.Route(1, 0.0, 400.0, 600.0, 400.0, lua.table(offroad=True))
+    pts, kinds = route_pts(r)
+    assert kinds[0] == 1 and kinds[-1] == 1 and 0 in kinds
+    # both ends of every road segment (the road may now be left right in the pass)
+    road_pts = [pts[j] for i in range(len(kinds)) if kinds[i] == 0 for j in (i, i + 1)]
+    assert any(280 <= x <= 320 and abs(y) < 60 for x, y in road_pts)  # through the pass
+    for i, k in enumerate(kinds):  # every off-road leg is passable
+        if k == 1:
+            (x1, y1), (x2, y2) = pts[i], pts[i + 1]
+            assert ns.Passability.SegmentCost(1, x1, y1, x2, y2) is not None
+    # A detour through the pass, not a trip along the whole road: 400 south-west leg,
+    # ~200 through the pass, ~450 back north-east.
+    assert r.length < 1300
+
+
+def test_offroad_walks_around(offroad):
+    lua, ns = offroad
+    # Short trip with the wall in the way: through the pass on foot, all passable.
+    r = ns.Router.Route(1, 0.0, 300.0, 600.0, 300.0, lua.table(offroad=True))
+    pts, kinds = route_pts(r)
+    assert any(abs(y) < 60 for x, y in pts if 250 < x < 350)
+    for i in range(len(kinds)):
+        (x1, y1), (x2, y2) = pts[i], pts[i + 1]
+        assert ns.Passability.SegmentCost(1, x1, y1, x2, y2) is not None
+
+
+def test_find_path_walks_through_the_pass(offroad):
+    lua, ns = offroad
+    P = ns.Passability
+    cost, path = P.FindPath(1, 0.0, 400.0, 600.0, 400.0)
+    pts = [path[i] for i in range(1, len(path) + 1)]
+    pts = list(zip(pts[0::2], pts[1::2]))
+    assert pts[0] == (0, 400) and pts[-1] == (600, 400)
+    for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
+        assert P.SegmentCost(1, x1, y1, x2, y2) is not None
+    assert any(abs(y) < 60 for x, y in pts if 250 < x < 350)  # crosses the wall at the pass
+    assert cost < 1100
+
+
+def cliff_terrain_lua(roads):
+    """3x3 tiles around the origin; a cliff at world X 290..310 from edge to edge (no way round it), and `roads`."""
+    import numpy as np
+    from azerothgps.roads.terrain import QUAD_YD, encode_row
+
+    cell = QUAD_YD * 2
+    tx0 = ty0 = 30
+    n = int(3 * TILE / cell)
+    rows = []
+    for r in range(n):
+        x = (32 - ty0) * TILE - (r + 0.5) * cell  # world X of the row centre
+        row = np.full(n, 2 if 290 <= x <= 310 else 0, np.uint8)
+        rows.append('"' + encode_row(row) + '"')
+    return (f"ns.Terrain = {{ [1] = {{ tx0 = {tx0}, ty0 = {ty0}, cell = {cell}, w = {n}, h = {n}, "
+            f"rows = {{ {', '.join(rows)} }} }} }}\n" + roads)
+
+
+# Road N east of the cliff, X = 340 (Y -500..500); the stop 90 yd west of it, behind the cliff. With `far`: a road over
+# the cliff at Y = 500 (roads are the way) and road F west of it, X = -200: reached over open ground.
+CLIFF_NEAR = "{1,2,1000,0, 340,-500, 340,0, 340,500}"
+CLIFF_FAR = "{2,3,540,0, 340,500, -200,500}, {3,4,1000,0, -200,500, -200,0, -200,-500}"
+
+
+def cliff_router(env, far):
+    lua, ns = env
+    load(lua, ns, "Passability.lua", "Router.lua")
+    roads = ("ns.Roads = { [1] = { n = { 340,-500, 340,500, -200,500, -200,-500 }, e = { %s } } }"
+             % (CLIFF_NEAR + (", " + CLIFF_FAR if far else "")))
+    lua.eval("function(src) return assert(load('local _, ns = ...; ' .. src)) end")(cliff_terrain_lua(roads))(None, ns)
+    ns.Router.Reset()
+    ns.Router.SYNC_WALKS = True
+    ns.Passability.ClearCache()
+    return lua, ns
+
+
+def blocked_off_pieces(ns, cont, r):
+    pts, kinds = route_pts(r)
+    return [(pts[i], pts[i + 1]) for i, k in enumerate(kinds)
+            if k == 1 and ns.Passability.SegmentCost(cont, *pts[i], *pts[i + 1]) is None]
+
+
+def test_no_hop_over_a_wall_to_the_nearer_road_when_a_further_one_is_reached(env):
+    # (asked 2026-11-14, Loch Modan: "If there is a road that would continue the path and its reachable based on open
+    # ground and no wall blocks it then make the dotted line connection but no wall hopping allowed.") Up road N to
+    # beside the stop and 90 yd over the cliff was the way (at BLOCKED_PENALTY, no walk round it); road F, round by
+    # the road over the cliff, 450 yd off over open ground, is
+    lua, ns = cliff_router(env, far=True)
+    for _ in range(2):  # (and again, the hop known: the same)
+        r = ns.Router.Route(1, 340.0, -500.0, 250.0, -400.0, lua.table(offroad=False))
+        pts, kinds = route_pts(r)
+        assert not r.unconnected
+        assert blocked_off_pieces(ns, 1, r) == []
+        assert r.hops == 0
+        last_road = [pts[i + 1] for i, k in enumerate(kinds) if k == 0][-1]
+        assert last_road[0] == pytest.approx(-200, abs=1)  # off road F
+
+
+def test_a_hop_over_a_wall_stays_when_no_road_is_reached(env):
+    # (the last resort: no road reached over open ground, however far looked; the route still exists, its one hop
+    # dotted)
+    lua, ns = cliff_router(env, far=False)
+    r = ns.Router.Route(1, 340.0, -500.0, 250.0, -400.0, lua.table(offroad=False))
+    pts, kinds = route_pts(r)
+    assert not r.unconnected and not r.noWay
+    assert len(blocked_off_pieces(ns, 1, r)) == 1
+    assert pts[-1] == pytest.approx((250, -400))
+    assert r.hops == 1
+
+
+def test_straight_leg_along_a_road_is_drawn_as_road(router):
+    lua, ns = router
+    # Offroad and no terrain data: straight, and it runs 5 yd beside the first leg of the L.
+    r = ns.Router.Route(1, 5.0, -50.0, 5.0, -950.0, lua.table(offroad=True))
+    pts, kinds = route_pts(r)
+    assert set(kinds) == {0}
+    assert r.road == pytest.approx(900, abs=1)
+    # Crossing a road (rather than following it) stays off-road.
+    r = ns.Router.Route(1, -200.0, -500.0, 200.0, -500.0, lua.table(offroad=True))
+    assert r.road == 0
+
+
+def tirisfal_env(env):
+    lua, ns = env
+    load(lua, ns, "Data/Roads.lua", "Data/Terrain.lua", "Passability.lua", "Router.lua")
+    ns.Router.Reset()
+    ns.Router.SYNC_WALKS = True
+    ns.Passability.ClearCache()
+    minX, minY, maxX, maxY = 825.0, -1485.4166, 3837.4998, 3033.3333  # Tirisfal Glades
+    return lua, ns, lambda mx, my: (maxX - my / 100 * (maxX - minX), maxY - mx / 100 * (maxY - minY))
+
+
+def test_buildings_are_ground_routes_dont_walk_through(env):
+    # (asked: "buildings as objects we can't walk through, like Goldshire") the inn's cells are
+    # blocked (Data/Buildings.lua, buildings.py), a leg straight through it isn't taken, a route
+    # past it goes round, and a stop inside it (the innkeeper) is still reached
+    lua, ns = env
+    load(lua, ns, "Data/Roads.lua", "Data/Terrain.lua", "Passability.lua", "Router.lua")
+    R, P = ns.Router, ns.Passability
+    R.Reset()
+    R.SYNC_WALKS = True
+    P.ClearCache()
+    inn = (-9466.0, 16.0)  # Goldshire's Lion's Pride Inn
+    assert P.At(0, *inn) == 2
+    assert P.SegmentCost(0, -9466.0, -30.0, -9466.0, 70.0) is None  # straight through it
+    assert P.SegmentCost(0, -9440.0, -30.0, -9440.0, 70.0) is not None  # beside it: open ground
+    r = R.Route(0, -9466.0, -30.0, -9466.0, 70.0, lua.table())
+    pts, kinds = route_pts(r)
+    # (round it: nowhere inside the inn's walls, about X -9478..-9454, Y -8..40; its off-road legs pass
+    # the router's own check)
+    for i, ((x1, y1), (x2, y2)) in enumerate(zip(pts, pts[1:])):
+        if kinds[i] == 1:
+            assert P.SegmentCost(0, x1, y1, x2, y2) is not None
+        n = max(1, int(math.hypot(x2 - x1, y2 - y1)))
+        for k in range(n + 1):
+            x, y = x1 + (x2 - x1) * k / n, y1 + (y2 - y1) * k / n
+            assert not (-9475 < x < -9457 and -5 < y < 37), (x, y)
+    assert sum(math.hypot(b[0] - a[0], b[1] - a[1]) for a, b in zip(pts, pts[1:])) > 110  # (100 yd straight)
+    stop = R.Route(0, -9440.0, -40.0, inn[0], inn[1], lua.table())
+    n = len(stop.pts)
+    assert stop and (stop.pts[n - 1], stop.pts[n]) == pytest.approx(inn) and not stop.unconnected
+
+
+def test_the_buildings_data_is_made_from_the_client_and_small(env):
+    # (Data/Buildings.lua: runs of cells per continent; reading them at first use stays cheap)
+    lua, ns = env
+    load(lua, ns, "Data/Terrain.lua", "Passability.lua")
+    for cont in (0, 1):
+        runs = ns.BuildingCells[cont]
+        assert len(runs) % 3 == 0 and len(runs) > 3000
+    t = time.perf_counter()
+    ns.Passability.At(0, -9466.0, 16.0)
+    assert (time.perf_counter() - t) * 1000 < 20  # (the set made at first read)
+    text = (ADDON / "Data/Buildings.lua").read_text(encoding="utf-8")
+    assert "agps buildings" in text and len(text) < 200_000
+    assert "Data\\Buildings.lua" in (ADDON / "AzerothGPS.toc").read_text(encoding="utf-8")
+
+
+def test_offroad_respects_tirisfal_mountains(env):
+    lua, ns, at = tirisfal_env(env)
+    # Shadowvale is walled in by mountains: from east of Brill it must come in by the road,
+    # not straight over the ridge.
+    (sx, sy), (tx, ty) = at(57.2, 55.4), at(12.6, 65.2)
+    assert ns.Passability.SegmentCost(0, sx, sy, tx, ty) is None
+    r = ns.Router.Route(0, sx, sy, tx, ty, lua.table(offroad=True))
+    pts, kinds = route_pts(r)
+    assert 0 in kinds
+    for i, k in enumerate(kinds):
+        if k == 1:
+            (x1, y1), (x2, y2) = pts[i], pts[i + 1]
+            assert ns.Passability.SegmentCost(0, x1, y1, x2, y2) is not None
+
+
+def test_offroad_long_route_works_out_node_links_in_the_background(env):
+    lua, ns, at = tirisfal_env(env)
+    R = ns.Router
+    (sx, sy), (tx, ty) = at(57.2, 55.4), at(12.6, 65.2)
+    want = R.Route(0, sx, sy, tx, ty, lua.table(offroad=True)).length  # all at once
+    R.Reset()
+    R.SYNC_WALKS, R.NODE_LINK_MS = False, 0  # (none in the route calculation itself)
+    pump = lua.eval("function(R) while R.HasWork() do R.Pump(math.huge, function() return 0 end) end end")
+    try:
+        r = R.Route(0, sx, sy, tx, ty, lua.table(offroad=True))
+        assert r.pending  # provisional: the links are worked out in the background
+        for _ in range(10):
+            pump(R)
+            r = R.Route(0, sx, sy, tx, ty, lua.table(offroad=True))
+            if not r.pending:
+                break
+        assert not r.pending
+        assert r.length == pytest.approx(want, abs=1)  # then the same route
+    finally:
+        R.SYNC_WALKS, R.NODE_LINK_MS = True, 12
+
+
+def test_offroad_from_undercity_skips_brill(env):
+    lua, ns, at = tirisfal_env(env)
+    # Out of the Ruins' gate and straight west, not north through Brill first.
+    r = ns.Router.Route(0, 1600.0, 240.0, *at(12.6, 65.2), lua.table(offroad=True))
+    pts, _ = route_pts(r)
+    bx, by = at(60.5, 52.0)  # Brill
+    assert min(math.hypot(x - bx, y - by) for x, y in pts) > 250
+    assert r.length < 3200
+
+
+# ---- World map, transports ----------------------------------------------------------
+
+def test_world_map_conversion_roundtrip(env):
+    lua, ns = env
+    load(lua, ns, "Data/Maps.lua")
+    x, y = ns.Geo.ToContinent(0, 1600.0, 240.0, 1)  # Undercity into Kalimdor's coordinates
+    bx, by = ns.Geo.ToContinent(1, x, y, 0)
+    assert (bx, by) == pytest.approx((1600.0, 240.0), abs=0.01)
+    # Undercity lies north-east of Kalimdor on the world map: beyond Kalimdor's north edge
+    # (X) and east edge (Y), in Kalimdor's frame.
+    kal = ns.Maps[1414].bounds
+    assert x > kal[3] - 20000 and y < kal[2]
+
+
+def test_zoom_out_levels(env):
+    lua, ns = env
+    load(lua, ns, "Data/Maps.lua")
+    name = lambda i: ns.Maps[i].name if i else None
+    assert name(ns.GPS.UpMap(1458)) == "Tirisfal Glades"  # Undercity
+    assert name(ns.GPS.UpMap(1454)) == "Durotar"  # Orgrimmar
+    assert name(ns.GPS.UpMap(1420)) == "Eastern Kingdoms"
+    assert name(ns.GPS.UpMap(1415)) == "Azeroth"
+    assert ns.GPS.UpMap(947) is None
+
+
+@pytest.fixture
+def nav_env(env):
+    lua, ns = env
+    lua.execute("""
+      GetTime = function() return 0 end
+      GetUnitSpeed = function() return 0, 7, 7, 4.7 end
+      IsMounted = function() return false end
+    """)
+    ns.db = lua.eval("{}")
+    ns.CharDB = lua.eval("function(store) return function() return store end end")(lua.eval("{}"))
+    load(lua, ns, "Data/Maps.lua", "Data/Roads.lua", "Data/Transports.lua", "Router.lua", "Nav.lua")
+    ns.Nav.LATER_PER_CALL = 100  # the whole route in one call (see test_stretches_between_stops_fill_in)
+    ns.Router.WARM = False  # no background warm-up (nothing pumps it here)
+    ns.Nav.FUN = False  # (always "Working out the route...": test_working_out_the_route_now_and_then_in_murloc)
+    return lua, ns
+
+
+def test_plan_undercity_to_orgrimmar_takes_the_zeppelin(nav_env):
+    lua, ns = nav_env
+    ns.Nav.SetDestination(1600.0, -4400.0, 1, "Orgrimmar")
+    legs, secs = ns.Nav.Plan(0, 1600.0, 240.0, 7.0)
+    kinds = ["ride" if legs[i].ride else "walk" for i in range(1, len(legs) + 1)]
+    assert kinds == ["walk", "ride", "walk"]
+    ride = legs[2].ride
+    assert ride[8] == "zeppelin" and {ride[1], ride[4]} == {0, 1}
+    assert secs < 30 * 60
+
+
+def test_plan_same_continent_walks(nav_env):
+    lua, ns = nav_env
+    ns.Nav.SetDestination(-600.0, -4180.0, 1, "Valley of Trials")
+    legs, _ = ns.Nav.Plan(1, -450.0, -4700.0, 7.0)
+    assert len(legs) == 1 and legs[1].walk
+
+
+def test_cross_continent_route_has_transport_leg(nav_env):
+    lua, ns = nav_env
+    ns.Nav.SetDestination(-440.0, -4700.0, 1, "near Razor Hill")  # ~2k yd south of the zeppelin tower
+    r = ns.Nav.Route(1600.0, 240.0, 0)
+    parts = [r.parts[i] for i in range(1, len(r.parts) + 1)]
+    assert [p.cont for p in parts] == [0, 0, 1]  # walk (EK), ride (drawn from EK), walk (Kalimdor)
+    assert [parts[1].kinds[i] for i in range(1, len(parts[1].kinds) + 1)] == [2]
+    far = parts[2]
+    far_kinds = [far.kinds[i] for i in range(1, len(far.kinds) + 1)]
+    assert 0 in far_kinds  # the far side is routed over Kalimdor's roads, not a straight line
+    assert r.extraSeconds > 0
+
+
+def test_route_seen_from_the_other_continent(nav_env):
+    lua, ns = nav_env
+    ns.Nav.SetDestination(1600.0, -4400.0, 1, "Orgrimmar")
+    r = ns.Nav.Route(1600.0, 240.0, 0)
+    segs = []
+    last = ns.Nav.EachSegment(r, 1, lambda *a: segs.append(a))
+    assert len(segs) > 5
+    assert (last[0], last[1]) == pytest.approx((1600.0, -4400.0), abs=0.5)  # ends at the destination in Kalimdor's frame
+
+
+# ---- Map layers (Layers.lua) -------------------------------------------------------------
+
+def test_minimap_hover_offset(env):
+    lua, ns = env
+    load(lua, ns, "Data/Maps.lua", "Layers.lua")
+    L = ns.Layers
+    # North-up minimap 140 UI units showing 466.67 yd: 30 units right, 15 up of the centre.
+    dx, dy = L.MinimapOffset(30.0, 15.0, 140.0, 1400 / 3, 0)
+    k = (1400 / 3) / 140
+    assert dx == pytest.approx(15 * k)  # up = north = +X
+    assert dy == pytest.approx(-30 * k)  # right = east = -Y
+    # Rotating minimap, player facing west (+Y, facing = pi/2): up on the minimap is west.
+    dx, dy = L.MinimapOffset(0.0, 15.0, 140.0, 1400 / 3, math.pi / 2)
+    assert dx == pytest.approx(0, abs=1e-9) and dy == pytest.approx(15 * k)
+
+
+def test_a_vein_gathered_that_the_map_hides_says_so_once(env):
+    # (2026-11-13: a Copper Vein mined never showed: Find Herbs and Ore had only Tin Vein picked; it looked unsaved)
+    lua, ns = env
+    ns.db = lua.eval("{}")
+    ns.settings = lua.eval("{ gps = { layerHerbs = true, layerOre = true, nodeFilter = { ['Tin Vein'] = true } } }")
+    printed = []
+    lua.globals().AGPS_SAID = printed.append
+    lua.execute("GetTime = function() return 0 end")
+    lua.eval("function(ns) ns.Print = function(t) AGPS_SAID(t) end end")(ns)
+    load(lua, ns, "Data/Maps.lua", "Layers.lua")
+    L = ns.Layers
+    assert L.SayIfHidden("Tin Vein", "ore") is False and printed == []  # (picked: shown)
+    assert L.SayIfHidden("Copper Vein", "ore") is True
+    assert printed == ["Copper Vein saved, but hidden: Find Herbs and Ore shows only the ones you picked."]
+    assert L.SayIfHidden("Copper Vein", "ore") is False and len(printed) == 1  # (once a session)
+    ns.settings.gps.nodeFilter = lua.eval("{}")
+    ns.settings.gps.layerHerbs = False
+    assert L.SayIfHidden("Peacebloom", "herb") is True
+    assert printed[-1] == "Peacebloom saved, but the map hides herbs: turn the Herbs layer on to see them."
+
+
+def test_a_vein_hovered_on_the_minimap_is_saved_though_its_tooltip_is_uiparents(env):
+    # This client's Minimap_OnUpdate shows the blips' tooltip owned by UIParent, not the Minimap: a vein hovered
+    # was never saved (reported 2026-11-13, with the GPS square on). Its spot comes from the game's view radius.
+    lua, ns = env
+    ns.db = lua.eval("{}")
+    ns.settings = lua.eval("{ gps = { layerHerbs = true, layerOre = true } }")
+    lua.execute("""
+      GetTime = function() return 0 end
+      UIParent = UIParent or {}
+      strtrim = strtrim or function(t) return (t:gsub("^%s+", ""):gsub("%s+$", "")) end
+      local mouse = true
+      Minimap = { GetCenter = function() return 500, 400 end, GetEffectiveScale = function() return 1 end,
+        GetWidth = function() return 300 end, GetZoom = function() return 0 end,
+        IsVisible = function() return true end, GetEffectiveAlpha = function() return 1 end,
+        IsMouseOver = function() return mouse end }
+      HoverMouse = function(v) mouse = v end
+      C_Minimap = C_Minimap or {}
+      C_Minimap.GetViewRadius = function() return 150 end
+      GetCursorPosition = function() return 530, 400 end -- 30 units right of the middle: 30 yd east
+      GetCVar = function() return "0" end
+      HoverTip = { GetOwner = function() return UIParent end, GetName = function() return "HoverTip" end,
+        NumLines = function() return 2 end, GetUnit = function() return nil end }
+      HoverTipTextLeft1 = { GetText = function() return "Cat" end }
+      HoverTipTextLeft2 = { GetText = function() return "Copper Vein" end }
+    """)
+    lua.eval("function(ns) ns.Geo = ns.Geo or {}; ns.Geo.RealPlayerWorld = function() return 1000, 2000, 1 end end")(ns)
+    load(lua, ns, "Data/Maps.lua", "Layers.lua")
+    L = ns.Layers
+    tip = lua.eval("HoverTip")
+    assert L.IsMinimapTip(tip) is True
+    lua.eval("HoverMouse")(False)
+    # (the GPS square: the mouse on the map's own frame over the Minimap, IsMouseOver false; the cursor inside it)
+    assert L.IsMinimapTip(tip) is True
+    lua.execute("GetCursorPosition = function() return 900, 400 end")  # (off the Minimap)
+    assert L.IsMinimapTip(tip) is False  # a world object's tooltip over UIParent
+    lua.execute("GetCursorPosition = function() return 530, 400 end")
+    lua.eval("HoverMouse")(True)
+    L.OnTooltip(tip)
+    veins = ns.db.nodes[1]
+    assert veins is not None and len(veins) == 1, "the vein was not saved"
+    v = veins[1]
+    assert v[3] == "Copper Vein"
+    # 300 units across showing 2 x 150 yd: 30 units right of the middle is 30 yd east (-Y)
+    assert (v[1], v[2]) == (pytest.approx(1000.0), pytest.approx(1970.0))
+
+
+def test_nodes_merge_and_herbs_ore_layers(env):
+    lua, ns = env
+    ns.db = lua.eval("{}")
+    ns.settings = lua.eval("{ gps = { layerHerbs = true, layerOre = true } }")
+    lua.execute("""
+      GetNumSkillLines = function() return 1 end
+      GetSkillLineInfo = function() return "Mining", false end
+      GetTime = function() return 0 end
+    """)
+    load(lua, ns, "Data/Maps.lua", "Layers.lua")
+    L = ns.Layers
+    assert L.AddNode(1, 100.0, 200.0, "Copper Vein") is True
+    assert L.AddNode(1, 110.0, 205.0, "Copper Vein") is False  # same node, seen again
+    assert L.AddNode(1, 100.0, 200.0, "Peacebloom") is True
+    assert L.AddNode(1, 0.0, 0.0, "Some Rock") is False  # not a gathering node
+    def shown():
+        marks = L.Marks(1, 100.0, 200.0, 500.0, lua.table())
+        return sorted(marks[i][4] for i in range(1, len(marks) + 1))
+    assert shown() == ["Copper Vein", "Peacebloom"]  # both layers on
+    ns.settings.gps.layerHerbs = False
+    assert shown() == ["Copper Vein"]  # the Herbs layer off
+    ns.settings.gps.layerHerbs, ns.settings.gps.layerOre = True, False
+    assert shown() == ["Peacebloom"]
+
+
+def test_quest_marks_from_the_quest_api(env):
+    lua, ns = env
+    ns.db = lua.eval("{}")
+    ns.settings = lua.eval("{ gps = { layerQuests = true } }")
+    lua.execute("""
+      GetTime = function() return 0 end
+      C_QuestLog = {
+        GetQuestsOnMap = function() return { { questID = 7, x = 0.5, y = 0.5 } } end,
+        IsComplete = function() return false end,
+        GetTitleForQuestID = function() return "Sting of the Scorpid" end,
+      }
+    """)
+    load(lua, ns, "Data/Maps.lua", "Layers.lua")
+    durotar = ns.Maps[1411]
+    b = durotar.bounds
+    cx, cy = (b[1] + b[3]) / 2, (b[2] + b[4]) / 2
+    marks = ns.Layers.Marks(1, cx, cy, 10000.0, lua.table(1411))
+    got = {marks[i][4]: (marks[i][1], marks[i][2]) for i in range(1, len(marks) + 1)}
+    assert set(got) == {"Sting of the Scorpid"}
+    assert got["Sting of the Scorpid"] == pytest.approx((cx, cy))  # map centre -> zone centre
+
+
+def test_outline_of_a_square(env):
+    lua, ns = env
+    load(lua, ns, "Data/Maps.lua", "Layers.lua")
+    inside = lua.eval("function(i, j) return i >= 2 and i <= 4 and j >= 2 and j <= 4 end")
+    segs = ns.Layers.Outline(inside, 8, 8)
+    pts = [segs[i] for i in range(1, len(segs) + 1)]
+    n = len(pts) // 4
+    assert n == 12  # 3 cells per side, 4 sides, one segment per boundary cell edge
+    xs = pts[0::2]
+    assert min(xs) == 1.5 and max(xs) == 4.5  # halfway between inside and outside samples
+
+
+def test_quest_area_traced_from_hit_tests(env):
+    lua, ns = env
+    ns.db = lua.eval("{}")
+    ns.settings = lua.eval("{ gps = {} }")
+    lua.execute("""
+      GetTime = function() return 1000 end
+      C_QuestLog = {
+        GetQuestsOnMap = function() return { { questID = 7, x = 0.4, y = 0.6 } } end,
+        IsComplete = function() return false end,
+        GetQuestObjectives = function() return { { finished = false } } end,
+      }
+      -- the quest's area: a circle of radius 0.1 around (0.4, 0.6) in map coordinates
+      C_Minimap = { IsInsideQuestBlob = function(q, u, v)
+        return q == 7 and (u - 0.4) ^ 2 + (v - 0.6) ^ 2 <= 0.01 end }
+    """)
+    load(lua, ns, "Data/Maps.lua", "Layers.lua")
+    L = ns.Layers
+    maps = lua.table(1411)
+    b = ns.Maps[1411].bounds
+    cx, cy = (b[1] + b[3]) / 2, (b[2] + b[4]) / 2
+    assert len(L.Areas(1, cx, cy, 1e6, maps)) == 0  # queued, not traced yet
+    assert L.hitterName == "IsInsideQuestBlob(q, u, v)"
+    L.TraceAll()
+    a = L.Areas(1, cx, cy, 1e6, maps)
+    pts = [a[i] for i in range(1, len(a) + 1)]
+    assert len(pts) > 40
+    # every outline point lies on the circle (radius 0.1 of the map), to within a fine cell
+    ox, oy, _ = L.MapToWorld(1411, 0.4, 0.6)
+    rx = 0.1 * (b[3] - b[1])  # yards per 0.1 of the map, north-south
+    ry = 0.1 * (b[4] - b[2])
+    for x, y in zip(pts[0::2], pts[1::2]):
+        r = math.hypot((x - ox) / rx, (y - oy) / ry)
+        assert 0.9 < r < 1.1
+    # hovering: inside the circle finds the quest, outside doesn't
+    assert list(L.QuestsAt(1, ox, oy).values()) == [7]
+    assert len(L.QuestsAt(1, ox + 2 * rx, oy)) == 0
+    lua.execute("C_QuestLog.IsComplete = function() return true end")
+    assert len(L.QuestsAt(1, ox, oy)) == 0  # done: no area, no tooltip
+
+
+def test_quest_area_trace_waits_out_hidden_answers(env):
+    # (the live game, 2026-10-08: killing Young Nightsabers in Shadowglen, "quest area sometimes just doesn't draw") a
+    # hit test the game hides (a secret value) read as outside: a trace then came out empty and stayed so. A hidden
+    # answer is no answer: the trace waits and goes on from there once the game answers again
+    lua, ns = env
+    ns.db = lua.eval("{}")
+    ns.settings = lua.eval("{ gps = {} }")
+    lua.execute("""
+      GetTime = function() return 1000 end
+      AGPS_SECRET, AGPS_HIDE = {}, false
+      C_QuestLog = {
+        GetQuestsOnMap = function() return { { questID = 7, x = 0.4, y = 0.6 } } end,
+        IsComplete = function() return false end,
+        GetQuestObjectives = function() return { { finished = false } } end,
+      }
+      C_Minimap = { IsInsideQuestBlob = function(q, u, v)
+        if AGPS_HIDE then return AGPS_SECRET end
+        return q == 7 and (u - 0.4) ^ 2 + (v - 0.6) ^ 2 <= 0.01 end }
+    """)
+    load(lua, ns, "Data/Maps.lua", "Layers.lua")
+    ns.IsSecret = lua.eval("function(v) return v == AGPS_SECRET end")
+    L = ns.Layers
+    maps = lua.table(1411)
+    b = ns.Maps[1411].bounds
+    cx, cy = (b[1] + b[3]) / 2, (b[2] + b[4]) / 2
+    assert len(L.Areas(1, cx, cy, 1e6, maps)) == 0 and L.hitterName  # (queued; the hit test chosen)
+    lua.execute("AGPS_HIDE = true")
+    L.TraceAll()  # (hidden: it waits)
+    assert len(L.Areas(1, cx, cy, 1e6, maps)) == 0
+    lua.execute("AGPS_HIDE = false")
+    L.TraceAll()
+    assert len(L.Areas(1, cx, cy, 1e6, maps)) > 40  # (the whole circle, not an empty area kept)
+
+
+def test_quest_areas_inside_as_few_rectangles(env):
+    # (asked 2026-10-08: a faint fill in each quest area, so being inside one shows at any zoom) Layers.FillRects: the
+    # inside of a sampled shape as rectangles (each row's runs, carried down while the same), covering exactly the
+    # inside samples; and a traced area hands its rectangles to EachArea's fillFn
+    lua, ns = env
+    ns.db = lua.eval("{}")
+    ns.settings = lua.eval("{ gps = {} }")
+    load(lua, ns, "Data/Maps.lua", "Layers.lua")
+    L = ns.Layers
+    # an L: rows 0-2 columns 0-1, row 3 columns 0-4 (grid units as world: x = u, y = v)
+    shape = lua.eval("""function(i, j)
+      return (j <= 2 and i <= 1) or (j == 3 and i <= 4)
+    end""")
+    rects = L.FillRects(shape, 6, 5, lua.eval("function(u, v) return u, v end"))
+    r = [rects[k] for k in range(1, len(rects) + 1)]
+    boxes = sorted(tuple(r[k:k + 4]) for k in range(0, len(r), 4))
+    assert boxes == [(0, 0, 2, 3), (0, 3, 5, 4)]  # (two: the column and the foot)
+    covered = {(i, j) for x1, y1, x2, y2 in boxes for i in range(int(x1), int(x2)) for j in range(int(y1), int(y2))}
+    assert covered == {(i, j) for i in range(6) for j in range(5) if (j <= 2 and i <= 1) or (j == 3 and i <= 4)}
+    assert L.FillRects(lua.eval("function() return false end"), 4, 4, lua.eval("function(u, v) return u, v end")) is None
+    # a traced circle: its rectangles cover its middle, not far outside it
+    lua.execute("""
+      GetTime = function() return 1000 end
+      C_QuestLog = {
+        GetQuestsOnMap = function() return { { questID = 7, x = 0.4, y = 0.6 } } end,
+        IsComplete = function() return false end,
+        GetQuestObjectives = function() return { { finished = false } } end,
+      }
+      C_Minimap = { IsInsideQuestBlob = function(q, u, v) return q == 7 and (u - 0.4) ^ 2 + (v - 0.6) ^ 2 <= 0.01 end }
+    """)
+    maps = lua.table(1411)
+    b = ns.Maps[1411].bounds
+    cx, cy = (b[1] + b[3]) / 2, (b[2] + b[4]) / 2
+    L.Areas(1, cx, cy, 1e6, maps)
+    L.TraceAll()
+    got = []
+    L.EachArea(1, cx, cy, 1e6, maps, lua.eval("function() end"),
+               lambda x1, y1, x2, y2: got.append((x1, y1, x2, y2)))
+    ox, oy, _ = L.MapToWorld(1411, 0.4, 0.6)
+    rx, ry = 0.1 * (b[3] - b[1]), 0.1 * (b[4] - b[2])
+    assert 10 < len(got) < 120
+    assert any(x1 <= ox <= x2 and y1 <= oy <= y2 for x1, y1, x2, y2 in got)  # (its middle filled)
+    for x1, y1, x2, y2 in got:  # (nothing well outside it)
+        for x, y in ((x1, y1), (x2, y2)):
+            assert math.hypot((x - ox) / rx, (y - oy) / ry) < 1.15
+
+
+def test_small_quest_area_found_near_the_player(env):
+    # A quest area of about 30 yards, between the coarse samples, its map icon elsewhere:
+    # not found while the player is far away; looked for again around them later, found.
+    lua, ns = env
+    ns.db = lua.eval("{}")
+    ns.settings = lua.eval("{ gps = {} }")
+    lua.execute("""
+      AGPS_T = 1000
+      GetTime = function() return AGPS_T end
+      AGPS_QUESTS = { { questID = 1, x = 0.5, y = 0.5 } }
+      C_QuestLog = {
+        GetQuestsOnMap = function() return AGPS_QUESTS end,
+        IsComplete = function() return false end,
+        GetQuestObjectives = function() return { { finished = false } } end,
+      }
+      AGPS_U, AGPS_V = 0.1, 0.9 -- the player, far from it
+      C_Map = C_Map or {}
+      C_Map.GetPlayerMapPosition = function() return { x = AGPS_U, y = AGPS_V } end
+      -- quest 1: a big area (picks the hit test); quest 8: radius 0.006 around (0.708, 0.292)
+      C_Minimap = { IsInsideQuestBlob = function(q, u, v)
+        if q == 1 then return (u - 0.5) ^ 2 + (v - 0.5) ^ 2 <= 0.01 end
+        if q == 8 then return (u - 0.708) ^ 2 + (v - 0.292) ^ 2 <= 0.006 ^ 2 end
+        return false end }
+    """)
+    load(lua, ns, "Data/Maps.lua", "Layers.lua")
+    L = ns.Layers
+    maps = lua.table(1411)
+    L.Areas(1, 0, 0, 1e6, maps)
+    L.TraceAll()
+    assert L.hitterName
+    ox, oy, _ = L.MapToWorld(1411, 0.708, 0.292)
+    lua.execute("AGPS_T = 2000; AGPS_QUESTS = { { questID = 8, x = 0.3, y = 0.3 } }")
+    L.Areas(1, 0, 0, 1e6, maps)
+    L.TraceAll()
+    assert list(L.QuestsAt(1, ox, oy).values()) == []  # stepped over, the player far away
+    lua.execute("AGPS_T = 2100; AGPS_U, AGPS_V = 0.71, 0.29")  # later, the player near it
+    L.Areas(1, 0, 0, 1e6, maps)
+    L.TraceAll()
+    assert list(L.QuestsAt(1, ox, oy).values()) == [8]
+
+
+def test_quest_area_without_a_map_icon_is_traced(env):
+    # Quest 9 is in the log but not among the map's quests (no icon here), with a small
+    # area near the player: traced anyway.
+    lua, ns = env
+    ns.db = lua.eval("{}")
+    ns.settings = lua.eval("{ gps = {} }")
+    lua.execute("""
+      AGPS_T = 1000
+      GetTime = function() return AGPS_T end
+      C_QuestLog = {
+        GetQuestsOnMap = function() return { { questID = 1, x = 0.5, y = 0.5 } } end,
+        GetNumQuestLogEntries = function() return 3, 2 end,
+        GetInfo = function(i)
+          if i == 1 then return { isHeader = true, title = "Durotar" } end
+          if i == 2 then return { questID = 1 } end
+          if i == 3 then return { questID = 9 } end
+        end,
+        IsComplete = function() return false end,
+        GetQuestObjectives = function() return { { finished = false } } end,
+      }
+      C_Map = C_Map or {}
+      C_Map.GetPlayerMapPosition = function() return { x = 0.71, y = 0.29 } end
+      C_Minimap = { IsInsideQuestBlob = function(q, u, v)
+        if q == 1 then return (u - 0.5) ^ 2 + (v - 0.5) ^ 2 <= 0.01 end
+        if q == 9 then return (u - 0.708) ^ 2 + (v - 0.292) ^ 2 <= 0.006 ^ 2 end
+        return false end }
+    """)
+    load(lua, ns, "Data/Maps.lua", "Layers.lua")
+    L = ns.Layers
+    assert list(L.LogQuests().values()) == [1, 9]
+    maps = lua.table(1411)
+    L.Areas(1, 0, 0, 1e6, maps)
+    L.TraceAll()
+    ox, oy, _ = L.MapToWorld(1411, 0.708, 0.292)
+    assert list(L.QuestsAt(1, ox, oy).values()) == [9]
+
+
+def test_quest_route_stops_from_the_quest_log(env):
+    # Log: 1 open (pin on Durotar), 2 finished (turn-in pin), 3 open with no pin (next
+    # waypoint), 4 nowhere. Stops for 1-3, named; 4 reported missing.
+    lua, ns = env
+    ns.db = lua.eval("{}")
+    ns.settings = lua.eval("{ gps = {} }")
+    lua.execute("""
+      GetTime = function() return 10 end
+      C_Map = C_Map or {}
+      C_Map.GetBestMapForUnit = function() return 1411 end
+      C_QuestLog = {
+        GetNumQuestLogEntries = function() return 4, 4 end,
+        GetInfo = function(i) return { questID = i } end,
+        IsComplete = function(id) return id == 2 end,
+        GetTitleForQuestID = function(id) return ({ "Wolves", "Letter", "Far Away", "Lost" })[id] end,
+        GetQuestsOnMap = function(mapID)
+          if mapID == 1411 then return { { questID = 1, x = 0.4, y = 0.5 }, { questID = 2, x = 0.6, y = 0.3 } } end
+          return {}
+        end,
+        GetNextWaypoint = function(id) if id == 3 then return 1411, 0.2, 0.8 end end,
+      }
+    """)
+    load(lua, ns, "Data/Maps.lua", "Layers.lua")
+    stops, c = ns.Layers.QuestStops()
+    names = sorted(stops[i].name for i in range(1, len(stops) + 1))
+    assert names == ["Far Away", "Turn in: Letter", "Wolves"]
+    assert c.todo == 2 and c.turnin == 1 and list(c.missing.values()) == ["Lost"]
+    x, y, cont = ns.Layers.MapToWorld(1411, 0.4, 0.5)
+    wolves = [stops[i] for i in range(1, len(stops) + 1) if stops[i].name == "Wolves"][0]
+    assert (wolves.x, wolves.y, wolves.cont) == (x, y, cont)
+    # (asked 2026-10-06) each stop knows its quest, and whether it's the turn-in
+    letter = [stops[i] for i in range(1, len(stops) + 1) if stops[i].name == "Turn in: Letter"][0]
+    assert wolves.quest == 1 and not wolves.turnin and letter.quest == 2 and letter.turnin
+
+
+def test_group_quests_are_told_from_their_size_or_elite_tag(env):
+    # (asked 2026-10-06) a quest for a group: more than one player suggested, or elite / group / dungeon tagged
+    lua, ns = env
+    ns.db = lua.eval("{}")
+    ns.settings = lua.eval("{ gps = {} }")
+    lua.execute("""
+      C_QuestLog = {
+        GetSuggestedGroupSize = function(id) return ({ [1] = 0, [2] = 3, [3] = 0, [4] = 1, [5] = 0 })[id] end,
+        GetQuestTagInfo = function(id)
+          if id == 3 then return { tagName = "Elite", tagID = 1, isElite = true } end
+          if id == 5 then return { tagName = "Dungeon", tagID = 81 } end
+          return nil
+        end,
+        GetLogIndexForQuestID = function(id) return id end,
+        GetInfo = function(i) return { questID = i, suggestedGroup = (i == 4) and 2 or 0 } end,
+      }
+    """)
+    load(lua, ns, "Data/Maps.lua", "Layers.lua")
+    L = ns.Layers
+    assert L.QuestGroup(1) is None
+    g = L.QuestGroup(2)
+    assert g.size == 3 and not g.elite
+    g = L.QuestGroup(3)
+    assert g.elite and g.size == 0
+    assert L.QuestGroup(4).size == 2  # (the log's own field)
+    assert L.QuestGroup(5).tag == "Dungeon"
+
+
+def test_undercity_district_labels(env):
+    # Inside Undercity's map: one label per district, the Trade Quarter's in its middle.
+    lua, ns = env
+    load(lua, ns, "Data/Interiors.lua")
+    G = ns.GPS
+    best = None
+    for i in range(1, len(ns.Interiors[0]) + 1):
+        p = ns.Interiors[0][i]
+        if p[6] < 1600 < p[8] and p[7] < 240 < p[9]:
+            area = (p[8] - p[6]) * (p[9] - p[7])
+            if not best or area > best[0]:
+                best = (area, p)
+    p = best[1]
+    c, s = math.cos(p[5]), math.sin(p[5])
+    wx, wy = p[2] - 54.8 * c + 2.4 * s, p[3] - 54.8 * s - 2.4 * c  # the Trade Quarter's middle
+    place, wmo, room = G.FindInterior(wx, wy, 0, 0, "Trade Quarter", True)
+    labels = G.InteriorLabels(place, wmo, room)
+    names = [labels[i][3] for i in range(1, len(labels) + 1)]
+    assert len(names) == len(set(names))  # each once
+    for n in ("Trade Quarter", "War Quarter", "Magic Quarter", "Rogues' Quarter", "The Apothecarium", "Royal Quarter"):
+        assert n in names
+    tq = [labels[i] for i in range(1, len(labels) + 1) if labels[i][3] == "Trade Quarter"][0]
+    assert math.hypot(tq[1] - wx, tq[2] - wy) < 20
+
+
+# ---- Multi-stop routes -----------------------------------------------------------------
+
+def stops(lua, *pts):
+    return lua.table(*[lua.table(x=x, y=y, cont=1) for x, y in pts])
+
+
+def test_multi_stop_route_covers_every_stop(nav_env):
+    lua, ns = nav_env
+    a, b = (-600.0, -4180.0), (-440.0, -4700.0)  # Valley of Trials, south of Razor Hill
+    ns.Nav.SetStops(stops(lua, a, b))
+    assert [ns.Nav.stops[i].icon for i in (1, 2)] == [6, 1]  # square, then star
+    r = ns.Nav.Route(-800.0, -4400.0, 1)
+    last = ns.Nav.EachSegment(r, 1, lambda *x: None)
+    assert (last[0], last[1]) == pytest.approx(b, abs=0.5)  # ends at the last stop
+    assert r.totalYards > r.walkYards > 0  # whole trip longer than the way to stop 1
+    # every segment knows which stop it leads to (for per-stop colours)
+    seen = set()
+    ns.Nav.EachSegment(r, 1, lambda x1, y1, x2, y2, kind, stop, *rest: seen.add(stop))
+    assert seen == {1, 2}
+
+
+def test_reaching_a_stop_moves_on_to_the_next(nav_env):
+    lua, ns = nav_env
+    ns.Nav.SetStops(stops(lua, (-600.0, -4180.0), (-440.0, -4700.0)))
+    status = ns.Nav.Status(-602.0, -4181.0, 1)  # standing at stop 1
+    assert len(ns.Nav.stops) == 1 and ns.Nav.dest.x == -440.0
+    assert "Arrived" not in status
+    assert "Arrived" in ns.Nav.Status(-440.0, -4700.0, 1)
+
+
+def test_the_last_stop_goes_at_once_when_reached(nav_env):
+    # (reported) arrived, still running: out of the stop's circle the route to it came back,
+    # until the stop went a few seconds later. Reached: gone at once, "Arrived" shown a while.
+    lua, ns = nav_env
+    N = ns.Nav
+    lua.execute("AGPS_T = 100 GetTime = function() return AGPS_T end")
+    N.SetStops(stops(lua, (-440.0, -4700.0)))
+    assert "Arrived" in N.Status(-440.0, -4700.0, 1)
+    assert len(N.stops) == 0 and N.dest is None and N.route is None
+    lua.execute("AGPS_T = 102")
+    assert "Arrived" in N.Status(-470.0, -4700.0, 1)  # (30 yd on: still just "Arrived")
+    assert N.dest is None and N.Route(-470.0, -4700.0, 1) is None
+    lua.execute("AGPS_T = 106")
+    N.Tick()
+    assert N.Status(-500.0, -4700.0, 1) is None  # (then nothing)
+
+
+def test_fastest_order(nav_env):
+    lua, ns = nav_env
+    lua.execute("Geo_Player = nil")
+    # placed far-first; the fastest order visits the near one first
+    near, far = (-500.0, -4400.0), (-500.0, -3400.0)
+    ns.Nav.SetStops(stops(lua, far, near))
+    ns.Nav.OrderStops(-500.0, -4600.0, 1)
+    assert ns.Nav.stops[1].y == -4400.0 and ns.Nav.stops[2].y == -3400.0
+    assert ns.Nav.stops[1].icon == 1  # markers stay with their stops (placed 2nd: star)
+
+
+def test_a_quest_area_in_parts_is_visited_at_the_part_on_the_way(nav_env):
+    """(asked 2026-11-07: Quest Route led to a quest's north area while the same quest's area was also by another
+    quest's stop) a stop with its area's parts (Layers.QuestAreaSpots) goes to the part that fits the order best."""
+    lua, ns = nav_env
+    lua.execute("Geo_Player = nil")
+    N = ns.Nav
+    a = lua.table(x=-500.0, y=-4400.0, cont=1, quest=1)
+    north = lua.table(x=-500.0, y=-3400.0, cont=1)
+    by_a = lua.table(x=-480.0, y=-4380.0, cont=1)
+    b = lua.table(x=-500.0, y=-3400.0, cont=1, quest=2, z=12.0, parts=lua.table(north, by_a))
+    N.SetStops(lua.table(b, a))
+    N.OrderStops(-500.0, -4600.0, 1)
+    ys = [N.stops[i].y for i in (1, 2)]
+    assert ys == [-4400.0, -4380.0], ys
+    assert N.stops[2].quest == 2 and N.stops[2].z is None  # (moved: the pin's floor no longer known)
+    # (asked again from there: it stays, nothing to gain)
+    assert not N.OrderStops(-500.0, -4600.0, 1, True)
+    # with no parts, as before: the pin
+    b2 = lua.table(x=-500.0, y=-3400.0, cont=1, quest=2)
+    N.SetStops(lua.table(b2, lua.table(x=-500.0, y=-4400.0, cont=1, quest=1)))
+    N.OrderStops(-500.0, -4600.0, 1)
+    assert [N.stops[i].y for i in (1, 2)] == [-4400.0, -3400.0]
+
+
+DARKSHORE_QUESTS = [  # (the live game's quest route, 2026-11-08: x, y, quest)
+    (6409, 466, 4763), (7427, -327, 1138), (6208, -158, 4812), (6145, 16, 6123), (6157, 653, 1579), (5957, 344, 985),
+    (5781, -22, 1), (5691, 144, 2), (5686, 155, 3), (5634, 166, 4), (5002, 89, 5), (4933, 298, 6), (4993, 617, 7),
+    (4679, 602, 8)]
+
+
+def test_a_quest_areas_far_part_is_taken_where_it_fits_in_the_whole_order(nav_env):
+    """(asked 2026-11-08, Darkshore: Fruit of the Sea's area north past every other stop, and again in the south by
+    WANTED: Murkdeep! at the route's far end) the part is weighed where it fits best in the order, not only between
+    the neighbors it had: the route goes south, never up north for it."""
+    lua, ns = nav_env
+    lua.execute("Geo_Player = nil")
+    N = ns.Nav
+    stops = []
+    for x, y, q in DARKSHORE_QUESTS:
+        d = lua.table(x=float(x), y=float(y), cont=1, quest=q, questRoute=True)
+        if q == 1138:
+            d.parts = lua.table(lua.table(x=7426.5, y=-269.6, cont=1, size=92996.0),
+                                lua.table(x=4990.7, y=667.4, cont=1, size=66265.0))
+        stops.append(d)
+    N.SetStops(lua.table(*stops))
+    N.OrderStops(6400.0, 450.0, 1)
+    fruit = next(N.stops[i] for i in range(1, len(N.stops) + 1) if N.stops[i].quest == 1138)
+    assert (fruit.x, fruit.y) == (4990.7, 667.4)
+    assert max(N.stops[i].x for i in range(1, len(N.stops) + 1)) < 6500
+
+
+def test_a_quest_route_is_put_in_order_again_when_a_stop_leaves_it(nav_env):
+    """(asked 2026-11-07: "When a quest is removed from the route ... the route should be recalculated with that quest
+    removed and the next one and so on") a quest route's stop removed: the rest in the fastest order again from the
+    player (any number of stops, not only when clearly faster), and a quest area's part chosen again."""
+    lua, ns = nav_env
+    lua.execute("Geo_Player = nil")
+    N = ns.Nav
+    ns.settings = lua.eval("{ gps = { fastestOrder = true } }")
+    q = lambda x, y, i, **kw: lua.table(x=x, y=y, cont=1, quest=i, questRoute=True, **kw)
+    # (east first, kept in its order: then the east one removed)
+    far_part, near_part = lua.table(x=-500.0, y=-3400.0, cont=1), lua.table(x=-480.0, y=-4380.0, cont=1)
+    east = q(-500.0, -4300.0, 1)
+    split = q(-500.0, -3400.0, 2, parts=lua.table(far_part, near_part), partAt=1)
+    N.SetStops(lua.table(east, split, q(-500.0, -4400.0, 3)))
+    assert [N.stops[i].quest for i in (1, 2, 3)] == [1, 2, 3]
+    N.RemoveStop(1)
+    assert N.reorderDue
+    N.MaybeReorder(-500.0, -4600.0, 1)
+    assert not N.reorderDue
+    assert [N.stops[i].quest for i in (1, 2)] == [3, 2] and N.stops[2].y == -4380.0
+    # not a quest route: as before (only when clearly faster, a few seconds on)
+    N.SetStops(lua.table(lua.table(x=-500.0, y=-3400.0, cont=1), lua.table(x=-500.0, y=-4300.0, cont=1),
+                         lua.table(x=-500.0, y=-4400.0, cont=1)))
+    N.RemoveStop(2)
+    lua.execute("GetTime = function() return 1 end")
+    N.MaybeReorder(-500.0, -4600.0, 1)
+    assert N.stops[1].y == -3400.0
+
+
+def test_fastest_order_many_stops(nav_env):
+    lua, ns = nav_env
+    # 8 stops on a line, shuffled: nearest-first + 2-opt must visit them in line order
+    ys = [-4600.0 + 100 * k for k in (5, 2, 7, 1, 8, 3, 6, 4)]
+    ns.Nav.SetStops(stops(lua, *[(-500.0, y) for y in ys]))
+    ns.Nav.OrderStops(-500.0, -4600.0, 1)
+    got = [ns.Nav.stops[i].y for i in range(1, 9)]
+    assert got == sorted(got)
+
+
+def test_steps_for_a_zeppelin_trip(nav_env):
+    lua, ns = nav_env
+    ns.Nav.SetDestination(-440.0, -4700.0, 1, "Razor Hill")
+    ns.Nav.Route(1600.0, 240.0, 0)  # Undercity
+    steps = ns.Nav.Steps()
+    steps = [steps[i] for i in range(1, len(steps) + 1)]
+    assert len(steps) == 3
+    assert steps[0].startswith("Walk ") and "to the zeppelin (Brill, Tirisfal Glades)" in steps[0]
+    assert steps[1] == "Take the zeppelin to Jaggedswine Farm, Durotar"
+    assert steps[2].startswith("Walk ") and steps[2].endswith("Razor Hill")
+
+
+def test_steps_text_shows_three_then_more(nav_env):
+    lua, ns = nav_env
+    # zeppelin trip (3 steps) then two more stops in Durotar: 5 steps
+    ns.Nav.SetStops(lua.table(lua.table(x=-440.0, y=-4700.0, cont=1), lua.table(x=-600.0, y=-4180.0, cont=1),
+                              lua.table(x=-800.0, y=-4400.0, cont=1)))
+    ns.Nav.Route(1600.0, 240.0, 0)
+    assert len(ns.Nav.Steps()) == 5
+    steps = ns.Nav.Steps()
+    # each step reaching a stop ends with the time from the previous stop (run speed 7 yd/s here)
+    r = ns.Nav.route
+    for n, stop_step in ((2, 3), (3, 4)):
+        st = r.stretches[n]
+        assert steps[stop_step + 1].endswith(ns.Nav.FormatTime(st.walk / 7 + st.ride) + "|r")
+    first = r.stretches[1]
+    assert steps[3].endswith(ns.Nav.FormatTime(first.walk / 7 + first.ride) + "|r")  # includes the zeppelin
+    text = ns.Nav.StepsText(3)
+    lines = text.split("\n")
+    assert len(lines) == 4 and lines[0].startswith("|cffffffff1. ") and "2 more steps" in lines[3]
+    # single walk: no step list
+    ns.Nav.SetDestination(-600.0, -4180.0, 1)
+    ns.Nav.Route(-800.0, -4400.0, 1)
+    assert ns.Nav.StepsText(3) == ""
+
+
+def test_no_spoiler_map_draws_only_explored_overlays(env):
+    lua, ns = env
+    load(lua, ns, "Data/Maps.lua")
+    lua.execute("""
+      GetTime = function() return 0 end
+      C_MapExplorationInfo = { GetExploredMapTextures = function(id)
+        -- one explored area 300x200 px at (100, 50): 2x1 textures, the second 44 px wide
+        return { { textureWidth = 300, textureHeight = 200, offsetX = 100, offsetY = 50,
+                   isShownByMouseOver = false, fileDataIDs = { 11, 12 } },
+                 { textureWidth = 64, textureHeight = 64, offsetX = 0, offsetY = 0,
+                   isShownByMouseOver = true, fileDataIDs = { 13 } } } end }
+    """)
+    G = ns.GPS
+    tiles = G.ExploredOverlays(1411)
+    t = [[tiles[i][j] for j in range(1, 8)] for i in range(1, len(tiles) + 1)]
+    assert t == [[11, 100, 50, 256, 200, 256, 256], [12, 356, 50, 44, 200, 64, 256]]
+    d = ns.Maps[1411]
+    b = d.bounds
+    cx, cy = (b[1] + b[3]) / 2, (b[2] + b[4]) / 2
+    full = G.LayoutZone(cx, cy, 1411, 0, 3000.0, 130.0)
+    nospoil = G.LayoutZone(cx, cy, 1411, 0, 3000.0, 130.0, None, True)
+    fids = lambda qs: [qs[i][1] for i in range(1, len(qs) + 1)]
+    n_base = len(d.tiles)
+    assert len(fids(full)) > n_base + 2  # every explored overlay
+    assert fids(nospoil)[n_base:] == [11, 12]  # only what this character explored
+    assert G.IsMapStyle("nospoiler") and not G.IsMapStyle("minimap")
+
+
+def test_terrain_walks_run_in_the_background(offroad):
+    lua, ns = offroad
+    R, P = ns.Router, ns.Passability
+    R.SYNC_WALKS = False
+    P.PATH_YIELD_EVERY = 10  # small slices, to see them
+    opts = lua.table(offroad=True)
+    # a short trip with the wall in the way: the walk around it isn't known yet
+    before = R.Route(1, 0.0, 300.0, 600.0, 300.0, opts)
+    assert R.HasWork()
+    # the search runs in slices: a clock that passes the deadline after one check allows
+    # exactly one slice per Pump call
+    one_slice = lua.eval("function() local n = 0; return function() n = n + 1; return n == 1 and -1 or 1 end end")
+    slices = 0
+    while R.HasWork():
+        R.Pump(0, one_slice())
+        slices += 1
+    assert slices > 10
+    after = R.Route(1, 0.0, 300.0, 600.0, 300.0, opts)
+    pts, kinds = route_pts(after)
+    # (meanwhile about straight: only the wall's width is blocked; then the walk found, through the pass)
+    assert before.pending and not after.pending
+    assert any(abs(y) < 60 for x, y in pts if 250 < x < 350)
+    for i, k in enumerate(kinds):
+        if k == 1:
+            (x1, y1), (x2, y2) = pts[i], pts[i + 1]
+            assert P.SegmentCost(1, x1, y1, x2, y2) is not None
+
+
+def test_added_stops_take_the_next_free_marker(nav_env):
+    lua, ns = nav_env
+    N = ns.Nav
+    N.SetStops(stops(lua, (-600.0, -4180.0), (-440.0, -4700.0)))  # square, star
+    pending = lua.table()
+    m1 = N.NextMarker(N.stops, pending)
+    assert m1 == 4  # triangle: square and star are taken
+    pending[1] = lua.table(x=0.0, y=0.0, cont=1, icon=m1)
+    assert N.NextMarker(N.stops, pending) == 3  # then diamond
+    # reaching the first stop frees the square for the next one placed
+    N.Status(-600.0, -4180.0, 1)
+    assert [N.stops[i].icon for i in range(1, len(N.stops) + 1)] == [1]
+    assert N.NextMarker(N.stops, lua.table()) == 6
+    # confirming appends: existing stops keep their markers, new ones follow
+    combined = lua.table(N.stops[1], lua.table(x=-800.0, y=-4400.0, cont=1, icon=6))
+    N.SetStops(combined)
+    assert [N.stops[i].icon for i in (1, 2)] == [1, 6]
+
+
+def test_stretches_between_stops_fill_in(nav_env):
+    # One stretch between stops per call: the route grows over the next calls (frames),
+    # the player's stretch isn't recalculated for it, and after Invalidate the old
+    # stretches stay drawn until each is replaced.
+    lua, ns = nav_env
+    N = ns.Nav
+    N.LATER_PER_CALL = 1
+    N.SetStops(stops(lua, (-600.0, -4180.0), (-440.0, -4700.0), (-800.0, -4400.0)))
+    r = N.Route(-500.0, -4500.0, 1)
+    assert r.stretches[2] and not r.stretches[3]
+    first = r.firstStretch
+    r = N.Route(-500.0, -4500.0, 1)
+    assert r.stretches[3] and lua.eval("rawequal")(r.firstStretch, first)
+    last = N.EachSegment(r, 1, lambda *a: None)
+    assert (last[0], last[1]) == pytest.approx((-800.0, -4400.0), abs=0.5)
+    N.Invalidate(True)
+    r = N.Route(-500.0, -4500.0, 1)
+    assert r.stretches[2] and r.stretches[3]
+
+
+def test_road_data_warms_up_in_the_background(nav_env):
+    # The first route on a continent waits for its road data to be built in small steps
+    # (none of them long), then works out as usual; after WARM_WAIT it doesn't wait.
+    lua, ns = nav_env
+    R, N = ns.Router, ns.Nav
+    lua.execute("AGPS_T = 0; GetTime = function() return AGPS_T end")
+    clock = lua.eval("function() return os.clock() * 1000 end")
+
+    def warm_up():
+        R.Reset()
+        R.WARM = True
+        N.SetDestination(-910.0, -3490.0, 0, "Hammerfall")
+        assert N.Route(1350.0, 150.0, 0) is None and "Working out" in N.Status(1350.0, 150.0, 0)
+        steps, longest = 0, 0.0
+        while R.HasWork() and steps < 100000:
+            t0 = clock()
+            R.Pump(t0 + 1, clock)
+            longest = max(longest, clock() - t0)
+            steps += 1
+        assert steps > 5  # built in slices
+        # (then the route itself, worked out in the background too: no frame waits on it)
+        assert N.Route(1350.0, 150.0, 0) is None and "Working out" in N.Status(1350.0, 150.0, 0)
+        while R.HasWork():
+            t0 = clock()
+            R.Pump(t0 + 1, clock)
+            longest = max(longest, clock() - t0)
+        r = N.Route(1350.0, 150.0, 0)
+        assert r and r.totalYards > 1000
+        return longest
+
+    # (no slice long, generous: lupa's timing is coarse, and os.clock is the wall clock on Windows: a busy
+    # PC, the game running, made one slice 26-27 ms now and then; a real long job is long every time)
+    runs = []
+    for _ in range(3):
+        runs.append(warm_up())
+        if runs[-1] < 25:
+            break
+    assert min(runs) < 25, runs
+    # another continent while its warm-up can't run: after WARM_WAIT, worked out anyway
+    N.SetDestination(-600.0, -4180.0, 1)
+    assert N.Route(-800.0, -4400.0, 1) is None
+    lua.execute("AGPS_T = 10")
+    N.Route(-800.0, -4400.0, 1)
+    while R.HasWork():
+        R.Pump(clock() + 5, clock)
+    assert N.Route(-800.0, -4400.0, 1)
+
+
+def test_long_imported_list_in_fastest_order_routed_a_few_ahead(nav_env):
+    # 60 stops scattered around Durotar: all ordered from the player in one go (quickly),
+    # the route worked out and drawn 8 ahead, and reaching a stop brings in the next.
+    import random
+    import time
+    lua, ns = nav_env
+    N = ns.Nav
+    ns.settings = lua.eval("{ gps = { stopsAhead = 8 } }")  # (the option at its most; 3 by default)
+    lua.execute("AGPS_PLAYER = { -500.0, -4500.0, 1 }")
+    ns.Geo.PlayerWorld = lua.eval("function() return AGPS_PLAYER[1], AGPS_PLAYER[2], AGPS_PLAYER[3] end")
+    rnd = random.Random(3)
+    pts = [(rnd.uniform(-1500, 900), rnd.uniform(-5200, -3800)) for _ in range(60)]
+    t0 = time.perf_counter()
+    N.SetStops(lua.table(*[lua.table(x=x, y=y, cont=1) for x, y in pts]), True)
+    assert time.perf_counter() - t0 < 2.0
+    ordered = [(N.stops[i].x, N.stops[i].y) for i in range(1, len(N.stops) + 1)]
+    assert sorted(ordered) == sorted(pts)  # every stop, once
+
+    def length(seq):
+        total, (cx, cy) = 0.0, (-500.0, -4500.0)
+        for x, y in seq:
+            total += ((x - cx) ** 2 + (y - cy) ** 2) ** 0.5
+            cx, cy = x, y
+        return total
+    assert length(ordered) < 0.3 * length(pts)
+    assert N.PlannedStops() == 8
+    r = N.Route(-500.0, -4500.0, 1)
+    assert len(r.stretches) == 8
+    assert "Next 8 stops:" in N.Status(-500.0, -4500.0, 1)
+    ninth = (N.stops[9].x, N.stops[9].y)
+    N.RemoveStop(1)  # as if reached
+    assert (N.stops[8].x, N.stops[8].y) == ninth and N.PlannedStops() == 8
+
+
+def test_questing_stop_waits_for_the_quest_objectives(nav_env):
+    # A stop inside a quest's area: getting there doesn't finish it; in the area the route
+    # waits and the directions show the objectives; leaving leads back; finishing the
+    # quest moves on to the next stop.
+    lua, ns = nav_env
+    N = ns.Nav
+    lua.execute("""
+      AGPS_T = 0
+      GetTime = function() return AGPS_T end
+      AGPS_DONE = {}
+      C_QuestLog = {
+        IsComplete = function(id) return AGPS_DONE[id] == true end,
+        IsOnQuest = function(id) return true end,
+        GetQuestObjectives = function(id)
+          return { { text = "Vile Familiar slain: 3/8", finished = false }, { text = "Collect a claw: 1/1", finished = true } }
+        end,
+        GetTitleForQuestID = function(id) return "Vile Familiars" end,
+      }
+      -- quest 101's area: 150 yd around (-600, -4180) on Kalimdor
+      AGPS_LAYERS = { QuestsAt = function(cont, x, y)
+        if cont == 1 and (x + 600) ^ 2 + (y + 4180) ^ 2 < 150 ^ 2 and not AGPS_DONE[101] then return { 101 } end
+        if cont == 1 and (x + 300) ^ 2 + (y + 4700) ^ 2 < 100 ^ 2 then return { 202 } end
+        return {}
+      end }
+    """)
+    load(lua, ns, "Layers.lua")
+    ns.Layers.QuestsAt = lua.eval("AGPS_LAYERS.QuestsAt")
+    ns.settings = lua.eval("{ gps = { questing = true } }")
+    N.SetStops(lua.table(lua.table(x=-600.0, y=-4180.0, cont=1), lua.table(x=-800.0, y=-4400.0, cont=1)))
+
+    def status(x, y):
+        lua.execute("AGPS_T = AGPS_T + 1")
+        return N.Status(x, y, 1)
+
+    assert "In the quest area" not in status(-300.0, -4700.0) and not N.questing
+    # on the way, in another quest's area (202, around -300, -4700): its objectives with
+    # the directions, the times line still last
+    assert list(N.areaQuests.values()) == [202] and not N.questing
+    text = status(-300.0, -4700.0)
+    assert "Vile Familiar slain: 3/8" in text and text.splitlines()[-1].startswith("All stops:")
+    # in the area: objectives, and the arrow still leads to the stop's spot (route kept up)
+    text = status(-650.0, -4150.0)
+    assert "In the quest area" in text and "Vile Familiar slain: 3/8" in text and N.questing[1] == 101
+    assert not N.QuestPaused() and N.route and N.StepsText(3) == ""
+    # right at the spot: not reached while the quest is open; from now on the route waits
+    status(-600.0, -4180.0)
+    assert len(N.stops) == 2 and N.questing and N.QuestPaused()
+    before = N.route
+    status(-640.0, -4160.0)
+    assert lua.eval("rawequal")(N.Route(-640.0, -4160.0, 1), before)
+    # left the area: back to directions, the route recalculated from here
+    assert "In the quest area" not in status(-300.0, -4700.0) and not N.questing
+    assert N.route and len(N.stops) == 2
+    # back in the area (spot already visited): waits right away
+    status(-650.0, -4150.0)
+    assert N.QuestPaused()
+    # the quest done (from anywhere): on to the next stop
+    lua.execute("AGPS_DONE[101] = true")
+    status(-650.0, -4150.0)
+    assert len(N.stops) == 1 and N.dest.x == -800.0 and not N.questing
+    # questing off: a stop is reached by getting there, as before
+    ns.settings.gps.questing = False
+    N.SetStops(lua.table(lua.table(x=-600.0, y=-4180.0, cont=1), lua.table(x=-800.0, y=-4400.0, cont=1)))
+    lua.execute("AGPS_DONE[101] = nil")
+    status(-600.0, -4180.0)
+    assert len(N.stops) == 1
+
+
+def test_quest_route_stop_with_no_area_waits_for_its_objectives(nav_env):
+    # (asked 2026-10-06) a quest route stop for a quest with no area: getting to its spot doesn't finish it; near it
+    # (QUEST_SPOT_YD) its objectives are what to do, the route waits at the spot, and the quest's objectives done
+    # (from anywhere) finish it. A turn-in: done when the quest is turned in, not on arriving.
+    lua, ns = nav_env
+    N = ns.Nav
+    lua.execute("""
+      AGPS_T = 0
+      GetTime = function() return AGPS_T end
+      AGPS_DONE, AGPS_GONE = {}, {}
+      C_QuestLog = {
+        IsComplete = function(id) return AGPS_DONE[id] == true end,
+        IsOnQuest = function(id) return not AGPS_GONE[id] end,
+        GetQuestObjectives = function(id) return { { text = "Bristleback Quilboar slain: 4/12", finished = false } } end,
+        GetTitleForQuestID = function(id) return ({ [11] = "Bristlebacks", [12] = "Letter Home", [13] = "Old Note" })[id] end,
+      }
+      AGPS_LAYERS = { QuestsAt = function() return {} end, AreaContains = function() return false end }
+    """)
+    load(lua, ns, "Layers.lua")
+    ns.Layers.QuestsAt = lua.eval("AGPS_LAYERS.QuestsAt")
+    ns.Layers.AreaContains = lua.eval("AGPS_LAYERS.AreaContains")
+    ns.settings = lua.eval("{ gps = { questing = true } }")
+    N.SetStops(lua.eval("""{
+      { x = -600, y = -4180, cont = 1, name = "Bristlebacks", questRoute = true, quest = 11 },
+      { x = -800, y = -4400, cont = 1, name = "Turn in: Letter Home", questRoute = true, quest = 12, turnin = true },
+      { x = -300, y = -4700, cont = 1, name = "Last", questRoute = true },
+    }"""))
+
+    def status(x, y):
+        lua.execute("AGPS_T = AGPS_T + 1")
+        return N.Status(x, y, 1) or ""
+
+    assert N.stops[1].quest == 11 and N.stops[2].turnin  # (kept with the stops)
+    far = status(-900.0, -3900.0)
+    assert "Bristleback" not in far and not N.questing
+    # within QUEST_SPOT_YD: its objectives are the thing to do
+    text = status(-600.0 + N.QUEST_SPOT_YD - 10, -4180.0)
+    assert "Bristleback Quilboar slain: 4/12" in text and N.questing[1] == 11
+    # at the spot: not finished; the route waits there
+    status(-600.0, -4180.0)
+    assert N.stops[1].name == "Bristlebacks" and N.QuestPaused()
+    # wandered off: back to directions, the route leads back
+    status(-600.0 + N.QUEST_SPOT_YD + 50, -4180.0)
+    assert not N.questing and N.stops[1].name == "Bristlebacks"
+    # the objectives done (away from the spot): on to the turn-in
+    lua.execute("AGPS_DONE[11] = true")
+    status(-600.0 + N.QUEST_SPOT_YD + 50, -4180.0)
+    assert N.stops[1].name == "Turn in: Letter Home"
+    # the turn-in: arriving doesn't finish it ("Turn in the quest"); turning it in does
+    lua.execute("AGPS_DONE[12] = true")
+    text = status(-800.0, -4400.0)
+    assert N.stops[1].name == "Turn in: Letter Home" and "Turn in the quest" in text
+    lua.execute("AGPS_GONE[12] = true")
+    N.OnQuestGone(12, "Letter Home")
+    status(-800.0, -4400.0)
+    assert N.stops[1].name == "Last"
+    # questing off: as before, reached by getting there
+    ns.settings.gps.questing = False
+    N.SetStops(lua.eval('{ { x = -600, y = -4180, cont = 1, name = "Q", questRoute = true, quest = 14 }, { x = -800, y = -4400, cont = 1 } }'))
+    status(-600.0, -4180.0)
+    assert len(N.stops) == 1
+
+
+def test_a_quest_icons_stop_is_done_by_its_quest(nav_env):
+    # (the live game, 2026-10-08, The Balance of Nature: ready for turn-in, the route still led to its objective, 13 yd
+    # on) a quest's stop made from its map icon carries its quest (Nav.QuestStop), so it's done by the quest, area traced
+    # or not; done, the route goes on to the stops left, nothing added, or ends (the user, 2026-10-08: "I'd rather it
+    # just stop routing after quest is complete")
+    lua, ns = nav_env
+    N = ns.Nav
+    lua.execute("""
+      AGPS_T = 0
+      GetTime = function() return AGPS_T end
+      AGPS_DONE = {}
+      C_QuestLog = {
+        IsComplete = function(id) return AGPS_DONE[id] == true end,
+        IsOnQuest = function() return true end,
+        GetQuestObjectives = function() return { { text = "Young Nightsaber slain: 3/7", finished = false } } end,
+        GetTitleForQuestID = function() return "The Balance of Nature" end,
+      }
+    """)
+    load(lua, ns, "Layers.lua")
+    ns.Layers.QuestsAt = lua.eval("function() return {} end")  # (its area never traced)
+    ns.Layers.AreaContains = lua.eval("function() return false end")
+    # (a turn-in the maps would show: never added)
+    ns.Layers.QuestTurnIn = lua.eval("function(id) return { x = -700, y = -4300, cont = 1, name = 'Turn in', quest = id, turnin = true } end")
+    ns.settings = lua.eval("{ gps = { questing = true } }")
+    stop = N.QuestStop(lua.eval('{ x = -600, y = -4180, cont = 1, name = "The Balance of Nature" }'), 21)
+    assert stop.quest == 21 and stop.questRoute and not stop.turnin
+    N.SetStops(lua.table(stop, lua.eval('{ x = -300, y = -4700, cont = 1, name = "Last" }')))
+
+    def status(x, y):
+        lua.execute("AGPS_T = AGPS_T + 1")
+        return N.Status(x, y, 1) or ""
+
+    # near it, no area traced: its objectives are shown
+    assert "Young Nightsaber slain: 3/7" in status(-610.0, -4190.0)
+    # done: on to the next stop, nothing added
+    lua.execute("AGPS_DONE[21] = true")
+    status(-610.0, -4190.0)
+    assert len(N.stops) == 1 and N.stops[1].name == "Last"
+    # two quests' stops (the user, 2026-10-08: "if the first quest completes route continues, its just that particular
+    # stop is complete"): the first quest done, only its stop is; the route goes straight on to the second, nothing added
+    lua.execute("AGPS_DONE = {}")
+    N.SetStops(lua.table(N.QuestStop(lua.eval('{ x = -600, y = -4180, cont = 1, name = "The Balance of Nature" }'), 21),
+                         N.QuestStop(lua.table(x=-900.0, y=-4000.0, cont=1, name="Nature's Call"), 22)))
+    status(-610.0, -4190.0)
+    lua.execute("AGPS_DONE[21] = true")
+    status(-610.0, -4190.0)
+    assert len(N.stops) == 1 and N.stops[1].name == "Nature's Call" and N.stops[1].quest == 22
+    assert N.dest is not None and N.dest.quest == 22 and not N.dest.turnin
+    lua.execute("AGPS_DONE[22] = true")
+    assert "Arrived" in status(-610.0, -4190.0) and len(N.stops) == 0
+    # the only stop: done, the route ends ("Arrived", as at a last stop)
+    lua.execute("AGPS_DONE = {}")
+    N.SetStops(lua.table(N.QuestStop(lua.eval('{ x = -600, y = -4180, cont = 1, name = "The Balance of Nature" }'), 21)))
+    status(-610.0, -4190.0)
+    lua.execute("AGPS_DONE[21] = true")
+    assert "Arrived" in status(-610.0, -4190.0) and len(N.stops) == 0
+    # a quest's icon already done (its turn-in icon): a turn-in stop, done when it's turned in
+    t = N.QuestStop(lua.eval('{ x = -700, y = -4300, cont = 1, name = "The Balance of Nature" }'), 21)
+    assert t.turnin and t.name == "Turn in: The Balance of Nature"
+
+
+def test_quest_turned_in_takes_its_stops_out_of_the_route(nav_env):
+    # (asked 2026-10-06) a quest turned in (QUEST_TURNED_IN) or no longer in the log: every stop of the route for it is
+    # done, by its quest, or by its name for a route saved before the stops carried their quest; a later stop whose
+    # objectives got done on the way goes too
+    lua, ns = nav_env
+    N = ns.Nav
+    lua.execute("""
+      AGPS_T = 0
+      GetTime = function() return AGPS_T end
+      AGPS_DONE, AGPS_GONE = {}, {}
+      C_QuestLog = {
+        IsComplete = function(id) return AGPS_DONE[id] == true end,
+        IsOnQuest = function(id) return not AGPS_GONE[id] end,
+        GetQuestObjectives = function() return {} end,
+        GetTitleForQuestID = function(id) return "Q" .. id end,
+      }
+      AGPS_LAYERS = { QuestsAt = function() return {} end, AreaContains = function() return false end }
+    """)
+    load(lua, ns, "Layers.lua")
+    ns.Layers.QuestsAt = lua.eval("AGPS_LAYERS.QuestsAt")
+    ns.Layers.AreaContains = lua.eval("AGPS_LAYERS.AreaContains")
+    ns.settings = lua.eval("{ gps = { questing = true } }")
+    N.SetStops(lua.eval("""{
+      { x = -600, y = -4180, cont = 1, name = "Q1", questRoute = true, quest = 1 },
+      { x = -800, y = -4400, cont = 1, name = "Turn in: Q2", questRoute = true, quest = 2, turnin = true },
+      { x = -300, y = -4700, cont = 1, name = "Turn in: Old", questRoute = true },
+      { x = -900, y = -4100, cont = 1, name = "Q3", questRoute = true, quest = 3 },
+      { x = -1000, y = -4000, cont = 1, name = "Mine" },
+    }"""))
+    names = lambda: [N.stops[i].name for i in range(1, len(N.stops) + 1)]
+    assert N.OnQuestGone(2, "Q2") == 1 and names() == ["Q1", "Turn in: Old", "Q3", "Mine"]
+    assert N.OnQuestGone(77, "Old") == 1 and names() == ["Q1", "Q3", "Mine"]  # (by its name)
+    # Q3's objectives done on the way to Q1: taken out
+    lua.execute("AGPS_DONE[3] = true AGPS_T = 5")
+    N.Status(-1500.0, -3000.0, 1)
+    assert names() == ["Q1", "Mine"]
+    # the next stop's quest turned in: moves on as on arriving
+    lua.execute("AGPS_GONE[1] = true AGPS_T = 10")
+    N.OnQuestGone(1, "Q1")
+    N.Status(-1500.0, -3000.0, 1)
+    assert names() == ["Mine"]
+
+
+def test_a_quest_finished_on_a_quest_route_without_its_turn_in_pulses_the_sprint_icon(nav_env):
+    # (asked 2026-11-11 for 1.2.3: "show the quest route glow button when quests are completed too so turn ins are
+    # added to the route just like new quests suggest a re route")
+    lua, ns = nav_env
+    N = ns.Nav
+    lua.execute("""
+      AGPS_DONE, AGPS_SAID = {}, 0
+      C_QuestLog = {
+        IsComplete = function(id) return AGPS_DONE[id] end,
+        IsOnQuest = function() return true end,
+      }
+    """)
+    lua.globals().AGPS_NS = ns
+    lua.execute("AGPS_NS.Print = function() AGPS_SAID = AGPS_SAID + 1 end")
+    ids = lua.eval("{ 1, 2, 3 }")
+    said = lambda: lua.eval("AGPS_SAID")  # noqa: E731
+    N.questRouteStale, N.questsDoneSeeded = None, None
+    N.SetStops(lua.eval("""{
+      { x = -600, y = -4180, cont = 1, name = "Q1", questRoute = true, quest = 1 },
+      { x = -800, y = -4400, cont = 1, name = "Turn in: Q2", questRoute = true, quest = 2, turnin = true },
+      { x = -900, y = -4100, cont = 1, name = "Q3", questRoute = true, quest = 3 },
+    }"""))
+    # already finished at the first look of the session: no news
+    lua.execute("AGPS_DONE[2] = true")
+    assert N.CheckQuestsDone(ids) is None and not N.questRouteStale and said() == 0
+    # its turn-in already on the route: nothing to add
+    assert N.CheckQuestsDone(ids) is None and not N.questRouteStale
+    # Q1 finished, its turn-in not on the route: the icon pulses, said once
+    lua.execute("AGPS_DONE[1] = true")
+    assert N.CheckQuestsDone(ids) == 1 and N.questRouteStale is True and said() == 1
+    assert N.CheckQuestsDone(ids) is None and said() == 1
+    # the quest route made again: what's finished now is in it; only what finishes after pulses
+    N.questRouteStale = None
+    N.CheckQuestsDone(ids, True)
+    lua.execute("AGPS_DONE[3] = true")
+    assert N.CheckQuestsDone(ids) == 3 and N.questRouteStale is True and said() == 2
+    # hidden in combat (a secret value): skipped, looked at again after
+    N.questRouteStale = None
+    lua.execute("AGPS_DONE[4] = 'secret'")
+    ns.IsSecret = lua.eval("function(v) return v == 'secret' end")
+    assert N.CheckQuestsDone(lua.eval("{ 1, 2, 3, 4 }")) is None and not N.questsDoneSeen[4]
+    # not on a quest route: nothing pulses
+    lua.execute("AGPS_DONE[4] = true")
+    N.SetStops(lua.eval('{ { x = -1000, y = -4000, cont = 1, name = "Mine" } }'))
+    assert N.CheckQuestsDone(lua.eval("{ 1, 2, 3, 4 }")) is None and not N.questRouteStale
+    # wired: the log's update looks, the quest route made notes what's finished
+    src = (ADDON / "Layers.lua").read_text(encoding="utf-8")
+    assert "ns.Nav.CheckQuestsDone(ids)" in src
+    assert "ns.Nav.CheckQuestsDone(ns.Layers.LogQuests(), true)" in (ADDON / "GPSFrame.lua").read_text(encoding="utf-8")
+
+
+def test_questing_stop_done_when_its_quest_finishes_in_the_area(nav_env):
+    # A stop inside quest 404's big area: its quest finished anywhere in the area (300 yd
+    # from the spot) completes the stop; finished outside the area, the stop is reached by
+    # going there.
+    lua, ns = nav_env
+    N = ns.Nav
+    lua.execute("""
+      AGPS_T = 0
+      GetTime = function() return AGPS_T end
+      AGPS_DONE = {}
+      C_QuestLog = { IsComplete = function(id) return AGPS_DONE[id] == true end, IsOnQuest = function() return true end,
+        GetQuestObjectives = function() return {} end, GetTitleForQuestID = function() return "Q" end }
+      local function inside(x, y) return (x + 300) ^ 2 + (y + 4700) ^ 2 < 400 ^ 2 end
+      AGPS_LAYERS = {
+        QuestsAt = function(cont, x, y) if cont == 1 and inside(x, y) and not AGPS_DONE[404] then return { 404 } end return {} end,
+        AreaContains = function(id, cont, x, y) return id == 404 and cont == 1 and inside(x, y) end,
+      }
+    """)
+    load(lua, ns, "Layers.lua")
+    ns.Layers.QuestsAt = lua.eval("AGPS_LAYERS.QuestsAt")
+    ns.Layers.AreaContains = lua.eval("AGPS_LAYERS.AreaContains")
+    ns.settings = lua.eval("{ gps = { questing = true } }")
+
+    def step(x, y):
+        lua.execute("AGPS_T = AGPS_T + 1")
+        N.Status(x, y, 1)
+
+    # done 300 yd from the spot, inside the area: the stop is done
+    N.SetStops(lua.table(lua.table(x=-300.0, y=-4400.0, cont=1, name="spot"), lua.table(x=-900.0, y=-4100.0, cont=1, name="next")))
+    step(-300.0, -4700.0)
+    assert N.questing
+    lua.execute("AGPS_DONE[404] = true")
+    step(-300.0, -4700.0)
+    assert N.stops[1].name == "next"
+    # done outside the area (the quest finished elsewhere): kept, reached by getting there
+    lua.execute("AGPS_DONE[404] = nil")
+    N.SetStops(lua.table(lua.table(x=-300.0, y=-4400.0, cont=1, name="spot"), lua.table(x=-900.0, y=-4100.0, cont=1, name="next")))
+    step(-1500.0, -4700.0)
+    lua.execute("AGPS_DONE[404] = true")
+    step(-1500.0, -4700.0)
+    assert N.stops[1].name == "spot" and not N.questing
+    step(-300.0, -4400.0)
+    assert N.stops[1].name == "next"
+
+
+def test_quest_area_objectives_without_a_route(nav_env):
+    # No route at all: standing in a quest's area still gives its quests (for the arrow).
+    lua, ns = nav_env
+    N = ns.Nav
+    lua.execute("""
+      GetTime = function() return 50 end
+      C_QuestLog = { IsComplete = function() return false end, IsOnQuest = function() return true end,
+        GetQuestObjectives = function() return { { text = "Wolves slain: 2/10", finished = false } } end,
+        GetTitleForQuestID = function() return "Wolves" end }
+      AGPS_LAYERS = { QuestsAt = function(cont, x, y)
+        if cont == 1 and (x + 300) ^ 2 + (y + 4700) ^ 2 < 100 ^ 2 then return { 505 } end
+        return {}
+      end }
+    """)
+    load(lua, ns, "Layers.lua")
+    ns.Layers.QuestsAt = lua.eval("AGPS_LAYERS.QuestsAt")
+    ns.settings = lua.eval("{ gps = { questing = true } }")
+    N.Clear()
+    assert N.Status(-300.0, -4700.0, 1) is None
+    assert list(N.areaQuests.values()) == [505]
+    assert N.QuestLines(N.areaQuests)[2][1] == "Wolves slain: 2/10"
+
+
+def test_later_stop_in_the_quest_area_youre_in_comes_first(nav_env):
+    # Stops: A (no quest), B, C (in quest 303's area around -300, -4700). Standing in that
+    # area while heading to A: C comes first (already there).
+    lua, ns = nav_env
+    N = ns.Nav
+    lua.execute("""
+      AGPS_T = 0
+      GetTime = function() return AGPS_T end
+      C_QuestLog = { IsComplete = function() return false end, IsOnQuest = function() return true end,
+        GetQuestObjectives = function() return {} end, GetTitleForQuestID = function() return "Q" end }
+      local function inside(x, y) return (x + 300) ^ 2 + (y + 4700) ^ 2 < 150 ^ 2 end
+      AGPS_LAYERS = {
+        QuestsAt = function(cont, x, y) if cont == 1 and inside(x, y) then return { 303 } end return {} end,
+        AreaContains = function(id, cont, x, y) return id == 303 and cont == 1 and inside(x, y) end,
+      }
+    """)
+    load(lua, ns, "Layers.lua")
+    ns.Layers.QuestsAt = lua.eval("AGPS_LAYERS.QuestsAt")
+    ns.Layers.AreaContains = lua.eval("AGPS_LAYERS.AreaContains")
+    ns.settings = lua.eval("{ gps = { questing = true } }")
+    N.SetStops(lua.table(lua.table(x=-900.0, y=-4100.0, cont=1, name="A"), lua.table(x=-700.0, y=-4300.0, cont=1, name="B"),
+                         lua.table(x=-320.0, y=-4680.0, cont=1, name="C")))
+    lua.execute("AGPS_T = 1")
+    N.Status(-1200.0, -4000.0, 1)  # outside: order kept
+    assert [N.stops[i].name for i in (1, 2, 3)] == ["A", "B", "C"]
+    lua.execute("AGPS_T = 2")
+    N.Status(-280.0, -4720.0, 1)  # in C's quest area
+    assert [N.stops[i].name for i in (1, 2, 3)] == ["C", "A", "B"]
+    assert N.questing and N.questing[1] == 303
+
+
+def test_corpse_run_puts_your_body_first(nav_env):
+    # Released as a ghost: the body (skull) becomes stop 1 ahead of the route, never
+    # reordered; alive again, it's taken off and the route goes on. No route: just the body.
+    lua, ns = nav_env
+    N = ns.Nav
+    lua.execute("""
+      AGPS_T = 0
+      GetTime = function() return AGPS_T end
+      AGPS_GHOST = false
+      UnitIsGhost = function() return AGPS_GHOST end
+      C_DeathInfo = { GetCorpseMapPosition = function(id)
+        if id == AGPS_KALIMDOR then return { x = 0.6, y = 0.5 } end
+      end }
+    """)
+    lua.globals().AGPS_NSREF = ns
+    lua.execute("""
+      for id, m in pairs(AGPS_NSREF.Maps) do
+        if m.type == 2 and m.continent == 1 and m.bounds then AGPS_KALIMDOR = id end
+      end
+    """)
+    assert lua.eval("AGPS_KALIMDOR")
+    ns.settings = lua.eval("{ gps = { fastestOrder = true } }")
+
+    def step():
+        lua.execute("AGPS_T = AGPS_T + 2")
+        return N.Status(-500.0, -4500.0, 1)
+
+    N.SetStops(lua.table(lua.table(x=-600.0, y=-4180.0, cont=1, name="A"), lua.table(x=-800.0, y=-4400.0, cont=1, name="B")))
+    step()
+    assert len(N.stops) == 2
+    lua.execute("AGPS_GHOST = true")
+    step()
+    assert len(N.stops) == 3 and N.stops[1].corpse and N.stops[1].icon == 8 and N.stops[2].name == "A"
+    assert N.OrderStops(-500.0, -4500.0, 1) is False and N.stops[1].corpse  # never moved
+    assert N.route is None or N.Route(-500.0, -4500.0, 1)
+    lua.execute("AGPS_GHOST = false")
+    step()
+    assert [N.stops[i].name for i in (1, 2)] == ["A", "B"] and len(N.stops) == 2
+    # no route at all: just the body
+    N.Clear()
+    lua.execute("AGPS_GHOST = true")
+    step()
+    assert len(N.stops) == 1 and N.stops[1].corpse
+
+
+def undercity_env(nav_env):
+    lua, ns = nav_env
+    load(lua, ns, "Data/Terrain.lua", "Passability.lua", "Data/Cities.lua", "Data/Caves.lua",
+         "Data/Capitals.lua")  # (as the toc: the caves and capitals too)
+    ns.Router.Reset()
+    ns.Router.SYNC_WALKS = True
+    lua.execute("""
+      AGPS_MAP = 1458
+      C_Map = C_Map or {}
+      C_Map.GetBestMapForUnit = function() return AGPS_MAP end
+    """)
+    return lua, ns, 10001
+
+
+def test_undercity_is_its_own_level(nav_env):
+    # Down in Undercity (the game reports its map): the player routes on the city's level,
+    # and stops placed on its floors are on it; drawn in Eastern Kingdoms coordinates.
+    lua, ns, UC = undercity_env(nav_env)
+    N, Geo = ns.Nav, ns.Geo
+    tq = (1560.0, 228.0)  # the Trade Quarter's raised ring
+    assert N.PlayerLevel(0) == UC
+    assert N.StopLevel(0, *tq) == UC
+    assert Geo.MapCont(1458) == UC and Geo.Base(UC) == 0
+    assert tuple(Geo.ToContinent(UC, 10.0, 20.0, 0)) == (10.0, 20.0)
+    lua.execute("AGPS_MAP = 1420")  # up in Tirisfal
+    lua.execute("GetTime = function() return 100 end")
+    assert N.PlayerLevel(0) == 0
+
+
+def test_a_stop_by_a_ledge_down_in_undercity_stays_down_there(nav_env):
+    # (reported) down at the bottom, a stop on the First Aid trainer (at the edge of the bank's
+    # level, over the drop): "board the lift to the Ruins". A spot a yard or two off the
+    # trainer is a closed cell (the ledge), but it's the city's floors, not the Ruins up top.
+    lua, ns, UC = undercity_env(nav_env)
+    N = ns.Nav
+    assert N.PlayerLevel(0) == UC
+    ledge = (1522.7, 166.05)  # next to the First Aid trainer, over the drop
+    assert not ns.Passability.IsOpen(UC, *ledge)
+    assert N.StopLevel(0, *ledge) == UC
+    N.SetDestination(ledge[0], ledge[1], N.StopLevel(0, *ledge), "First Aid")
+    r = N.Route(1588.6, 174.8, 0)  # at the bottom, below the bank
+    assert all(not (l.ride and l.ride[8] == "lift") for l in r.legs.values())
+
+
+def test_out_of_the_ruins_through_the_north_gate(nav_env):
+    # (reported) from a lift's top to anywhere outside: out the north gate onto the road, not
+    # straight over the ruins' walls (the road outside the gate was dropped: its end crossed
+    # the gate's steps, so the ruins' roads led nowhere and routes fell back to a straight line)
+    lua, ns, UC = undercity_env(nav_env)
+    R, P = ns.Router, ns.Passability
+    for offroad in (False, True):
+        # Brill, the Sepulcher, Tarren Mill, and the road just west of the Ruins (reported: over the west bank)
+        for stop in ((2250.0, 280.0), (505.0, 1570.0), (-20.0, -900.0), (1560.0, 540.0)):
+            r = R.Route(0, 1594.9, 290.8, stop[0], stop[1], lua.table(offroad=offroad))
+            pts = [(r.pts[i], r.pts[i + 1]) for i in range(1, len(r.pts), 2)]
+            assert len(pts) > 3, (offroad, stop)
+            # out across the gate's line (x 1866), in its opening (y 208 to 268)
+            gate = [a[1] + (b[1] - a[1]) * (1866 - a[0]) / (b[0] - a[0]) for a, b in zip(pts, pts[1:])
+                    if (a[0] - 1866) * (b[0] - 1866) < 0]
+            assert gate and 208 <= gate[0] <= 268, (offroad, stop, gate)
+            for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
+                d = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+                n, run = max(1, int(d / 0.5)), 0
+                for k in range(1, n):
+                    v = P.OverlayRaw(0, x1 + (x2 - x1) * k / n, y1 + (y2 - y1) * k / n, True)
+                    run = run + 1 if v == 2 else 0
+                    assert run < 5, (offroad, stop, x1, y1, x2, y2)  # (a corner, not through a wall)
+
+
+def test_the_map_shows_undercitys_roads_on_its_map(nav_env):
+    # (reported) Undercity's map (its model's inside map, or its zone map) showed no roads, and
+    # zoomed out the city's roads lay over the Ruins on Tirisfal's map: the art shown decides
+    lua, ns, UC = undercity_env(nav_env)
+    G = ns.GPS
+    wmo = ns.CityLevels[UC].wmo
+    assert G.CityArtLevel(wmo) == UC and G.CityArtLevel(None, 1458) == UC
+    assert G.CityArtLevel(None, 1420) is None and G.CityArtLevel(12345) is None  # Tirisfal, a building
+    # the road tools draw on the level shown there: the city's over its map, over the city only
+    saved = []
+    ns.Print = lambda *a: None
+    ns.Record = lua.table(Save=lambda t: saved.append(t) or len(saved))
+    lua.execute("C_Map.GetMapInfo = function() return { name = 'Undercity' } end time = os.time")
+    line = lambda x, y: lua.table(cont=0, pts=lua.table(x, y, x + 10, y, x + 20, y))
+    G.shownLevel, G.shownCont = UC, 0
+    G.FinishRoad(line(1560.0, 228.0))
+    G.FinishRoad(line(-9000.0, 400.0))
+    G.shownLevel = 0  # Tirisfal's map
+    G.FinishRoad(line(1560.0, 228.0))
+    assert [t.continent for t in saved] == [UC, 0, 0]
+
+
+def test_undercitys_map_stays_up_anywhere_over_the_city_while_down_in_it(nav_env):
+    # (reported, a recording) zooming in on the city's map moved the view off the player, and the
+    # outside map (the Ruins' ground) flipped in and out: down there, the city's map anywhere over it
+    lua, ns, UC = undercity_env(nav_env)
+    G = ns.GPS
+    lua.execute("GetTime = function() return 10 end")
+    assert G.DownInCityAt(0, 1700.0, 60.0) == UC  # the Magic Quarter, the player elsewhere down there
+    assert G.DownInCityAt(0, -9000.0, 400.0) is None  # Elwynn
+    lua.execute("AGPS_MAP = 1420 GetTime = function() return 100 end")  # up in Tirisfal
+    assert G.DownInCityAt(0, 1700.0, 60.0) is None
+
+
+def test_right_click_in_a_building_goes_to_the_outside_view_first(nav_env):
+    # (reported) inside a building, its inside map shown: a right-click jumped to the continent's
+    # map. First the outside view there (kept while in that building), the continent's map next.
+    lua, ns, UC = undercity_env(nav_env)
+    G = ns.GPS
+    browsed = []
+    G.Browse = lambda *a: browsed.append(a)
+    G.shownInside, G.outsideOf = "Inn", None
+    G.TerrainZoomOut()
+    assert G.outsideOf == "Inn" and G.shownInside is None and not browsed
+    assert G.KeepOutside("Inn", "Inn") == "Inn"  # still in there: still outside
+    assert G.KeepOutside("Inn", None) is None  # left it: its inside map again next time in
+    assert G.KeepOutside("Inn", "Bank") is None
+    assert G.KeepOutside(None, "Inn") is None
+
+
+def test_down_in_undercity_the_route_starts_on_the_players_own_floor(nav_env):
+    # (reported) under a walkway, the top floor's height at the player's spot is the walkway's:
+    # the route started up there (up the stairs and back). The game's height says which floor.
+    lua, ns, UC = undercity_env(nav_env)
+    R, N = ns.Router, ns.Nav
+    zoff = ns.CityLevels[UC].zoff
+    start, stop = (1520.0, 172.0), (1677.8, 99.0)  # under the First Aid walkway; the Fishing trainer
+    assert N.CityHeight(UC, *start) > -110  # (the top floor there: the walkway)
+    lua.execute(f"UnitPosition = function() return {start[1]}, {start[0]}, {-124.0 + zoff}, 0 end")
+    assert abs(N.PlayerCityZ(UC) + 124) < 0.1
+    r = R.Route(UC, start[0], start[1], stop[0], stop[1], lua.table(offroad=False, z=-124.0 + zoff, tz=-61.9))
+    near = [r.zs[i] - zoff for i in range(2, 4)]  # (the route's own heights: floors over floors)
+    assert all(z < -118 for z in near)  # (on the bottom floor, not up the walkway)
+
+
+def test_city_places_carry_their_npcs_height_to_the_stop(nav_env):
+    # (reported) the Cooking trainer and Guild Master are on the bank's level, 12 yd under the
+    # walkway the route went to: a place's height (its NPC's) tells the floor
+    lua, ns, UC = undercity_env(nav_env)
+    load(lua, ns, "Layers.lua", "Data/CityPlaces.lua")
+    L = ns.Layers
+    ns.db = lua.eval("{}")
+    ns.settings = lua.eval("{ gps = { layerCity = true, style = 'minimap' } }")
+    L.RevealCity()
+    cook = next(p for p in L.RevealedPlaces(0).values() if p[3] == "Undercity Cooking Trainer")
+    assert abs(cook.z - -55.3) < 0.5 and abs((cook.z - ns.CityLevels[UC].zoff) - N_bank(ns, UC)) < 5
+    marks = L.Marks(0, cook[1], cook[2], 400.0, lua.table(), UC)
+    mark = next(marks[i] for i in range(1, len(marks) + 1) if marks[i][4] == "Undercity Cooking Trainer")
+    assert mark[13] == cook.z
+    assert L.PlaceZ(UC, cook[1] + 3, cook[2], "Undercity Cooking Trainer") == cook.z  # (a guard's directions)
+    assert L.PlaceZ(UC, cook[1] + 80, cook[2], "Undercity Cooking Trainer") is None
+
+
+def N_bank(ns, UC):
+    return ns.Nav.CityHeight(UC, 1598.0, 262.0)  # (the bank's floor, the model's own height)
+
+
+def test_undercitys_roads_are_on_floors_over_floors(nav_env):
+    # (reported) the Cooking trainer and Guild Master on the bank's level, a Warlock trainer on
+    # the Magic Quarter's lower floor, First Aid on its walkway: each place's own floor, reached
+    # by the roads on that floor (floors over floors), not the top floor over it
+    lua, ns, UC = undercity_env(nav_env)
+    R = ns.Router
+    zoff = ns.CityLevels[UC].zoff
+    lift = (1545.3, 239.5, -104.0 + zoff)
+    # (the places: Cooking, Guild Master, a Warlock trainer, First Aid; and at most how long, from the
+    # south lift: the old top-floor network's were 240, 216, 611 and 463 yd; on foot over the floors,
+    # the Warlock's is 437, First Aid's 324: not the 112 of a way dropping through the floors; the
+    # Guild Master's 114 went down steps of 3-4 yd off a ledge, walked it's up the Trade Quarter's steps)
+    for x, y, z, most in ((1590.5, 277.0, -55.3, 160), (1591.2, 204.5, -55.3, 200), (1780.3, 44.0, -61.4, 650),
+                          (1525.0, 171.4, -62.1, 460)):
+        r = R.Route(UC, lift[0], lift[1], x, y, lua.table(offroad=False, z=lift[2], tz=z))
+        n = len(r.pts) // 2
+        last_road = next(r.zs[i] for i in range(n - 1, 0, -1) if r.zs[i])
+        assert abs(last_road - z) <= 4, (x, y, z, last_road)  # (on the place's floor, not the one over it: 12 yd up)
+        assert r.length < most, (x, y, r.length)
+
+
+def test_undercity_legs_off_the_roads_dont_cross_gaps_or_walls(nav_env):
+    # (the 600-trip sweep) a leg onto the roads went over a hole down to the floor below, and across
+    # a canal's water: on the one-floor grid, a top floor well under the leg is a gap at its height
+    lua, ns, UC = undercity_env(nav_env)
+    R = ns.Router
+    zoff = ns.CityLevels[UC].zoff
+    assert R.WallYards(UC, 1594.4, 170.0, -104.0 + zoff, 1586.3, 165.8, -108.5 + zoff) > R.LAYER_VOID_YD  # (the hole)
+    assert R.VoidYards(UC, 1765.0, 240.0, 1743.0, 240.0) > R.LAYER_VOID_YD  # (the canal)
+    assert R.WallYards(UC, 1594.4, 170.0, -104.0 + zoff, 1602.3, 169.8, -103.5 + zoff) <= R.LAYER_VOID_YD  # (along the walkway)
+
+
+def test_undercity_routes_dont_drop_through_the_floors(nav_env):
+    # (reported) from the walkway by the Apothecarium to the Enchanting trainer below: 55 yd, down
+    # through the floor; on foot it's round by the passage (222 yd over the floors). Floors stacked
+    # a few yards apart had let a way zig-zag down through them (clear_step now).
+    lua, ns, UC = undercity_env(nav_env)
+    R = ns.Router
+    zoff = ns.CityLevels[UC].zoff
+    r = R.Route(UC, 1528.45, 268.79, 1487.48, 274.54, lua.table(offroad=False, z=-108.0 + zoff, tz=-62.1))
+    assert r.length > 150
+    n = len(r.pts) // 2
+    for i in range(1, n):
+        a, b = r.zs[i], r.zs[i + 1]
+        if a and b:
+            d = ((r.pts[2 * i + 1] - r.pts[2 * i - 1]) ** 2 + (r.pts[2 * i + 2] - r.pts[2 * i]) ** 2) ** 0.5
+            assert abs(a - b) <= max(6, 2 * d), (i, a - zoff, b - zoff, d)
+
+
+def test_no_undercity_road_climbs_steeper_than_a_stair(nav_env):
+    # (a stair between floors whose cells were joined in the wrong order jumped and doubled back:
+    # a road a yard long rising 13 yd. Between two nodes, no steeper than a stair.)
+    lua, ns, UC = undercity_env(nav_env)
+    e, g = ns.Router.Edges(UC)
+    steep = []
+    for i in range(1, len(e) + 1):
+        a, b, length = e[i][1], e[i][2], e[i][3]
+        dz = abs(g.z[a] - g.z[b])
+        if dz > 1.2 * length + 3:
+            steep.append((i, round(length, 1), round(dz, 1)))
+    assert len(steep) <= 0.005 * len(e), steep[:10]  # (a few quirks of the floors: 80 when the stairs' cells were in the wrong order)
+
+
+def test_undercity_roads_dont_climb_onto_a_canals_rim(nav_env):
+    # (reported) by the Trade Quarter's edge, the Enchanting trainer 95 yd away "straight" down: the
+    # road stepped up onto the canal's rim (4 yd up, one diagonal step of the floors) and across.
+    # The way is round by the passages (about 200 yd and more).
+    lua, ns, UC = undercity_env(nav_env)
+    R = ns.Router
+    zoff = ns.CityLevels[UC].zoff
+    start, trainer = (1545.7, 292.8), (1487.5, 274.5)
+    r = R.Route(UC, *start, *trainer, lua.table(offroad=False, z=-124.5 + zoff, tz=-62.1))
+    pts, _ = route_pts(r)
+    assert r.length > 150, round(r.length)
+    assert min(math.hypot(x - 1536, y - 300) for x, y in pts) > 4  # (not over the rim)
+    e, g = R.Edges(UC)
+    rim = [i for i in range(1, len(e) + 1) if abs(g.z[e[i][1]] - g.z[e[i][2]]) > 3.2 * max(e[i][3], 1)]
+    assert len(rim) <= 0.002 * len(e), rim[:10]
+
+
+def test_a_route_to_another_continent_is_overviewed_on_the_world_map(nav_env):
+    # (reported) routing over the sea, the overview zoomed out to the continent's map: the world
+    # map shows both ends (then back to following the player, in their own view)
+    lua, ns, UC = undercity_env(nav_env)
+    G, N = ns.GPS, ns.Nav
+    N.stops = lua.eval("{ { x = 1600, y = -4400, cont = 1 } }")  # Orgrimmar, from Eastern Kingdoms
+    assert G.TourAcrossContinents(0)
+    N.stops = lua.eval("{ { x = 2250, y = 280, cont = 0 } }")  # Brill: the same continent
+    assert not G.TourAcrossContinents(0)
+    N.stops = lua.eval("{ { x = 1590, y = 277, cont = 10001 } }")  # down in Undercity: on it too
+    assert not G.TourAcrossContinents(0)
+    # (reported, a recording) a stop on this continent reached through the other one (Tirisfal to
+    # Riverglades by the zeppelins through Durotar): the world map too
+    N.stops = lua.eval("{ { x = -12000, y = 200, cont = 0 } }")
+    N.route = lua.eval("{ parts = { { cont = 0, pts = {} }, { cont = 1, pts = {} }, { cont = 0, pts = {} } } }")
+    assert G.TourAcrossContinents(0)
+    N.route = None
+
+
+def test_undercity_lift_tops_are_up_top(nav_env):
+    # The halls at the lifts' tops report Undercity's map too, but they're up at the surface:
+    # a stop in the Trade Quarter right below is down a lift, not a few yards away.
+    lua, ns, UC = undercity_env(nav_env)
+    N = ns.Nav
+    lua.execute('GetSubZoneText = function() return "Ruins of Lordaeron" end')
+    assert N.PlayerLevel(0) == 0
+    top = (1570.0, 240.0)  # the hall at the west lift's top
+    legs, secs = N.Plan(N.PlayerLevel(0), top[0], top[1], 7.0, lua.table(x=1593.0, y=238.0, cont=UC))
+    rides = [legs[i].ride for i in range(1, len(legs) + 1) if legs[i].ride]
+    assert len(rides) == 1 and rides[0][8] == "lift"
+    lua.execute('GetSubZoneText = function() return "Trade Quarter" end GetTime = function() return 100 end')
+    assert N.PlayerLevel(0) == UC
+
+
+def test_undercity_walk_to_the_road_goes_round_walls(nav_env):
+    # (reported) by a wall north of the Trade Quarter, heading for the bank: onto the road
+    # beside the player, not through the one-cell wall to the road past it. (Floors over floors:
+    # a short step onto a road on the player's own floor; the 3D walk of Undercity's routes
+    # over its floors is checked offline.)
+    lua, ns, UC = undercity_env(nav_env)
+    R = ns.Router
+    zoff = ns.CityLevels[UC].zoff
+    here = ns.Nav.CityHeight(UC, 1594.4, 170.0)
+    r = R.Route(UC, 1594.4, 170.0, 1595.6, 232.5, lua.table(offroad=False, z=here + zoff, tz=-52.1))
+    first = ((r.pts[3] - r.pts[1]) ** 2 + (r.pts[4] - r.pts[2]) ** 2) ** 0.5
+    assert first <= 8 and abs(r.zs[2] - zoff - here) <= 3
+
+
+def test_a_safe_drop_depends_on_health(nav_env):
+    # (a drop off a ledge: taken when the fall is safe; health decides how far. Undercity's
+    # roads have none now: floors over floors, joined by their stairs and ramps)
+    lua, ns, UC = undercity_env(nav_env)
+    # health decides how far: full health survives more than a sliver
+    lua.execute("UnitHealth = function() return AGPS_HP end UnitHealthMax = function() return 100 end")
+    lua.execute("AGPS_HP = 100")
+    full = ns.Nav.SafeDrop()
+    lua.execute("AGPS_HP = 20")
+    assert full > 40 and ns.Nav.SafeDrop() == ns.Nav.FALL_FREE
+
+
+def test_any_banker_reaches_a_bank_stop(nav_env):
+    # the guard marked one spot; the bank window opening near it (another banker) will do
+    lua, ns, UC = undercity_env(nav_env)
+    N = ns.Nav
+    N.SetStops(lua.table(lua.table(x=1595.6, y=232.5, cont=UC, name="Undercity Bank"),
+                         lua.table(x=1760.0, y=335.0, cont=UC, name="War Quarter")))
+    assert not N.OnService("AUCTION_HOUSE_SHOW", 1590.0, 225.0, 0)  # not the bank's window
+    assert not N.OnService("BANKFRAME_OPENED", 1700.0, 300.0, 0)  # a bank far away
+    assert N.OnService("BANKFRAME_OPENED", 1590.0, 225.0, 0)
+    N.Status(1590.0, 225.0, 0)
+    assert len(N.stops) == 1 and N.dest.name == "War Quarter"
+
+
+def test_undercity_says_below_or_above(nav_env):
+    lua, ns, UC = undercity_env(nav_env)
+    N = ns.Nav
+    ring, bank_floor = (1560.0, 228.0), (1605.0, 240.0)  # the raised ring, and the bank's floor
+    assert N.CityHeight(UC, *ring) > N.CityHeight(UC, *bank_floor) + 6
+    N.SetStops(lua.table(lua.table(x=bank_floor[0], y=bank_floor[1], cont=UC, name="Bank")))
+    way, yd = N.HeightHint(ring[0], ring[1], 0)
+    assert way == "down" and yd >= 6 and "Below you" in N.HeightText(ring[0], ring[1], 0)
+    # up at the lift tops: down a lift
+    lua.execute('GetSubZoneText = function() return "Ruins of Lordaeron" end GetTime = function() return 50 end')
+    assert N.HeightText(1586.0, 240.0, 0) == "|cff80c0ffBelow you (down a lift)|r"
+
+
+def test_guard_locations_down_in_undercity_are_on_its_level(nav_env):
+    # (reported) the Enchanting Trainer, marked on the continent's map: it's down in the city
+    lua, ns, UC = undercity_env(nav_env)
+    load(lua, ns, "Layers.lua")
+    L = ns.Layers
+    assert L.CityLevelAt(0, 1488.82, 278.71) == UC
+    assert L.CityLevelAt(0, 2250.0, 250.0) is None  # Brill: up on the continent
+    ns.db = lua.eval('{ cityPois = { [0] = { { 1488.82, 278.71, "Undercity Enchanting Trainer" }, { 2250, 250, "Brill" } } } }')
+    db = L.CityDB()
+    assert len(db[0]) == 1 and db[UC][1][3] == "Undercity Enchanting Trainer"
+
+
+def test_undercity_lower_level_walks_stay_on_their_floor(nav_env):
+    # (reported) down by the ring's foot, to the Enchanting Trainer: onto the road on the same
+    # floor, not up onto the ring through its wall
+    lua, ns, UC = undercity_env(nav_env)
+    R, P = ns.Router, ns.Passability
+    zoff = ns.CityLevels[UC].zoff
+    here = ns.Nav.CityHeight(UC, 1541.9, 295.6)  # (the floor by the ring's foot)
+    r = R.Route(UC, 1541.9, 295.6, 1488.82, 278.71, lua.table(offroad=False, z=here + zoff, tz=-62.1))
+    assert abs(r.zs[2] - zoff - here) < 4  # (onto the road on the same floor)
+
+
+def test_city_places_show_after_talking_to_a_guard(nav_env):
+    lua, ns, UC = undercity_env(nav_env)
+    load(lua, ns, "Layers.lua", "Data/CityPlaces.lua")
+    L = ns.Layers
+    ns.db = lua.eval("{}")
+    assert len(L.RevealedPlaces(0)) == 0  # nothing until a guard there is talked to
+    guard = lua.eval('{ { name = "The bank" }, { name = "The inn" }, { name = "A class trainer" } }')
+    other = lua.eval('{ { name = "Let me browse your goods." } }')
+    assert L.IsGuardMenu(guard) and not L.IsGuardMenu(other)
+    L.RevealCity()  # (the player's map: Undercity)
+    names = {p[3]: p.cont for p in L.RevealedPlaces(0).values()}
+    assert names.get("Undercity Bank") == UC and "Undercity Enchanting Trainer" in names
+    assert not any(n.startswith("Orgrimmar") for n in names)
+
+
+def test_a_guard_in_any_capital_shows_all_its_places(nav_env):
+    # (reported: a Stormwind guard showed only the place asked for) every capital has its places,
+    # the Alliance's too: a guard there shows them all, and only that city's
+    lua, ns, UC = undercity_env(nav_env)
+    load(lua, ns, "Layers.lua", "Data/CityPlaces.lua")
+    L = ns.Layers
+    real = lua.eval("C_Map.GetBestMapForUnit")
+    try:
+        for ui, city, cont in ((1453, "Stormwind", 0), (1455, "Ironforge", 0), (1457, "Darnassus", 1),
+                               (1454, "Orgrimmar", 1), (1456, "Thunder Bluff", 1), (1458, "Undercity", 0)):
+            ns.db = lua.eval("{}")
+            lua.execute(f"C_Map.GetBestMapForUnit = function() return {ui} end")
+            L.RevealCity()
+            names = [p[3] for p in L.RevealedPlaces(cont).values()]
+            assert len(names) >= 19, (city, len(names))
+            assert f"{city} Bank" in names and f"{city} Inn" in names, city
+            assert all(n.startswith(city + " ") for n in names), city
+    finally:
+        lua.globals().C_Map.GetBestMapForUnit = real
+
+
+def test_undercity_places_show_only_down_in_the_city(nav_env):
+    lua, ns, UC = undercity_env(nav_env)
+    load(lua, ns, "Layers.lua", "Data/CityPlaces.lua")
+    L = ns.Layers
+    ns.db = lua.eval("{}")
+    ns.settings = lua.eval("{ gps = { layerCity = true, style = 'minimap' } }")
+    L.RevealCity()
+    bank = next(p for p in L.RevealedPlaces(0).values() if p[3] == "Undercity Bank")
+    def names(level):
+        marks = L.Marks(0, bank[1], bank[2], 400.0, lua.table(), level)
+        return {marks[i][4] for i in range(1, len(marks) + 1)}
+    assert "Undercity Bank" not in names(0)  # up in Tirisfal: not over the Ruins
+    assert "Undercity Bank" not in names(None)  # (looking at another map)
+    assert "Undercity Bank" in names(UC)  # down in the city
+
+
+def test_a_city_place_s_stop_is_down_in_the_city_even_without_floor_data_under_it(nav_env):
+    lua, ns, UC = undercity_env(nav_env)
+    load(lua, ns, "Layers.lua", "Data/CityPlaces.lua")
+    L = ns.Layers
+    ns.db = lua.eval("{}")
+    ns.settings = lua.eval("{ gps = { layerCity = true, style = 'minimap' } }")
+    L.RevealCity()
+    priest = next(p for p in L.RevealedPlaces(0).values() if p[3] == "Undercity Priest Trainer")
+    marks = L.Marks(0, priest[1], priest[2], 400.0, lua.table(), UC)
+    mark = next(marks[i] for i in range(1, len(marks) + 1) if marks[i][4] == "Undercity Priest Trainer")
+    assert mark[12] == UC  # (a stop made from it goes down the lift, though no floor is under its booth)
+
+
+def test_zone_hover_says_the_levels_colored_for_the_player(router):
+    lua, ns = router
+    G = ns.GPS
+    assert list(G.ZoneHoverText(1, "Desolace", 35))[:2] == ["Desolace", "Level 30-40"]
+    assert tuple(G.ZoneHoverText(1, "Desolace", 35))[2:] == (1, 1, 0)  # yellow: in range
+    assert tuple(G.ZoneHoverText(1, "Desolace", 12))[2:] == (1, 0.1, 0.1)  # red: far below
+    assert tuple(G.ZoneHoverText(1, "Desolace", 60))[2:] == (0.6, 0.6, 0.6)  # gray: far above
+    assert G.ZoneHoverText(1, "Somewhere New", 10) == "Somewhere New"  # no levels known
+
+
+def test_ruins_of_lordaeron_walk_follows_its_roads(nav_env):
+    # (reported) from the Ruins' north gate to a lift: along the ruins' roads, round their
+    # walls and slime, not straight across the courtyard
+    lua, ns, UC = undercity_env(nav_env)
+    R, P = ns.Router, ns.Passability
+    r = R.Route(0, 1835.7, 236.2, 1545.0, 240.0, lua.table(offroad=False))
+    pts, kinds = r.pts, r.kinds
+    road, bad = 0.0, 0
+    for i in range(1, len(pts) - 2, 2):
+        x1, y1, x2, y2 = pts[i], pts[i + 1], pts[i + 2], pts[i + 3]
+        d = ((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5
+        if kinds[(i + 1) // 2] == 0:
+            road += d
+        m = max(1, int(d))
+        bad += sum(1 for k in range(1, m) if not P.IsOpen(0, x1 + (x2 - x1) * k / m, y1 + (y2 - y1) * k / m))
+    assert road > 0.8 * r.length and bad <= 3
+
+
+def test_undercity_trainer_from_the_walkway_beside_it(nav_env):
+    # (reported) on the Apothecarium's upper walkway, the trainer just round the corner: not
+    # down off the walkway and round below (its marker sits on a sliver of the lower floor)
+    lua, ns, UC = undercity_env(nav_env)
+    r = ns.Router.Route(UC, 1481.7, 295.6, 1488.82, 278.71, lua.table(offroad=False))
+    assert r.length < 40
+    assert all(r.kinds[i] != ns.Router.KIND_DROP for i in range(1, len(r.kinds) + 1))
+
+
+def test_ruins_lift_hall_to_each_lift(nav_env):
+    # (reported) in the hall between the guardians: straight down a corridor to a lift
+    lua, ns, UC = undercity_env(nav_env)
+    for lift in ((1597.0, 190.0), (1545.0, 240.0), (1595.0, 291.0)):
+        r = ns.Router.Route(0, 1596.3, 241.0, lift[0], lift[1], lua.table(offroad=False))
+        assert r.length < 70, (lift, r.length)
+
+
+def test_a_route_out_of_undercitys_sewers_follows_their_tunnels(nav_env):
+    # (reported 2026-11-14) at the west end of the Sewers (the winding tunnel west of the War Quarter) the route out
+    # was straight dashed legs through the rock: the sewers had no roads (their floors only an outline, not floors
+    # over floors). Out along the tunnel, through the pipe south of the War Quarter and down onto the ring, on roads
+    # at the floors' heights, to the Trade Quarter.
+    lua, ns, UC = undercity_env(nav_env)
+    R = ns.Router
+    zoff = ns.CityLevels[UC].zoff
+    stop = (1595.3, 224.7, -62.0)  # (Jeremiah Payson on the Trade Quarter's ring, the game's height)
+    for x, y, z in ((1656.3, 657.8, -32.5), (1692.3, 603.8, -63.5)):  # (the model's heights)
+        r = R.Route(UC, x, y, stop[0], stop[1], lua.table(offroad=False, z=z + zoff, tz=stop[2]))
+        n = len(r.pts) // 2
+        off = 0.0
+        for i in range(1, n):
+            if r.kinds[i] != R.KIND_ROAD:
+                off += math.hypot(r.pts[2 * i + 1] - r.pts[2 * i - 1], r.pts[2 * i + 2] - r.pts[2 * i])
+        assert off < 10, (x, y, off)  # (was 231 and 175 yd straight through the rock)
+        zs = [r.zs[i] - zoff for i in range(1, n + 1) if r.zs[i]]
+        assert abs(zs[0] - z) < 3  # (it starts on the sewer's floor, not on the street under it)
+        # (through the pipe: down its steps to the ring's ledge, about -108)
+        assert any(1626 < r.pts[2 * i - 1] < 1660 and 470 < r.pts[2 * i] < 490 for i in range(1, n + 1))
+        assert r.length < 800
+
+
+def test_out_of_the_west_lift_through_its_arch(nav_env):
+    # (issue #315, QA) from the west lift's bottom to Jeremiah Payson on the ring below, the route went
+    # out through the lift shaft's wall at 1590, 288 (a doorway's gap filled through the wall onto the walkway's curb):
+    # the character stuck there. The shaft is closed but for its arch on the west side (x 1594.4 to 1597.9 at y 299.8):
+    # out through it, wherever the lift's floor is taken to be (its city end's height, or a GM's teleport's).
+    lua, ns, UC = undercity_env(nav_env)
+    R = ns.Router
+    for z in (-41.5, -42.5):
+        r = R.Route(UC, 1594.9, 290.8, 1595.3, 224.7, lua.table(offroad=False, z=z, tz=-62.0))
+        assert r and not r.noWay
+        pts = [(r.pts[i], r.pts[i + 1]) for i in range(1, len(r.pts), 2)]
+        for (ax, ay), (bx, by) in zip(pts, pts[1:]):
+            L2 = (bx - ax) ** 2 + (by - ay) ** 2
+            t = 0.0 if L2 == 0 else max(0.0, min(1.0, ((1590.1 - ax) * (bx - ax) + (288.3 - ay) * (by - ay)) / L2))
+            assert math.hypot(ax + (bx - ax) * t - 1590.1, ay + (by - ay) * t - 288.3) > 2.5, (z, (ax, ay), (bx, by))
+        # (the first step out of the shaft, past its west face: through the arch)
+        out = next(i for i, (x, y) in enumerate(pts) if y > 299.8 or math.hypot(x - 1595.0, y - 290.3) > 10.5)
+        (ax, ay), (bx, by) = pts[out - 1], pts[out]
+        assert by > 299.8 >= ay, (z, pts[:out + 1])
+        x = ax + (bx - ax) * (299.8 - ay) / (by - ay)
+        assert 1594.4 < x < 1597.9, (z, pts[:out + 1])
+
+
+def test_undercity_route_stays_on_the_floors(nav_env):
+    # Trade Quarter to the War Quarter hall: along the city's roads, and the walks to and
+    # from them on its walkable floors (no straight line through a wall or off a ledge; the
+    # stairs between levels are roads, through the ledges' cells).
+    lua, ns, UC = undercity_env(nav_env)
+    N, P = ns.Nav, ns.Passability
+    N.SetStops(lua.table(lua.table(x=1760.0, y=335.0, cont=UC, name="War Quarter")))
+    r = N.Route(1560.0, 228.0, 0)
+    assert r and r.walkYards > 200
+    pts = r.pts
+    bad = 0
+    for i in range(1, len(pts) - 2, 2):
+        if r.kinds[(i + 1) // 2] in (0, 4):  # (a road, or a drop off a ledge)
+            continue
+        x1, y1, x2, y2 = pts[i], pts[i + 1], pts[i + 2], pts[i + 3]
+        for k in range(1, 10):
+            f = k / 10
+            if not P.IsOpen(UC, x1 + (x2 - x1) * f, y1 + (y2 - y1) * f):
+                bad += 1
+    assert bad <= 3  # (a cell or so of slack at corners)
+
+
+def test_undercity_to_brill_takes_a_lift(nav_env):
+    lua, ns, UC = undercity_env(nav_env)
+    N = ns.Nav
+    legs, secs = N.Plan(UC, 1593.0, 238.0, 7.0, lua.table(x=2250.0, y=250.0, cont=0))
+    rides = [legs[i].ride for i in range(1, len(legs) + 1) if legs[i].ride]
+    assert len(rides) == 1 and rides[0][8] == "lift"
+
+
+# ---- Caves (Data/Caves.lua) --------------------------------------------------------------
+
+def caves_world(lua, ns, caves=True):
+    load(lua, ns, "Data/Roads.lua", "Data/Terrain.lua", *(("Data/Caves.lua",) if caves else ()),
+         "Passability.lua", "Router.lua")
+    ns.Router.Reset()
+    ns.Router.SYNC_WALKS = True
+    ns.Router.WARM = False
+    ns.Passability.ClearCache()
+    return lua, ns
+
+
+@pytest.fixture
+def caves_env(env):
+    return caves_world(*env)
+
+
+def cave_cell(ns, cont, x, y):
+    """A cave overlay's own value at (x, y) and its grid, or (None, None)."""
+    r = ns.Passability.OverlayRaw(cont, x, y)
+    return r if isinstance(r, tuple) else (r, None)
+
+
+def cave_key(ns, cont, name):
+    caves = ns.Caves[cont]
+    return next(caves[i][2] for i in range(1, len(caves) + 1) if caves[i][1] == name)
+
+
+def check_cave_route(ns, cont, name, r, mouths):
+    """Along the cave's roads, in by a mouth, never through its closed cells: (share on roads,
+    yards through closed cells)."""
+    pts, kinds = route_pts(r)
+    grid = ns.Terrain[cave_key(ns, cont, name)]
+    road = closed = 0.0
+    for i, k in enumerate(kinds):
+        (x1, y1), (x2, y2) = pts[i], pts[i + 1]
+        d = math.hypot(x2 - x1, y2 - y1)
+        road += d if k == 0 else 0
+        n = max(1, int(d))
+        for s in range(n + 1):
+            v, g = cave_cell(ns, cont, x1 + (x2 - x1) * s / n, y1 + (y2 - y1) * s / n)
+            if v == 2 and g.tx0 == grid.tx0 and g.ty0 == grid.ty0:
+                closed += d / (n + 1)
+    near_mouth = min(math.hypot(x - mx, y - my) for x, y in pts for mx, my in mouths)
+    assert near_mouth < 15, near_mouth  # (in by its mouth, not through the hill)
+    return road / r.length, closed
+
+
+def test_route_into_burning_blade_coven_follows_its_roads(caves_env):
+    # From Durotar's road to the cave's far end: out along its way in (through the basin south
+    # of it, not over the ridge), in at its mouth, along its tunnels.
+    lua, ns = caves_env
+    r = ns.Router.Route(1, -84.0, -4743.0, -62.0, -4229.0, lua.table(offroad=False))
+    share, closed = check_cave_route(ns, 1, "Burning Blade Coven", r,
+                                     [(-174.0, -4343.0), (-182.0, -4385.0), (-200.0, -4361.0)])
+    assert share > 0.9 and closed < 15
+    assert r.length < 2000
+
+
+def test_route_into_fargodeep_mine_follows_its_roads(caves_env):
+    # A mine under a hill (its floors under walkable ground): into its deep end by the mouth.
+    lua, ns = caves_env
+    r = ns.Router.Route(0, -9703.0, 299.0, -9830.0, 181.0, lua.table(offroad=False))
+    share, closed = check_cave_route(ns, 0, "Fargodeep Mine", r,
+                                     [(-9808.0, 211.0), (-9822.0, 211.0), (-9838.0, 171.0), (-9848.0, 219.0), (-9856.0, 175.0)])
+    assert share > 0.9 and closed < 10
+    assert r.length < 800
+
+
+def test_the_directions_say_where_the_route_goes_into_a_cave_and_out(caves_env):
+    # (asked 2026-11-12 for 1.2.4: "Update routing to consider say when to enter a cave or cross a bridge or go into a
+    # building") "Enter the cave" at its mouth on the way in, "Leave the cave" there on the way out, once each
+    lua, ns = caves_env
+    load(lua, ns, "Turns.lua")
+    T = ns.Turns
+    mouths = [(-174.0, -4343.0), (-182.0, -4385.0), (-200.0, -4361.0)]
+    for a, b, want in (((-84.0, -4743.0), (-62.0, -4229.0), "Enter the cave"),
+                       ((-62.0, -4229.0), (-84.0, -4743.0), "Leave the cave")):
+        r = ns.Router.Route(1, *a, *b, lua.table(offroad=False))
+        path = T.Path(lua.table(parts=lua.table(lua.table(pts=r.pts, kinds=r.kinds, cont=1, stop=1))))
+        ms = T.Maneuvers(path, "the stop")
+        said = [(str(ms[i].text), ms[i].dist) for i in range(1, len(ms) + 1)]
+        places = [(t, d) for t, d in said if "cave" in t]
+        assert [t for t, _ in places] == [want], said
+        x, y = T.PointAt(path, places[0][1])
+        assert min(math.dist((x, y), m) for m in mouths) < 30, (x, y, said)
+    # (out on the land: none of them)
+    for a, b in (((1100.0, -4400.0), (850.0, -4450.0)), ((-2350.0, -350.0), (-2100.0, -500.0))):
+        r = ns.Router.Route(1, *a, *b, lua.table(offroad=False))
+        path = T.Path(lua.table(parts=lua.table(lua.table(pts=r.pts, kinds=r.kinds, cont=1, stop=1))))
+        ms = T.Maneuvers(path, "the stop")
+        assert not [str(ms[i].text) for i in range(1, len(ms) + 1) if str(ms[i].kind) in ("place", "bridge")], (a, b)
+
+
+def test_the_directions_say_where_the_route_crosses_a_bridge(caves_env):
+    # (asked 2026-11-12 for 1.2.4) the game's bridges are models of their own (Data/Bridges.lua, `agps bridges`): over
+    # Thandol Span from the Wetlands into Arathi (no road over it: walked), "Cross the bridge" where it starts, once
+    lua, ns = caves_env
+    load(lua, ns, "Data/Bridges.lua", "Turns.lua")
+    T = ns.Turns
+    assert len(ns.Bridges[0]) > 20 and len(ns.Bridges[1]) > 20
+    r = ns.Router.Route(0, -2700.0, -2500.0, -1900.0, -2450.0, lua.table(offroad=False))
+    path = T.Path(lua.table(parts=lua.table(lua.table(pts=r.pts, kinds=r.kinds, cont=0, stop=1))))
+    ms = T.Maneuvers(path, "the stop")
+    said = [(str(ms[i].kind), str(ms[i].text), ms[i].dist) for i in range(1, len(ms) + 1)]
+    spans = [d for k, t, d in said if k == "bridge" and -2490 < T.PointAt(path, d)[0] < -2240]
+    assert len(spans) == 1 and [t for k, t, d in said if k == "bridge"][0] == "Cross the bridge", said
+    x, y = T.PointAt(path, spans[0])
+    assert ns.Router.OnBridgeModel(0, x + 0.0, y + 0.0) or ns.Router.OnBridgeModel(0, *T.PointAt(path, spans[0] + 2))
+
+
+@pytest.mark.parametrize("offroad", [False, True])
+def test_a_stop_in_banethil_barrow_den_is_reached_by_its_way_in(caves_env, offroad):
+    # (a bug report, 2026-11-06, with a screenshot: Teldrassil, The Relics of Wakening) from the woods south-west of
+    # Ban'ethil Hollow the route to the quest's stop in the Barrow Den was a line 423 yd straight over the hill: the
+    # den's floors spiral down under each other, its ramp from the mouth lost under the lower floor (a 40 yd drop
+    # there), so no way on its roads was found. Round to its way in, then on to the stop; nothing much over the hill.
+    lua, ns = caves_env
+    P = ns.Passability
+    start, stop = (9516.0, 1288.0), (9887.0, 1492.0)
+    r = ns.Router.Route(1, *start, *stop, lua.table(offroad=offroad))
+    pts, kinds = route_pts(r)
+    assert not r.unconnected and not r.noWay
+    blocked = sum(math.dist(pts[i], pts[i + 1]) for i, k in enumerate(kinds)
+                  if k == 1 and P.SegmentCost(1, *pts[i], *pts[i + 1]) is None)
+    assert blocked < 100, blocked
+    ways = [(9887.0, 1569.0), (9843.0, 1535.0)]  # (its ways in, Data/Caves.lua)
+    assert min(math.dist(p, w) for p in pts for w in ways) < 15
+
+
+def test_up_top_over_a_mine_keeps_off_its_roads(caves_env):
+    # On the hill over Fargodeep Mine: outdoors, the roads to get on at are the land's, not the
+    # mine's under it; indoors (down in it), only the mine's.
+    lua, ns = caves_env
+    R = ns.Router
+    x, y = -9790.0, 140.0
+    assert cave_cell(ns, 0, x, y)[0] == 3  # (a floor under walkable ground)
+    _, g = R.Edges(0)
+    near = R.NearestEdges(0, x, y)
+    assert not R.CaveDown(0, x, y, False) and R.CaveDown(0, x, y, True) and R.CaveDown(0, x, y)
+    up = R.CaveLevel(g, 0, near, False, False)
+    down = R.CaveLevel(g, 0, near, True, False)
+    assert any(g.cave[near[i].edge] for i in range(1, len(near) + 1))
+    assert not any(g.cave[up[i].edge] for i in range(1, len(up) + 1)) and len(up) > 0
+    assert all(g.cave[down[i].edge] for i in range(1, len(down) + 1))
+
+
+def test_surface_routes_away_from_caves_unchanged(env):
+    # Trips nowhere near a cave route the same with the caves loaded.
+    trips = [(0, (2250.0, 250.0), (1841.0, 236.0)), (1, (1300.0, -4400.0), (1050.0, -4450.0)),
+             (1, (-2350.0, -350.0), (-2100.0, -500.0))]
+    lua, ns = env
+    with_caves = caves_world(lua, ns)
+    got = [route_pts(ns.Router.Route(c, *a, *b, lua.table(offroad=o))) for c, a, b in trips for o in (False, True)]
+    lua2 = lupa.LuaRuntime()
+    lua2.execute(PRELUDE)
+    ns2 = lua2.table()
+    ns2.IsSecret = lua2.eval("function(v) return false end")
+    load(lua2, ns2, "Geo.lua")
+    caves_world(lua2, ns2, caves=False)
+    want = [route_pts(ns2.Router.Route(c, *a, *b, lua2.table(offroad=o))) for c, a, b in trips for o in (False, True)]
+    assert got == want
+
+
+def test_cave_roads_join_the_land_roads_at_their_mouths(caves_env):
+    # Each cave road ending on a land road (joins) is tied onto it: the network runs on.
+    lua, ns = caves_env
+    for cont in (0, 1):
+        ov = ns.RoadOverlays[cont]
+        extra = next(ov[i] for i in range(1, len(ov) + 1) if ov[i].cave)
+        base = len(ns.Roads[cont].n) // 2
+        _, g = ns.Router.Edges(cont)
+        last = base + len(extra.n) // 2
+        # (roads drawn since the caves were generated can move a road off a mouth: that one
+        # falls back to a gap link, so nearly all, not all)
+        tied = 0
+        for k in range(1, len(extra.joins) + 1):
+            j = base + extra.joins[k]
+            tied += any(g.adjTo[i] <= base or g.adjTo[i] > last for i in range(int(g.adjIdx[j]), int(g.adjIdx[j + 1])))
+        assert tied >= 0.95 * len(extra.joins), (cont, tied, len(extra.joins))
+
+
+# ---- Capitals at ground level (Data/Capitals.lua) --------------------------------------------
+
+def capitals_world(lua, ns, capitals=True):
+    load(lua, ns, "Data/Maps.lua", "Data/CityPlaces.lua", "Data/Roads.lua", "Data/Terrain.lua", "Data/Caves.lua",
+         *(("Data/Capitals.lua",) if capitals else ()), "Passability.lua", "Router.lua")
+    ns.Router.Reset()
+    ns.Router.SYNC_WALKS = True
+    ns.Router.WARM = False
+    ns.Passability.ClearCache()
+    return lua, ns
+
+
+@pytest.fixture
+def capitals_env(env):
+    return capitals_world(*env)
+
+
+def test_stormwind_s_roads_are_its_streets(capitals_env):
+    # (reported: Stormwind's roads jumbled everywhere and into the water) the land's roads (traced from
+    # the ground's textures and NPCs' paths) don't run over a model-built capital's own cells any more
+    # (roads drawn in game excepted), and the city's own roads are its streets, not every floor's middle
+    lua, ns = capitals_env
+    P = ns.Passability
+    roads = ns.Roads[0]
+    inside = 0
+    for i in range(1, len(roads.e) + 1):
+        e = roads.e[i]
+        if e[4] == 2:  # (drawn in game)
+            continue
+        for k in range(5, len(e) + 1, 2):
+            x, y = e[k], e[k + 1]
+            # (well inside: the land's roads run on 20 yd into a capital's grid, up to its gates)
+            if -9100 < x < -8300 and 350 < y < 1200 and all(
+                    P.Overlay(0, x + dx, y + dy) in (0, 2) for dx, dy in
+                    ((0, 0), (25, 0), (-25, 0), (0, 25), (0, -25), (18, 18), (18, -18), (-18, 18), (-18, -18))):
+                inside += 1
+    assert inside == 0
+    ov = next(o for o in ns.RoadOverlays[0].values() if o.capital)  # (the continent's capitals' roads)
+    total = 0.0
+    for i in range(1, len(ov.e) + 1):
+        e = ov.e[i]
+        x, y = ov.n[2 * e[1] - 1], ov.n[2 * e[1]]
+        if -9200 < x < -8200 and 200 < y < 1300:  # (Stormwind's)
+            total += e[3]
+    assert 5000 < total < 22000  # (every floor's middle: 36,000 yd)
+
+
+def city_places(ns, ui_map):
+    """A capital's places (Data/CityPlaces.lua, map %) in world yards: [(name, x, y)]."""
+    c, b = ns.CityPlaces[ui_map], ns.Maps[ui_map].bounds
+    minX, minY, maxX, maxY = (b[i] for i in range(1, 5))
+    return [(c[i][3], maxX - c[i][2] / 100 * (maxX - minX), maxY - c[i][1] / 100 * (maxY - minY))
+            for i in range(1, len(c) + 1)]
+
+
+def check_capital_route(ns, cont, r):
+    """(share of the route on roads, yards of off-road legs through the capital's closed cells,
+    the last leg's yards)."""
+    P = ns.Passability
+    pts, kinds = route_pts(r)
+    road = closed = drawn = 0.0
+    for i, k in enumerate(kinds):
+        (x1, y1), (x2, y2) = pts[i], pts[i + 1]
+        d = math.hypot(x2 - x1, y2 - y1)
+        drawn += d
+        road += d if k in (0, 4, 5, 6) else 0  # (roads, drops off ledges, lifts)
+        if k == 1:
+            n = max(1, int(d))
+            closed += sum(d / (n + 1) for s in range(n + 1)
+                          if P.Overlay(cont, x1 + (x2 - x1) * s / n, y1 + (y2 - y1) * s / n) == 2)
+    last = math.hypot(pts[-1][0] - pts[-2][0], pts[-1][1] - pts[-2][1])
+    return road / max(drawn, 1), closed, last  # (of the way drawn: a lift's length counts its wait too)
+
+
+ORGRIMMAR_OUTSIDE = (1310.0, -4388.0)  # (on Durotar's road, outside the front gate)
+
+
+def test_route_into_orgrimmar_follows_its_streets(capitals_env):
+    # From Durotar's road outside the gate to the bank: in at the gate, along the city's own
+    # roads (no line straight through its walls; before, it had no roads in there at all)
+    lua, ns = capitals_env
+    bank = next((x, y) for n, x, y in city_places(ns, 1454) if n == "Orgrimmar Bank")
+    r = ns.Router.Route(1, *ORGRIMMAR_OUTSIDE, *bank, lua.table(offroad=False))
+    share, closed, last = check_capital_route(ns, 1, r)
+    assert share > 0.8 and closed < 5 and last < 20
+    assert r.length < 2.2 * math.dist(ORGRIMMAR_OUTSIDE, bank)
+    pts, _ = route_pts(r)
+    assert min(math.dist(p, (1352.0, -4372.0)) for p in pts) < 25  # (through the gate)
+
+
+def test_orgrimmar_places_are_reached_on_its_roads(capitals_env):
+    # Every service a guard points out, from outside the gate: mostly on the city's roads,
+    # the last stretch short, and never a long way through its walls
+    lua, ns = capitals_env
+    for name, x, y in city_places(ns, 1454):
+        r = ns.Router.Route(1, *ORGRIMMAR_OUTSIDE, x, y, lua.table(offroad=False))
+        share, closed, last = check_capital_route(ns, 1, r)
+        assert share > 0.75 and closed < 40 and last < 45 and r.length < 2500, (name, share, closed, last, r.length)
+
+
+def test_orgrimmar_flight_master_up_its_tower(capitals_env):
+    # The wind rider master is up on a tower, reached by the ramp winding round it: the route
+    # climbs it (it isn't a straight line up from the street at its foot)
+    lua, ns = capitals_env
+    fm = (1677.6, -4315.7)
+    r = ns.Router.Route(1, *ORGRIMMAR_OUTSIDE, *fm, lua.table(offroad=False))
+    pts, _ = route_pts(r)
+    assert min(math.dist(p, (1675.0, -4336.0)) for p in pts) < 8  # (on the ramp round the tower)
+    assert math.dist(pts[-2], fm) < 12
+
+
+def test_orgrimmar_cleft_of_shadow_is_down_under_the_drag(capitals_env):
+    # The warlock trainer is down in the Cleft of Shadow, under the Drag: a stop there is on the
+    # floor under (its own roads), the player up on the Drag isn't (their height tells)
+    lua, ns = capitals_env
+    R = ns.Router
+    wl = next((x, y) for n, x, y in city_places(ns, 1454) if n == "Orgrimmar Warlock Trainer")
+    under = (1788.0, -4388.0)  # (a spot with the Cleft's floor at about -17, the Drag's at 37)
+    assert R.CaveDown(1, *under) and R.CaveDown(1, *under, None, -16.0) and not R.CaveDown(1, *under, None, 37.0)
+    r = R.Route(1, *ORGRIMMAR_OUTSIDE, *wl, lua.table(offroad=False))
+    share, closed, last = check_capital_route(ns, 1, r)
+    # (the capitals' roads are their streets now, not every floor's centerline: a last walk over the open
+    # floor a few yards longer, never through closed cells)
+    assert share > 0.8 and last < 15
+
+
+IRONFORGE_OUTSIDE = (-5100.0, -741.0)  # (on Dun Morogh's road below the gates)
+
+
+@pytest.mark.parametrize("name,spot", [("the Great Forge", (-4763.0, -1108.0)), ("the Deeprun Tram", (-4838.0, -1318.0)),
+                                       ("the gryphon master", (-4821.8, -1155.4)), ("the Mystic Ward", (-4661.0, -954.0)),
+                                       ("the Vault", (-4888.0, -995.0)), ("the Military Ward", (-4976.0, -1208.0))])
+def test_route_into_ironforge_follows_its_halls(capitals_env, name, spot):
+    # From Dun Morogh's road in at the gates and along the city's halls round the Great Forge
+    lua, ns = capitals_env
+    r = ns.Router.Route(0, *IRONFORGE_OUTSIDE, *spot, lua.table(offroad=False))
+    share, closed, last = check_capital_route(ns, 0, r)
+    assert share > 0.85 and closed < 5 and last < 60, (name, share, closed, last)  # (the streets: see above)
+    assert r.length < 2.5 * math.dist(IRONFORGE_OUTSIDE, spot), (name, r.length)
+    pts, _ = route_pts(r)
+    assert min(math.dist(p, (-5030.0, -835.0)) for p in pts) < 20  # (in by the gates)
+
+
+STORMWIND_OUTSIDE = (-9120.0, 397.0)  # (on Elwynn's road before the bridge to the gate)
+
+
+@pytest.mark.parametrize("name,spot", [("the Trade District", (-8832.0, 625.0)), ("Cathedral Square", (-8618.0, 776.0)),
+                                       ("the gryphon master", (-8832.8, 478.6)), ("the Dwarven District", (-8407.0, 573.0)),
+                                       ("Stormwind Keep", (-8438.0, 399.0)), ("the Mage Quarter", (-8947.0, 858.0))])
+def test_route_into_stormwind_follows_its_streets(capitals_env, name, spot):
+    # In at the gate past the Valley of Heroes, along the city's streets and over its canals'
+    # bridges (not straight through its walls and houses)
+    lua, ns = capitals_env
+    r = ns.Router.Route(0, *STORMWIND_OUTSIDE, *spot, lua.table(offroad=False))
+    share, closed, last = check_capital_route(ns, 0, r)
+    # (the road drawn in game onto the gate's bridge starts 15 yd past the land's road: their join
+    # crosses the bridge's edge cells, 8 yd)
+    assert share > 0.78 and closed < 10 and last < 25, (name, share, closed, last)
+    assert r.length < 2.5 * math.dist(STORMWIND_OUTSIDE, spot), (name, r.length)
+    pts, _ = route_pts(r)
+    near = min(_seg_dist(p, q, (-9016.0, 474.0)) for p, q in zip(pts, pts[1:]))
+    assert near < 30  # (through the Valley of Heroes: a drawn road runs straight through it)
+
+
+def _seg_dist(a, b, p):
+    vx, vy = b[0] - a[0], b[1] - a[1]
+    L2 = vx * vx + vy * vy
+    t = max(0.0, min(1.0, ((p[0] - a[0]) * vx + (p[1] - a[1]) * vy) / L2)) if L2 > 0 else 0.0
+    return math.hypot(a[0] + vx * t - p[0], a[1] + vy * t - p[1])
+
+
+THUNDER_BLUFF_BELOW = (-1334.0, 176.0)  # (on Mulgore's road at the foot of the west lifts)
+
+
+def test_the_great_lift_is_taken_and_said(capitals_env):
+    # (asked: the lifts outside the capitals, roads/lifts.py) the Barrens down to Thousand Needles by the
+    # Great Lift: its road (source 5) taken, "Take the lift down"; up the other way. Before, the two roads'
+    # ends were joined by a straight link down the cliff
+    lua, ns = capitals_env
+    R = ns.Router
+    load(lua, ns, "Turns.lua")
+    for a, b, kind, text in (((-4550.0, -1720.0), (-4900.0, -1900.0), R.KIND_LIFT_DOWN, "Take the lift down"),
+                             ((-4900.0, -1900.0), (-4550.0, -1720.0), R.KIND_LIFT_UP, "Take the lift up")):
+        R.Reset()
+        r = R.Route(1, a[0], a[1], b[0], b[1], lua.table(offroad=False))
+        _, kinds = route_pts(r)
+        assert kind in kinds, (a, b)
+        part = lua.table(pts=r.pts, kinds=r.kinds, cont=1, stop=1)
+        ms = ns.Turns.Maneuvers(ns.Turns.Path(lua.table(parts=lua.table(part))))
+        assert any(str(ms[i].text) == text for i in range(1, len(ms) + 1)), text
+
+
+def test_route_up_into_thunder_bluff_takes_a_lift(capitals_env):
+    # From Mulgore up to the bank: up a lift (the mesas' cliffs are no way up), then along the
+    # mesa's roads
+    lua, ns = capitals_env
+    bank = next((x, y) for n, x, y in city_places(ns, 1456) if n == "Thunder Bluff Bank")
+    r = ns.Router.Route(1, *THUNDER_BLUFF_BELOW, *bank, lua.table(offroad=False))
+    share, closed, last = check_capital_route(ns, 1, r)
+    assert share > 0.85 and closed < 5 and last < 25  # (the streets: see above)
+    pts, _ = route_pts(r)
+    assert min(math.dist(p, q) for p in pts for q in ((-1286.2, 189.7), (-1308.4, 185.3))) < 12  # (the lift)
+    # (asked: as Undercity's, the lift said: "Take the lift up", the route over it drawn as a ride)
+    _, kinds = route_pts(r)
+    assert ns.Router.KIND_LIFT_UP in kinds
+    load(lua, ns, "Turns.lua")
+    part = lua.table(pts=r.pts, kinds=r.kinds, cont=1, stop=1)
+    ms = ns.Turns.Maneuvers(ns.Turns.Path(lua.table(parts=lua.table(part))))
+    assert any(str(ms[i].text) == "Take the lift up" for i in range(1, len(ms) + 1))
+
+
+def test_capital_stairs_are_said_in_the_directions(capitals_env):
+    # (asked) a capital's stairs and ramps between levels (walknet's, written as source 6 with the nodes'
+    # heights): Router.StairAt finds them along a route, up or down by the heights, and the directions say
+    # "Take the stairs up" there
+    lua, ns = capitals_env
+    R = ns.Router
+    assert R.StairAt(1, 0.0, 0.0, 1.0, 1.0) is None  # (builds Kalimdor's graph; no stairs out there)
+    g = R.DebugGraph(1)
+    found = None
+    for i in range(1, len(g.e) + 1):
+        e = g.e[i]
+        za, zb = g.nz[e[1]], g.nz[e[2]]
+        if e[4] == R.SOURCE_STAIR and za and zb and abs(zb - za) >= 6 and len(e) >= 8:
+            found = e
+            break
+    assert found, "no stairs between levels in Kalimdor's capitals"
+    e = found
+    pts = [(e[k], e[k + 1]) for k in range(5, len(e) + 1, 2)]
+    up = g.nz[e[2]] > g.nz[e[1]]
+    (x1, y1), (x2, y2) = pts[0], pts[1]
+    assert R.StairAt(1, x1, y1, x2, y2) == (1 if up else -1)
+    assert R.StairAt(1, x2, y2, x1, y1) == (-1 if up else 1)
+    load(lua, ns, "Turns.lua")
+    lo_to_hi = pts if up else pts[::-1]
+    lead = [(lo_to_hi[0][0] - 30, lo_to_hi[0][1])]  # (a walk up to their foot first, and on from the top: not arriving)
+    (ax, ay), (bx, by) = lo_to_hi[-2], lo_to_hi[-1]
+    d = math.hypot(bx - ax, by - ay) or 1
+    tail = [(bx + (bx - ax) / d * 60, by + (by - ay) / d * 60)]
+    walk = lead + lo_to_hi + tail
+    part = lua.table(pts=lua.table(*[v for q in walk for v in q]), kinds=lua.table(*([0] * (len(walk) - 1))), cont=1, stop=1)
+    ms = ns.Turns.Maneuvers(ns.Turns.Path(lua.table(parts=lua.table(part))))
+    assert any(str(ms[i].kind) == "stairs" and str(ms[i].text) == "Take the stairs up" for i in range(1, len(ms) + 1))
+
+def test_beside_the_road_by_thunder_bluff_the_arrow_points_down_it(capitals_env):
+    # (Mulgore by Thunder Bluff's lifts, 2026-11-05: a few yards beside the road, heading along it, the arrow was red,
+    # pointing back at where the walk joined the road behind) since the land's roads went 3D every route has its
+    # floors, and the indoor corner rule aimed at the road's small kinks; outdoors (the game says) the outdoor aim
+    lua, ns = capitals_env
+    load(lua, ns, "Turns.lua")
+    T, R = ns.Turns, ns.Router
+    lua.execute("IsIndoors = function() return false end")
+    bank = next((x, y) for n, x, y in city_places(ns, 1456) if n == "Thunder Bluff Bank")
+    road, _ = route_pts(R.Route(1, -1100.0, -100.0, *bank, lua.table(offroad=False)))
+
+    def along(s):
+        acc = 0.0
+        for a, b in zip(road, road[1:]):
+            L = math.dist(a, b)
+            if L and acc + L >= s:
+                t = (s - acc) / L
+                return a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t
+            acc += L
+        return road[-1]
+
+    off = []
+    for s in range(0, 200, 25):
+        x, y = along(s)
+        ax, ay = along(s + 30)
+        h = math.atan2(ay - y, ax - x)  # (the way along the road)
+        for side in (-5, 5):
+            px, py = x + math.cos(h + math.pi / 2) * side, y + math.sin(h + math.pi / 2) * side
+            R.Reset()
+            r = R.Route(1, px, py, *bank, lua.table(offroad=False))
+            part = lua.table(pts=r.pts, kinds=r.kinds, cont=1, stop=1, fz=r.fz)
+            path = T.Path(lua.table(parts=lua.table(part), legs=lua.table(lua.table(walk=True))))
+            tx, ty = T.Target(path, px, py)
+            off.append(abs(math.degrees(T.RelativeAngle(px, py, h, tx, ty))))
+    assert sum(a > 45 for a in off) <= 2, sorted(round(a) for a in off)
+
+
+def test_thunder_bluff_places_are_reached_on_its_roads(capitals_env):
+    # Every service a guard points out, from the lifts' foot: on the mesas' roads and their
+    # bridges, never a long way through the chasms between the mesas or their tents
+    lua, ns = capitals_env
+    for name, x, y in city_places(ns, 1456):
+        r = ns.Router.Route(1, *THUNDER_BLUFF_BELOW, x, y, lua.table(offroad=False))
+        share, closed, last = check_capital_route(ns, 1, r)
+        assert share > 0.75 and closed < 10 and last < 25 and r.length < 1200, (name, share, closed, last, r.length)
+
+
+def test_thunder_bluffs_bridge_to_elder_rise_is_crossed_through_the_tent(capitals_env):
+    # (reported 2026-11-12: "the thunderbluff bridges, the route tells the player to go around the building to get to a
+    # bridge but you actually need to enter the building to cross the bridge"): the lower bridge to Elder Rise starts in
+    # the tent at its west end; the land's road round the tent's outside onto it is gone, and the city's way up inside
+    # the tent (only a drop down in its roads) is a road with its heights (overrides/roads_1.geojson). And the
+    # directions say the bridge
+    lua, ns = capitals_env
+    places = {str(n): (x, y) for n, x, y in city_places(ns, 1456)}
+    for a, b in (("Thunder Bluff Bank", "Thunder Bluff Druid Trainer"), ("Thunder Bluff Druid Trainer", "Thunder Bluff Bank")):
+        r = ns.Router.Route(1, *places[a], *places[b], lua.table(offroad=False))
+        pts, kinds = route_pts(r)
+        assert min(math.dist(p, (-1136.0, -120.0)) for p in pts) < 2, (a, b)  # (up inside the tent)
+        assert min(math.dist(p, (-1126.0, -108.0)) for p in pts) > 5, (a, b)  # (not round its outside)
+        assert r.length < 500, (a, b, r.length)
+    load(lua, ns, "Turns.lua")
+    part = lua.table(pts=r.pts, kinds=r.kinds, cont=1, stop=1)
+    ms = ns.Turns.Maneuvers(ns.Turns.Path(lua.table(parts=lua.table(part))))
+    said = [(str(ms[i].kind), str(ms[i].text), round(ms[i].dist)) for i in range(1, len(ms) + 1)]
+    bridges = [m for m in said if m[0] == "bridge"]
+    assert bridges and all(m[1] == "Cross the bridge" for m in bridges), said
+    print(said)
+
+
+DARNASSUS_OUTSIDE = (9986.0, 1864.0)  # (on Teldrassil's road below the south gate)
+
+
+@pytest.mark.parametrize("name,spot", [("Craftsmen's Terrace", (10143.0, 2317.0)), ("the Temple of the Moon", (9622.0, 2522.0)),
+                                       ("Tradesmen's Terrace", (9812.0, 2252.0)), ("Warrior's Terrace", (9950.0, 2316.7))])
+def test_route_into_darnassus_follows_its_paths(capitals_env, name, spot):
+    lua, ns = capitals_env
+    r = ns.Router.Route(1, *DARNASSUS_OUTSIDE, *spot, lua.table(offroad=False))
+    share, closed, last = check_capital_route(ns, 1, r)
+    assert share > 0.85 and closed < 5 and last < 25, (name, share, closed, last)
+    assert r.length < 2.5 * math.dist(DARNASSUS_OUTSIDE, spot), (name, r.length)
+
+
+def test_capitals_leave_routes_elsewhere_unchanged(env):
+    # Trips nowhere near a capital route the same with the capitals loaded.
+    trips = [(0, (2250.0, 250.0), (1841.0, 236.0)), (1, (1100.0, -4400.0), (850.0, -4450.0)),
+             (1, (-2350.0, -350.0), (-2100.0, -500.0)), (1, (-84.0, -4743.0), (-62.0, -4229.0)),
+             (0, (-9460.0, 60.0), (-9100.0, -200.0))]
+    lua, ns = env
+    capitals_world(lua, ns)
+    got = [route_pts(ns.Router.Route(c, *a, *b, lua.table(offroad=o))) for c, a, b in trips for o in (False, True)]
+    lua2 = lupa.LuaRuntime()
+    lua2.execute(PRELUDE)
+    ns2 = lua2.table()
+    ns2.IsSecret = lua2.eval("function(v) return false end")
+    load(lua2, ns2, "Geo.lua")
+    capitals_world(lua2, ns2, capitals=False)
+    want = [route_pts(ns2.Router.Route(c, *a, *b, lua2.table(offroad=o))) for c, a, b in trips for o in (False, True)]
+    assert got == want
+
+
+def test_add_and_remove_stops_on_an_active_route(nav_env):
+    lua, ns = nav_env
+    N = ns.Nav
+    N.SetStops(stops(lua, (-600.0, -4180.0), (-440.0, -4700.0)))  # square, star
+    assert N.AddStop(lua.table(x=-800.0, y=-4400.0, cont=1))
+    assert [N.stops[i].icon for i in (1, 2, 3)] == [6, 1, 4]  # appended with the next free marker
+    r = N.Route(-500.0, -4500.0, 1)
+    last = N.EachSegment(r, 1, lambda *a: None)
+    assert (last[0], last[1]) == pytest.approx((-800.0, -4400.0), abs=0.5)  # route now ends there
+    N.RemoveStop(2)  # drop the star
+    assert [N.stops[i].icon for i in (1, 2)] == [6, 4]
+    assert N.route is None  # rerouted on the next request
+    r = N.Route(-500.0, -4500.0, 1)
+    seen = set()
+    N.EachSegment(r, 1, lambda x1, y1, x2, y2, kind, stop, *rest: seen.add(stop))
+    assert seen == {1, 2}
+
+
+def test_busy_search_queue_never_drops_legs_between_stops(offroad):
+    lua, ns = offroad
+    R = ns.Router
+    R.SYNC_WALKS = False
+    moving = lua.table(offroad=True, transient=True)  # walks from the player's position
+    fixed = lua.table(offroad=True)  # a leg between two stops
+    # short trips across the wall need a walk around it (queued, not known yet)
+    R.Route(1, 0.0, 280.0, 600.0, 280.0, moving)
+    before = R.Route(1, 0.0, 300.0, 600.0, 300.0, fixed)
+    for k in range(20):  # the player keeps moving: many searches from new spots
+        R.Route(1, 0.0, 320.0 + 3 * k, 600.0, 320.0, moving)
+    lua.eval("function(R) while R.HasWork() do R.Pump(math.huge, function() return 0 end) end end")(R)
+    after = R.Route(1, 0.0, 300.0, 600.0, 300.0, fixed)
+    assert not R.HasWork()  # its walk finished (it wasn't dropped): nothing re-queued
+    assert before.pending and not after.pending  # and the route uses it: through the pass
+    pts, kinds = route_pts(after)
+    assert any(abs(y) < 60 for x, y in pts if 250 < x < 350)
+
+
+def test_a_walk_found_from_behind_is_joined_ahead_not_at_its_start(offroad):
+    # (asked 2026-10-06, Shadowvale in Tirisfal: the route went back to the road and down again while walking off the
+    # roads) a walk around found from where the player was is used from where they are now, joined along it ahead of
+    # them: not back at its start (a step back), and not "searched again, the long way meanwhile" once its start is
+    # more than WALK_REUSE_YD behind (its corners are far apart)
+    lua, ns = offroad
+    R = ns.Router
+    R.SYNC_WALKS = False
+    moving = lua.table(offroad=True, transient=True)
+    start, goal = (0.0, 400.0), (600.0, 400.0)
+    first = R.Route(1, start[0], start[1], goal[0], goal[1], moving)
+    assert first.pending  # (searched in the background)
+    lua.eval("function(R) while R.HasWork() do R.Pump(math.huge, function() return 0 end) end end")(R)
+    found = R.Route(1, start[0], start[1], goal[0], goal[1], moving)
+    pts, _ = route_pts(found)
+    assert not found.pending and len(pts) >= 3
+    (ax, ay), (bx, by) = pts[0], pts[1]
+    seg = math.hypot(bx - ax, by - ay)
+    assert seg > 80  # (its first corner far from its start)
+    for ahead in (20.0, 45.0):  # within WALK_REUSE_YD of its start, and past it
+        px, py = ax + (bx - ax) * ahead / seg, ay + (by - ay) * ahead / seg
+        r = R.Route(1, px, py, goal[0], goal[1], moving)
+        rp, _ = route_pts(r)
+        assert not r.pending  # (the walk found used, nothing to wait for)
+        assert rp[0] == pytest.approx((px, py), abs=0.5)
+        assert all(math.hypot(x - ax, y - ay) > 5 for x, y in rp[1:])  # (never back at its start)
+        assert r.length == pytest.approx(found.length - ahead, abs=3)
+
+
+def test_following_the_route_trims_instead_of_recalculating(nav_env):
+    lua, ns = nav_env
+    N = ns.Nav
+    lua.execute("now = 0; GetTime = function() return now end")
+    N.SetStops(stops(lua, (-600.0, -4180.0), (-440.0, -4700.0)))
+    r = N.Route(-800.0, -4400.0, 1)
+    base_len, base_total = r.walkYards, r.totalYards
+    pts = [r.pts[i] for i in range(1, len(r.pts) + 1)]
+    pts = list(zip(pts[0::2], pts[1::2]))
+    # walk a few points along the first part of the route
+    k = min(4, len(pts) - 2)
+    x, y = pts[k]
+    walked = sum(math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]) for i in range(k))
+    lua.execute("now = 5")
+    r2 = N.Route(x + 3.0, y, 1)  # a few yards beside the line
+    same = lua.eval("rawequal")
+    assert same(r2, r)  # same route object: followed, not recalculated
+    assert r2.walkYards == pytest.approx(base_len - walked, abs=4)
+    assert r2.totalYards == pytest.approx(base_total - walked, abs=4)
+    assert (r2.pts[1], r2.pts[2]) == pytest.approx((x, y), abs=4)  # drawn from the player on
+    # far off the route: recalculated
+    lua.execute("now = 10")
+    far = (-1400.0, -3600.0)  # nowhere near this route
+    assert min(math.hypot(px - far[0], py - far[1]) for px, py in pts) > 200
+    r3 = N.Route(far[0], far[1], 1)
+    assert not same(r3, r)
+
+
+def test_the_walked_part_is_trimmed_off_between_recalculations(nav_env):
+    lua, ns = nav_env
+    N = ns.Nav
+    lua.execute("now = 0; GetTime = function() return now end")
+    N.SetStops(stops(lua, (-600.0, -4180.0), (-440.0, -4700.0)))
+    r = N.Route(-800.0, -4400.0, 1)
+    base = r.walkYards
+    same = lua.eval("rawequal")
+    # a few yards along it, well before a recalculation is due (under 2 s, under 15 yd moved)
+    pts = [r.pts[i] for i in range(1, len(r.pts) + 1)]
+    (ax, ay), (bx, by) = (pts[0], pts[1]), (pts[2], pts[3])
+    seg = math.hypot(bx - ax, by - ay)
+    step = min(6.0, seg * 0.8)
+    x, y = ax + (bx - ax) / seg * step, ay + (by - ay) / seg * step
+    lua.execute("now = 0.5")
+    r2 = N.Route(x, y, 1)
+    assert same(r2, r)  # not recalculated
+    assert (r2.pts[1], r2.pts[2]) == pytest.approx((x, y), abs=0.5)  # drawn from the player on
+    assert r2.walkYards == pytest.approx(base - step, abs=0.5)
+    # under TRIM_MOVED_YD further: left as it is
+    lua.execute("now = 0.6")
+    r3 = N.Route(x + 0.5, y, 1)
+    assert (r3.pts[1], r3.pts[2]) == pytest.approx((x, y), abs=0.01)
+
+
+# ---- Turn-by-turn (Turns.lua) --------------------------------------------------------------
+
+@pytest.fixture
+def turns(env):
+    lua, ns = env
+    load(lua, ns, "Turns.lua")
+    return lua, ns
+
+
+def path_of(lua, ns, pts, kinds, stop=1, extra_parts=(), legs=None):
+    flat = [v for p in pts for v in p]
+    parts = [lua.table(cont=1, pts=lua.table(*flat), kinds=lua.table(*kinds), stop=stop)] + list(extra_parts)
+    route = lua.table(parts=lua.table(*parts), legs=legs or lua.table(lua.table(walk=True)))
+    return ns.Turns.Path(route)
+
+
+def maneuvers(lua, ns, path, label="stop 1"):
+    ms = ns.Turns.Maneuvers(path, label)
+    return [(ms[i].kind, round(ms[i].dist), ms[i].text) for i in range(1, len(ms) + 1)], ms
+
+
+def test_turn_left_at_a_corner(turns):
+    lua, ns = turns
+    # east 500 yd (east = -Y), then north 500 yd (+X): a left turn, seen from above
+    p = path_of(lua, ns, [(0, 0), (0, -250), (0, -500), (250, -500), (500, -500)], [0, 0, 0, 0])
+    got, _ = maneuvers(lua, ns, p)
+    assert got == [("turn", 500, "Turn left"), ("arrive", 1000, "Arrive at stop 1")]
+
+
+def test_a_long_routes_turns_cost_its_length_not_its_square(turns):
+    # (2026-10-06: zoomed in on a long route, 15% of a CPU core, as much as zoomed out) the arrow window (4 a second)
+    # and the map's panel (2) each worked out the whole route's turns, PointAt scanning from the start for every point
+    # of the 670: 22 ms a time. Now PointAt halves its way to the point (the same points as the scan), the turns are
+    # worked out only HORIZON_YD ahead (the next one or two are shown) with the arrival still at the end, and once per
+    # route as it is now for both (Turns.Ahead: again when trimmed, the player gone on)
+    lua, ns = turns
+    T = ns.Turns
+    # a zigzag 6 km long: a turn every 200 yd
+    pts, x, y = [(0.0, 0.0)], 0.0, 0.0
+    for k in range(30):
+        y -= 200.0
+        pts.append((x, y))
+        x += 200.0 if k % 2 == 0 else -200.0
+        pts.append((x, y))
+    p = path_of(lua, ns, pts, [0] * (len(pts) - 1))
+    linear = lua.eval("""function(path, s)
+      local pts, cum = path.pts, path.cum
+      if s <= 0 or #cum < 2 then return pts[1], pts[2] end
+      for i = 2, #cum do
+        if cum[i] >= s then
+          local seg = cum[i] - cum[i - 1]
+          local t = seg > 0 and (s - cum[i - 1]) / seg or 0
+          return pts[2 * i - 3] + (pts[2 * i - 1] - pts[2 * i - 3]) * t, pts[2 * i - 2] + (pts[2 * i] - pts[2 * i - 2]) * t
+        end
+      end
+      return pts[#pts - 1], pts[#pts]
+    end""")
+    for s in (-5, 0, 0.5, 199.9, 200, 200.1, 3333.3, p.total - 0.01, p.total, p.total + 50):
+        assert tuple(T.PointAt(p, s)) == pytest.approx(tuple(linear(p, s))), s
+    # (on 20000 points, 2000 lookups: halving, about 3 ms; the scan from the start, over 200 ms)
+    spent = lua.eval("""function(T)
+      local pts, cum = {}, { 0 }
+      for i = 0, 19999 do pts[#pts + 1] = 0; pts[#pts + 1] = -i end
+      for i = 2, 20000 do cum[i] = i - 1 end
+      local path = { pts = pts, cum = cum, kinds = {}, total = 19999 }
+      local t0 = os.clock()
+      for k = 1, 2000 do T.PointAt(path, (k * 7919) % 19999) end
+      return os.clock() - t0
+    end""")(T)
+    assert spent < 0.05, spent
+    full, _ = maneuvers(lua, ns, p)
+    ms = T.Maneuvers(p, "stop 1", 1500)
+    near = [(ms[i].kind, round(ms[i].dist), ms[i].text) for i in range(1, len(ms) + 1)]
+    assert near[:-1] == [m for m in full if m[1] <= 1500 and m[0] != "arrive"] and near[-1] == full[-1]
+    assert len(near) < len(full) and near[-1][0] == "arrive" and near[-1][1] == round(p.total)
+    # once per route as it is: both readers share it; trimmed (a new first part), worked out again
+    route = lua.table(parts=lua.table(lua.table(cont=1, pts=lua.table(*[v for q in pts for v in q]),
+                                                kinds=lua.table(*([0] * (len(pts) - 1))), stop=1)))
+    T.aheadRuns = 0
+    path1, ms1 = T.Ahead(route, "stop 1")
+    path2, ms2 = T.Ahead(route, "stop 1")
+    assert T.aheadRuns == 1 and lua.eval("rawequal")(ms1, ms2) and ms1[1].kind == "turn"
+    route.parts[1] = lua.table(cont=1, pts=lua.table(*[v for q in pts[1:] for v in q]),
+                               kinds=lua.table(*([0] * (len(pts) - 2))), stop=1)
+    T.Ahead(route, "stop 1")
+    assert T.aheadRuns == 2
+
+
+def _stairs_in(lua, ns, x0, x1, y0, y1):
+    # (Router.StairAt as a stand-in: a stretch whose middle is in the box is stairs, up going east or north)
+    ns.Router = lua.eval(f"""{{ StairAt = function(cont, ax, ay, bx, by)
+      local mx, my = (ax + bx) / 2, (ay + by) / 2
+      if mx < {x0} or mx > {x1} or my < {y0} or my > {y1} then return nil end
+      return (by < ay or bx > ax) and 1 or -1
+    end }}""")
+
+
+def test_stairs_then_a_turn_are_said_together(turns):
+    # (asked) "Stairs up in 10 yd, then turn left": stairs on the way (a capital's, Router.StairAt) said
+    # where they start, with a turn just after them
+    lua, ns = turns
+    _stairs_in(lua, ns, -1, 1, -121, -99)
+    p = path_of(lua, ns, [(0, 0), (0, -100), (0, -120), (0, -130), (250, -130), (500, -130)], [0, 0, 0, 0, 0])
+    got, ms = maneuvers(lua, ns, p)
+    assert got == [("stairs", 100, "Take the stairs up"), ("turn", 130, "Turn left"), ("arrive", 630, "Arrive at stop 1")]
+    fmt = lua.eval("function(d) return string.format('%d yd', d) end")
+    assert ns.Turns.NowText(ms[1], fmt) == "Stairs up in 100 yd, then turn left"
+    ms[1].dist = 2
+    assert ns.Turns.NowText(ms[1], fmt) == "Take the stairs up, then turn left"
+    # (the other way: down)
+    p = path_of(lua, ns, [(500, -130), (250, -130), (0, -130), (0, -120), (0, -100), (0, 0)], [0, 0, 0, 0, 0])
+    got, _ = maneuvers(lua, ns, p)
+    assert ("stairs", 510, "Take the stairs down") in got
+
+
+def test_turns_on_the_stairs_are_not_said(turns):
+    # (a spiral's bends, or a landing's corner: "Take the stairs up" covers them)
+    lua, ns = turns
+    _stairs_in(lua, ns, -1, 41, -141, -99)
+    p = path_of(lua, ns, [(0, 0), (0, -100), (0, -140), (40, -140), (500, -140)], [0, 0, 0, 0])
+    got, ms = maneuvers(lua, ns, p)
+    assert got == [("stairs", 100, "Take the stairs up"), ("arrive", 640, "Arrive at stop 1")]
+    assert not ms[1].after
+
+def test_stairs_by_the_routes_heights_on_a_level_of_floors(turns):
+    # (Undercity, a dungeon: the route's points have heights; a steep stretch rising 4 yd or more is stairs,
+    # a bump isn't)
+    lua, ns = turns
+    pts = [(0, 0), (0, -100), (0, -110), (0, -150), (0, -170), (0, -300)]
+    zs = [0, 0, 2.5, 2.5, 12.5, 12.5]
+    part = lua.table(cont=20036, pts=lua.table(*[v for q in pts for v in q]), kinds=lua.table(0, 0, 0, 0, 0),
+                     stop=1, zs=lua.table(*zs))
+    p = ns.Turns.Path(lua.table(parts=lua.table(part), legs=lua.table(lua.table(walk=True))))
+    got, _ = maneuvers(lua, ns, p)
+    assert got == [("stairs", 150, "Take the stairs up"), ("arrive", 300, "Arrive at stop 1")]
+
+def test_the_next_turn_reads_what_to_do_now_first(turns):
+    # (asked) "Continue straight, then slight right in 13 yd": what to do now, then the next maneuver;
+    # at the turn, "Slight right now"
+    lua, ns = turns
+    T = ns.Turns
+    yd = lua.eval("function(v) return string.format('%d yd', v) end")
+    m = lambda kind, dist, text: lua.table(kind=kind, dist=dist, text=text)
+    assert T.NowText(m("turn", 13, "Slight right"), yd) == "Continue straight, then slight right in 13 yd"
+    assert T.NowText(m("turn", 13, "Slight right"), yd, True) == "Straight, then slight right in 13 yd"
+    assert T.NowText(m("turn", 5, "Turn left onto the road"), yd) == "Turn left onto the road now"
+    assert T.NowText(m("arrive", 52, "Arrive at Stormwind Mage Trainer"), yd) == \
+        "Continue straight, then arrive at Stormwind Mage Trainer in 52 yd"
+    assert T.NowText(m("arrive", 4, "Arrive at Stormwind Mage Trainer"), yd) == "Arrive at Stormwind Mage Trainer"
+    assert T.NowText(m("drop", 20, "Jump down here"), yd) == "Continue straight, then jump down in 20 yd"
+
+
+def test_turn_words_and_curves(turns):
+    lua, ns = turns
+    T = ns.Turns
+    assert [T.TurnText(a) for a in (40, -80, 130, -170)] == ["Slight left", "Turn right", "Sharp left", "Make a U-turn"]
+    # a gentle curve made of many small bends is one turn, not several
+    import math as m
+    arc = [(0.0, -float(i * 20)) for i in range(10)]  # east 180 yd
+    cx, cy, r = 60.0, -180.0, 60.0  # quarter circle bending left (towards north)
+    arc += [(cx - r * m.cos(t), cy - r * m.sin(t)) for t in [k * m.pi / 20 for k in range(1, 11)]]
+    arc += [(arc[-1][0] + 20 * k, arc[-1][1]) for k in range(1, 10)]
+    p = path_of(lua, ns, arc, [0] * (len(arc) - 1))
+    got, _ = maneuvers(lua, ns, p)
+    assert [g[0] for g in got] == ["turn", "arrive"] and got[0][2] == "Turn left"
+
+
+def test_joining_and_leaving_the_road(turns):
+    lua, ns = turns
+    # off-road east, then along a road north (join + left turn = one instruction), then off it
+    p = path_of(lua, ns, [(0, 0), (0, -200), (300, -200), (300, -400)], [1, 0, 1])
+    got, _ = maneuvers(lua, ns, p)
+    assert got[0] == ("turn", 200, "Turn left onto the road")
+    assert got[1][2].endswith("off the road")  # turning east again, off the road
+
+
+def test_board_a_transport_and_toward_a_place(turns):
+    lua, ns = turns
+    ns.Pois = lua.eval("{ [1] = { {3, 350, -500, 'Razor Hill', 1} } }")
+    ride = lua.table(0, 1.0, 2.0, 1, 3.0, 4.0, 200, "zeppelin", "Brill, Tirisfal Glades", "Jaggedswine Farm, Durotar")
+    transport = lua.table(cont=1, pts=lua.table(500.0, -500.0, 900.0, -900.0), kinds=lua.table(2), stop=1)
+    p = path_of(lua, ns, [(0, 0), (0, -250), (0, -500), (250, -500), (500, -500)], [0, 0, 0, 0],
+                extra_parts=[transport], legs=lua.table(lua.table(walk=True), lua.table(ride=ride, **{"from": 1})))
+    got, ms = maneuvers(lua, ns, p)
+    assert ms[1].toward == "Razor Hill"  # the named place ahead after the turn
+    assert got[-1] == ("board", 1000, "Board the zeppelin to Jaggedswine Farm, Durotar")
+
+
+def test_a_flight_from_undercity_is_boarded_not_skipped(turns):
+    # (the user, 2026-10-06: in Undercity the map's panel said "Board the flight to The Sepulcher" and the arrow window
+    # "Arrive at Arugal's Folly", the stop past the flight) the walk to Undercity's flight master is on the city's level
+    # (10001) and the flight over the continent (0): the walk ends at the flight all the same. A ride of a later stop
+    # doesn't end the first stop's walk.
+    lua, ns = turns
+    ride = lua.table(10001, 1.0, 2.0, 0, 3.0, 4.0, 120, "flight", "Undercity, Tirisfal Glades",
+                     "The Sepulcher, Silverpine Forest")
+    walk = lua.table(cont=10001, pts=lua.table(0.0, 0.0, 0.0, -20.0), kinds=lua.table(0), stop=1)
+    flight = lua.table(cont=0, pts=lua.table(0.0, -20.0, 500.0, -900.0), kinds=lua.table(2), stop=1)
+    after = lua.table(cont=0, pts=lua.table(500.0, -900.0, 500.0, -1400.0), kinds=lua.table(0), stop=1)
+    legs = lua.table(lua.table(walk=True), lua.table(ride=ride, **{"from": 1}), lua.table(walk=True))
+    p = ns.Turns.Path(lua.table(parts=lua.table(walk, flight, after), legs=legs))
+    got, ms = maneuvers(lua, ns, p, "Arugal's Folly")
+    assert got[-1] == ("board", 20, "Board the flight to The Sepulcher, Silverpine Forest")
+    assert str(ns.Turns.NowText(ms[len(ms)], lambda d: "%d yd" % d)) == \
+        "Continue straight, then board the flight to The Sepulcher, Silverpine Forest in 20 yd"  # (the arrow window's line)
+    # (a flight that's the next stop's: the first stop is arrived at first)
+    flight2 = lua.table(cont=0, pts=lua.table(0.0, -20.0, 500.0, -900.0), kinds=lua.table(2), stop=2)
+    p2 = ns.Turns.Path(lua.table(parts=lua.table(walk, flight2), legs=legs))
+    got2, _ = maneuvers(lua, ns, p2, "Arugal's Folly")
+    assert got2[-1] == ("arrive", 20, "Arrive at Arugal's Folly")
+
+
+def test_a_flight_of_stairs_goes_the_way_the_routes_floors_go(turns):
+    # (the 1.1.5 test pass, v115-inn-a: from upstairs in Brill's inn, down to its First Aid trainer, "Take the stairs up")
+    # a flight found by the stairs roads (Router.StairAt, by their way on the map: stairs over stairs read the other way on
+    # a piece) goes up or down as the route's floors (fz, a building's or a capital's) go across it
+    lua, ns = turns
+    ns.Router = lua.eval("{ StairAt = function() return 1 end }")  # (every piece reads "up" on the map)
+    part = lua.table(cont=0, pts=lua.table(0.0, 0.0, 0.0, -6.0, 0.0, -12.0, 0.0, -18.0, 0.0, -30.0),
+                     kinds=lua.table(0, 0, 0, 0), stop=1, fz=lua.table(41.5, 41.5, 37.0, 34.5, 34.5))
+    p = ns.Turns.Path(lua.table(parts=lua.table(part), legs=lua.table(lua.table(walk=True))))
+    got, _ = maneuvers(lua, ns, p, "the trainer")
+    assert [g[2] for g in got if g[0] == "stairs"] == ["Take the stairs down"]
+    # (no floors on the route: as the stairs roads read)
+    part.fz = None
+    p = ns.Turns.Path(lua.table(parts=lua.table(part), legs=lua.table(lua.table(walk=True))))
+    got, _ = maneuvers(lua, ns, p, "the trainer")
+    assert [g[2] for g in got if g[0] == "stairs"] == ["Take the stairs up"]
+
+
+def test_arrow_angle(turns):
+    lua, ns = turns
+    T = ns.Turns
+    # facing north (0), target to the west (+Y): a quarter turn to the left
+    assert T.RelativeAngle(0, 0, 0, 0, 100) == pytest.approx(math.pi / 2)
+    # facing west, target north: a quarter turn to the right
+    assert T.RelativeAngle(0, 0, math.pi / 2, 100, 0) == pytest.approx(-math.pi / 2)
+    assert T.Compass(-1, 1) == "south-west"
+
+
+def test_road_bends_are_only_turns_at_junctions(turns):
+    lua, ns = turns
+    load(lua, ns, "Router.lua")
+    ns.Router.WARM = False  # (the roads built at once: nothing pumps a background warm-up here)
+    # east 500 yd along a road, then 45 degrees to the left (north-east) for 400 yd
+    import math as m
+    bend = (0.0, -500.0)
+    far = (400 * m.cos(m.radians(45)), -500 - 400 * m.sin(m.radians(45)))
+    pts = [(0.0, 0.0), (0.0, -250.0), bend, ((bend[0] + far[0]) / 2, (bend[1] + far[1]) / 2), far]
+    edges = "{1,2,500,0, 0,0, 0,-250, 0,-500}, {2,3,400,0, 0,-500, %f,%f}" % far
+    lua.execute("ns_ = ...", ns)
+    set_roads = lua.eval("function(ns, src) ns.Roads = assert(load('return ' .. src))() end")
+    # the road just bends there: a plain curve, not announced
+    set_roads(ns, "{ [1] = { n = { 0,0, 0,-500, %f,%f }, e = { %s } } }" % (far[0], far[1], edges))
+    ns.Router.Reset()
+    got, _ = maneuvers(lua, ns, path_of(lua, ns, pts, [0, 0, 0, 0]))
+    assert [g[0] for g in got] == ["arrive"]
+    # a third road meets there: a junction, so the bend is a turn
+    set_roads(ns, "{ [1] = { n = { 0,0, 0,-500, %f,%f, -300,-500 }, e = { %s, {2,4,300,0, 0,-500, -300,-500} } } }"
+              % (far[0], far[1], edges))
+    ns.Router.Reset()
+    got, _ = maneuvers(lua, ns, path_of(lua, ns, pts, [0, 0, 0, 0]))
+    assert got[0][:2] == ("turn", 500) and got[0][2] == "Slight left"
+
+
+# ---- Waypoint import (Import.lua) ---------------------------------------------------------
+
+@pytest.fixture
+def importer(nav_env):
+    lua, ns = nav_env
+    load(lua, ns, "Import.lua")
+    return lua, ns
+
+
+def test_parse_tomtom_way_lines(importer):
+    lua, ns = importer
+    I = ns.Import
+    text = """/way Elwynn Forest 43.2 65.1 First Stop (Vendor)
+/way Elwynn Forest 52.0 40.5 Second Stop (Quest NPC)
+/way elwynn 60.1, 22.8 Third Stop (Cave Entrance)
+/way Elwynn Forest 24.5 80.2 Final Destination
+/way Elwin Forest 10 10 Typo
+/way 50 50
+"""
+    stops, errors = I.Parse(text, 1411)  # current zone: Durotar
+    got = [stops[i] for i in range(1, len(stops) + 1)]
+    assert [s.name for s in got] == ["First Stop (Vendor)", "Second Stop (Quest NPC)", "Third Stop (Cave Entrance)",
+                                     "Final Destination", "Durotar 50.0, 50.0"]
+    assert list(errors.values()) == ["Line 5: unknown zone 'Elwin Forest'"]
+    elwynn = ns.Maps[I.FindMap("Elwynn Forest")]
+    b = elwynn.bounds
+    first = got[0]
+    assert first.cont == 0
+    assert first.x == pytest.approx(b[3] - 0.651 * (b[3] - b[1]))  # 65.1 down the map
+    assert first.y == pytest.approx(b[4] - 0.432 * (b[4] - b[2]))  # 43.2 across
+    assert got[4].cont == 1  # "/way 50 50": in the current zone (Durotar)
+
+
+def test_import_sets_the_route(importer):
+    lua, ns = importer
+    I = ns.Import
+    stops, _ = I.Parse("/way Durotar 50 50 A\n/way Durotar 52 44 B", 1411)
+    assert I.Apply(stops, False) == 2
+    assert [ns.Nav.stops[i].name for i in (1, 2)] == ["A", "B"]
+    assert [ns.Nav.stops[i].icon for i in (1, 2)] == [6, 1]  # square, star
+    more, _ = I.Parse("/way #1411 40 40 C", 1411)
+    assert I.Apply(more, True) == 3 and ns.Nav.stops[3].name == "C" and ns.Nav.stops[3].icon == 4
+
+
+def test_ctrl_click_on_a_stop_copies_its_way_line():
+    # (asked 2026-11-09) Ctrl + left-click on a stop's marker: its /way line in a box, selected to copy
+    from azerothgps.gameharness import start
+
+    lua, ns = start()
+    I, G, N = ns.Import, ns.GPS, ns.Nav
+    stops, _ = I.Parse("/way Durotar 52.3 41.8 Razor Hill", 1411)
+    I.Apply(stops, False)
+    pin = lua.eval("{ stopIndex = 1 }")
+    assert G.PinStop(pin).name == "Razor Hill"
+    assert G.PinStop(lua.eval("{ stopIndex = 1, ride = {} }")) is None  # (a ride's pin: no stop of its own)
+    G.CopyStopWay(pin)
+    box = lua.eval("AzerothGPSCopyLine")
+    assert box is not None and box.text == "/way Durotar 52.3 41.8 Razor Hill"
+    again, _ = I.Parse(box.text, 1411)  # (pasted back: the same spot)
+    assert again[1].x == pytest.approx(N.stops[1].x, abs=2) and again[1].y == pytest.approx(N.stops[1].y, abs=2)
+    I.CopiedLine()  # (Ctrl+C in the box: "Copied!" in green, then the window closes)
+    assert box.copied.IsShown(box.copied) and not box.hint.IsShown(box.hint)
+    G.CopyStopWay(pin)  # (shown again: the hint back, not "Copied!")
+    assert box.IsShown(box) and box.hint.IsShown(box.hint) and not box.copied.IsShown(box.copied)
+
+
+def test_shift_click_on_a_stop_shares_it_as_a_pin_link():
+    # (asked 2026-11-15 for 1.3.3: "share a destination's location as a map pin with shift + left click") the pin link
+    # a pin's Shift-click pastes, read back the same spot by whoever clicks it
+    from azerothgps.gameharness import start
+
+    lua, ns = start()
+    I, G, N = ns.Import, ns.GPS, ns.Nav
+    stops, _ = I.Parse("/way Durotar 52.3 41.8 Razor Hill", 1411)
+    I.Apply(stops, False)
+    # (asked 2026-11-16: "should share as a normal map pin location, not a azerothGPS share") the game's own
+    # "[Map Pin Location]" link, on Durotar's map at the stop's spot
+    lua.execute("AGPS_LINKED = nil; AGPS_REAL_INSERT = AGPS_NS.Import.InsertLink; "
+                "AGPS_NS.Import.InsertLink = function(t) AGPS_LINKED = t return t ~= nil end")
+    try:
+        assert G.ShareStopPin(lua.eval("{ stopIndex = 1 }"))
+        text = str(lua.eval("AGPS_LINKED"))
+        assert text.startswith("|cffffff00|Hworldmap:1411:") and text.endswith("|h[Map Pin Location]|h|r"), text
+        assert "AzerothGPS" not in text
+        _, u, v = text.split("|h")[0].split(":")[1:4]
+        assert int(u) == pytest.approx(5230, abs=2) and int(v) == pytest.approx(4180, abs=2)
+        assert not G.ShareStopPin(lua.eval("{ stopIndex = 1, ride = {} }"))  # (a ride's pin: no stop to share)
+    finally:
+        lua.execute("AGPS_NS.Import.InsertLink = AGPS_REAL_INSERT")
+
+
+def test_pasted_way_lines_run_together(importer):
+    lua, ns = importer
+    # several lines pasted into the chat box can arrive on one line
+    text = ("/way Elwynn Forest 43.2 65.1 First Stop (Vendor) /way Elwynn Forest 52.0 40.5 Second Stop "
+            "/WAY Elwynn Forest 60.1 22.8 Third")
+    stops, errors = ns.Import.ParseWays(text, 1411)
+    assert [stops[i].name for i in range(1, len(stops) + 1)] == ["First Stop (Vendor)", "Second Stop", "Third"]
+    assert len(errors) == 0
+    stops, _ = ns.Import.ParseWays("/way Durotar 50 50 A\n/way Durotar 52 44 B", 1411)
+    assert len(stops) == 2
+
+
+def test_questie_s_tomtom_target_is_a_stop(importer):
+    lua, ns = importer
+    # Questie's tracker: "Set TomTom Target" calls TrackerUtils:SetTomTomTarget(title, areaId, x%, y%) (asked 2026-11-09)
+    lua.execute("""
+        QUESTIE_CALLS = 0
+        local tu = {}
+        function tu:SetTomTomTarget(title, zone, x, y) QUESTIE_CALLS = QUESTIE_CALLS + 1 end
+        local zdb = {}
+        function zdb:GetUiMapIdByAreaId(area) return ({ [14] = 1411 })[area] end
+        QuestieLoader = { _modules = { TrackerUtils = tu, ZoneDB = zdb } }
+    """)
+    I, N = ns.Import, ns.Nav
+    assert I.HookQuestie() and not I.HookQuestie()  # (once)
+    tu = lua.eval("QuestieLoader._modules.TrackerUtils")
+    tu.SetTomTomTarget(tu, "Vorek", 14, 50.0, 50.0)
+    assert len(N.stops) == 1 and N.stops[1].name == "Vorek" and N.stops[1].cont == 1
+    want, _ = I.Parse("/way #1411 50 50 Vorek", 1411)
+    assert N.stops[1].x == pytest.approx(want[1].x) and N.stops[1].y == pytest.approx(want[1].y)
+    assert lua.eval("QUESTIE_CALLS") == 1  # (Questie's own still runs: TomTom's arrow, when TomTom is there)
+    tu.SetTomTomTarget(tu, "Vorek", 14, 50.0, 50.0)  # the same again: no second stop
+    assert len(N.stops) == 1
+    other, _ = I.Parse("/way #1411 40 40 Mine", 1411)
+    I.Apply(other, True)
+    tu.SetTomTomTarget(tu, "Gornek", 14, 42.0, 68.0)  # a new target is added to the route: nothing replaced
+    assert sorted(N.stops[i].name for i in range(1, len(N.stops) + 1)) == ["Gornek", "Mine", "Vorek"]
+    tu.SetTomTomTarget(tu, "Nowhere", 99999, 50.0, 50.0)  # no map for its area: nothing added
+    assert len(N.stops) == 3
+    ns.settings = lua.eval("{ gps = { acceptWay = false } }")  # off with "Accept TomTom /way commands"
+    tu.SetTomTomTarget(tu, "Off", 14, 30.0, 30.0)
+    assert len(N.stops) == 3 and lua.eval("QUESTIE_CALLS") == 5
+
+
+# ---- Recorded roads used right away -----------------------------------------------------------
+
+def test_recorded_missing_road_is_routed_on(router):
+    lua, ns = router
+    # a track from the middle of the first leg (0,-500) north to (600,-500)
+    ns.db = lua.eval("{ tracks = { { op = 'add', continent = 1, pts = { 5,-500, 200,-500, 400,-500, 600,-500 } } } }")
+    ns.Router.Reset()
+    r = ns.Router.Route(1, 0.0, 30.0, 620.0, -500.0)
+    pts, kinds = route_pts(r)
+    assert r.road > 1000  # along the first leg to the junction, then up the recorded road
+    assert any(abs(x - 400) < 1 and abs(y + 500) < 1 for x, y in pts)  # on the track
+    assert r.length < 30 + 500 + 600 + 60  # not around via B and C
+    # the shipped data isn't changed
+    assert len(ns.Roads[1].e) == 2
+
+
+def test_recorded_false_road_is_removed(router):
+    lua, ns = router
+    # drive along the second leg B -> C and mark it false
+    ns.db = lua.eval("{ tracks = { { op = 'remove', continent = 1, pts = { 0,-1000, 500,-1000, 1000,-1000 } } } }")
+    ns.Router.Reset()
+    r = ns.Router.Route(1, 0.0, 30.0, 1030.0, -1000.0)
+    assert r.road < 1001  # only the first leg is road now; the rest goes off-road
+
+
+def test_erasing_part_of_a_road_cuts_it(router):
+    lua, ns = router
+    # a stroke across the middle of the second leg B -> C: that stretch goes, both sides stay
+    ns.db = lua.eval("{ tracks = { { op = 'remove', drawn = true, continent = 1, pts = { 500,-1100, 500,-900 } } } }")
+    ns.Router.Reset()
+    edges = ns.Router.Edges(1)[0]
+    assert len(edges) == 3
+    for e in edges.values():
+        for i in range(5, len(e), 2):
+            assert not (abs(e[i] - 500) < 10 and abs(e[i + 1] + 1000) < 10)
+
+
+def drawn_edges(ns):
+    return [e for e in ns.Router.Edges(1)[0].values() if e[4] == ns.Router.SOURCE_RECORDED]
+
+
+def test_drawn_road_along_an_existing_one_replaces_that_stretch(router):
+    lua, ns = router
+    # drawn along the second leg (5 yd off it) from x 200 to 500, then away north to y -1300
+    ns.db = lua.eval("{ tracks = { { op = 'add', drawn = true, continent = 1, time = 1, "
+                     "pts = { 200,-1005, 350,-1004, 500,-1006, 500,-1150, 500,-1300 } } } }")
+    ns.Router.Reset()
+    edges = list(ns.Router.Edges(1)[0].values())
+    # one road there, the drawn one: the leg's stretch beside it is gone
+    for e in edges:
+        if e[4] != ns.Router.SOURCE_RECORDED:
+            assert not any(220 < e[i] < 480 for i in range(5, len(e), 2))
+    # and the leg's ends join it: along the leg, onto the drawn road and up it, then on to C
+    r = ns.Router.Route(1, 0.0, 30.0, 500.0, -1310.0, lua.table(offroad=False))
+    assert r.road > 1000 + 300 + 250 and r.length < 30 + 1000 + 520 + 320 + 40
+    r = ns.Router.Route(1, 0.0, 30.0, 1030.0, -1000.0, lua.table(offroad=False))
+    assert r.length < 30 + 2000 + 30 + 40
+
+
+def test_drawn_road_that_stops_short_joins_the_road(router):
+    lua, ns = router
+    # ends 18 yd from the first leg (x = 0): joined to it anyway
+    ns.db = lua.eval("{ tracks = { { op = 'add', drawn = true, continent = 1, time = 1, pts = { 300,-500, 150,-500, 18,-500 } } } }")
+    ns.Router.Reset()
+    e = drawn_edges(ns)[0]
+    assert (e[len(e) - 1], e[len(e)]) == pytest.approx((0, -500), abs=0.01)
+    r = ns.Router.Route(1, 0.0, 30.0, 310.0, -500.0, lua.table(offroad=False))
+    assert r.road > 700  # down the first leg, then along the drawn road
+
+
+def test_drawing_the_same_road_twice_keeps_one(router):
+    lua, ns = router
+    ns.db = lua.eval("""{ tracks = {
+      { op = 'add', drawn = true, continent = 1, time = 1, pts = { 300,-500, 150,-500, 5,-500 } },
+      { op = 'add', drawn = true, continent = 1, time = 2, pts = { 305,-506, 150,-494, 2,-503 } } } }""")
+    ns.Router.Reset()
+    assert len(drawn_edges(ns)) == 1
+
+
+def test_drawn_roads_the_data_has_are_left_out_and_dropped(router):
+    lua, ns = router
+    ns.db = lua.eval("{ tracks = { { op = 'add', drawn = true, continent = 1, time = 7, pts = { 300,-500, 150,-500, 5,-500 } } } }")
+    ns.RoadTracksIn = lua.eval("{ [7] = true }")
+    ns.Router.Reset()
+    assert drawn_edges(ns) == []
+    ns.Print = lua.eval("function() end")
+    load(lua, ns, "Record.lua")
+    ns.Record.Prune()
+    assert len(ns.db.tracks) == 0
+    # (kept for good in the archive, packed: asked 2026-10-06, keep data forever)
+    (a,) = [ns.db.tracksShipped[i] for i in range(1, len(ns.db.tracksShipped) + 1)]
+    assert a.time == 7 and a.pk == "300 -500 150 -500 5 -500" and a.pts is None
+
+
+def test_shipped_overrides_draw_as_roads_and_the_players_own_drawn_roads_green(router):
+    lua, ns = router
+    ns.Roads[1].e[2][4] = 2  # (an override in the data)
+    ns.db = lua.eval("{ tracks = { { op = 'add', continent = 1, time = 1, pts = { 300,-500, 150,-500, 5,-500 } } } }")
+    ns.Router.Reset()
+    segs = ns.GPS.LayoutRoads(0.0, -500.0, 1, 0, 3000.0, 130.0)
+    colors = {segs[i][5] for i in range(1, len(segs) + 1)}
+    # (asked 2026-11-11: the player's own drawn roads green, "so the player can see what they have drawn"; an
+    # override in the data is a road like any)
+    assert colors == {0, ns.GPS.OWN_ROAD_COLOR} and ns.GPS.OWN_ROAD_COLOR == 2
+
+
+def test_recorded_roads_keep_the_ruins_roads_and_the_citys(nav_env):
+    lua, ns = nav_env
+    load(lua, ns, "Data/Terrain.lua", "Passability.lua", "Data/Cities.lua")
+    R = ns.Router
+
+    def ruins_roads():  # the ruins' own roads (Cities.lua's overlay), well inside the gate the record runs past
+        out = set()
+        for e in R.Edges(0)[0].values():
+            ends = ((e[5], e[6]), (e[len(e) - 1], e[len(e)]))
+            if all(1700 < x < 1855 and 120 < y < 360 for x, y in ends):
+                out.add(tuple(round(v, 1) for end in ends for v in end))
+        return out
+
+    R.Reset()
+    before = ruins_roads()
+    ns.db = lua.eval("""{ tracks = {
+      { op = 'add', drawn = true, continent = 0, pts = { 1900, 236, 1880, 236, 1860, 236 } },
+      { op = 'remove', drawn = true, continent = 10001, pts = { 1400, 50, 1402, 52 } } } }""")
+    R.Reset()
+    # the ruins' roads are all still there with a record (it used to be one point: the gate's join at 1882, 236,
+    # which a drawn road along y = 236 takes over since the ruins' gate road ends on that line: client 70938's data)
+    assert len(before) > 50 and not before - ruins_roads()
+    # and the ruins are still joined to the land's roads past the record
+    out = R.Route(0, 1800.0, 240.0, 1960.0, 236.0, lua.table(offroad=False))
+    assert out and len(out.pts) > 4 and not out.noWay
+    # the ruins' walked way from the gate is still a road (its courtyard's points; its stretch under the drawn road
+    # is the drawn one now, so its end at the gate may be the drawn road's), and the way in from the gate is on roads
+    found = any(any(abs(e[k] - 1790) < 1 and abs(e[k + 1] - 236) < 1 for k in range(5, len(e), 2))
+                for e in R.Edges(0)[0].values())
+    assert found
+    r = R.Route(0, 1895.0, 236.0, 1596.0, 240.0, lua.table(offroad=False))
+    off = sum(math.hypot(r.pts[2 * i + 1] - r.pts[2 * i - 1], r.pts[2 * i + 2] - r.pts[2 * i])
+              for i in range(1, len(r.pts) // 2) if r.kinds[i] != R.KIND_ROAD)
+    assert off < 15 and r.length < 330
+    # the city's routes still work with a record on its level (its roads on floors over floors)
+    r = R.Route(10001, 1590.6, 204.0, 1658.9, 275.8, lua.table(offroad=False))
+    assert len(r.pts) > 4 and r.zs
+
+
+# ---- Opt-in feedback (Feedback.lua) ------------------------------------------------------------
+
+def test_a_faster_trip_is_kept(nav_env):
+    # (the option to keep them was removed, asked 2026-10-01: always kept, on the player's PC; Copy Map
+    # Data's Routes checkbox says whether they're shared)
+    lua, ns = nav_env
+    lua.execute("""
+      now = 0; GetTime = function() return now end; time = function() return 1790000000 end
+      GetBuildInfo = function() return "1.60.1", "70009" end
+      pos = { 0, 0, 1 }
+    """)
+    ns.settings = lua.eval("{ gps = { offroad = false } }")
+    load(lua, ns, "Feedback.lua")
+    F = ns.Feedback
+    ns.Geo.PlayerWorld = lua.eval("function() return pos[1], pos[2], pos[3] end")
+    # the once-a-second ticker: captured, then called by hand
+    lua.globals().C_Timer = lua.eval("{ NewTicker = function(_, fn) TICK = fn; return {} end }")
+    F.Init()
+    TICK = lua.globals().TICK
+    ns.Nav.SetDestination(-600.0, -4180.0, 1, "Target")
+    lua.execute("pos = { -800, -4400, 1 }")
+    ns.Nav.Route(-800.0, -4400.0, 1)
+    def walk_there(seconds):
+        for k in range(11):
+            lua.execute(f"now = {seconds * k / 10}; pos = {{ {-800 + 20 * k}, {-4400 + 22 * k}, 1 }}")
+            TICK()
+        F.Arrived(ns.Nav.dest)
+    walk_there(30)  # way faster than the estimate
+    roads, trips = F.Counts()
+    assert trips == 1
+    t = ns.db.feedback.trips[1]
+    assert t.actual == 30 and t.estimate > 30 / 0.85 and len(t.pts) >= 20
+    # a trip that took as long as estimated isn't kept
+    ns.Nav.SetDestination(-600.0, -4180.0, 1, "Target")
+    ns.Nav.Route(-800.0, -4400.0, 1)
+    walk_there(10000)
+    assert F.Counts() == (0, 1)
+
+
+def test_recorded_road_shows_in_the_road_overlay_right_away(router):
+    lua, ns = router
+    ns.db = lua.eval("{ tracks = {} }")
+    ns.Router.Reset()
+    before = ns.GPS.LayoutRoads(0.0, -500.0, 1, 0, 1000.0, 130.0)
+    # record a road, then the recording is saved (Record.Changed resets the router)
+    lua.eval("function(db) db.tracks[1] = { op = 'add', continent = 1, pts = { 5,-500, 200,-500, 400,-500, 600,-500 } } end")(ns.db)
+    ns.Router.Reset()
+    after = ns.GPS.LayoutRoads(0.0, -500.0, 1, 0, 1000.0, 130.0)
+    colors = [after[i][5] for i in range(1, len(after) + 1)]
+    assert len(after) > len(before)
+    assert set(colors) == {0, 2}  # (the recorded one green, the player's own: asked 2026-11-11)
+    assert {b[5] for b in before.values()} == {0}
+
+
+def test_poi_double_click_adds_a_stop_to_the_route(nav_env):
+    lua, ns = nav_env
+    ns.settings = lua.eval("{ gps = { fastestOrder = false } }")
+    ns.Geo.PlayerWorld = lua.eval("function() return -800.0, -4400.0, 1 end")
+    ns.Nav.SetStops(stops(lua, (-600.0, -4180.0), (-440.0, -4700.0)))
+    assert ns.GPS.AddStopAt(-300.0, -4600.0, "Razor Hill")
+    assert len(ns.Nav.stops) == 3 and ns.Nav.stops[3].name == "Razor Hill"
+    assert ns.Nav.stops[3].icon not in (ns.Nav.stops[1].icon, ns.Nav.stops[2].icon)
+    # and further stops can still be added after it
+    assert ns.GPS.AddStopAt(-350.0, -4500.0)
+    assert len(ns.Nav.stops) == 4
+
+
+
+def test_poi_double_click_waits_for_confirm_route(nav_env):
+    lua, ns = nav_env
+    ns.settings = lua.eval("{ gps = { fastestOrder = false, zoom = 400 } }")
+    ns.Geo.PlayerWorld = lua.eval("function() return -800.0, -4400.0, 1 end")
+    ns.Nav.Clear()
+    assert ns.GPS.AddStopAt(-300.0, -4600.0, "Razor Hill")
+    assert len(ns.Nav.stops) == 0  # placed, not routed yet
+    ns.GPS.ConfirmRoute()
+    assert len(ns.Nav.stops) == 1 and ns.Nav.dest.name == "Razor Hill"
+
+
+def test_export_route_as_way_lines_round_trips(importer):
+    lua, ns = importer
+    I = ns.Import
+    stops_in, _ = I.Parse("/way Durotar 52.0 41.0 Razor Hill\n/way Elwynn Forest 43.2 65.1 Goldshire-ish", None)
+    text, skipped = I.ExportText(stops_in)
+    assert skipped == 0
+    lines = text.split("\n")
+    assert lines[0].startswith("/way Durotar 52.0 41.0") and lines[0].endswith("Razor Hill")
+    assert lines[1].startswith("/way Elwynn Forest 43.2 65.1")
+    back, errors = I.Parse(text, None)
+    assert len(list(errors.values())) == 0 and len(back) == 2
+    for i in (1, 2):
+        a, b = stops_in[i], back[i]
+        assert (a.x, a.y) == pytest.approx((b.x, b.y), abs=5)  # rounded to 0.1% of a zone: a few yards
+        assert a.cont == b.cont and a.name == b.name
+
+
+def test_export_a_stop_down_in_undercity(importer):
+    # (reported: "No route to copy") a stop on the city's level is written on its map
+    lua, ns = importer
+    I = ns.Import
+    ns.CityLevels = lua.eval('{ [10001] = { base = 0, name = "Undercity", map = 1458 } }')
+    bank = lua.eval('{ { x = 1595.6, y = 232.5, cont = 10001, name = "Undercity Bank" } }')
+    text, skipped = I.ExportText(bank)
+    assert skipped == 0 and text.startswith("/way Undercity ") and text.endswith("Undercity Bank")
+
+
+def test_share_route_in_game_messages(importer):
+    lua, ns = importer
+    I = ns.Import
+    stops_in, _ = I.Parse("/way Durotar 52.0 41.0 Razor Hill\n/way Durotar 45.0 10.0", None)
+    msgs = I.ShareMessages(stops_in, "ab12")
+    assert len(msgs) == 2 and all(len(msgs[i]) < 255 for i in (1, 2))
+    # arrives out of order; a broken message and someone else's are ignored
+    assert I.Receive("garbage", "Friend", 0) is None
+    assert I.Receive(msgs[2], "Friend", 0) is None
+    assert I.Receive("1\tab12\t1\t2\t99\t0\t0\tbad continent", "Friend", 1) is None
+    got = I.Receive(msgs[1], "Friend", 1)
+    assert got is not None and len(got) == 2
+    assert got[1].name == "Razor Hill" and got[2].name == stops_in[2].name
+    assert abs(got[1].x - stops_in[1].x) < 0.1 and got[1].cont == stops_in[1].cont
+    # a stop from long ago doesn't complete a new route
+    assert I.Receive(msgs[2], "Other", 0) is None
+    assert I.Receive(msgs[1], "Other", 100) is None
+
+
+
+def test_routes_are_shared_as_chat_links(importer):
+    # (asked 2026-10-02) sharing puts a short link in the chat box, sent by the player; nothing pops up
+    # unasked: the route's stops go only to who clicks the link, and only routes asked for are offered
+    lua, ns = importer
+    I = ns.Import
+    sent, offered = [], []
+    real_send, real_offer = I.io.send, I.Offer
+    lua.execute("""AGPS_OLD_CHAT = { ChatFrame_OpenChat, ChatEdit_GetActiveWindow, UnitName }
+      ChatFrame_OpenChat = function(t) AGPS_OPENED = t end
+      ChatEdit_GetActiveWindow = function() return nil end
+      UnitName = function() return "Tester" end""")
+    printed, real_print = [], ns.Print
+    ns.Print = lambda *a: printed.append(" ".join(str(x) for x in a))
+    try:
+        I.io.send = lambda prefix, msg, channel, target: sent.append((msg, channel, target))
+        I.Offer = lambda sender, stops: offered.append((sender, len(stops)))
+        stops, _ = I.Parse("/way Durotar 52.0 41.0 Razor Hill\n/way Durotar 45.0 10.0", None)
+        ns.Nav.SetStops(stops)
+        assert I.Send("WHISPER", "Ann")[1] and lua.eval("AGPS_OPENED").startswith("/w Ann [AzerothGPS Route ")
+        n, rid = I.Send("PARTY", None)
+        tag = lua.eval("AGPS_OPENED")
+        assert n == 2 and tag == "/p [AzerothGPS Route %s: 2 stops]" % rid and not sent
+        # someone without AzerothGPS reads the short line; with it, a link to ask "Tester" for the route
+        line = I.LinkifyRoutes("look " + tag[3:] + " here", "Tester")
+        assert "|Haddon:AzerothGPS:route:%s:Tester|h[AzerothGPS Route: 2 stops]|h" % rid in line and line.startswith("look ")
+        assert I.LinkifyRoutes("no route here", "Tester") == "no route here"
+        # your own link clicked: nothing asked
+        assert I.OnRouteLink("addon:AzerothGPS:route:%s:Tester" % rid) and not sent and "your route" in printed[-1]
+        assert not I.OnRouteLink("item:6948")
+        # Bob clicks it: his ask is answered with the stops, to him only; asking again at once isn't
+        I.OnAddonMessage("AzerothGPS", "?\t" + rid, "WHISPER", "Bob-Realm")
+        assert len(sent) == 2 and all(c == "WHISPER" and t == "Bob-Realm" for _, c, t in sent)
+        I.OnAddonMessage("AzerothGPS", "?\t" + rid, "WHISPER", "Bob-Realm")
+        I.OnAddonMessage("AzerothGPS", "?\tabcdef", "WHISPER", "Cat")  # (a route never linked)
+        I.OnAddonMessage("AzerothGPS", "?\t" + rid, "PARTY", "Cat")  # (asks only by whisper)
+        assert len(sent) == 2
+        route = [m for m, _, _ in sent]
+        # stops nobody asked for are ignored (the old way: a route pushed at you)
+        for m in route:
+            I.OnAddonMessage("AzerothGPS", m, "WHISPER", "Dan")
+        assert not offered
+        # clicking Dan's link asks him; his answer is offered, someone else's isn't
+        sent.clear()
+        assert I.OnRouteLink("addon:AzerothGPS:route:%s:Dan-Realm" % rid)
+        assert sent == [("?\t" + rid, "WHISPER", "Dan-Realm")] and "Asking Dan-Realm" in printed[-1]
+        for m in route:
+            I.OnAddonMessage("AzerothGPS", m, "WHISPER", "Eve")
+        assert not offered
+        for m in route:
+            I.OnAddonMessage("AzerothGPS", m, "WHISPER", "Dan-Realm")
+        assert offered == [("Dan-Realm", 2)]
+        for m in route:  # (once: the same again isn't)
+            I.OnAddonMessage("AzerothGPS", m, "WHISPER", "Dan-Realm")
+        assert len(offered) == 1
+        # only the last few routes linked are answered for
+        for _ in range(I.POSTED_MAX):
+            I.Send("PARTY", None)
+        sent.clear()
+        I.OnAddonMessage("AzerothGPS", "?\t" + rid, "WHISPER", "Fay")
+        assert not sent
+    finally:
+        I.io.send, I.Offer = real_send, real_offer
+        ns.Print = real_print
+        lua.execute("ChatFrame_OpenChat, ChatEdit_GetActiveWindow, UnitName = AGPS_OLD_CHAT[1], AGPS_OLD_CHAT[2], AGPS_OLD_CHAT[3]")
+
+def test_route_messages_keep_under_the_games_throttle(importer):
+    # (StreetView's finding, 2026-10-02: the game drops addon messages past 10 in a burst per prefix, then 1 a
+    # second, whispers outside instances excepted, result 3) in an instance, three raid members asking for an
+    # 8-stop route at once: every message arrives, in order, none dropped; outside, whispers go at once
+    lua, ns = importer
+    I = ns.Import
+    lua.execute("""
+      AGPS_OLD_Q = { GetTime, IsInInstance, UnitName, C_Timer }
+      AGPS_T = 1000 GetTime = function() return AGPS_T end
+      AGPS_INSIDE = true IsInInstance = function() return AGPS_INSIDE, AGPS_INSIDE and "raid" or "none" end
+      UnitName = function() return "Tester" end
+      C_Timer = { After = function() end }
+      -- the game: 10 in a burst per prefix, then 1 a second, past it refused (3) and dropped
+      AGPS_GOT, AGPS_REFUSED, AGPS_BUDGET, AGPS_AT = {}, 0, 10, AGPS_T
+      AGPS_GAME = function(prefix, msg, channel, target)
+        if channel ~= "WHISPER" or AGPS_INSIDE then
+          AGPS_BUDGET = math.min(10, AGPS_BUDGET + (AGPS_T - AGPS_AT)) AGPS_AT = AGPS_T
+          if AGPS_BUDGET < 1 then AGPS_REFUSED = AGPS_REFUSED + 1 return 3 end
+          AGPS_BUDGET = AGPS_BUDGET - 1
+        end
+        table.insert(AGPS_GOT, (target or "") .. "|" .. msg)
+        return 0
+      end
+    """)
+    real_send = I.io.send
+    try:
+        I.io.send = lua.eval("AGPS_GAME")
+        stops = lua.eval("{}")
+        for k in range(8):
+            stops[k + 1] = lua.eval(f"{{ x = 2250 + {k} * 10, y = 250, cont = 0, name = 'S{k + 1}' }}")
+        msgs = I.ShareMessages(stops, "abc123")
+        I.Post("abc123", msgs)
+        for who in ("Ann", "Bob", "Cat"):
+            I.OnAddonMessage("AzerothGPS", "?\tabc123", "WHISPER", who)
+        got = list(lua.eval("AGPS_GOT").values())
+        assert 0 < len(got) <= 10 and lua.eval("AGPS_REFUSED") == 0  # (a burst within the game's)
+        for _ in range(40):  # (a second at a time: the queue goes on as the throttle allows)
+            lua.execute("AGPS_T = AGPS_T + 1")
+            I.Pump()
+        got = list(lua.eval("AGPS_GOT").values())
+        assert len(got) == 24  # (all of them, none dropped)
+        for who in ("Ann", "Bob", "Cat"):
+            mine = [g.split("|", 1)[1] for g in got if g.startswith(who + "|")]
+            assert mine == [msgs[i] for i in range(1, 9)], who  # (in order)
+        # a refusal the queue didn't foresee (the server's own throttle, 8): tried again, not lost
+        lua.execute("AGPS_GOT = {} AGPS_BUDGET = 0 AGPS_AT = AGPS_T")
+        I.Queue("AzerothGPS", "one", "RAID", None)
+        assert len(lua.eval("AGPS_GOT")) == 0
+        lua.execute("AGPS_T = AGPS_T + 2")
+        I.Pump()
+        assert list(lua.eval("AGPS_GOT").values()) == ["|one"]
+        # outside instances whispers aren't throttled: all at once
+        lua.execute("AGPS_INSIDE = false AGPS_GOT = {}")
+        for who in ("Dan", "Eve", "Fay"):
+            I.OnAddonMessage("AzerothGPS", "?\tabc123", "WHISPER", who)
+        assert len(lua.eval("AGPS_GOT")) == 24
+    finally:
+        I.io.send = real_send
+        lua.execute("GetTime, IsInInstance, UnitName, C_Timer = AGPS_OLD_Q[1], AGPS_OLD_Q[2], AGPS_OLD_Q[3], AGPS_OLD_Q[4]")
+
+
+def test_route_across_pieces_of_the_road_network_uses_roads(nav_env):
+    # Durotar's roads and the ones near this Kalimdor spot aren't connected in the data;
+    # the route still follows roads, joining the pieces across the gaps
+    lua, ns = nav_env
+    r = ns.Router.Route(1, 1318.1, -4658.0, 5250.0, -2400.0, lua.eval("{}"))
+    assert r.road > 0.6 * r.length
+
+
+def test_fade_while_moving_target(env):
+    lua, ns = env
+    st = lua.eval("{ fadeMoving = true, movingAlpha = 0.4 }")
+    T = ns.GPS.FadeTarget
+    assert T(st, True, False, 1.0) == pytest.approx(0.4)
+    assert T(st, True, False, 0.8) == pytest.approx(0.5)  # a share of the map's own opacity
+    assert T(st, False, False, 1.0) == 1  # standing still
+    assert T(st, True, True, 1.0) == 1  # pointing at the map
+    assert T(st, True, False, 0.3) == 1  # already fainter than the moving opacity
+    st.fadeMoving = False
+    assert T(st, True, False, 1.0) == 1
+
+
+def test_keep_current_route_when_recalculation_is_longer(nav_env):
+    lua, ns = nav_env
+    K = ns.Nav.KeepOld
+    old = lua.eval("{ totalYards = 1000, totalRide = 0 }")
+    longer = lua.eval("{ totalYards = 1400, totalRide = 0, pending = true }")
+    assert K(old, longer, 7.0, 0)  # provisional and longer: keep the current route
+    longer.pending = False
+    assert K(old, longer, 7.0, 0)  # final but longer: keep it for a while...
+    old.keptSince = 0
+    assert not K(old, longer, 7.0, 25)  # ...then take the new one
+    similar = lua.eval("{ totalYards = 1050, totalRide = 0 }")
+    assert not K(old, similar, 7.0, 0)  # about as long: just take it
+    shorter = lua.eval("{ totalYards = 800, totalRide = 0 }")
+    assert not K(old, shorter, 7.0, 0)
+    # rides count at walking speed
+    ride = lua.eval("{ totalYards = 600, totalRide = 200, pending = true }")
+    assert K(old, ride, 7.0, 0)
+
+
+def test_a_provisional_straight_line_never_stays_over_the_roads(nav_env):
+    # (reported) standing still a minute, the route became a straight line over the hills: each
+    # refresh's terrain search gave a provisional straight line (shorter), and when the roads
+    # came back worked out they were "clearly longer", so the straight line was kept
+    lua, ns = nav_env
+    K = ns.Nav.KeepOld
+    straight = lua.eval("{ totalYards = 633, totalRide = 0, pending = true }")
+    roads = lua.eval("{ totalYards = 1409, totalRide = 0 }")
+    assert not K(straight, roads, 7.0, 0)  # worked out: over a provisional one at once
+    assert K(roads, straight, 7.0, 0)  # and a provisional one doesn't replace it meanwhile
+
+
+def test_reroute_keeps_route_until_player_leaves_it(nav_env):
+    lua, ns = nav_env
+    lua.globals().AGPS_ROUTER = ns.Router
+    lua.execute("""
+      AGPS_T = 0
+      GetTime = function() return AGPS_T end
+      AGPS_LONG = false
+      AGPS_ROUTER.Route = function(cont, sx, sy, tx, ty)
+        if AGPS_LONG then
+          local mx, my = (sx + tx) / 2 + 400, (sy + ty) / 2 -- off to the side
+          local d = math.sqrt((mx - sx) ^ 2 + (my - sy) ^ 2) + math.sqrt((tx - mx) ^ 2 + (ty - my) ^ 2)
+          return { pts = { sx, sy, mx, my, tx, ty }, kinds = { 0, 0 }, length = d, road = d, pending = true }
+        end
+        local d = math.sqrt((tx - sx) ^ 2 + (ty - sy) ^ 2)
+        return { pts = { sx, sy, tx, ty }, kinds = { 0 }, length = d, road = d }
+      end
+    """)
+    ns.Nav.SetDestination(0.0, 1000.0, 1, "There")
+    r1 = ns.Nav.Route(0.0, 0.0, 1)
+    assert r1.totalYards == pytest.approx(1000, abs=1)
+    lua.execute("AGPS_LONG = true; AGPS_T = 25")  # a recalculation now would come out longer
+    ns.Nav.Invalidate(False)
+    r2 = ns.Nav.Route(0.0, 100.0, 1)  # still on the route
+    assert lua.eval("rawequal")(r2, r1) and r2.totalYards == pytest.approx(900, abs=1)
+    lua.execute("AGPS_T = 50")
+    ns.Nav.Invalidate(False)
+    r3 = ns.Nav.Route(300.0, 200.0, 1)  # walked well away from it: the new route is used
+    assert not lua.eval("rawequal")(r3, r1)
+
+
+def test_off_the_walk_to_the_road_the_route_is_worked_out_again(nav_env):
+    # (asked) the player's movement suggests a new point on the road to join: walking to the
+    # road but off the way drawn there (10 yd and more), the route is worked out from them again
+    lua, ns = nav_env
+    lua.globals().AGPS_ROUTER = ns.Router
+    lua.execute("""
+      AGPS_T = 0
+      GetTime = function() return AGPS_T end
+      AGPS_ROUTER.Route = function(cont, sx, sy, tx, ty)
+        local d = math.sqrt((100 - sx) ^ 2 + sy ^ 2) + math.sqrt((tx - 100) ^ 2 + (ty - 0) ^ 2)
+        return { pts = { sx, sy, 100, 0, tx, ty }, kinds = { 1, 0 }, length = d, road = d - 100 }
+      end
+    """)
+    N = ns.Nav
+    N.SetDestination(100.0, 1000.0, 1, "There")
+    r1 = N.Route(0.0, 0.0, 1)
+    lua.execute("AGPS_T = 3")
+    assert lua.eval("rawequal")(N.Route(40.0, 5.0, 1), r1)  # near the way to the road: followed
+    lua.execute("AGPS_T = 6")
+    r2 = N.Route(60.0, 20.0, 1)  # off it (20 yd): from here again
+    assert not lua.eval("rawequal")(r2, r1) and (r2.pts[1], r2.pts[2]) == (60.0, 20.0)
+    lua.execute("AGPS_T = 9")
+    r3 = N.Route(115.0, 300.0, 1)  # along the road itself, a little off it: followed
+    assert lua.eval("rawequal")(r3, r2)
+
+
+def test_the_route_joins_the_road_where_its_heading(env):
+    # (asked) south of Brill, heading west: the route went out to the road's nearest point to
+    # the east and back round. Now it walks round the houses' fences and onto the road where
+    # it's heading (without the offroad option, which is gone)
+    lua, ns, at = tirisfal_env(env)
+    P = ns.Passability
+    s, t = at(60.5, 54.7), at(50.0, 50.0)
+    r = ns.Router.Route(0, *s, *t, lua.table(offroad=False))
+    pts, kinds = route_pts(r)
+    k = list(kinds).index(0)  # (the first road point)
+    assert pts[k][1] > at(59.5, 0)[1]  # joined west of Brill's fences, not east of the start
+    assert r.length < 580  # (was 606)
+    for i in range(k):  # the walk to the road: over open ground
+        assert P.SegmentCost(0, *pts[i], *pts[i + 1]) is not None
+
+
+def test_a_short_walk_over_open_ground_isnt_sent_along_a_bit_of_road(env):
+    # (reported) north of a junction west of Stillwater Pond: 58 yd back to the junction, 88 yd up
+    # the road and 190 yd off it again to the stop (322 yd, most of it off the road anyway),
+    # when the stop was 201 yd straight over open ground
+    lua, ns, at = tirisfal_env(env)
+    s, t = at(43.9, 47.6), at(44.55, 41.0)
+    assert ns.Passability.SegmentCost(0, *s, *t) is not None
+    r = ns.Router.Route(0, *s, *t, lua.table(offroad=False))
+    pts, _ = route_pts(r)
+    assert len(pts) == 2 and r.length < 205
+
+
+def test_the_offroad_option_is_gone(env):
+    # (asked) no offroad toggle: routes always keep to the roads, joining them where they're heading
+    addon = Path(__file__).parents[2] / "addon" / "AzerothGPS"
+    for f in ("Core.lua", "Config.lua", "Options.lua", "GPSFrame.lua"):
+        text = (addon / f).read_text(encoding="utf-8")
+        assert "Off-road" not in text and "Off-Road" not in text and "/agps offroad" not in text, f
+    core = (addon / "Core.lua").read_text(encoding="utf-8")
+    assert "if gps then gps.offroad = nil end" in core  # (a saved setting cleared)
+
+
+def test_a_route_option_changed_works_the_trip_out_again_at_once(nav_env):
+    # (asked) toggling flight paths, the hearthstone, teleports or the zones avoided: the route is
+    # worked out again right away (a longer one isn't held back while on the old), the stops put
+    # in the fastest order again, and the map redrawn now
+    lua, ns = nav_env
+    lua.globals().AGPS_ROUTER = ns.Router
+    lua.execute("""
+      AGPS_T = 0
+      GetTime = function() return AGPS_T end
+      AGPS_LONG = false
+      AGPS_ROUTER.Route = function(cont, sx, sy, tx, ty)
+        if AGPS_LONG then
+          local mx, my = (sx + tx) / 2 + 400, (sy + ty) / 2
+          local d = math.sqrt((mx - sx) ^ 2 + (my - sy) ^ 2) + math.sqrt((tx - mx) ^ 2 + (ty - my) ^ 2)
+          return { pts = { sx, sy, mx, my, tx, ty }, kinds = { 0, 0 }, length = d, road = d }
+        end
+        local d = math.sqrt((tx - sx) ^ 2 + (ty - sy) ^ 2)
+        return { pts = { sx, sy, tx, ty }, kinds = { 0 }, length = d, road = d }
+      end
+    """)
+    N = ns.Nav
+    ns.settings = lua.eval("{ gps = { fastestOrder = true } }")
+    N.SetDestination(0.0, 1000.0, 1, "There")
+    r1 = N.Route(0.0, 0.0, 1)
+    redrawn, ordered = [], []
+    ns.GPS.Redraw = lambda: redrawn.append(1)
+    lua.execute("AGPS_LONG = true; AGPS_T = 5")
+    N.Invalidate()  # (a search finished: a longer route is held back while on the old one)
+    assert lua.eval("rawequal")(N.Route(0.0, 50.0, 1), r1)
+    N.OptionsChanged()  # (the player turned something off: the new one at once)
+    r2 = N.Route(0.0, 60.0, 1)
+    assert not lua.eval("rawequal")(r2, r1) and r2.totalYards > 1100
+    assert redrawn
+    N.stops = lua.eval("{ { x = 0, y = 1000, cont = 1 }, { x = 0, y = 500, cont = 1 } }")
+    real = N.OrderStops
+    N.OrderStops = lambda *a: ordered.append(1)
+    try:
+        N.OptionsChanged()
+        assert ordered  # several stops, fastest order: put in order again
+        ns.settings.gps.fastestOrder = False
+        ordered.clear()
+        N.OptionsChanged()
+        assert not ordered
+    finally:
+        N.OrderStops = real
+    opts = (Path(__file__).parents[2] / "addon" / "AzerothGPS" / "Options.lua").read_text(encoding="utf-8")
+    for key in ("avoidHighZones", "useFlights", "useHearthstone", "useTeleports", "avoidHostile"):
+        at = opts.index(f"GPS().{key} = v")
+        assert "ns.Nav.OptionsChanged()" in opts[at:at + 120], key
+
+
+def test_collapsed_steps_show_only_the_trip_times(env):
+    lua, ns = env
+    C = ns.GPS.CollapsedStatus
+    assert C("1/3  574 yd\nAll stops: Walk 5m 02s    Mount 3m 10s") == "All stops: Walk 5m 02s    Mount 3m 10s"
+    assert C("Arrived") == "Arrived"
+    assert C(None) == ""
+
+
+def test_offroad_joins_the_road_partway_along(env):
+    # From south of Brill toward Silverpine: cut across to where the road is heading
+    # rather than first going to the nearest junction (about half the distance here).
+    lua, ns, _ = tirisfal_env(env)
+    P = ns.Passability
+    r = ns.Router.Route(0, 2038.5, 113.9, 908.6, 630.1, lua.table(offroad=False))
+    # (the straight line is blocked now; the far gap links are picked by place, so the route doesn't
+    # change with roads edited across the continent: 2,242 yd, with either data set)
+    assert r.length < 1.9 * math.dist((2038.5, 113.9), (908.6, 630.1))
+    pts, kinds = route_pts(r)
+    for i, k in enumerate(kinds):
+        if k == 1 and 0 < i < len(kinds) - 1:  # (the ends' legs have their own slack: a stop on rocky ground)
+            assert P.SegmentCost(0, *pts[i], *pts[i + 1]) is not None, (pts[i], pts[i + 1])
+
+
+def flights_env(nav_env, known):
+    lua, ns = nav_env
+    load(lua, ns, "Data/Pois.lua", "Data/Flights.lua")
+    nodes = "".join(f"{{ nodeID = {n}, known = true }}," for n in known)
+    ns.CharDB = lua.eval("function(store) return function() return store end end")(
+        lua.eval(f"{{ taxiNodes = {{ [1415] = {{ nodes = {{ {nodes} }} }} }}, flights = {{}} }}"))
+    ns.Nav.FlightsChanged()
+    return lua, ns
+
+
+def test_route_takes_a_known_flight(nav_env):
+    lua, ns = flights_env(nav_env, [11, 17])  # Undercity, Hammerfall
+    lua.execute("function AGPS_STOP(x, y) return { x = x, y = y, cont = 0 } end")
+    legs, secs = ns.Nav.Plan(0, 1560.0, 260.0, 7.0, lua.eval("AGPS_STOP")(-910.0, -3490.0))
+    kinds = [("fly " + legs[i].ride[10]) if legs[i].ride else "walk" for i in range(1, len(legs) + 1)]
+    assert kinds == ["walk", "fly Hammerfall, Arathi", "walk"]
+    assert secs < 400  # vs ~15 minutes on foot
+
+
+def test_a_flight_is_weighed_against_the_walk_as_routed(nav_env):
+    # (reported, /agps debug) level 14 from Brill into Arathi Highlands: the straight line over
+    # Lordamere Lake and Alterac planned a walk; routed, it went round by Silverpine (7.6k yd) right
+    # past the Sepulcher's flight master, and the flight there from Undercity wasn't taken
+    lua, ns = flights_env(nav_env, [10, 11])  # the Sepulcher, Undercity
+    load(lua, ns, "Data/Zones.lua", "Data/Terrain.lua", "Passability.lua", "Data/Cities.lua", "GPSFrame.lua")
+    ns.Router.Reset()
+    ns.Router.SYNC_WALKS = True
+    ns.settings = lua.eval("{ gps = {} }")
+    lua.execute("UnitLevel = function() return 14 end")
+    N = ns.Nav
+    N.SetDestination(-1441.0, -2332.0, 0, "Arathi")
+    r = N.Route(2254.0, 293.0, 0)
+    flights = [r.legs[i].ride[10] for i in range(1, len(r.legs) + 1) if r.legs[i].ride]
+    assert "The Sepulcher, Silverpine Forest" in flights
+    assert r.totalYards < 7000  # (on foot the whole way: 7.6k)
+
+
+def test_a_walk_still_being_searched_doesnt_decide_against_the_flight_for_good(nav_env):
+    # (reported) the flight came once, then after a stop elsewhere and back it didn't: a walk
+    # still being searched is provisional (about straight, short) and beat the flight, and that
+    # was remembered; used for now, it's decided again when the search is done
+    lua, ns = flights_env(nav_env, [10, 11])
+    load(lua, ns, "Data/Zones.lua", "Data/Terrain.lua", "Passability.lua", "Data/Cities.lua", "GPSFrame.lua")
+    R, N = ns.Router, ns.Nav
+    R.Reset()
+    R.SYNC_WALKS = True
+    ns.settings = lua.eval("{ gps = {} }")
+    lua.execute("UnitLevel = function() return 14 end")
+    lua.globals().AGPS_R = R
+    lua.execute("""
+      AGPS_PENDING = true
+      local route = AGPS_R.Route
+      AGPS_R.Route = function(cont, sx, sy, tx, ty, opts)
+        if AGPS_PENDING and math.abs(sx - 2254) < 60 and math.abs(sy - 293) < 60 and tx == -1441 then -- (the walk the whole way, still searched; the comparison's from about there)
+          local d = math.sqrt((tx - sx) ^ 2 + (ty - sy) ^ 2)
+          return { pts = { sx, sy, tx, ty }, kinds = { 1 }, length = d, road = 0, pending = true }
+        end
+        return route(cont, sx, sy, tx, ty, opts)
+      end
+    """)
+    N.SetDestination(-1441.0, -2332.0, 0, "Arathi")
+
+    def flies():
+        r = N.Route(2254.0, 293.0, 0)
+        return any(r.legs[i].ride for i in range(1, len(r.legs) + 1))
+    # (the provisional walk is one straight line over blocked ground: never the route meanwhile. Since 2026-10-07
+    # the planner judges a walk still searched by that line (N.ProvisionalBlockedYards) and takes the flight at once)
+    assert flies()
+    lua.execute("AGPS_PENDING = false")
+    N.Invalidate(True)
+    assert flies()  # the search done: the flight
+
+
+def test_a_provisional_walk_with_no_better_way_is_shown_while_it_is_searched(nav_env):
+    # (the 2026-10-08 replay of the overnight trip sweep: 24 long trips more with no route after 45 s) a route still
+    # being searched whose line crosses blocked ground was held back unshown (Apply's draft guard, 2026-10-07, for
+    # Teldrassil): where nothing better comes, long trips said "Working out the route..." for 45 s and more. The
+    # planner takes a better way at once (the test above, Teldrassil's); with none, the provisional route shows
+    lua, ns = flights_env(nav_env, [])  # (no flight known: walking is the only way)
+    load(lua, ns, "Data/Zones.lua", "Data/Terrain.lua", "Passability.lua", "Data/Cities.lua", "GPSFrame.lua")
+    R, N = ns.Router, ns.Nav
+    R.Reset()
+    R.SYNC_WALKS = True
+    ns.settings = lua.eval("{ gps = {} }")
+    lua.execute("UnitLevel = function() return 14 end")
+    lua.globals().AGPS_R = R
+    lua.execute("""
+      AGPS_PENDING = true
+      local route = AGPS_R.Route
+      AGPS_R.Route = function(cont, sx, sy, tx, ty, opts)
+        if AGPS_PENDING and tx == -1441 then -- (every walk to the stop still searched: a straight line for now)
+          local d = math.sqrt((tx - sx) ^ 2 + (ty - sy) ^ 2)
+          return { pts = { sx, sy, tx, ty }, kinds = { 1 }, length = d, road = 0, pending = true }
+        end
+        return route(cont, sx, sy, tx, ty, opts)
+      end
+    """)
+    N.SetDestination(-1441.0, -2332.0, 0, "Arathi")
+    r = N.Route(2254.0, 293.0, 0)
+    assert r is not None and r.pending  # (shown, provisional; it failed here: None)
+    lua.execute("AGPS_PENDING = false")
+    N.Invalidate(True)
+    r = N.Route(2254.0, 293.0, 0)
+    assert r is not None and not r.pending  # (the search done: the walk as found)
+
+
+def test_a_zone_too_high_said_yes_to_isnt_asked_again_after_a_reload(nav_env):
+    # (reported) routing through a zone too high, asked and said yes to: after a /reload, with
+    # the route still on, the question came up again. The answers are saved with the stops.
+    lua, ns = nav_env
+    N = ns.Nav
+    N.redOk = lua.eval("{ [1417] = true }")  # (yes for Arathi Highlands)
+    N.SetStops(lua.eval("{ { x = -1441, y = -2332, cont = 0 } }"), False, "red")
+    N.redOk = lua.eval("{}")  # (a /reload: nothing in memory)
+    N.Restore()
+    assert N.redOk[1417] and len(N.stops) == 1
+    N.Clear()  # (a new route: asked again)
+    N.Restore()
+    assert not N.redOk[1417] and len(N.stops) == 0
+
+
+def _flight_env(nav_env, known):
+    lua, ns = flights_env(nav_env, known)
+    load(lua, ns, "Data/Zones.lua", "Data/Terrain.lua", "Passability.lua", "Data/Cities.lua", "GPSFrame.lua")
+    ns.Router.Reset()
+    ns.Router.SYNC_WALKS = True
+    ns.settings = lua.eval("{ gps = {} }")
+    lua.execute("UnitLevel = function() return 14 end")
+    return lua, ns
+
+
+def _flights(r):
+    out = []
+    for i in range(1, len(r.legs) + 1):
+        t = r.legs[i].ride
+        if t and t.pts:
+            out.append((t[9], t[10], [(round(t.pts[j]), round(t.pts[j + 1])) for j in range(1, len(t.pts) + 1, 2)]))
+    return out
+
+
+def test_a_flight_master_learned_on_the_way_is_flown_to(nav_env):
+    # (asked) Brill into Arathi at level 14: knowing Undercity and the Sepulcher, the flight to the
+    # Sepulcher and a long walk; Tarren Mill learned too, the flight to Tarren Mill instead, drawn
+    # as the dotted line from Undercity straight to it (the flight's own path)
+    lua, ns = _flight_env(nav_env, [10, 11, 13])  # the Sepulcher, Undercity, Tarren Mill
+    ns.Nav.SetDestination(-1441.0, -2332.0, 0, "Arathi")
+    r = ns.Nav.Route(2254.0, 293.0, 0)
+    (a, b, pts), = _flights(r)
+    assert (a, b) == ("Undercity, Tirisfal", "Tarren Mill, Hillsbrad") and len(pts) == 2
+    assert r.totalYards < 4000  # (via the Sepulcher: 6.4k on foot)
+
+
+def test_a_flight_master_passed_on_the_way_is_recommended(nav_env):
+    # (asked) the walk from the Sepulcher into Arathi goes by Tarren Mill's flight master, not
+    # learned yet: a detour to learn it (a step where the walk passes it, a brown line on the map;
+    # the next trips may fly there); learned, not
+    lua, ns = _flight_env(nav_env, [10, 11])
+    N = ns.Nav
+    ns.CharDB().faction = "Horde"
+    N.SetDestination(-1441.0, -2332.0, 0, "Arathi")
+    r = N.Route(2254.0, 293.0, 0)
+    (hint,) = N.LearnOnRoute(r).values()
+    assert hint.name == "Tarren Mill" and 350 < hint.off < 450
+    assert (hint.x, hint.y) == (-0.1, -859.9) and hint.rx and hint.ry
+    # (the walk from the Sepulcher split where it passes: walk, detour, the rest of the walk)
+    steps = [N.Steps()[i] for i in range(1, len(N.Steps()) + 1)]
+    k = next(i for i, t in enumerate(steps) if "learn the flight path at Tarren Mill" in t)
+    assert steps[k].startswith("|cffc08040Detour") and steps[k - 1].startswith("Walk 3.") and steps[k + 1].startswith("Walk 2.")
+    assert steps[k - 2].startswith("Take the flight to The Sepulcher")
+    assert "learn the flight path" not in N.Status(2254.0, 293.0, 0)
+    ns.CharDB().faction = "Alliance"  # (not their faction's: Southshore's instead, near that walk too; not an obsolete "zzOLD" one)
+    r.learnAt = None
+    names = [h.name for h in N.LearnOnRoute(r).values()]
+    assert "Southshore" in names and "Tarren Mill" not in names and not any(n.startswith("zz") for n in names)
+    lua, ns = _flight_env(nav_env, [10, 11, 13])  # (learned)
+    ns.CharDB().faction = "Horde"
+    ns.Nav.SetDestination(-1441.0, -2332.0, 0, "Arathi")
+    r = ns.Nav.Route(2254.0, 293.0, 0)
+    assert "Tarren Mill" not in [h.name for h in (ns.Nav.LearnOnRoute(r) or lua.table()).values()]
+
+
+def test_every_flight_master_passed_is_a_detour_and_the_flight_is_still_taken(nav_env):
+    # (reported) toward Hammerfall: only one flight master to learn was suggested (Tarren Mill's
+    # too, on the way), its detour came as step 1 before an 8.6k yd walk, and the route walked from
+    # Brill all the way (the plan with a ride, asked for, walked to the flight master and on: no
+    # ride in it to compare). Each detour where the walk passes it; one at the walk's end, after it.
+    lua, ns = _flight_env(nav_env, [10, 11])
+    N = ns.Nav
+    ns.CharDB().faction = "Horde"
+    N.SetDestination(-1300.0, -3400.0, 0, "Hammerfall way")
+    r = N.Route(2254.0, 293.0, 0)
+    assert [h.name for h in N.LearnOnRoute(r).values()] == ["Tarren Mill", "Hammerfall"]
+    steps = [N.Steps()[i] for i in range(1, len(N.Steps()) + 1)]
+    assert any("Take the flight to The Sepulcher" in t for t in steps)
+    tm = next(i for i, t in enumerate(steps) if "at Tarren Mill" in t)
+    hf = next(i for i, t in enumerate(steps) if "at Hammerfall" in t)
+    assert steps[tm - 1].startswith("Walk ") and steps[tm + 1].startswith("Walk ") and "Hammerfall way" in steps[tm + 1]
+    assert hf == len(steps) - 1  # (at the walk's end: after it)
+    assert not any(t.startswith("Walk 2 yd") for t in steps)
+
+
+def test_a_connecting_flight_is_drawn_through_its_stops(nav_env):
+    # (asked) Undercity to Hammerfall: the direct path known only its ends; with Tarren Mill known
+    # the flight goes through it (faster), and the dotted line goes through it too
+    for known, via in (([11, 17], 2), ([11, 13, 17], 3)):
+        lua, ns = _flight_env(nav_env, known)
+        ns.Nav.SetDestination(-1000.0, -3500.0, 0, "Hammerfall")
+        r = ns.Nav.Route(2254.0, 293.0, 0)
+        (a, b, pts), = _flights(r)
+        assert (a, b) == ("Undercity, Tirisfal", "Hammerfall, Arathi") and len(pts) == via, (known, pts)
+
+
+def test_a_bit_of_blocked_ground_on_both_ways_doesnt_send_the_route_back_by_air(nav_env):
+    # (reported) from a stop by Hammerfall to the Wetlands: walk to Hammerfall's flight master (not
+    # learned), fly back to the Sepulcher and walk all the way down again. Both walks crossed the
+    # same stretch the terrain calls blocked (Thandol Span), each ruled "no walk", and the tie went
+    # to the ride. Blocked yards are weighed (the router's cost), not ruled out.
+    lua, ns = _flight_env(nav_env, [10, 11])
+    N = ns.Nav
+    ns.CharDB().faction = "Horde"
+    N.SetStops(lua.eval("{ { x = -1090, y = -3203, cont = 0 }, { x = -3780, y = -2750, cont = 0 } }"), False, "red")
+    r = N.Route(2254.0, 293.0, 0)
+    st2 = r.stretches[2]
+    assert st2 and not any(st2.legs[i].ride for i in range(1, len(st2.legs) + 1))
+
+
+def test_debug_tells_how_the_trip_was_planned(nav_env):
+    # (a flight not taken in game, taken offline: /agps debug says why) the level, the zones too
+    # high, the flight masters known, the plan and the walk straight there
+    lua, ns = flights_env(nav_env, [10, 11])  # the Sepulcher, Undercity
+    load(lua, ns, "Data/Zones.lua", "GPSFrame.lua")
+    ns.settings = lua.eval("{ gps = {} }")
+    lua.execute("UnitLevel = function() return 14 end UnitPosition = function() return 290.0, 2060.0, 0, 0 end")
+    ns.Nav.SetDestination(-1050.0, -750.0, 0, "Arathi")
+    text = ns.Nav.DescribePlan()
+    assert "level=14" in text and "Arathi Highlands" in text and "flight masters known=2" in text
+    assert "plan " in text and "walk straight there" in text
+
+
+def test_a_flight_beats_a_walk_through_zones_too_high(nav_env):
+    # (reported) level 13 from Tarren Mill into Western Plaguelands: the straight line looked a short
+    # walk (over Alterac Mountains, 30-40), so no flight; the walk then went the long way round.
+    # Planning weighs those yards as the router does (not the zones a walk starts and ends in).
+    lua, ns = flights_env(nav_env, [11, 13])  # Undercity, Tarren Mill
+    load(lua, ns, "Data/Zones.lua", "GPSFrame.lua")
+    ns.settings = lua.eval("{ gps = {} }")
+    stop = lua.eval("{ x = 1993.0, y = -967.0, cont = 0 }")
+
+    def flies():
+        legs, _ = ns.Nav.Plan(0, -20.0, -900.0, 7.0, stop)
+        return any(legs[i].ride for i in range(1, len(legs) + 1))
+    lua.execute("UnitLevel = function() return 60 end")
+    assert not flies()  # (Alterac's fine at 60: the walk)
+    lua.execute("UnitLevel = function() return 13 end")
+    assert flies()
+
+
+def test_planning_doesnt_walk_through_a_zone_too_high_by_a_dock_in_it(nav_env):
+    # (reported: to Hillsbrad at level 13, offroad on or off, the same way) the plan split the walk
+    # at a transport's end in Alterac Mountains (too high), which made Alterac a walk's end and so
+    # not charged: 1.6k yd through it. Only the trip's own ends are exempt.
+    lua, ns = nav_env
+    load(lua, ns, "Data/Terrain.lua", "Passability.lua", "Data/Cities.lua", "Data/Zones.lua", "GPSFrame.lua")
+    R, N = ns.Router, ns.Nav
+    R.Reset()
+    R.SYNC_WALKS = True
+    ns.settings = lua.eval("{ gps = {} }")
+    lua.execute("UnitLevel = function() return 13 end")
+    alterac = next(k for k in ns.Maps.keys() if ns.Maps[k].name == "Alterac Mountains" and ns.Maps[k].type == 3)
+    stop = lua.table(x=-700.0, y=-600.0, cont=0)  # Hillsbrad (too high too: the stop's own zone)
+    legs, _ = N.Plan(0, 1594.9, 290.8, 7.0, stop)
+    assert len(legs) == 1 and legs[1].walk  # (one walk: not two, split at a point in Alterac)
+    for off in (False, True):
+        ns.settings.gps.offroad = off
+        N.Clear()
+        N.SetDestination(-700.0, -600.0, 0, "stop")
+        r = N.Route(1594.9, 290.8, 0)
+        through = 0
+        for i in range(1, len(r.parts) + 1):
+            p = r.parts[i]
+            for k in range(1, len(p.pts) - 2, 2):
+                through += R.ZoneYards(0, p.pts[k], p.pts[k + 1], p.pts[k + 2], p.pts[k + 3])[alterac] or 0
+        assert through < 100, (off, through)
+
+
+def test_connecting_flight_and_option_off(nav_env):
+    # Sepulcher to Light's Hope has no direct flight: one flight, connecting at Undercity
+    lua, ns = flights_env(nav_env, [10, 11, 68])
+    stop = lua.eval("{ x = 2320.0, y = -5280.0, cont = 0 }")
+    legs, _ = ns.Nav.Plan(0, 480.0, 1530.0, 7.0, stop)
+    rides = [legs[i].ride for i in range(1, len(legs) + 1) if legs[i].ride]
+    assert len(rides) == 1 and rides[0][9].startswith("The Sepulcher") and rides[0][10].startswith("Light's Hope")
+    assert len(rides[0].pts) == 6  # via Undercity
+    ns.settings = lua.eval("{ gps = { useFlights = false } }")
+    ns.Nav.FlightsChanged()
+    legs, _ = ns.Nav.Plan(0, 480.0, 1530.0, 7.0, stop)
+    assert all(not legs[i].ride for i in range(1, len(legs) + 1))
+
+
+def _rides(legs):
+    return [legs[i].ride for i in range(1, len(legs) + 1) if legs[i].ride]
+
+
+def test_a_ride_left_out_is_not_taken_on_this_route(nav_env):
+    # (asked) right-click "Remove?" on a ride's pin: that zeppelin isn't taken again on this route
+    # (rerouting, after a /reload), and is back with a new route
+    lua, ns = nav_env
+    N = ns.Nav
+    N.SetDestination(1600.0, -4400.0, 1, "Orgrimmar")
+    zep = _rides(N.Plan(0, 1600.0, 240.0, 7.0)[0])[0]
+    assert zep[8] == "zeppelin"
+    key = N.RideKey(zep)
+    N.SkipRide(zep)
+    legs, _ = N.Plan(0, 1600.0, 240.0, 7.0)
+    assert legs and all(N.RideKey(t) != key for t in _rides(legs))
+    assert list(ns.CharDB().skipRides.values()) == [key]  # (saved with the stops)
+    N.skipRides = lua.eval("{}")
+    N.Restore()  # (a /reload)
+    assert N.skipRides[key]
+    assert all(N.RideKey(t) != key for t in _rides(N.Plan(0, 1600.0, 240.0, 7.0)[0]))
+    N.SetDestination(1600.0, -4400.0, 1, "Orgrimmar")  # (a new route: the ride back)
+    assert not N.skipRides[key]
+    assert N.RideKey(_rides(N.Plan(0, 1600.0, 240.0, 7.0)[0])[0]) == key
+    N.SkipRide(zep)
+    N.Clear()
+    assert not N.skipRides[key] and not ns.CharDB().skipRides
+
+
+def test_a_flight_connection_left_out_breaks_the_flights_over_it(nav_env):
+    # (asked) "Remove?" on a flight's pin leaves out that one connection between two flight masters:
+    # a flight connecting over it can't be taken either on this route ("so be it"), the others can
+    lua, ns = flights_env(nav_env, [10, 11, 68])
+    N = ns.Nav
+    load(lua, ns, "Turns.lua")
+    N.SetDestination(2320.0, -5280.0, 0, "Light's Hope")
+    stop = N.dest
+    r = N.Route(480.0, 1530.0, 0)
+    pins = N.RidePins(r)
+    titles = [pins[i].title for i in range(1, len(pins) + 1)]
+    assert len(titles) == 2  # Sepulcher to Undercity, Undercity to Light's Hope: one pin each
+    assert titles[0].startswith("Flight: The Sepulcher") and " to Undercity" in titles[0]
+    assert titles[1].startswith("Flight: Undercity") and " to Light's Hope" in titles[1]
+    assert pins[1].kind == "flight" and pins[2].hop == 2
+    N.SkipRide(pins[2].ride, pins[2].hop)
+    legs, _ = N.Plan(0, 480.0, 1530.0, 7.0, stop)
+    assert not any(t[10].startswith("Light's Hope") for t in _rides(legs))
+    # (the Sepulcher to Undercity still flies)
+    to_uc = _rides(N.Plan(0, 480.0, 1530.0, 7.0, lua.eval("{ x = 1560.0, y = 260.0, cont = 0 }"))[0])
+    assert len(to_uc) == 1 and to_uc[0][10].startswith("Undercity")
+    # (either way: Light's Hope to Undercity is the same connection)
+    back = _rides(N.Plan(0, 2270.0, -5340.0, 7.0, lua.eval("{ x = 1560.0, y = 260.0, cont = 0 }"))[0])
+    assert not any(t[9].startswith("Light's Hope") for t in back)
+
+
+def test_a_teleport_left_out_is_not_used_on_this_route(nav_env):
+    lua, ns = nav_env
+    N = ns.Nav
+    hearth = lua.eval("""{ { 0, 1560.0, 260.0, 0, -900.0, -3480.0, 10, "your Hearthstone", "", "Hammerfall", "your Hearthstone",
+      use = true, item = 6948 } }""")
+    stop = lua.eval("{ x = -910.0, y = -3490.0, cont = 0 }")
+    N.SetDestination(-910.0, -3490.0, 0, "Hammerfall")
+    assert N.RideKey(hearth[1]) == "u:i6948"
+    rides = _rides(N.Plan(0, 1560.0, 260.0, 7.0, stop, hearth)[0])
+    assert rides and rides[0].use
+    pins = N.RidePins(lua.eval("function(t) return { legs = { { ride = t, from = 1 } } } end")(hearth[1]))
+    assert len(pins) == 1 and pins[1].kind == "teleport" and pins[1].title == "Your Hearthstone to Hammerfall"
+    assert pins[1].x == -900.0  # (where it lands)
+    N.SkipRide(hearth[1])
+    assert not any(t.use for t in _rides(N.Plan(0, 1560.0, 260.0, 7.0, stop, hearth)[0]))
+
+def test_route_learns_a_new_flight_master_on_the_way(nav_env):
+    # Near Tarren Mill (not learned yet), to Undercity (known): walk to Tarren Mill, learn
+    # it and fly, rather than the long walk. Horde only; flights never land at unknown ones.
+    lua, ns = flights_env(nav_env, [11])
+    ns.CharDB().faction = "Horde"
+    ns.Nav.FlightsChanged()
+    stop = lua.eval("{ x = 1560.0, y = 260.0, cont = 0 }")
+    legs, secs = ns.Nav.Plan(0, 60.0, -800.0, 7.0, stop)
+    rides = [legs[i].ride for i in range(1, len(legs) + 1) if legs[i].ride]
+    assert len(rides) == 1 and rides[0].learn and rides[0][9].startswith("Tarren Mill")
+    assert rides[0][11] == "new flight master"
+    assert secs < 300
+    load(lua, ns, "Turns.lua")
+    ns.Nav.SetDestination(1560.0, 260.0, 0, "Undercity")
+    assert ns.Nav.Route(60.0, -800.0, 0)
+    steps = ns.Nav.StepsText(3)
+    assert "to the new flight master (Tarren Mill, Hillsbrad)" in steps
+    assert "Learn the flight path, then take the flight to Undercity, Tirisfal" in steps
+    ns.Nav.Clear()
+    ns.CharDB().faction = "Alliance"
+    ns.Nav.FlightsChanged()
+    legs, _ = ns.Nav.Plan(0, 60.0, -800.0, 7.0, stop)
+    assert all(not legs[i].ride for i in range(1, len(legs) + 1))
+    # to Tarren Mill itself: no flight lands there while it's unknown
+    ns.CharDB().faction = "Horde"
+    ns.Nav.FlightsChanged()
+    legs, _ = ns.Nav.Plan(0, 1560.0, 260.0, 7.0, lua.eval("{ x = 0.0, y = -860.0, cont = 0 }"))
+    assert all(not legs[i].ride for i in range(1, len(legs) + 1))
+
+
+@pytest.mark.parametrize("race,file,faction,flies", [
+    ("Windshaper Skyborne", "Skyborne", "Horde", True),
+    ("High Order Skyborne", "Skyborne", "Horde", True),
+    ("Tauren", "Tauren", "Horde", False),
+    ("Windshaper Skyborne", "Skyborne", "Alliance", False),
+])
+def test_horde_skyborne_know_thunder_bluff_and_orgrimmar_from_the_start(nav_env, race, file, faction, flies):
+    """2026-11-08: Horde Skyborne (WoW Forever's race, "Skyborne" in the game's data) know the flight from
+    Thunder Bluff to Orgrimmar by default; with no flight map seen yet it was a walk across the Barrens."""
+    lua, ns = flights_env(nav_env, [])
+    lua.execute(f"UnitRace = function() return '{race}', '{file}', 99 end "
+                f"UnitFactionGroup = function() return '{faction}' end")
+    ns.Nav.FlightsChanged()
+    known = ns.Nav.KnownFlightNodes()[0]
+    assert bool(known[22] and known[23]) == flies
+    legs, _ = ns.Nav.Plan(1, -1197.2, 29.7, 7.0, lua.eval("{ x = 1677.6, y = -4315.7, cont = 1 }"))
+    rides = [legs[i].ride[10] for i in range(1, len(legs) + 1) if legs[i].ride]
+    assert (rides == ["Orgrimmar, Durotar"]) == flies, rides
+
+
+def test_no_flights_without_known_flight_masters(nav_env):
+    lua, ns = flights_env(nav_env, [])
+    legs, _ = ns.Nav.Plan(0, 1560.0, 260.0, 7.0, lua.eval("{ x = -910.0, y = -3490.0, cont = 0 }"))
+    assert all(not legs[i].ride for i in range(1, len(legs) + 1))
+
+
+def test_flight_in_route_steps_and_directions(nav_env):
+    lua, ns = flights_env(nav_env, [11, 17])
+    load(lua, ns, "Turns.lua")
+    ns.Nav.SetDestination(-910.0, -3490.0, 0, "Hammerfall")
+    r = ns.Nav.Route(1350.0, 150.0, 0)  # a walk from the flight master
+    assert r and r.rideSeconds > 0
+    steps = ns.Nav.StepsText(3)
+    assert "to the flight master (Undercity, Tirisfal)" in steps
+    assert "Take the flight to Hammerfall, Arathi" in steps
+    status = ns.Nav.Status(1350.0, 150.0, 0)
+    assert "to the flight master (then to Hammerfall, Arathi)" in status
+
+
+def test_route_while_flying_waits_for_the_landing(nav_env):
+    lua, ns = flights_env(nav_env, [10, 11])  # The Sepulcher, Undercity
+    lua.execute("""
+      AGPS_FLYING = { from = "The Sepulcher, Silverpine Forest", to = "Undercity, Tirisfal", start = 0 }
+      AGPS_TAXI = { Current = function() return AGPS_FLYING end }
+    """)
+    ns.Taxi = lua.eval("AGPS_TAXI")
+    ns.Nav.SetDestination(1400.0, 150.0, 0, "Past Undercity")
+    r = ns.Nav.Route(900.0, 1000.0, 0)  # in the air over Silverpine
+    assert r.flying and r.flying.to == "Undercity, Tirisfal"
+    assert (r.pts[1], r.pts[2]) == (900.0, 1000.0)  # the flight's line starts at the player
+    assert r.legs[1].ride.flying and r.rideSeconds >= r.flying.seconds
+    assert "Flying to Undercity, Tirisfal" in ns.Nav.Status(900.0, 1000.0, 0)
+    assert "Flying to Undercity, Tirisfal" in ns.Nav.StepsText(3)
+    # further along: the same route, the line shorter; nothing recalculated
+    r2 = ns.Nav.Route(1200.0, 700.0, 0)
+    assert r2.flying and (r2.pts[1], r2.pts[2]) == (1200.0, 700.0)
+    # landed: an ordinary route again
+    lua.execute("AGPS_FLYING = nil")
+    r3 = ns.Nav.Route(1568.0, 268.0, 0)
+    assert not r3.flying
+
+
+def test_brill_to_gromgol_takes_the_direct_zeppelin(nav_env):
+    # (seen 2026-10-02) the Brill - Grom'gol zeppelin's time was its 16k-yard path at an assumed speed (666 s; the
+    # server's timetable rides it in 106.5 s), so routes took two zeppelins by way of Durotar; every transport with
+    # the server's timetable is planned at its ride plus the average wait
+    lua, ns = nav_env
+    rides = []
+    for i in range(1, len(ns.Transports) + 1):
+        t = ns.Transports[i]
+        if t.server:
+            assert abs(t[7] - ((t.ride1 + t.ride2) / 2 + 120)) <= 1, (t[9], t[10], t[7])
+    legs, _ = ns.Nav.Plan(0, 2254.0, 293.0, 7.0, lua.eval("{ x = -12420.0, y = 200.0, cont = 0 }"))
+    for i in range(1, len(legs) + 1):
+        t = legs[i].ride
+        if t:
+            rides.append((t[9], t[10]))
+    assert rides == [("Grom'gol Base Camp, Stranglethorn Vale", "Brill, Tirisfal Glades")], rides
+
+
+def test_a_zeppelin_turned_off_is_never_in_a_route(nav_env):
+    # (asked 2026-10-03) a zeppelin, boat or the tram turned off (right-click its dock, or Options → Routing) isn't
+    # used in any route until it's turned on again; kept by its kind and ends (account-wide settings)
+    lua, ns = nav_env
+    ns.settings = lua.eval("{ gps = {} }")
+    N = ns.Nav
+    gromgol = next(ns.Transports[k] for k in range(1, len(ns.Transports) + 1)
+                   if ns.Transports[k][9] == "Grom'gol Base Camp, Stranglethorn Vale" and ns.Transports[k][10] == "Brill, Tirisfal Glades")
+
+    def rides():
+        legs, _ = N.Plan(0, 2254.0, 293.0, 7.0, lua.eval("{ x = -12420.0, y = 200.0, cont = 0 }"))
+        return [(legs[i].ride[9], legs[i].ride[10]) for i in range(1, len(legs) + 1) if legs[i].ride]
+
+    assert rides() == [("Grom'gol Base Camp, Stranglethorn Vale", "Brill, Tirisfal Glades")]
+    assert N.RideAllowed(gromgol)
+    N.SetRideAllowed(gromgol, False)
+    assert not N.RideAllowed(gromgol)
+    assert ns.settings.gps.ridesOff["zeppelin:Grom'gol Base Camp, Stranglethorn Vale|Brill, Tirisfal Glades"]
+    assert ("Grom'gol Base Camp, Stranglethorn Vale", "Brill, Tirisfal Glades") not in rides()  # (by way of Durotar)
+    N.SetRideAllowed(gromgol, True)
+    assert N.RideAllowed(gromgol) and len(ns.settings.gps.ridesOff) == 0
+    assert rides() == [("Grom'gol Base Camp, Stranglethorn Vale", "Brill, Tirisfal Glades")]
+
+
+def test_a_flight_out_through_undercity_is_flown_not_rerouted(nav_env):
+    # (reported 2026-10-02, a video: the bat from Undercity flies through the city and its sewers, where the game
+    # puts the player on Undercity's map, and the route kept going back to the flight master, "151 yd... 328 yd to
+    # the flight master", until out in Tirisfal) on the city's level, the flight is the route too
+    lua, ns = _flight_env(nav_env, [10, 11])  # The Sepulcher, Undercity
+    lua.execute("""
+      AGPS_FLYING = { from = "Undercity, Tirisfal", to = "The Sepulcher, Silverpine Forest", start = 0 }
+      AGPS_TAXI = { Current = function() return AGPS_FLYING end }
+    """)
+    ns.Taxi = lua.eval("AGPS_TAXI")
+    N = ns.Nav
+    N.SetDestination(400.0, 1200.0, 0, "Past the Sepulcher")
+    for x, y in ((1595.0, 240.0), (1510.0, 160.0)):  # (in the city, then in its sewers: its level, 10001)
+        r = N.Route(x, y, 10001)
+        assert r and r.flying and r.flying.to == "The Sepulcher, Silverpine Forest", (x, y)
+        assert (r.pts[1], r.pts[2]) == (x, y)  # (the flight's line from the player)
+        assert "Flying to The Sepulcher" in N.Status(x, y, 10001)
+    r = N.Route(1300.0, 400.0, 0)  # (out over Tirisfal: the same flight)
+    assert r.flying
+
+
+def test_no_mount_time_without_riding(nav_env):
+    lua, ns = nav_env
+    lua.execute("""
+      AGPS_RANK = 0
+      GetNumSkillLines = function() return 1 end
+      GetSkillLineInfo = function() return "Riding", false, nil, AGPS_RANK end
+      AGPS_TAXI = false
+      UnitOnTaxi = function() return AGPS_TAXI end
+      GetUnitSpeed = function() return 32, 7, 7, 4.7 end
+      IsMounted = function() return AGPS_TAXI end
+    """)
+    lua.execute("AGPS_TAXI = true")  # on a flight: the game says mounted, at flight speed
+    _, _, mount, mounted, _ = ns.Nav.Speeds()
+    assert mount is None and not mounted
+    assert ns.CharDB().mountSpeed is None  # the flight's speed isn't kept as a mount's
+
+
+def test_movement_ability_time_shown_and_used_while_on(nav_env):
+    lua, ns = nav_env
+    lua.execute("""
+      AGPS_T = 0; GetTime = function() return AGPS_T end
+      GetNumSkillLines = function() return 0 end
+      UnitOnTaxi = function() return false end
+      IsMounted = function() return false end
+      AGPS_RUN = 7.35  -- (a 5% Speed stat)
+      GetUnitSpeed = function() return AGPS_RUN, AGPS_RUN, 7, 4.7 end
+      IsPlayerSpell = function(id) return id == 2645 end  -- a shaman with Ghost Wolf
+      AGPS_WOLF = false
+      C_UnitAuras = { GetPlayerAuraBySpellID = function(id) if AGPS_WOLF and id == 2645 then return {} end end }
+    """)
+    N = ns.Nav
+    cur, walk, mount, mounted, ab = N.Speeds()
+    assert walk == pytest.approx(7.35)  # the plain run speed, the Speed stat in it
+    assert ab.spell == 2645 and not ab.active
+    assert ab.speed == pytest.approx(7.35 * 1.4)  # estimated until seen
+    # turned on: the server's speed learned, and it's the walking speed now
+    lua.execute("AGPS_WOLF = true AGPS_RUN = 10.5 AGPS_T = 1")
+    cur, walk, mount, mounted, ab = N.Speeds()
+    assert ab.active and walk == pytest.approx(10.5)
+    assert ns.CharDB().moveSpeeds[2645] == pytest.approx(10.5)
+    # off again: walking at the plain speed, the wolf's learned time beside it
+    lua.execute("AGPS_WOLF = false AGPS_RUN = 7.35 AGPS_T = 2")
+    cur, walk, mount, mounted, ab = N.Speeds()
+    assert walk == pytest.approx(7.35) and not ab.active and ab.speed == pytest.approx(10.5)
+    # no ability known: none
+    lua.execute("IsPlayerSpell = function() return false end AGPS_T = 20")
+    assert N.MoveAbility() is None
+
+
+def test_cat_form_counts_only_with_feline_swiftness(nav_env):
+    lua, ns = nav_env
+    lua.execute("""
+      GetTime = function() return 0 end
+      AGPS_KNOWN = { [768] = true }
+      IsPlayerSpell = function(id) return AGPS_KNOWN[id] or false end
+    """)
+    assert ns.Nav.MoveAbility() is None  # Cat Form alone adds no speed
+    lua.execute("AGPS_KNOWN[24866] = true GetTime = function() return 30 end")  # Feline Swiftness rank 2
+    ab = ns.Nav.MoveAbility()
+    assert ab.spell == 768 and ab.speed == pytest.approx(7 * 1.3)
+
+
+def test_reorders_stops_when_another_order_becomes_clearly_faster(nav_env):
+    lua, ns = nav_env
+    lua.execute("AGPS_T = 100 GetTime = function() return AGPS_T end")
+    ns.settings = lua.eval("{ gps = { fastestOrder = true } }")
+    far, near = (-1500.0, -4700.0), (-600.0, -4180.0)
+    ns.Nav.SetStops(stops(lua, far, near))  # placed far first
+    assert ns.Nav.stops[1].x == far[0]
+    # the player is walking toward the near one: visiting it first is clearly faster
+    assert ns.Nav.MaybeReorder(-620.0, -4200.0, 1)
+    assert ns.Nav.stops[1].x == near[0] and ns.Nav.stops[2].x == far[0]
+    # right away again: not checked (every few seconds, after moving)
+    assert not ns.Nav.MaybeReorder(-620.0, -4200.0, 1)
+    # about as fast either way: the order stays
+    ns.Nav.SetStops(stops(lua, (-700.0, -4180.0), (-500.0, -4180.0)))
+    lua.execute("AGPS_T = 200")
+    assert not ns.Nav.MaybeReorder(-600.0, -3000.0, 1)
+
+
+def test_zephras_isle_has_map_data_and_a_way_there(nav_env):
+    lua, ns = nav_env
+    load(lua, ns, "Data/Minimap.lua")
+    assert len(list(ns.MinimapTiles[2991].keys())) > 50  # terrain view tiles
+    assert ns.Maps[2521].continent == 2991 and ns.Maps[2521].bounds
+    e, _ = ns.Router.Edges(2991)
+    assert len(e) > 50  # its roads
+    # from Mulgore, the zeppelin to the island
+    legs, _ = ns.Nav.Plan(1, -800.0, 360.0, 7.0, lua.eval("{ x = 2197.0, y = 772.0, cont = 2991 }"))
+    rides = [legs[i].ride for i in range(1, len(legs) + 1) if legs[i].ride]
+    assert rides and rides[0][10].endswith("Zephras Isle")
+
+
+def test_darnassus_s_teleporter_is_taken_like_a_lift_both_ways(nav_env):
+    # (asked 2026-10-07, for 1.1.5: the portal between Darnassus and Rut'theran Village "should be treated like a
+    # lift") a transport row from the client's AreaTriggers 527 and 542. The way with a ride (`direct` = math.huge, as
+    # the ride check asks) from Dolanaar to Rut'theran: walk to Darnassus, the teleporter down, walk on. It walked down
+    # the tree as the crow flies to the Rut'theran end, then up the teleporter and down again (each place had one label;
+    # with two, a ride there and back was the same walk in two)
+    lua, ns = nav_env
+    N = ns.Nav
+    rows = [t for t in ns.Transports.values() if t[8] == "teleporter" and t[1] == 1]
+    assert len(rows) == 1 and rows[0][9].endswith("Darnassus") and rows[0][10].startswith("Rut'theran Village")
+
+    def plan(start, stop):
+        legs, _ = N.Plan(1, start[0], start[1], 7.0, lua.eval("{ x = %.1f, y = %.1f, cont = 1 }" % stop), None, math.inf)
+        return [("walk",) if legs[i].walk else (legs[i].ride[8], legs[i]["from"]) for i in range(1, len(legs) + 1)]
+
+    dolanaar, bank, ruttheran = (9850.0, 950.0), (9900.0, 2370.0), (8605.0, 1000.0)
+    assert plan(dolanaar, ruttheran) == [("walk",), ("teleporter", 1), ("walk",)]
+    assert plan(bank, ruttheran) == [("walk",), ("teleporter", 1), ("walk",)]
+    assert plan(ruttheran, bank) == [("walk",), ("teleporter", 2), ("walk",)]
+    assert plan(ruttheran, dolanaar) == [("walk",), ("teleporter", 2), ("walk",)]
+
+
+def test_click_through_while_moving_or_in_combat(env):
+    lua, ns = env
+    W = ns.GPS.ClickThroughWanted
+    st = lua.eval("{ clickThroughMoving = true, clickThroughCombat = false }")
+    assert W(st, True, False) is True and W(st, False, True) is False and W(st, False, False) is False
+    st = lua.eval("{ clickThroughMoving = false, clickThroughCombat = true }")
+    assert W(st, True, False) is False and W(st, False, True) is True
+
+
+def test_search_places(nav_env):
+    lua, ns = nav_env
+    load(lua, ns, "Data/Pois.lua")
+    res = ns.GPS.SearchPlaces("razor", 8)
+    names = [res[i].name for i in range(1, len(res) + 1)]
+    assert names and names[0].startswith("Razor Hill")
+    assert len(ns.GPS.SearchPlaces("r", 8)) == 0  # needs 2+ letters
+    res = ns.GPS.SearchPlaces("zephras", 8)
+    assert any(res[i].cont == 2991 for i in range(1, len(res) + 1))
+
+
+def test_markers_skip_cross_and_skull(nav_env):
+    lua, ns = nav_env
+    icons = [ns.Nav.MarkerFor(k) for k in range(1, 9)]
+    assert 7 not in icons and 8 not in icons and icons[6:] == icons[:2]  # starts over after six
+
+
+def test_farming_loop_goes_round(nav_env):
+    lua, ns = nav_env
+    nodes = lua.eval("""{ { x = 0, y = 0, cont = 1, name = "Copper Vein" }, { x = 300, y = 0, cont = 1, name = "Copper Vein" },
+      { x = 300, y = 300, cont = 1, name = "Tin Vein" }, { x = 0, y = 300, cont = 1, name = "Copper Vein" } }""")
+    ns.Nav.SetLoop(nodes, -10.0, -10.0)
+    assert ns.Nav.loop and len(ns.Nav.stops) == 4 and (ns.Nav.stops[1].x, ns.Nav.stops[1].y) == (0, 0)
+    first = ns.Nav.stops[1]
+    ns.Nav.Status(1.0, 1.0, 1)  # at the first node: it goes to the end, on to the next
+    assert len(ns.Nav.stops) == 4 and lua.eval("rawequal")(ns.Nav.stops[4], first)
+    ns.Nav.Clear()
+    assert not ns.Nav.loop
+
+
+def test_shared_map_pin_becomes_a_stop(importer):
+    # A map pin link from chat ("worldmap:<map>:<x>:<y>", 1/10000 of the map): a stop at
+    # that spot, named after the zone and coordinates; added to a route, or a new one.
+    lua, ns = importer
+    I, N = ns.Import, ns.Nav
+    b = ns.Maps[1411].bounds
+    pin = I.ParseMapPin("worldmap:1411:4213:6534")
+    assert pin.cont == 1 and pin.name == "Map pin (Durotar 42.1, 65.3)"
+    assert pin.x == pytest.approx(b[3] - 0.6534 * (b[3] - b[1]))
+    assert pin.y == pytest.approx(b[4] - 0.4213 * (b[4] - b[2]))
+    assert I.ParseMapPin("item:6948") is None and I.ParseMapPin("worldmap:999999:1:1") is None
+    ns.Print = lua.eval("function() end")
+    N.Clear()
+    I.AddMapPin(pin)
+    assert len(N.stops) == 1 and N.stops[1].name == pin.name
+    I.AddMapPin(I.ParseMapPin("worldmap:1411:5000:5000"))
+    assert len(N.stops) == 2  # added to the route
+    # (asked 2026-10-01) a plain click on one adds it (it used to take Shift); a Shift-click with a chat box
+    # open is the game's "put it in the chat", not a stop; the option off, none
+    lua.execute("IsModifiedClick = function() return AGPS_SHIFT end ChatEdit_GetActiveWindow = function() return AGPS_BOX end")
+    N.Clear()
+    assert I.OnMapPinLink("worldmap:1411:4213:6534") and len(N.stops) == 1
+    lua.execute("AGPS_SHIFT, AGPS_BOX = true, {}")
+    assert I.OnMapPinLink("worldmap:1411:5000:5000") and len(N.stops) == 1
+    lua.execute("AGPS_BOX = nil")
+    I.OnMapPinLink("worldmap:1411:5000:5000")
+    assert len(N.stops) == 2  # (Shift without a chat box: a stop, as before)
+    lua.execute("AGPS_SHIFT = false")
+    old = ns.settings
+    ns.settings = lua.eval("{ gps = { acceptMapPins = false } }")
+    I.OnMapPinLink("worldmap:1411:6000:6000")
+    assert len(N.stops) == 2
+    ns.settings = old
+    assert not I.OnMapPinLink("item:6948")
+
+
+def test_guard_directions_become_a_saved_city_location_and_a_stop(importer):
+    # A guard marks "Alchemy Trainer" on the map (a gossip point of interest): saved for all
+    # characters with the alchemy icon, shown on the map, and made a stop (once).
+    lua, ns = importer
+    load(lua, ns, "Layers.lua")
+    L, N = ns.Layers, ns.Nav
+    lua.execute("""
+      C_Map = C_Map or {}
+      C_Map.GetBestMapForUnit = function() return 1411 end
+      C_GossipInfo = {
+        GetPoiForUiMapID = function(mapID) return 77 end,
+        GetPoiInfo = function(mapID, id) return { name = "Alchemy Trainer", textureIndex = 5, position = { x = 0.5, y = 0.4 } } end,
+      }
+    """)
+    ns.Print = lua.eval("function() end")
+    ns.settings = lua.eval("{ gps = { layerCity = true, fastestOrder = false } }")
+    assert L.CityIcon("Alchemy Trainer").endswith("Trade_Alchemy")
+    assert L.CityIcon("Warrior Trainer").endswith("INV_Sword_27")
+    assert L.CityIcon("Something Else") == L.CITY_DEFAULT_ICON
+    N.Clear()
+    L.OnGossipPoi()
+    L.OnGossipPoi()  # the event repeats: still one stop, one saved place
+    x, y, cont = L.MapToWorld(1411, 0.5, 0.4)
+    assert len(N.stops) == 1 and N.stops[1].name == "Alchemy Trainer" and N.stops[1].tex.endswith("Trade_Alchemy")
+    assert N.StopIcon(N.stops[1]) == N.stops[1].tex
+    saved = L.CityDB()[cont]
+    assert len(saved) == 1 and saved[1][3] == "Alchemy Trainer"
+    marks = L.Marks(cont, x, y, 100, lua.table())
+    assert any(marks[i][4] == "Alchemy Trainer" for i in range(1, len(marks) + 1))
+    ns.settings.gps.layerCity = False
+    marks = L.Marks(cont, x, y, 100, lua.table())
+    assert not any(marks[i][4] == "Alchemy Trainer" for i in range(1, len(marks) + 1))
+
+
+def test_approach_zoom_near_a_stop(importer):
+    # Within 50 yd of the next stop (following the player): zoom in to 70 yd, not beyond the
+    # zoom you had; back out (nil) beyond 70 yd, when it's off, or once you've arrived.
+    lua, ns = importer
+    G, N = ns.GPS, ns.Nav
+    ns.settings = lua.eval("{ gps = { approachZoom = true, zoom = 400 } }")
+    N.SetDestination(-600.0, -4180.0, 1, "Spot")
+    assert G.ApproachTarget(-600.0, -4240.0, 1) is None  # 60 yd: not yet
+    
+    assert G.ApproachTarget(-600.0, -4220.0, 1) == 70  # 40 yd
+    assert G.ApproachTarget(-600.0, -4245.0, 1) == 70  # 65 yd: still (until 70)
+    assert G.ApproachTarget(-600.0, -4260.0, 1) is None  # 80 yd: back out
+    ns.settings.gps.zoom = 50
+    assert G.ApproachTarget(-600.0, -4220.0, 1) == 50  # already closer: stays
+    ns.settings.gps.approachZoom = False
+    assert G.ApproachTarget(-600.0, -4220.0, 1) is None
+
+
+def test_import_nodes_and_pick_them_in_an_area(nav_env):
+    lua, ns = nav_env
+    load(lua, ns, "Import.lua", "Layers.lua")
+    added, skipped, errors = ns.Layers.ImportNodes(
+        "/way #1411 52.0 41.0 Copper Vein\n/way #1411 53.0 42.0 Peacebloom\n/way #1411 50.0 40.0 Tree")
+    assert added == 2 and len(list(errors.values())) == 1
+    cont = ns.Maps[1411].continent
+    node = ns.db.nodes[cont][1]
+    assert node[6] is True  # unconfirmed
+    ns.Layers.AddNode(cont, node[1] + 3, node[2] + 3, "Copper Vein", "ore")  # gathered there
+    assert ns.db.nodes[cont][1][6] is None
+    x, y = node[1], node[2]
+    poly = lua.eval("function(x, y) return { x - 50, y - 50, x + 50, y - 50, x + 50, y + 50, x - 50, y + 50 } end")(x, y)
+    inside = ns.Layers.NodesInPolygon(cont, poly, lua.eval("{ ore = true }"))
+    assert len(inside) == 1 and inside[1].name == "Copper Vein"
+
+
+def test_route_starts_with_the_hearthstone_when_faster(nav_env):
+    lua, ns = nav_env
+    lua.execute("""
+      AGPS_TP = { Available = function(cont, px, py)
+        return { { cont, px, py, 0, 2270.0, 245.0, 25, "your Hearthstone", "", "Brill", "your Hearthstone", use = true } }
+      end }
+    """)
+    ns.Teleports = lua.eval("AGPS_TP")
+    ns.Nav.SetDestination(2250.0, 250.0, 0, "Brill inn")  # home is Brill; the player is in Durotar
+    r = ns.Nav.Route(300.0, -4700.0, 1)
+    assert r.legs[1].ride and r.legs[1].ride.use
+    assert "Use your Hearthstone (to Brill)" in ns.Nav.StepsText(3) or "Use your Hearthstone" in ns.Nav.Status(300.0, -4700.0, 1)
+    # a stop right here: no hearthstone
+    ns.Nav.SetDestination(320.0, -4690.0, 1, "Nearby")
+    r = ns.Nav.Route(300.0, -4700.0, 1)
+    assert not (r.legs[1].ride and r.legs[1].ride.use)
+
+
+def test_the_hearthstone_only_when_it_saves_more_than_800_yards(nav_env):
+    # (asked) home is Brill: a stop at the inn 500 yd off isn't worth the hearthstone's cooldown;
+    # from farther (it saves more than 800 yd of walking), it is
+    lua, ns = nav_env
+    lua.execute("""
+      AGPS_TP = { Available = function(cont, px, py)
+        return { { cont, px, py, 0, 2270.0, 245.0, 25, "your Hearthstone", "", "Brill", "your Hearthstone", use = true, item = 6948 } }
+      end }
+    """)
+    ns.Teleports = lua.eval("AGPS_TP")
+    N = ns.Nav
+
+    def hearths(py):
+        N.SetDestination(2270.0, 245.0, 0, "Brill inn")
+        r = N.Route(2270.0, py, 0)
+        return bool(r.legs[1].ride and r.legs[1].ride.use)
+    assert not hearths(245.0 - 500)
+    assert hearths(245.0 - 1200)
+
+
+def test_hearthstone_on_the_stretch_where_it_saves_most(nav_env):
+    # A trip ending near home: hearth from the last stop but one, not walk back. And the
+    # hearthstone is used once per trip, even when it would help on two stretches.
+    lua, ns = nav_env
+    lua.execute("""
+      AGPS_TP = { Available = function(cont, px, py)
+        return { { cont, px, py, 0, 2270.0, 245.0, 25, "your Hearthstone", "", "Brill", "your Hearthstone", use = true } }
+      end }
+    """)
+    ns.Teleports = lua.eval("AGPS_TP")
+    N = ns.Nav
+
+    def uses(r):
+        return [any(st.legs[k].ride and st.legs[k].ride.use for k in range(1, len(st.legs) + 1))
+                for st in (r.stretches[i] for i in range(1, len(r.stretches) + 1))]
+
+    # from the Undercity to Tarren Mill, then to near Brill
+    N.SetStops(
+        lua.table(lua.table(x=0.0, y=-860.0, cont=0), lua.table(x=2250.0, y=250.0, cont=0)))
+    r = N.Route(1560.0, 260.0, 0)
+    assert uses(r) == [False, True]
+    assert "Use your Hearthstone (to Brill)" in N.StepsText(9)
+    # Durotar -> Brill -> Orgrimmar -> Brill: the hearthstone once only
+    N.SetStops(lua.table(lua.table(x=2250.0, y=250.0, cont=0), lua.table(x=1600.0, y=-4400.0, cont=1),
+                         lua.table(x=2260.0, y=260.0, cont=0)))
+    r = N.Route(300.0, -4700.0, 1)
+    assert sum(uses(r)) == 1
+
+
+def test_a_hearthstone_kept_for_a_later_stop_is_said_where_its_step_is_not_listed(nav_env):
+    # (asked 2026-11-05) the hearthstone kept for after stop 1, the steps collapsed (only the trip's times): it
+    # looked not planned. Said as "Use your Hearthstone after <stop>" wherever its step isn't listed.
+    lua, ns = nav_env
+    lua.execute("""
+      AGPS_TP = { Available = function(cont, px, py)
+        return { { cont, px, py, 0, 2270.0, 245.0, 25, "your Hearthstone", "", "Brill", "your Hearthstone", use = true } }
+      end }
+    """)
+    ns.Teleports = lua.eval("AGPS_TP")
+    N = ns.Nav
+    N.SetStops(lua.table(lua.table(x=0.0, y=-860.0, cont=0, name="Tarren Mill"), lua.table(x=2250.0, y=250.0, cont=0)))
+    N.Route(1560.0, 260.0, 0)
+    ahead = N.TeleportAheadText(0)
+    assert "Use your Hearthstone after" in ahead and "Tarren Mill" in ahead and "(to Brill)" in ahead
+    # listed among the steps shown: not said twice
+    assert N.TeleportAheadText(9) is None and N.StepsText(9).count("Use your Hearthstone") == 1
+    # among the "... more steps": said under them
+    text = N.StepsText(1)
+    assert "more step" in text and text.splitlines()[-1] == ahead
+    # from the player (step 1, what the directions say first): nothing more
+    N.SetDestination(2250.0, 250.0, 0, "Brill inn")
+    r = N.Route(300.0, -4700.0, 1)
+    assert r.legs[1].ride and r.legs[1].ride.use and N.TeleportAheadText(0) is None
+
+
+def test_offroad_start_on_rocks_walks_off_them(env):
+    # Zephras Isle, Rise of Spirits: the player stands on a rock outcrop the slope data calls
+    # impassable. The route walks off it and around (about 180 yd), not via the village road.
+    lua, ns = env
+    load(lua, ns, "Data/Roads.lua", "Data/Terrain.lua", "Passability.lua", "Router.lua")
+    ns.Router.Reset()
+    ns.Router.SYNC_WALKS = True
+    ns.Passability.ClearCache()
+    assert ns.Passability.At(2991, 4007.0, 1556.0) == 2  # standing on "blocked" ground
+    r = ns.Router.Route(2991, 4007.0, 1556.0, 4158.0, 1607.0, lua.table(offroad=True))
+    assert r.length < 260
+
+
+def test_gathering_recognized_at_any_rank_or_by_node_name(env):
+    lua, ns = env
+    ns.db = lua.eval("{}")
+    load(lua, ns, "Data/Maps.lua", "Layers.lua")
+    G = ns.Layers.GatherKind
+    assert G(2575, "Copper Vein") == "ore"
+    assert G(3564, "Iron Deposit") == "ore"  # a higher rank's spell
+    assert G(11993, "Sungrass") == "herb"
+    assert G(123456, "Copper Vein") == "ore"  # unknown spell, known node name
+    assert G(123456, "Some Mob") is None
+
+
+def test_offroad_walks_out_of_a_pocket_instead_of_cutting_the_cliff(env):
+    # Dustwallow Marsh (from agps route-check): the start is in an open pocket walled by
+    # steep ground; the route walks the long way out rather than straight through the wall.
+    lua, ns = env
+    load(lua, ns, "Data/Roads.lua", "Data/Terrain.lua", "Passability.lua", "Router.lua")
+    ns.Router.Reset()
+    ns.Router.SYNC_WALKS = True
+    ns.Passability.ClearCache()
+    r = ns.Router.Route(1, -3837.3, -2589.4, -3018.6, -3070.5, lua.table(offroad=True))
+    pts = [r.pts[i] for i in range(1, len(r.pts) + 1)]
+    kinds = [r.kinds[i] for i in range(1, len(r.kinds) + 1)]
+    P = ns.Passability
+    for i, k in enumerate(kinds):  # no off-road stretch crosses more than a few cells of wall
+        if k != 1:
+            continue
+        x1, y1, x2, y2 = pts[2 * i], pts[2 * i + 1], pts[2 * i + 2], pts[2 * i + 3]
+        n = max(1, int(((x2 - x1) ** 2 + (y2 - y1) ** 2) ** 0.5 / 3))
+        run = best = 0
+        for j in range(n + 1):
+            t = j / n
+            run = run + 3 if P.At(1, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t) == 2 else 0
+            best = max(best, run)
+        assert best < 40
+
+
+def test_right_clicked_herb_or_ore_without_the_profession_is_saved(env):
+    lua, ns = env
+    ns.db = lua.eval("{}")
+    load(lua, ns, "Data/Maps.lua", "Layers.lua")
+    L = ns.Layers
+    L.NoteWorldObject("Peacebloom", 10.0)  # the tooltip showed it
+    assert L.OnGatherError("Requires Herbalism", 11.0, 100.0, 200.0, 1)
+    L.NoteWorldObject("Copper Vein", 20.0)
+    assert L.OnGatherError("Requires Mining", 21.0, 300.0, 200.0, 1)
+    nodes = ns.db.nodes[1]
+    assert [(nodes[i][3], nodes[i][4]) for i in (1, 2)] == [("Peacebloom", "herb"), ("Copper Vein", "ore")]
+    L.NoteWorldObject("Tin Vein", 30.0)
+    assert not L.OnGatherError("Requires Mining", 40.0, 500.0, 200.0, 1)  # too long after the tooltip
+    assert not L.OnGatherError("Not enough mana", 30.5, 500.0, 200.0, 1)
+
+
+def test_hearthstone_ready_with_the_newer_item_api(nav_env):
+    lua, ns = nav_env
+    load(lua, ns, "Data/Pois.lua", "Teleports.lua")
+    lua.execute("""
+      GetItemCount = nil
+      C_Item = { GetItemCount = function(id) return id == 6948 and 1 or 0 end }
+      C_Container = { GetItemCooldown = function() return 0, 0, 1 end }
+      GetBindLocation = function() return "Brill" end
+      IsPlayerSpell = function() return false end
+    """)
+    ns.settings = lua.eval("{ gps = { useHearthstone = true, useTeleports = true } }")
+    rows = ns.Teleports.Available(1, 300.0, -4700.0)
+    assert len(rows) == 1 and rows[1][8] == "your Hearthstone" and rows[1][10] == "Brill" and rows[1][4] == 0
+    ns.settings.gps.useHearthstone = False
+    ns.Teleports.Changed()
+    assert len(ns.Teleports.Available(1, 300.0, -4700.0)) == 0
+
+
+def test_astral_recall_goes_before_the_hearthstone(nav_env):
+    # (asked) a shaman with Astral Recall ready: the route takes it (first of equals), the hearthstone kept;
+    # on cooldown, the hearthstone
+    lua, ns = nav_env
+    load(lua, ns, "Data/Pois.lua", "Teleports.lua")
+    lua.execute("""
+      GetItemCount = nil
+      C_Item = { GetItemCount = function(id) return id == 6948 and 1 or 0 end }
+      C_Container = { GetItemCooldown = function() return 0, 0, 1 end }
+      GetBindLocation = function() return "Brill" end
+      IsPlayerSpell = function(id) return id == 556 end
+      AGPS_RECALL_CD = 0
+      C_Spell = { GetSpellCooldown = function() return { startTime = AGPS_RECALL_CD > 0 and 1 or 0, duration = AGPS_RECALL_CD } end }
+    """)
+    ns.settings = lua.eval("{ gps = { useHearthstone = true, useTeleports = true } }")
+    T = ns.Teleports
+    T.Changed()
+    rows = T.Available(1, 300.0, -4700.0)
+    assert [rows[i][8] for i in range(1, len(rows) + 1)] == ["Astral Recall", "your Hearthstone"]
+    stop = lua.eval("{ x = 2250.0, y = 250.0, cont = 0 }")  # (Brill, home: across the sea)
+    legs, _ = ns.Nav.Plan(1, 300.0, -4700.0, 7.0, stop, rows)
+    first = legs[1].ride
+    assert first and first.spell == 556 and first[8] == "Astral Recall"
+    lua.execute("AGPS_RECALL_CD = 3600")  # (on its cooldown)
+    T.Changed()
+    rows = T.Available(1, 300.0, -4700.0)
+    assert [rows[i][8] for i in range(1, len(rows) + 1)] == ["your Hearthstone"]
+
+
+def test_engineers_teleporters_with_their_specialization(nav_env):
+    # (asked) more ways to travel: an engineer's Ultrasafe Transporter: Gadgetzan and Dimensional
+    # Ripper - Everlook, when in the bags, off cooldown, and with the specialization that uses it;
+    # each row says what the use button uses (item or spell)
+    lua, ns = nav_env
+    load(lua, ns, "Data/Pois.lua", "Teleports.lua")
+    lua.execute("""
+      AGPS_ITEMS = { [6948] = 1, [18986] = 1, [18984] = 1 }
+      AGPS_KNOWN = { [20219] = true } -- Gnomish Engineer (the Transporter's), not Goblin (the Ripper's)
+      GetItemCount = function(id) return AGPS_ITEMS[id] or 0 end
+      GetItemCooldown = function() return 0, 0, 1 end
+      GetBindLocation = function() return "Brill" end
+      IsPlayerSpell = function(id) return AGPS_KNOWN[id] or false end
+      GetItemInfo = nil
+    """)
+    ns.settings = lua.eval("{ gps = { useHearthstone = true, useTeleports = true } }")
+    T = ns.Teleports
+    T.Changed()
+    rows = {r[8]: r for r in T.Available(0, 2250.0, 250.0).values()}
+    assert set(rows) == {"your Hearthstone", "Ultrasafe Transporter: Gadgetzan"}
+    assert rows["your Hearthstone"].item == 6948
+    g = rows["Ultrasafe Transporter: Gadgetzan"]
+    assert g.item == 18986 and g[10] == "Gadgetzan" and g[4] == 1 and g.use
+    ns.settings.gps.useTeleports = False  # (the option: teleports and teleport items)
+    T.Changed()
+    assert [r[8] for r in T.Available(0, 2250.0, 250.0).values()] == ["your Hearthstone"]
+
+
+def test_the_use_button_uses_the_routes_first_teleport(nav_env):
+    # (asked) the route starting with a teleport: a button beside the directions uses it (the
+    # player's click, a secure button); set only out of combat
+    lua, ns = nav_env
+    G, N = ns.GPS, ns.Nav
+    hearth = lua.eval("{ 0, 1, 2, 0, 3, 4, 25, 'your Hearthstone', '', 'Brill', 'your Hearthstone', use = true, item = 6948 }")
+    N.route = lua.eval("function(t) return { legs = { { ride = t, from = 1 }, { walk = true } } } end")(hearth)
+    assert lua.eval("rawequal")(N.UseNow(), hearth)
+    N.route = lua.eval("{ legs = { { walk = true }, { ride = { use = true, item = 6948 }, from = 1 } } }")
+    assert N.UseNow() is None  # (walk first: not yet)
+    assert G.UseKey(hearth) == "item:6948"
+    assert G.UseKey(lua.eval("{ use = true, spell = 556 }")) == "spell:556"
+    lua.execute("""
+      AGPS_ATTR, AGPS_SHOWN = {}, false
+      AGPS_PANEL = { GetFrameStrata = function() return "MEDIUM" end, GetFrameLevel = function() return 5 end }
+      AGPS_BTN = { panel = AGPS_PANEL,
+        icon = { SetTexture = function() end },
+        SetAttribute = function(_, k, v) AGPS_ATTR[k] = v end,
+        Show = function() AGPS_SHOWN = true end, Hide = function() AGPS_SHOWN = false end,
+        ClearAllPoints = function() end, SetPoint = function() end,
+        SetFrameStrata = function() end, SetFrameLevel = function() end }
+      InCombatLockdown = function() return AGPS_COMBAT end
+      AGPS_COMBAT = false
+    """)
+    G.useBtn = lua.eval("AGPS_BTN")
+    G.UpdateUseButton(hearth)
+    assert lua.eval("AGPS_ATTR.type") == "item" and lua.eval("AGPS_ATTR.item") == "item:6948" and lua.eval("AGPS_SHOWN")
+    lua.execute("AGPS_COMBAT = true")
+    G.UpdateUseButton(None)  # (in combat: left as it is; hidden as combat started)
+    assert lua.eval("AGPS_SHOWN")
+    lua.execute("AGPS_COMBAT = false")
+    G.UpdateUseButton(None)
+    assert not lua.eval("AGPS_SHOWN")
+    G.useBtn = None
+
+
+def cooldown_env(nav_env):
+    # (the hearthstone in the bags, its cooldown AGPS_HS_START + AGPS_HS_CD; the clock AGPS_NOW)
+    lua, ns = nav_env
+    load(lua, ns, "Data/Pois.lua", "Teleports.lua")
+    lua.execute("""
+      AGPS_NOW, AGPS_HS_START, AGPS_HS_CD = 0, 0, 0
+      GetTime = function() return AGPS_NOW end
+      GetItemCount = function(id) return id == 6948 and 1 or 0 end
+      C_Container = { GetItemCooldown = function() return AGPS_HS_START, AGPS_HS_CD, 1 end }
+      GetBindLocation = function() return "Brill" end
+      IsPlayerSpell = function() return false end
+    """)
+    ns.settings = lua.eval("{ gps = { useHearthstone = true, useTeleports = true } }")
+    ns.Teleports.Changed()
+    return lua, ns
+
+
+def test_a_teleport_coming_off_its_cooldown_works_the_route_out_again(nav_env):
+    # (issue #46) the game sends no event as a cooldown runs out: the teleports on one are looked at every
+    # second (T.Tick); ready again, the list is built again and, with a stop set, the route is worked out again,
+    # said in the chat
+    lua, ns = cooldown_env(nav_env)
+    T, N = ns.Teleports, ns.Nav
+    printed = []
+    ns.Print = lambda *a: printed.append(" ".join(str(x) for x in a))
+    lua.execute("AGPS_NOW, AGPS_HS_START, AGPS_HS_CD = 7, 5, 60")  # (used at 5 s: BAG_UPDATE_COOLDOWN)
+    T.Changed()
+    assert len(T.Available(1, 300.0, -4700.0)) == 0
+    assert list(T.Waiting().values()) == ["your Hearthstone"]
+    N.SetDestination(2250.0, 250.0, 0, "Brill")
+    invalidated = []
+    real = N.Invalidate
+    N.Invalidate = lambda *a: invalidated.append(a)
+    try:
+        lua.execute("AGPS_NOW = 30")
+        assert T.Tick() is None and not invalidated and not printed
+        lua.execute("AGPS_NOW = 66")
+        ready = T.Tick()
+        assert list(ready.values()) == ["your Hearthstone"]
+        assert invalidated and printed == ["Your Hearthstone ready again: the route is worked out again with it."]
+        assert len(T.Waiting()) == 0 and T.Tick() is None  # (once)
+        rows = T.Available(1, 300.0, -4700.0)  # (the 3-second cache dropped: at once)
+        assert len(rows) == 1 and rows[1][8] == "your Hearthstone"
+    finally:
+        N.Invalidate = real
+    # no stop set: the list built again, nothing said
+    lua.execute("AGPS_NOW, AGPS_HS_START = 100, 90")
+    T.Changed()
+    T.Available(1, 300.0, -4700.0)
+    N.Clear()
+    printed.clear()
+    lua.execute("AGPS_NOW = 200")
+    assert list(T.Tick().values()) == ["your Hearthstone"] and not printed
+
+
+def test_cooldowns_read_as_minutes_and_seconds_or_tenths(nav_env):
+    lua, ns = cooldown_env(nav_env)
+    F = ns.Teleports.FormatCooldown
+    assert F(270) == "4:30" and F(3599.9) == "59:59" and F(60) == "1:00"
+    assert F(45.37) == "45.3" and F(0.05) == "0.0" and F(-3) == "0.0"
+    lua.execute("AGPS_NOW, AGPS_HS_START, AGPS_HS_CD = 10, 5, 60")
+    assert ns.Teleports.CooldownLeft(lua.eval("{ item = 6948 }")) == 55
+    lua.execute("AGPS_HS_CD = 1.5")  # (the global cooldown: ready)
+    assert ns.Teleports.CooldownLeft(lua.eval("{ item = 6948 }")) == 0
+
+
+def test_the_use_button_on_its_cooldown_uses_nothing_and_says_when(nav_env):
+    # (issue #46) the route's teleport on its cooldown after the route was planned: the time left over the
+    # icon, no "type" (a click doesn't call the game's use), the click says when it's ready; ready, it uses it
+    lua, ns = cooldown_env(nav_env)
+    G = ns.GPS
+    printed = []
+    ns.Print = lambda *a: printed.append(" ".join(str(x) for x in a))
+    hearth = lua.eval("{ 0, 1, 2, 0, 3, 4, 25, 'your Hearthstone', '', 'Brill', 'your Hearthstone', use = true, item = 6948 }")
+    lua.execute("""
+      AGPS_ATTR, AGPS_SHOWN, AGPS_CD, AGPS_GRAY = {}, false, nil, nil
+      AGPS_PANEL = { GetFrameStrata = function() return "MEDIUM" end, GetFrameLevel = function() return 5 end }
+      AGPS_BTN = { panel = AGPS_PANEL,
+        icon = { SetTexture = function() end, SetDesaturated = function(_, v) AGPS_GRAY = v end },
+        cd = { SetText = function(_, s) AGPS_CD = s end },
+        SetAttribute = function(_, k, v) AGPS_ATTR[k] = v end,
+        Show = function() AGPS_SHOWN = true end, Hide = function() AGPS_SHOWN = false end,
+        ClearAllPoints = function() end, SetPoint = function() end,
+        SetFrameStrata = function() end, SetFrameLevel = function() end }
+      InCombatLockdown = function() return false end
+      AGPS_NOW, AGPS_HS_START, AGPS_HS_CD = 20, 0, 3600
+      AGPS_HS_START = AGPS_NOW - 3600 + 270  -- (4:30 left)
+    """)
+    G.useBtn = lua.eval("AGPS_BTN")
+    try:
+        G.UpdateUseButton(hearth)
+        assert lua.eval("AGPS_SHOWN") and lua.eval("AGPS_ATTR.type") is None and lua.eval("AGPS_GRAY")
+        assert lua.eval("AGPS_CD") == "4:30"
+        G.UseWaitClick(G.useBtn)
+        G.UseWaitClick(G.useBtn)  # (a key's down and up: said once)
+        assert printed == ["Your Hearthstone is on its cooldown: ready in 4:30."]
+        lua.execute("AGPS_NOW = AGPS_NOW + 230.05")  # (under a minute: tenths)
+        G.UpdateUseButton(hearth)
+        assert lua.eval("AGPS_CD") == "39.9" and lua.eval("AGPS_ATTR.type") is None
+        lua.execute("AGPS_NOW = AGPS_NOW + 40")  # (ready)
+        G.UpdateUseButton(hearth)
+        assert lua.eval("AGPS_ATTR.type") == "item" and lua.eval("AGPS_ATTR.item") == "item:6948"
+        assert lua.eval("AGPS_CD") == "" and not lua.eval("AGPS_GRAY")
+        printed.clear()
+        lua.execute("AGPS_NOW = AGPS_NOW + 5")
+        G.UseWaitClick(G.useBtn)  # (ready: the game uses it; nothing said)
+        assert not printed
+    finally:
+        G.useBtn = None
+
+
+def test_turning_flights_off_applies_right_away(nav_env):
+    lua, ns = flights_env(nav_env, [11, 17])
+    lua.execute("AGPS_T = 0 GetTime = function() return AGPS_T end")
+    ns.settings = lua.eval("{ gps = { useFlights = true } }")
+    ns.Nav.SetDestination(-910.0, -3490.0, 0, "Hammerfall")
+    r = ns.Nav.Route(1350.0, 150.0, 0)
+    assert any(r.legs[i].ride for i in range(1, len(r.legs) + 1))
+    ns.settings.gps.useFlights = False
+    ns.Nav.FlightsChanged()
+    lua.execute("AGPS_T = 1")
+    r = ns.Nav.Route(1350.0, 150.0, 0)  # at once, though walking is much longer
+    assert not any(r.legs[i].ride for i in range(1, len(r.legs) + 1))
+
+
+def test_home_from_the_inn_building(nav_env):
+    lua, ns = nav_env
+    load(lua, ns, "Data/Pois.lua", "Teleports.lua")
+    lua.execute('GetBindLocation = function() return "Gallows\' End Tavern" end')
+    home = ns.Teleports.Home()
+    assert home.cont == 0 and abs(home.x - 2259) < 50 and abs(home.y - 245) < 50  # Brill
+
+
+def test_quest_area_stays_drawn_while_retraced(env):
+    lua, ns = env
+    ns.db = lua.eval("{}")
+    ns.settings = lua.eval("{ gps = {} }")
+    lua.execute("""
+      AGPS_T = 1000
+      GetTime = function() return AGPS_T end
+      AGPS_DONE = false
+      C_QuestLog = {
+        GetQuestsOnMap = function() return { { questID = 7, x = 0.4, y = 0.6 } } end,
+        IsComplete = function() return false end,
+        GetQuestObjectives = function() return { { finished = AGPS_DONE }, { finished = false } } end,
+      }
+      C_Minimap = { IsInsideQuestBlob = function(q, u, v)
+        return q == 7 and (u - 0.4) ^ 2 + (v - 0.6) ^ 2 <= 0.01 end }
+    """)
+    load(lua, ns, "Data/Maps.lua", "Layers.lua")
+    L = ns.Layers
+    maps = lua.table(1411)
+    b = ns.Maps[1411].bounds
+    cx, cy = (b[1] + b[3]) / 2, (b[2] + b[4]) / 2
+    L.Areas(1, cx, cy, 1e6, maps)
+    L.TraceAll()
+    before = len(L.Areas(1, cx, cy, 1e6, maps))
+    assert before > 40
+    # an objective finished: the area is traced again, and meanwhile the old one stays drawn
+    lua.execute("AGPS_DONE = true; AGPS_T = 2000")
+    assert len(L.Areas(1, cx, cy, 1e6, maps)) == before
+
+
+def test_panned_view_comes_back_after_a_reload(router):
+    lua, ns = router
+    lua.execute("UnitGUID = function() return 'Player-1' end; time = function() return 1000 end")
+    G = ns.GPS
+    assert G.SaveView() is None  # following the player: nothing to keep
+    G.RestoreView(lua.eval("{ x = 120, y = -340, rot = 0, cont = 1, cross = true, who = 'Player-1', t = 990 }"))
+    v = G.SaveView()
+    assert (v.x, v.y, v.cont) == (120, -340, 1)
+    G.Follow()
+    # another character, or a login much later: not restored
+    G.RestoreView(lua.eval("{ x = 5, y = 5, cont = 1, who = 'Player-2', t = 990 }"))
+    G.RestoreView(lua.eval("{ x = 5, y = 5, cont = 1, who = 'Player-1', t = 1 }"))
+    assert G.SaveView() is None
+
+
+def test_road_tools_stay_on_until_toggled_off(router):
+    lua, ns = router
+    ns.Print = lua.eval("function() end")
+    G = ns.GPS
+    G.ToggleRoadMode()
+    assert G.roadMode
+    G.FinishRoad(lua.eval("{ pts = { 1, 1 }, cont = 1 }"))  # (a stroke too short: nothing saved, still on)
+    assert G.roadMode
+    G.ToggleRoadMode()
+    assert not G.roadMode
+
+
+def test_right_click_from_terrain_opens_the_continent_map_with_its_zones(nav_env):
+    lua, ns = nav_env
+    # (not the small overview maps 1463 / 1464 some continents also have)
+    assert ns.GPS.ContinentMap(0) == 1415 and ns.GPS.ContinentMap(1) == 1414
+
+
+def test_routes_go_around_the_other_factions_guards(router):
+    lua, ns = router
+    # Horde guards across the middle of the first leg; a road around them (drawn)
+    ns.Hostile = lua.eval("{ [1] = { A = { 0, -500, 100 }, H = {} } }")
+    ns.db = lua.eval("{ tracks = { { op = 'add', drawn = true, continent = 1, time = 1, "
+                     "pts = { 0,-300, -400,-300, -400,-700, 0,-700 } } } }")
+    lua.execute("FACTION = 'A'")
+    ns.Nav = lua.eval("{ Faction = function() return FACTION end }")
+    R = ns.Router
+    R.Reset()
+    assert R.HostileYards(1, 0, -300, 0, -700) == pytest.approx(200, abs=10)
+    def passes_guards(r):
+        pts = [(r.pts[i], r.pts[i + 1]) for i in range(1, len(r.pts), 2)]
+        return any(abs(x) < 20 and -560 < y < -440 for x, y in pts) or any(
+            abs(x1) < 1 and abs(x2) < 1 and min(y1, y2) < -500 < max(y1, y2)
+            for (x1, y1), (x2, y2) in zip(pts, pts[1:]))
+    r = R.Route(1, 0.0, 30.0, 0.0, -1030.0, lua.table(offroad=False))
+    assert not passes_guards(r)  # an Alliance character: around them
+    lua.execute("FACTION = 'H'")
+    r = R.Route(1, 0.0, 30.0, 0.0, -1030.0, lua.table(offroad=False))
+    assert passes_guards(r)  # a Horde character: they're its own guards
+
+
+def test_a_jog_off_the_line_and_back_is_straight_on(turns):
+    lua, ns = turns
+    # east 300 yd, a quick jog 25 yd north and back over 50 yd, then on east
+    p = path_of(lua, ns, [(0, 0), (0, -300), (25, -325), (0, -350), (0, -700)], [1, 1, 1, 1])
+    got, _ = maneuvers(lua, ns, p)
+    assert [g[0] for g in got] == ["arrive"]
+
+
+def test_route_smoothing_takes_out_a_jog(router):
+    lua, ns = router
+    R = ns.Router
+    r = lua.eval("""{ pts = { 0,0, 0,-300, 20,-315, 0,-330, 0,-600 }, kinds = { 1, 1, 1, 1 }, length = 0, road = 0 }""")
+    R.Smooth(1, r)
+    pts = [(r.pts[i], r.pts[i + 1]) for i in range(1, len(r.pts), 2)]
+    assert all(abs(x) < 1 for x, _ in pts)  # the jog north is gone
+    assert pts[0] == (0, 0) and pts[-1] == (0, -600) and len(r.kinds) == len(pts) - 1
+    # a real bend (not coming back) stays
+    r = lua.eval("""{ pts = { 0,0, 0,-300, 30,-310, 200,-320 }, kinds = { 1, 1, 1 }, length = 0, road = 0 }""")
+    R.Smooth(1, r)
+    assert len(r.pts) >= 6 and any(r.pts[i] > 150 for i in range(1, len(r.pts), 2))
+
+
+def test_an_s_bend_that_shifts_the_route_keeps_its_turns(turns):
+    lua, ns = turns
+    # east 300, north 50 (left), then east again (right): the route moved over 50 yd
+    p = path_of(lua, ns, [(0, 0), (0, -300), (50, -300), (50, -700)], [1, 1, 1])
+    got, _ = maneuvers(lua, ns, p)
+    assert [g[0] for g in got] == ["turn", "turn", "arrive"]
+
+
+def test_a_jog_on_hilly_ground_is_left_as_it_is(router):
+    lua, ns = router
+    load(lua, ns, "Passability.lua")
+    R = ns.Router
+    jog = """{ pts = { 0,0, 0,-300, 20,-315, 0,-330, 0,-600 }, kinds = { 1, 1, 1, 1 }, length = 0, road = 0 }"""
+    # flat: the jog goes
+    r = R.Smooth(1, lua.eval(jog))
+    assert all(abs(r.pts[i]) < 1 for i in range(1, len(r.pts), 2))
+    # hilly all around (12 x 12 cells of 100 yd, every one 1: "W" = a run of 12 ones)
+    ns.Hills = lua.eval("{ [1] = { tx0 = 31, ty0 = 31, cell = 100, w = 12, h = 12, rows = { %s } } }"
+                        % ", ".join(["'W'"] * 12))
+    assert ns.Passability.Hilly(1, 20.0, -315.0)
+    r = R.Smooth(1, lua.eval(jog))
+    assert any(abs(r.pts[i]) > 10 for i in range(1, len(r.pts), 2))  # the winding stays
+
+
+def test_ironforge_icon_opens_its_interior_map(env):
+    lua, ns = env
+    load(lua, ns, "Data/Maps.lua", "Data/Interiors.lua")
+    G = ns.GPS
+    ids = {ns.Maps[k].name: k for k in ns.Maps.keys() if ns.Maps[k].type == 3}
+    got = G.CityInterior(ids["Ironforge"])
+    assert got is not None
+    assert G.CityInterior(ids["Orgrimmar"]) is None and G.CityInterior(ids["Stormwind City"]) is None
+
+
+def test_erasing_with_a_circle_takes_out_the_roads_inside_it(router):
+    lua, ns = router
+    import math as m
+    loop = [v for k in range(13) for v in (500 + 40 * m.cos(k * m.pi / 6), -1000 + 40 * m.sin(k * m.pi / 6))]
+    assert ns.GPS.IsLoop(lua.table(*loop), 250.0)
+    assert not ns.GPS.IsLoop(lua.table(0, 0, 50, 0, 100, 0, 150, 0), 150.0)  # a line isn't
+    ns.db = lua.eval("{ tracks = { { op = 'remove', drawn = true, area = true, continent = 1, time = 1, pts = { %s } } } }"
+                     % ",".join(f"{v:.1f}" for v in loop))
+    ns.Router.Reset()
+    edges = ns.Router.Edges(1)[0]
+    for e in edges.values():
+        for i in range(5, len(e), 2):
+            assert m.hypot(e[i] - 500, e[i + 1] + 1000) >= 38  # nothing left inside
+    assert len(edges) == 3  # the leg cut in two, the other leg as it was
+
+
+def test_road_data_text_to_copy_and_read_back(nav_env, tmp_path):
+    lua, ns = nav_env
+    lua.execute('GetBuildInfo = function() return "1.60.1", "70009" end')
+    load(lua, ns, "Feedback.lua")
+    ns.db = lua.eval("""{ tracks = {
+      { op = 'add', continent = 0, time = 5, pts = { 1, 2, 3.25, 4 } },
+      { op = 'remove', area = true, continent = 1, time = 6, pts = { 0,0, 10,0, 10,10, 0,10, 0,0 } } },
+      feedback = { roads = { { op = 'add', continent = 0, time = 5, pts = { 1, 2, 3, 4 } } } } }""")
+    text, n = ns.Feedback.RoadsText()
+    assert n == 2  # (the one kept for sharing too, once)
+    lines = text.split("\n")
+    assert lines[0].startswith("AzerothGPS roads 1") and lines[1] == "R add 0 5 1.0,2.0 3.2,4.0" or lines[1] == "R add 0 5 1.0,2.0 3.3,4.0"
+    from azerothgps.roads.tracks import import_shared, parse_shared
+    got = parse_shared(text)
+    assert [(t["op"], t["area"], t["continent"], t["time"]) for t in got] == [("add", False, 0, 5), ("remove", True, 1, 6)]
+    per = {}
+    assert import_shared(text, tmp_path, per) == 2 and per == {0: 1, 1: 1}
+    assert import_shared(text, tmp_path) == 0  # already there
+
+
+def test_a_drawn_wall_blocks_walking_but_not_roads(nav_env):
+    lua, ns = nav_env
+    load(lua, ns, "Data/Terrain.lua", "Passability.lua")
+    P, R = ns.Passability, ns.Router
+    # open ground in Durotar; a wall drawn across between two points
+    a, b = (-950.0, -4050.0), (-950.0, -3900.0)
+    assert P.SegmentCost(1, *a, *b) is not None
+    ns.db = lua.eval("{ tracks = { { op = 'wall', drawn = true, continent = 1, time = 1, pts = { -1030,-3975, -870,-3975 } } } }")
+    P.RefreshWalls()
+    assert P.CrossesWall(1, *a, *b) and P.SegmentCost(1, *a, *b) is None
+    c, path = P.FindPath(1, *a, *b)
+    assert c is not None and c > 150  # round the wall's end
+    pts = [(path[i], path[i + 1]) for i in range(1, len(path), 2)]
+    assert not any(P.CrossesWall(1, *p, *q) for p, q in zip(pts, pts[1:]))
+    # the wall isn't a road, and erasing it (a stroke along it) takes it out
+    R.Reset()
+    assert not any(e[4] == R.SOURCE_RECORDED for e in R.Edges(1)[0].values())
+    lua.eval("function(db) db.tracks[2] = { op = 'unwall', drawn = true, continent = 1, time = 2, pts = { -1030,-3977, -870,-3976 } } end")(ns.db)
+    P.RefreshWalls()
+    # (both ways through SegmentCost's memo: RefreshWalls starts it over, erased as well as drawn)
+    assert not P.CrossesWall(1, *a, *b) and P.SegmentCost(1, *a, *b) is not None
+
+
+def test_walls_in_the_road_data_text(nav_env, tmp_path):
+    lua, ns = nav_env
+    lua.execute('GetBuildInfo = function() return "1.60.1", "70009" end')
+    load(lua, ns, "Feedback.lua")
+    ns.db = lua.eval("""{ tracks = {
+      { op = 'wall', continent = 0, time = 5, pts = { 0,0, 50,0 } },
+      { op = 'unwall', area = true, continent = 0, time = 6, pts = { 0,0, 10,0, 10,10, 0,10, 0,0 } } } }""")
+    text, n = ns.Feedback.RoadsText()
+    assert n == 2 and "R wall 0 5" in text and "R unwallarea 0 6" in text
+    from azerothgps.roads.tracks import import_shared, walls
+    assert import_shared(text, tmp_path) == 2
+    assert walls(tmp_path) == {}  # (the wall is inside the erase loop)
+
+
+# Floors over floors (reported: Undercity strokes drawn before they had a floor erased 222 pieces across
+# floors): an edit changes the floor nearest the player's height under it, as recorded with it.
+UC_STACK = (1593.5, 157.3)  # (a walkway at -43.5 over a road at -62, 2.3 yd apart: the game's heights)
+
+
+def road_heights_near(lua, n, e, zs, x, y, r):
+    """The heights of the roads in e within r of (x, y), at their nearest points."""
+    out = []
+    for i in range(1, len(e) + 1):
+        ed = e[i]
+        best, along = None, 0.0
+        for k in range(5, len(ed) - 2, 2):
+            ax, ay, cx, cy = ed[k], ed[k + 1], ed[k + 2], ed[k + 3]
+            vx, vy = cx - ax, cy - ay
+            L2 = vx * vx + vy * vy
+            t = 0.0 if L2 == 0 else max(0.0, min(1.0, ((x - ax) * vx + (y - ay) * vy) / L2))
+            d = math.hypot(ax + vx * t - x, ay + vy * t - y)
+            if best is None or d < best[0]:
+                best = (d, along + math.sqrt(L2) * t)
+            along += math.sqrt(L2)
+        if best and best[0] <= r:
+            za, zb = zs[ed[1]], zs[ed[2]]
+            h = za if zb is None else zb if za is None else za + (zb - za) * max(0.0, min(1.0, best[1] / max(ed[3], 1)))
+            out.append(h)
+    return out
+
+
+def edges_near(g, x, y, r):
+    """The roads of graph g (their numbers) with a point within r of (x, y)."""
+    out = []
+    for ei in range(1, len(g.e) + 1):
+        ed = g.e[ei]
+        for k in range(5, len(ed) - 2, 2):
+            ax, ay, cx, cy = ed[k], ed[k + 1], ed[k + 2], ed[k + 3]
+            vx, vy = cx - ax, cy - ay
+            L2 = vx * vx + vy * vy
+            t = 0.0 if L2 == 0 else max(0.0, min(1.0, ((x - ax) * vx + (y - ay) * vy) / L2))
+            if math.hypot(ax + vx * t - x, ay + vy * t - y) <= r:
+                out.append(ei)
+                break
+    return out
+
+
+def uc_erase(lua, ns, UC, z):
+    """Undercity's roads after a short erase stroke across UC_STACK, drawn at height z (None: no floor)."""
+    x, y = UC_STACK
+    t = lua.table(op="remove", continent=UC, time=1, pts=lua.table(x - 3, y - 3, x + 3, y + 3))
+    if z is not None:
+        t.z = z
+    roads = ns.Roads[UC]
+    n, e, zs = ns.Router.WithTracks(lua.table(n=roads.n, e=roads.e, z=roads.z), lua.table(t), UC)[:3]
+    return road_heights_near(lua, n, e, zs, x, y, 3)
+
+
+def test_an_undercity_erasure_takes_out_only_the_floor_it_was_drawn_on(nav_env):
+    lua, ns, UC = undercity_env(nav_env)
+    x, y = UC_STACK
+    roads = ns.Roads[UC]
+    before = road_heights_near(lua, roads.n, roads.e, roads.z, x, y, 3)
+    assert any(abs(h + 62) < 1 for h in before) and any(abs(h + 43.5) < 1 for h in before)
+    # (no floor: both, as before floors were recorded)
+    assert not any(abs(h + 62) < 1 or abs(h + 43.5) < 1 for h in uc_erase(lua, ns, UC, None))
+    # down on the lower road: it goes, the walkway over it stays
+    low = uc_erase(lua, ns, UC, -61.0)
+    assert not any(abs(h + 62) < 1 for h in low) and any(abs(h + 43.5) < 1 for h in low)
+    # up on the walkway: it goes, the road under it stays
+    high = uc_erase(lua, ns, UC, -44.0)
+    assert any(abs(h + 62) < 1 for h in high) and not any(abs(h + 43.5) < 1 for h in high)
+
+
+def test_a_floor_cut_first_doesnt_leave_the_floor_over_it_as_the_only_one(nav_env):
+    # (the floors under an erasure are those before it: once the road down there was cut, the walkway
+    # 3 yd over it was the only road near and went too; tests/test_roads.py has the same offline)
+    lua, ns, UC = undercity_env(nav_env)
+    roads = lua.eval("""{ n = { 0,0, 0,100, 3,0, 3,100 }, z = { 0, 0, 20, 20 },
+      e = { { 1,2,100,0, 0,0, 0,50, 0,100 }, { 3,4,100,0, 3,0, 3,50, 3,100 } } }""")
+    for z, gone in ((1.0, {0}), (19.0, {3})):
+        t = lua.table(op="remove", continent=UC, time=1, z=z, pts=lua.table(-5, 50, 8, 50))
+        n, e, zs = ns.Router.WithTracks(roads, lua.table(t), UC)[:3]
+        cut = {x for x in (0, 3) if not edges_near(lua.table(e=e), x, 50, 0.5)}
+        assert cut == gone, (z, cut)
+
+
+def test_an_undercity_road_drawn_on_a_floor_joins_that_floor_at_its_height(nav_env):
+    lua, ns, UC = undercity_env(nav_env)
+    x, y = UC_STACK
+    roads = ns.Roads[UC]
+    # a road drawn from the spot out 30 yd, by someone down on the lower road: its end at the spot
+    # joins the lower road (at -62), not the walkway 2 yd over it
+    for z, want in ((-61.0, -62.0), (-44.0, -43.5)):
+        t = lua.table(op="add", continent=UC, time=1, z=z, pts=lua.table(x, y, x + 20, y - 22))
+        n, e, zs = ns.Router.WithTracks(lua.table(n=roads.n, e=roads.e, z=roads.z), lua.table(t), UC)[:3]
+        mine = [e[i] for i in range(1, len(e) + 1) if e[i][4] == ns.Router.SOURCE_RECORDED]
+        assert mine
+        ends = [zs[ed[k]] for ed in mine for k in (1, 2)
+                if math.hypot(n[2 * ed[k] - 1] - x, n[2 * ed[k]] - y) < 4]
+        assert ends and all(h is not None and abs(h - want) < 2 for h in ends), (z, ends)
+
+
+def test_a_recorded_walks_pieces_dont_replace_each_other(nav_env):
+    # (issue #33, Darnassus's spiral stairs: the walk's next piece, beside the spiral's last turn at about its height,
+    # replaced it as a drawn road replaces a road it runs along) the pieces of one walk (one time) all stay; a stroke of
+    # its own (another time) still replaces the road it runs along
+    lua, ns = nav_env
+    R = ns.Router
+    roads = lua.eval("{ n = { 1000,1000, 1000,1100 }, nz = { 10, 10 }, e = { { 1,2,100,0, 1000,1000, 1000,1100 } } }")
+    for t2, kept in ((1, 2), (2, 1)):
+        a = lua.table(op="add", continent=1, time=1, pts=lua.table(0, 0, 0, 20, 0, 40), zs=lua.table(10, 10, 10))
+        b = lua.table(op="add", continent=1, time=t2, pts=lua.table(5, 45, 5, 20, 5, -5), zs=lua.table(10, 10, 10))
+        n, e = R.WithTracks(roads, lua.table(a, b), 1)[:2]
+        mine = [e[i] for i in range(1, len(e) + 1) if e[i][4] == R.SOURCE_RECORDED]
+        beside = {round(ed[5 + 2 * ((len(ed) - 4) // 4)]) for ed in mine if ed[3] > 15}  # (their middles' x: 0, 5)
+        assert len(beside) == kept, (t2, [list(ed.values()) for ed in mine])
+
+
+def test_down_in_the_cleft_an_erasure_takes_out_the_cleft_road_not_the_drag_over_it(nav_env):
+    # (Orgrimmar's Cleft of Shadow under the Drag: a floor under the capital's, its roads a cave's)
+    lua, ns, UC = undercity_env(nav_env)
+    R = ns.Router
+    x, y = 1672.0, -4302.0  # (a Cleft road 1.4 yd under a Drag street; split 15.5)
+    v = R.CaveDown(1, x, y, None, 5.0), R.CaveDown(1, x, y, None, 30.0)
+    assert v == (True, False)
+
+    def after(z):
+        R.Reset()
+        t = lua.table(op="remove", continent=1, time=1, pts=lua.table(x - 2, y - 2, x + 2, y + 2))
+        if z is not None:
+            t.z = z
+        ns.db.tracks = lua.table(t)
+        edges, g = R.Edges(1)
+        near = {True: 0, False: 0}
+        for ei in edges_near(g, x, y, 2):
+            near[bool(g.cave[ei])] += 1
+        return near
+
+    assert after(None) == {True: 0, False: 0} and after(5.0) != after(30.0)  # (no floor: both)
+    ns.db.tracks = lua.table()
+    R.Reset()
+    edges, g = R.Edges(1)
+    assert {bool(g.cave[ei]) for ei in edges_near(g, x, y, 2)} == {True, False}  # (both there before)
+    down, up = after(5.0), after(30.0)
+    assert down[True] == 0 and down[False] > 0
+    assert up[True] > 0 and up[False] == 0
+    ns.db.tracks = lua.table()
+    R.Reset()
+
+
+def test_a_road_drawn_down_in_the_cleft_and_the_cave_roads_it_splits_stay_the_caves(nav_env):
+    # (the pieces of a cave's road a drawn road split were the land's: a route up top could start on
+    # them); a road drawn down there is the cave's own
+    lua, ns, UC = undercity_env(nav_env)
+    R = ns.Router
+    x, y = 1672.0, -4302.0
+    R.Reset()
+    ns.db.tracks = lua.table(lua.table(op="add", continent=1, time=1, z=5.0, pts=lua.table(x, y, x + 6, y + 9)))
+    edges, g = R.Edges(1)
+    mine = [ei for ei in range(1, len(g.e) + 1) if g.e[ei][4] == R.SOURCE_RECORDED]
+    assert mine and all(g.cave[ei] for ei in mine)
+    split = [ei for ei in edges_near(g, x, y, 0.5) if g.e[ei][4] != R.SOURCE_RECORDED]
+    assert split and all(g.cave[ei] for ei in split)
+    ns.db.tracks = lua.table()
+    R.Reset()
+
+
+def test_walls_on_floors_over_floors(nav_env):
+    lua, ns, UC = undercity_env(nav_env)
+    P, R = ns.Passability, ns.Router
+    x, y = UC_STACK
+    wall = lambda z, t: lua.table(op="wall", continent=UC, time=t, z=z, pts=lua.table(x - 6, y + 6, x + 6, y - 6))
+    # a wall drawn down on the lower road cuts that road, not the walkway over it
+    ns.db.tracks = lua.table(wall(-61.0, 1))
+    P.RefreshWalls()
+    R.Reset()
+    edges, g = R.Edges(UC)
+    hs = road_heights_near(lua, g.n, g.e, g.z, x, y, 1.5)
+    assert not any(abs(h + 62) < 1 for h in hs) and any(abs(h + 43.5) < 1 for h in hs)
+    # an eraser takes out the walls on its own floor only
+    ns.db.tracks = lua.table(wall(-61.0, 1), wall(-44.0, 2),
+                             lua.table(op="unwall", continent=UC, time=3, z=-44.0, pts=lua.table(x - 6, y + 6, x + 6, y - 6)))
+    lines = P.WallLines(UC)
+    assert len(lines) == 1 and lines[1].fl.z == -61.0
+    ns.db.tracks = lua.table()
+    P.RefreshWalls()
+    R.Reset()
+
+
+def test_the_road_tools_pick_the_floor_you_edit(nav_env):
+    # (the game gives addons no player height: the floor edited is picked, Shift + mouse wheel) the
+    # floors to pick from where the map is centered, and the other floor's roads faint
+    lua, ns, UC = undercity_env(nav_env)
+    G, R = ns.GPS, ns.Router
+    x, y = UC_STACK
+    edges, g = R.Edges(UC)
+    floors = G.EditFloors(UC, x, y)
+    zs = [floors[i].z for i in range(1, len(floors) + 1)]
+    assert zs == sorted(zs) and len(zs) >= 2 and zs[0] < -50 and zs[-1] > -46  # (the road's floor, the walkway's)
+    near = [ei for ei in edges_near(g, x, y, 3) if g.otherFloors[ei]]
+    lo = next(ei for ei in near if abs(g.otherFloors[ei].h + 62) < 0.5)
+    hi = next(ei for ei in near if abs(g.otherFloors[ei].h + 43.5) < 1)
+    down, up = lua.table(z=-62.0), lua.table(z=-43.5)
+    assert not G.OtherFloor(g, lo, UC, down) and G.OtherFloor(g, hi, UC, down)
+    assert G.OtherFloor(g, lo, UC, up) and not G.OtherFloor(g, hi, UC, up)
+    assert not G.OtherFloor(g, lo, UC, None)  # (none picked: all floors)
+
+
+def test_floors_in_the_road_data_text_and_the_import(nav_env, tmp_path):
+    lua, ns = nav_env
+    lua.execute('GetBuildInfo = function() return "1.60.1", "70009" end')
+    load(lua, ns, "Feedback.lua")
+    ns.db = lua.eval("""{ tracks = {
+      { op = 'remove', continent = 10001, time = 5, z = -61.04, indoors = true, pts = { 1, 2, 3, 4 } },
+      { op = 'add', continent = 1, time = 6, z = 5, down = true, pts = { 1, 2, 3, 4 } } } }""")
+    text, n = ns.Feedback.RoadsText()
+    lines = text.split("\n")
+    assert "R remove 10001 5 z=-61.0 indoors=1 1.0,2.0 3.0,4.0" in lines and "R add 1 6 z=5.0 down=1 1.0,2.0 3.0,4.0" in lines
+    from azerothgps.roads.tracks import import_shared, load_overrides, parse_shared
+    got = parse_shared(text)
+    assert [(t.get("z"), t.get("indoors"), t.get("down")) for t in got] == [(-61.0, True, None), (5.0, None, True)]
+    assert import_shared(text, tmp_path) == 2
+    props = [f["properties"] for f in load_overrides(tmp_path / "roads_10001.geojson")["features"]]
+    assert props[0]["z"] == -61.0 and props[0]["indoors"] is True
+
+
+def test_zone_of_a_city_is_the_zone_around_it(env):
+    lua, ns = env
+    load(lua, ns, "Data/Maps.lua", "Layers.lua")
+    ids = {ns.Maps[k].name: k for k in ns.Maps.keys() if ns.Maps[k].type == 3}
+    L = ns.Layers
+    assert L.ZoneOf(ids["Undercity"]) == ids["Tirisfal Glades"]
+    assert L.ZoneOf(ids["Durotar"]) == ids["Durotar"]
+
+
+def test_quest_route_stops_in_a_city_still_go_in_the_fastest_order(nav_env):
+    lua, ns = nav_env
+    load(lua, ns, "Data/Terrain.lua", "Data/Cities.lua")
+    ns.settings = lua.eval("{ gps = { fastestOrder = true, cityKeepOrder = true } }")
+    N = ns.Nav
+    N.stops = lua.eval("{ { x = 1480, y = 280, cont = 10001 }, { x = 1590, y = 204, cont = 10001 } }")
+    assert N.KeepCityOrder()  # placed by hand: your order
+    N.stops = lua.eval("{ { x = 1480, y = 280, cont = 10001, questRoute = true }, { x = 1590, y = 204, cont = 10001, questRoute = true } }")
+    assert not N.KeepCityOrder()  # the quest route: fastest
+
+
+def test_the_city_order_is_kept_only_among_the_citys_own_stops(nav_env):
+    # (reported) a stop outside the city with stops down in it: the whole route kept the order
+    # placed. Now: the fastest order, the city's stops still in theirs among themselves.
+    lua, ns = nav_env
+    load(lua, ns, "Data/Terrain.lua", "Data/Cities.lua")
+    ns.settings = lua.eval("{ gps = { fastestOrder = true, cityKeepOrder = true } }")
+    N = ns.Nav
+    N.PlayerLevel = lua.eval("function(c) return c end")
+    far, a, b = (2250.0, 280.0), (1480.0, 280.0), (1590.0, 204.0)  # Brill; two spots down in Undercity
+    N.stops = lua.eval(f"{{ {{ x = {far[0]}, y = {far[1]}, cont = 0, name = 'brill' }}, "
+                       f"{{ x = {b[0]}, y = {b[1]}, cont = 10001, name = 'b' }}, {{ x = {a[0]}, y = {a[1]}, cont = 10001, name = 'a' }} }}")
+    assert not N.KeepCityOrder()
+    N.OrderStops(1570.0, 230.0, 10001)
+    names = [N.stops[i].name for i in range(1, len(N.stops) + 1)]
+    assert names.index("b") < names.index("a")  # (b placed before a: still so)
+    assert names[-1] == "brill"  # (Brill's the far one: last)
+    N.stops = lua.eval(f"{{ {{ x = {b[0]}, y = {b[1]}, cont = 10001 }}, {{ x = {a[0]}, y = {a[1]}, cont = 10001 }} }}")
+    assert N.KeepCityOrder()  # (all down in the city: your order)
+
+
+def test_undercity_flight_master_is_down_in_the_city(nav_env):
+    lua, ns = nav_env
+    load(lua, ns, "Data/Pois.lua")
+    fm = [ns.Pois[0][i] for i in range(1, len(ns.Pois[0]) + 1)
+          if ns.Pois[0][i][1] == 1 and ns.Pois[0][i][4] == "Undercity, Tirisfal"]
+    assert fm and fm[0][7] == 10001
+    others = [ns.Pois[0][i] for i in range(1, len(ns.Pois[0]) + 1) if ns.Pois[0][i][1] == 1 and ns.Pois[0][i][7]]
+    assert len(others) == 1  # (only it)
+
+
+def test_flying_from_undercity_starts_at_its_flight_master_down_in_the_city(nav_env):
+    lua, ns = flights_env(nav_env, [11, 17])  # Undercity, Hammerfall
+    load(lua, ns, "Data/Terrain.lua", "Passability.lua", "Data/Cities.lua")
+    ns.Nav.FlightsChanged()
+    lua.execute("function AGPS_STOP(x, y) return { x = x, y = y, cont = 0 } end")
+    # in the Trade Quarter, down in the city, a few yards from the bat handler
+    legs, secs = ns.Nav.Plan(10001, 1585.0, 280.0, 7.0, lua.eval("AGPS_STOP")(-910.0, -3490.0))
+    kinds = [("ride " + str(legs[i].ride[8])) if legs[i].ride else "walk" for i in range(1, len(legs) + 1)]
+    assert kinds[:2] == ["walk", "ride flight"]  # straight to the flight master: no lift first
+
+
+def test_a_flight_from_undercity_is_drawn_over_the_land(nav_env):
+    # (reported: the flight's dotted line gone) its flight master is down in the city, so the
+    # flight's part was on the city's level, which the map doesn't draw while the player is up top
+    lua, ns = flights_env(nav_env, [11, 17])  # Undercity, Hammerfall
+    load(lua, ns, "Data/Terrain.lua", "Passability.lua", "Data/Cities.lua")
+    ns.Router.Reset()
+    ns.Router.SYNC_WALKS = True
+    N = ns.Nav
+    N.FlightsChanged()
+    N.SetDestination(-910.0, -3490.0, 0, "Hammerfall")
+    r = N.Route(2250.0, 280.0, 0)  # Brill: up on the land
+    flights = [r.parts[i] for i in range(1, len(r.parts) + 1)
+               if r.parts[i].kinds and len(r.parts[i].pts) >= 4 and r.parts[i].kinds[1] == N.KIND_TRANSPORT
+               and (r.parts[i].pts[1] - r.parts[i].pts[len(r.parts[i].pts) - 1]) ** 2 > 100]
+    assert flights and all(f.cont == 0 for f in flights)
+
+
+def test_the_route_tour_stays_on_the_terrain_view(env):
+    # (reported, a recording) a long route's overview zoomed out past the terrain's tiles, and the
+    # zone maps' art took over halfway through the zoom: the terrain view stops at its tiles
+    lua, ns = env
+    G = ns.GPS
+    G.Follow()
+    ns.settings = lua.eval("{ gps = { style = 'minimap', zoom = 300 } }")
+    assert G.TourZoom(9000.0) < G.MINIMAP_MAX_ZOOM and G.TourZoom(800.0) == 800.0
+    ns.settings.gps.style = "zone"  # (the map style: its maps, all of the route)
+    assert G.TourZoom(9000.0) == 9000.0
+
+
+def test_a_route_to_another_continent_stays_on_the_seamless_map(nav_env):
+    # (reported 2026-11-09) routing to another continent, the seamless map's overview went to the game's world map
+    # instead: the seamless map zooms out on its own art, both ends on it, as far as it zooms
+    lua, ns, UC = undercity_env(nav_env)
+    G, N = ns.GPS, ns.Nav
+    G.Follow()
+    N.stops = lua.eval("{ { x = 1600, y = -4400, cont = 1 } }")  # Orgrimmar, from Eastern Kingdoms
+    assert G.TourAcrossContinents(0)
+    G.Seamless = lua.eval("function() return true end")
+    assert not G.TourWorldMap(0)
+    assert G.TourZoom(30000.0) == min(30000.0, G.MaxZoom()) and G.TourZoom(30000.0) > G.MINIMAP_MAX_ZOOM
+    G.Seamless = lua.eval("function() return false end")
+    assert G.TourWorldMap(0)  # (the other styles: the world map, as before)
+
+
+def test_show_walls_outlines_the_mountains(nav_env):
+    lua, ns = nav_env
+    load(lua, ns, "Data/Terrain.lua", "Passability.lua")
+    G, P = ns.GPS, ns.Passability
+    # Durotar's hills around Razor Hill: blocked and open ground both near
+    e = G.BlockEdges(1, 300.0, -4700.0, 300.0)
+    n = len(e) // 4
+    assert n > 10
+    # each border lies between a blocked and an open sample
+    for k in range(0, min(n, 50)):
+        ax, ay, bx, by = e[4 * k + 1], e[4 * k + 2], e[4 * k + 3], e[4 * k + 4]
+        mx, my = (ax + bx) / 2, (ay + by) / 2
+        if ax == bx:  # (a border across x)
+            sides = {P.At(1, mx - 4, my) == 2, P.At(1, mx + 4, my) == 2}
+        else:
+            sides = {P.At(1, mx, my - 4) == 2, P.At(1, mx, my + 4) == 2}
+        assert sides == {True, False}
+    assert lua.eval("rawequal")(G.BlockEdges(1, 300.0, -4700.0, 300.0), e)  # (kept while the view stays near)
+
+
+def test_a_wall_along_the_ruins_edge_closes_it(nav_env):
+    lua, ns = nav_env
+    load(lua, ns, "Data/Terrain.lua", "Passability.lua")
+    P = ns.Passability
+    ns.Walls = lua.eval("{}")  # (not the shipped ones: the player may have changed them)
+    ns.db = lua.eval("{ tracks = { { op = 'wall', drawn = true, continent = 0, time = 1, pts = { 1380,400, 1380,90 } } } }")
+    P.RefreshWalls()
+    # (from the Ruins' courtyard straight out over the lake: not that way)
+    assert P.CrossesWall(0, 1420.0, 240.0, 1330.0, 240.0)
+    assert P.SegmentCost(0, 1420.0, 240.0, 1330.0, 240.0) is None
+
+
+def test_a_drawn_wall_leaves_the_road_it_crosses(router):
+    # (asked 2026-11-15: "roads should be allowed through drawn walls just like normal walls"; a wall drawn
+    # in Hillsbrad cut its road and Tarren Mill -> Kharanos had no way left) walls block walking, not roads
+    lua, ns = router
+    load(lua, ns, "Passability.lua")
+    P, R = ns.Passability, ns.Router
+    # a wall across the second leg (B (0,-1000) -> C (1000,-1000)) at x = 500
+    ns.db = lua.eval("{ tracks = { { op = 'wall', drawn = true, continent = 1, time = 1, pts = { 500,-1100, 500,-900 } } } }")
+    try:
+        for cut, n in ((False, 2), (True, 3)):  # (the old cut, still there behind its switch: the second leg in two)
+            R.WALLS_CUT_ROADS = cut
+            P.RefreshWalls()
+            R.Reset()
+            assert len(R.Edges(1)[0]) == n, cut
+        R.WALLS_CUT_ROADS = False
+        R.Reset()
+        r = R.Route(1, 0.0, 30.0, 1030.0, -1000.0, lua.table(offroad=False))
+        assert not r.noWay and not r.unconnected
+    finally:
+        R.WALLS_CUT_ROADS = False
+        ns.db = lua.eval("{}")
+        P.RefreshWalls()
+        R.Reset()
+
+
+def test_the_wall_eraser_opens_the_terrain_under_it(nav_env):
+    lua, ns = nav_env
+    load(lua, ns, "Data/Terrain.lua", "Passability.lua")
+    P = ns.Passability
+    # a blocked spot in Durotar's hills near Razor Hill
+    spot = next((x, y) for x in range(0, 600, 10) for y in range(-5000, -4400, 10) if P.At(1, float(x), float(y)) == 2)
+    x, y = spot
+    loop = ",".join(f"{x + dx},{y + dy}" for dx, dy in ((-20, -20), (20, -20), (20, 20), (-20, 20), (-20, -20)))
+    ns.db = lua.eval("{ tracks = { { op = 'unwall', area = true, drawn = true, continent = 1, time = 1, pts = { %s } } } }" % loop)
+    P.RefreshWalls()
+    assert P.At(1, float(x), float(y)) == 0 and P.IsOpen(1, float(x), float(y))
+    # a wall drawn over it closes it again (walls win)
+    lua.eval("function(db) db.tracks[2] = { op = 'wall', drawn = true, continent = 1, time = 2, pts = { %s,%s, %s,%s } } end"
+             % (x - 30, y, x + 30, y))(ns.db)
+    P.RefreshWalls()
+    assert P.At(1, float(x), float(y)) == 2
+
+
+def test_waiting_counts_roads_and_walls_apart(nav_env):
+    lua, ns = nav_env
+    load(lua, ns, "Feedback.lua")
+    ns.db = lua.eval("""{ tracks = { { op = 'add', time = 1 }, { op = 'remove', time = 2 },
+      { op = 'wall', time = 3 }, { op = 'unwall', time = 4 }, { op = 'wall', time = 5 } } }""")
+    ns.RoadTracksIn = lua.eval("{ [5] = true }")  # (that one's in the data now)
+    assert tuple(ns.Feedback.DrawnCounts()) == (2, 2)
+
+
+def test_height_hint_is_about_the_next_ride_when_one_comes_first(nav_env):
+    lua, ns = nav_env
+    load(lua, ns, "Data/Terrain.lua", "Passability.lua", "Data/Cities.lua")
+    N = ns.Nav
+    lua.execute("AGPS_CHAR = {} GetSubZoneText = function() return 'Trade Quarter' end")
+    ns.CharDB = lua.eval("function() return AGPS_CHAR end")
+    ns.Geo.PlayerMap = lua.eval("function() return 1458 end")
+    # the stop is up top (a surface quest turn-in); the next thing is a flight boarded down here
+    N.dest = lua.eval("{ x = 2000, y = 300, cont = 0 }")
+    N.route = lua.eval("{ legs = { { walk = true }, { ride = { 10001, 1569, 268, 0, -916, -3497, 60, 'flight' }, from = 1 } } }")
+    way = N.HeightHint(1596.0, 266.0, 10001)
+    assert way != "up" or N.HeightText(1596.0, 266.0, 10001).find("lift") == -1  # not "up a lift" for the flight master
+
+
+def test_nothing_to_share_once_the_data_has_it(nav_env):
+    lua, ns = nav_env
+    lua.execute('GetBuildInfo = function() return "1.60.1", "70009" end')
+    load(lua, ns, "Feedback.lua", "Record.lua")
+    ns.Print = lua.eval("function() end")
+    ns.db = lua.eval("""{ tracks = { { op = 'add', continent = 0, time = 5, pts = { 0,0, 50,0 } } },
+      feedback = { roads = { { op = 'add', continent = 0, time = 5, pts = { 0,0, 50,0 } },
+                             { op = 'wall', continent = 0, time = 6, pts = { 0,0, 0,50 } } }, trips = {} } }""")
+    ns.RoadTracksIn = lua.eval("{ [5] = true }")  # (road 5 is in the data now)
+    text, n = ns.Feedback.RoadsText()
+    assert n == 1 and "R wall 0 6" in text and "R add 0 5" not in text
+    assert tuple(ns.Feedback.Counts())[0] == 1 and tuple(ns.Feedback.DrawnCounts()) == (0, 0)
+    ns.Record.Prune()
+    assert len(ns.db.tracks) == 0 and len(ns.db.feedback.roads) == 1
+    assert len(ns.db.tracksShipped) == 1  # (archived once: the old second copy of road 5 isn't another)
+
+
+def test_a_stroke_drawn_elsewhere_from_down_in_a_city_is_on_the_continent(nav_env):
+    lua, ns = nav_env
+    load(lua, ns, "Data/Terrain.lua", "Passability.lua", "Data/Cities.lua", "Record.lua")
+    ns.Print = lua.eval("function() end")
+    lua.execute("C_Map = C_Map or {} C_Map.GetBestMapForUnit = function() return 1458 end C_Map.GetMapInfo = function() return { name = 'Undercity' } end time = function() return 1 end")
+    ns.Nav.PlayerLevel = lua.eval("function(c) return 10001 end")  # (the player is down in Undercity)
+    ns.GPS.shownLevel, ns.GPS.shownCont = 10001, 0  # (its map shown)
+    ns.db = lua.eval("{ tracks = {} }")
+    # looking at Duskwood from there, a road drawn
+    ns.GPS.FinishRoad(lua.eval("{ cont = 0, pts = { -10900,400, -10880,450, -10860,500 } }"))
+    assert ns.db.tracks[1].continent == 0
+    # drawn over the city itself: on its level
+    ns.GPS.FinishRoad(lua.eval("{ cont = 0, pts = { 1560,250, 1570,270, 1590,280 } }"))
+    assert ns.db.tracks[2].continent == 10001
+
+
+@pytest.fixture
+def api(env):
+    lua, ns = env
+    load(lua, ns, "Api.lua")
+    return lua, ns, lua.globals().AzerothGPS
+
+
+def test_api_places_zephras_isle_on_its_world_map_inset(api):
+    # (StreetView asked) a spot on Zephras Isle, on the world view in another continent's
+    # coordinates: on the isle's inset there, not nil
+    lua, ns, A = api
+    load(lua, ns, "Data/Maps.lua")
+    assert A.version >= 7
+    b = ns.Maps[2521].bounds
+    cx, cy = (b[1] + b[3]) / 2, (b[2] + b[4]) / 2
+    x, y = A.ToContinent(2991, cx, cy, 0)
+    it = ns.GPS.WORLD_INSETS[1]
+    ib = ns.GPS.InsetBounds(it, ns.Geo.WorldArtBounds(0))
+    assert ib[1] < x < ib[3] and ib[2] < y < ib[4]
+    assert abs(x - (ib[1] + ib[3]) / 2) < 1 and abs(y - (ib[2] + ib[4]) / 2) < 1  # (the isle's middle: the inset's)
+    x2, _ = A.ToContinent(2991, b[3], cy, 0)  # (its north edge: the inset's top)
+    assert abs(x2 - ib[3]) < 1
+    assert A.ToContinent(0, 1600.0, 240.0, 2991) is None  # (the other way: none)
+
+
+def multi(lua, f, *args):
+    """All the values a Lua function returns (lupa keeps only the first)."""
+    t = lua.eval("function(f, ...) return { f(...) } end")(f, *args)
+    return tuple(t[i] for i in range(1, len(t) + 1))
+
+
+def test_public_api_exposes_documented_functions(api):
+    lua, ns, A = api
+    for name in ("Instance", "InstanceFloors", "PlayerWorld", "Facing", "BaseContinent", "LocateWorld", "MapToWorld", "Roads",
+                 "NearestRoad", "RoadEdge", "MapFrame", "MapCanvas", "MapButtonParent", "MapShown",
+                 "View", "CursorWorld", "WorldToMap", "SetOverlay", "ShowRoads", "Redraw", "MapButton",
+                 "HoldMap", "LookAt", "Follow", "ShowMap", "TopPanelInset", "OnLayout", "ShowWorld", "ToContinent", "OnIconShiftClick",
+                 "AddOptionsPage", "RefreshOptions", "ShowOptions", "SetUnsaved", "SaveNow",
+                 "PlayerLevel", "ShownLevel",
+                 "SetPlayerArrow", "SetRouteLook", "SetFrameLook", "OnArrive", "TitleBarSlot",
+                 "RegisterLookFrame", "FrameLook", "SeamKnobs", "AddCharm", "RegisterPopup"):
+        assert A[name] is not None, name
+    assert A.version == 20
+    assert A.TopPanelInset() == 4  # (no window frame in the tests)
+    assert A.MapButton("recenter") is None  # (no map built in the tests)
+
+
+def test_public_api_shift_click_on_a_boss_goes_to_another_addon(api):
+    # (StreetView asked, API 12, the user 2026-10-02: Shift-click a boss in a dungeon's map for its street view,
+    # said at the top of the map) the click is offered to the owner with the boss and its dungeon; its hint
+    # names what it does; a click it doesn't use is not taken; removed, no hint
+    lua, ns, A = api
+    G = ns.GPS
+    got = lua.eval("{}")
+    lua.execute("""
+      function SHIFT_FN(t) return function(info) t.name, t.x, t.cont = info.name, info.x, info.cont; return info.cont == 20389 end end
+      function SHIFT_HINT(info) if info.cont == 20389 then return "its street view" end end
+    """)
+    assert G.IconHint(lua.eval('{ kind = "boss", cont = 20389 }')) is None
+    A.OnIconShiftClick("StreetView", lua.globals().SHIFT_FN(got), lua.globals().SHIFT_HINT)
+    info = lua.eval('{ kind = "boss", name = "Taragaman the Hungerer", x = -244.7, y = 150.1, cont = 20389 }')
+    assert G.IconShiftClick(info) is True and (got.name, got.x, got.cont) == ("Taragaman the Hungerer", -244.7, 20389)
+    assert G.IconHint(lua.eval('{ kind = "boss", cont = 20389 }')) == "its street view"
+    assert G.IconShiftClick(lua.eval('{ kind = "boss", cont = 20036 }')) is False  # (not used: not taken)
+    assert G.IconHint(lua.eval('{ kind = "boss", cont = 20036 }')) is None
+    A.OnIconShiftClick("StreetView", None)
+    assert G.IconShiftClick(info) is False and G.IconHint(info) is None
+
+
+def test_public_api_hold_map_takes_double_clicks_until_let_go(api):
+    lua, ns, A = api
+    G = ns.GPS
+    got = lua.eval("{}")
+    click = lua.eval("function(t) return function(x, y, c) t.x, t.y, t.c = x, y, c end end")(got)
+    assert not G.Held()
+    A.HoldMap("game", True, click)
+    assert G.Held()
+    assert G.HeldClick(10, 20, 1) is True
+    assert (got.x, got.y, got.c) == (10, 20, 1)
+    A.HoldMap("game", False)
+    assert not G.Held()
+    assert G.HeldClick(1, 2, 0) is False
+
+
+def test_a_held_map_style_overrides_the_setting_until_let_go(api):
+    # (StreetView asked, API 9: a game's difficulty locks every player's map style) a holder's style is
+    # what the map draws, the setting untouched; holding again updates it; letting go brings the player's
+    # own back; no style, as before
+    lua, ns, A = api
+    G = ns.GPS
+    ns.settings = lua.eval('{ gps = { style = "minimap", zoom = 300 } }')
+    assert G.Style() == "minimap"
+    A.HoldMap("game", True, None, lua.eval('{ style = "zone" }'))
+    assert G.Style() == "zone" and G.HeldStyle() == "zone" and ns.settings.gps.style == "minimap"
+    assert G.IsMapStyle(G.Style())
+    A.HoldMap("game", True, None, lua.eval('{ style = "unrevealed" }'))  # (a joiner learns the level a moment later)
+    assert G.Style() == "unrevealed" and G.IsMapStyle("unrevealed")
+    A.HoldMap("game", True, None, lua.eval('{ style = "sideways" }'))  # (not a style: none held)
+    assert G.Style() == "minimap"
+    A.HoldMap("game", True, None, lua.eval('{ style = "minimap" }'))
+    ns.settings.gps.style = "zone"
+    assert G.Style() == "minimap"  # (held: the terrain view, whatever the player picked)
+    A.HoldMap("game", False)
+    assert G.Style() == "zone" and G.HeldStyle() is None
+    A.HoldMap("game", True)  # (no opts: today's behavior)
+    assert G.Style() == "zone"
+    A.HoldMap("game", False)
+
+
+def test_the_unrevealed_style_draws_no_explored_areas(api):
+    # (API 9) "unrevealed": the world map's base art only, no area overlays at all (the same for every
+    # character); "zone" all of them
+    lua, ns, A = api
+    load(lua, ns, "Data/Maps.lua")
+    G = ns.GPS
+    mid = next(k for k in sorted(ns.Maps.keys()) if ns.Maps[k].overlays and len(ns.Maps[k].overlays) > 0
+               and ns.Maps[k].tiles and ns.Maps[k].bounds)
+    b = ns.Maps[mid].bounds
+    cx, cy = (b[1] + b[3]) / 2, (b[2] + b[4]) / 2
+    zoom = max(b[3] - b[1], b[4] - b[2])
+    n = {style: len(G.LayoutZone(cx, cy, mid, 0, zoom, 200, None, G.SpoilerMode(style)))
+         for style in ("zone", "unrevealed")}
+    tiles = lua.eval("function(G, m, x, y, z) local t = G.LayoutZone(x, y, m, 0, z, 200, nil, 'none') return #t end")
+    assert G.SpoilerMode("unrevealed") == "none" and G.SpoilerMode("nospoiler") is True and not G.SpoilerMode("zone")
+    assert 0 < n["unrevealed"] < n["zone"], n
+    assert n["unrevealed"] == tiles(G, mid, cx, cy, zoom)
+
+def test_api_saves_and_restores_the_whole_view(api):
+    # (StreetView asked: a game ending put a browsed continent or world map back as a zoomed-out
+    # terrain view) the view as it was: a continent's map, the world map, following the player
+    lua, ns, A = api
+    load(lua, ns, "Data/Maps.lua")
+    ns.settings = lua.eval("{ gps = { zoom = 300 } }")
+    lua.execute("time = os.time")
+    G = ns.GPS
+    browsing = lua.eval("function(G) local b = G.BrowseState() return b end")
+    following = lua.eval("function(G) local b, f = G.BrowseState() return b == nil and f == nil end")
+    kalimdor = G.ContinentMap(1)
+    world = next(k for k in ns.Maps.keys() if ns.Maps[k].worldFrames)
+    for mid in (kalimdor, world):
+        G.Browse(mid, 1)
+        state = A.SaveView()
+        A.LookAt(0, 1600.0, 240.0, 3000.0)
+        assert browsing(G) != mid
+        A.RestoreView(state)
+        assert browsing(G) == mid, mid
+    G.Follow()
+    state = A.SaveView()
+    assert state.follow
+    A.LookAt(0, 1600.0, 240.0, 3000.0)
+    A.RestoreView(state)
+    assert following(G)
+    A.RestoreView(None)  # (none: following)
+    A.RestoreView(lua.eval("{ x = 1, y = 2, instance = 99999 }"))  # (a dungeon no longer there: following)
+    assert following(G)
+
+
+def test_no_docks_or_dungeon_entrances_while_the_map_is_held(api):
+    # (StreetView asked: during its game, the zeppelins', boats' and dungeons' markers hidden)
+    lua, ns, A = api
+    G = ns.GPS
+    assert G.ShowsTravelMarkers()
+    A.HoldMap("StreetGuess", True)
+    assert not G.ShowsTravelMarkers()
+    A.HoldMap("StreetGuess", False)
+    assert G.ShowsTravelMarkers()
+
+
+def test_no_road_or_wall_tools_while_the_map_is_held(api):
+    lua, ns, A = api
+    G = ns.GPS
+    said = lua.eval("{}")
+    ns.Print = lua.eval("function(t) return function(msg) t[#t + 1] = msg end end")(said)
+    G.SetRoadMode(True)
+    assert G.roadMode
+    A.HoldMap("game", True, None)  # (a game on the map starts)
+    assert not G.roadMode and not G.wallMode  # (turned off)
+    assert G.SetRoadMode(True) is False and not G.roadMode  # (refused while held, and said why)
+    assert G.SetWallMode(True) is False and not G.wallMode
+    assert G.StartDrawing("farm") is False and not G.drawMode
+    assert said[len(said)] == "not during a game on the map"
+    ns.settings = lua.eval("{ gps = { showWalls = true } }")
+    assert G.ShowsWalls() is False  # (no wall outlines over the game's map)
+    A.HoldMap("game", False)
+    assert G.ShowsWalls() is True and ns.settings.gps.showWalls  # (the option untouched)
+    assert not G.roadMode  # (not back by itself)
+    G.SetRoadMode(True)  # (turned on again after the game: fine)
+    assert G.roadMode
+    G.SetRoadMode(False)
+
+
+def test_nearest_road_waits_for_the_background_build(nav_env):
+    lua, ns = nav_env
+    load(lua, ns, "Api.lua")
+    A, R = lua.globals().AzerothGPS, ns.Router
+    R.WARM = True  # (as in game: the roads built in the background after a /reload)
+    assert A.NearestRoad(1, -600.0, -4400.0) is None  # not built in this frame
+    clock = lua.eval("function() return os.clock() * 1000 end")
+    while R.HasWork():
+        R.Pump(clock() + 200, clock)
+    x, y, dist, edge = multi(lua, A.NearestRoad, 1, -600.0, -4400.0)
+    assert dist is not None and dist < 200
+
+
+def test_public_api_to_continent_goes_there_and_back(api):
+    lua, ns, A = api
+    load(lua, ns, "Data/Maps.lua")
+    x, y = multi(lua, A.ToContinent, 0, -9000.0, 400.0, 1)  # Eastern Kingdoms, in Kalimdor's coordinates
+    assert (x, y) != (-9000.0, 400.0)
+    assert multi(lua, A.ToContinent, 1, x, y, 0) == pytest.approx((-9000.0, 400.0))
+    assert multi(lua, A.ToContinent, 0, 5.0, 6.0, 0) == (5.0, 6.0)
+
+
+def test_public_api_map_to_world_inverts_locate(api):
+    lua, ns, A = api
+    ns.Maps = lua.eval("{ [1411] = { name = 'Durotar', type = 3, continent = 1,"
+                       " bounds = { -1716.67, -7250, 1808.33, -1962.5 } } }")
+    mapID, name, u, v = multi(lua, A.LocateWorld, 1, -568.5, -4436.9)
+    assert mapID == 1411 and name == "Durotar"
+    assert (u, v) == pytest.approx((0.46797, 0.67428), abs=1e-4)
+    x, y, cont = multi(lua, A.MapToWorld, 1411, u, v)
+    assert (x, y, cont) == pytest.approx((-568.5, -4436.9, 1))
+
+
+def test_public_api_world_to_map_and_forced_roads(api):
+    lua, ns, A = api
+    # The initial view: centered on (0, 0), north up, 1 UI unit per yard.
+    dx, dy = multi(lua, A.WorldToMap, 10.0, -5.0)  # 10 yd north, 5 yd east
+    assert (dx, dy) == pytest.approx((5.0, 10.0))
+    assert ns.GPS.ForcedRoadColor() is None
+    A.ShowRoads("sv", True, lua.eval("{ 0, 0, 1 }"))
+    c = ns.GPS.ForcedRoadColor()
+    assert [c[1], c[2], c[3]] == [0, 0, 1]
+    A.ShowRoads("sv", False)
+    assert ns.GPS.ForcedRoadColor() is None
+    A.SetOverlay("sv", lua.eval("function(ctx) end"))
+    assert ns.GPS.overlays["sv"] is not None
+    A.SetOverlay("sv", None)
+    assert ns.GPS.overlays["sv"] is None
+
+
+def test_terrain_view_city_icons_are_the_cities_with_an_inside_map(env):
+    lua, ns = env
+    load(lua, ns, "Data/Maps.lua", "Data/Interiors.lua")
+    names = {c.name for c in ns.GPS.InteriorCities(0).values()}
+    assert {"Ironforge", "Undercity"} <= names and "Stormwind City" not in names
+
+
+def test_no_u_turn_to_the_road_while_a_walk_around_is_searched(env):
+    # Tirisfal, a corpse run: the body ~95 yd south, a small steep patch on the straight line.
+    # While the walk around it was searched the route went back north to the road (a 284 yd
+    # U-turn), and every step started the search over, so it stayed that way.
+    lua, ns, at = tirisfal_env(env)
+    R = ns.Router
+    px, py, bx, by = 2192.7, 430.5, 2099.7, 409.5
+    assert ns.Passability.SegmentCost(0, px, py, bx, by) is None  # (blocked in a straight line)
+    R.Reset()
+    R.SYNC_WALKS = False
+    now = lua.eval("function() return os.clock() * 1000 end")
+    try:
+        for offroad in (True, False):
+            R.Reset()
+            opts = lua.table(offroad=offroad, transient=True)
+            r = R.Route(0, px, py, bx, by, opts)
+            assert r.pending and r.length < 130  # meanwhile: about straight, not the long way round
+            while R.HasWork():
+                R.Pump(now() + 50, now)
+            r = R.Route(0, px, py, bx, by, opts)
+            assert not r.pending and r.length < 130
+            # a few yards on: the walk found is joined, not searched again
+            r = R.Route(0, px - 4, py - 3, bx, by, opts)
+            assert not r.pending and r.length < 130 and not R.HasWork()
+    finally:
+        R.SYNC_WALKS = True
+
+
+def test_routes_keep_out_of_zones_too_high_for_the_player(nav_env):
+    # Level 13 from Brill to Tarren Mill: not over Alterac Mountains (30-40, red for them) but
+    # by Silverpine; Hillsbrad (the destination's zone) is fine. At 60, the short way.
+    lua, ns = nav_env
+    load(lua, ns, "Data/Terrain.lua", "Passability.lua", "Data/Zones.lua", "GPSFrame.lua")
+    R = ns.Router
+    R.Reset()
+    R.SYNC_WALKS = True
+    ns.settings = lua.eval("{ gps = {} }")
+
+    def zone(name):
+        return next(k for k in ns.Maps.keys() if ns.Maps[k].name == name and ns.Maps[k].type == 3)
+
+    def at(name, u, v):
+        b = ns.Maps[zone(name)].bounds
+        return b[3] - v / 100 * (b[3] - b[1]), b[4] - u / 100 * (b[4] - b[2])
+
+    (sx, sy), (tx, ty) = at("Tirisfal Glades", 61, 52), at("Hillsbrad Foothills", 61, 20)
+    alterac = zone("Alterac Mountains")
+    assert R.ZoneAt(0, sx, sy) == zone("Tirisfal Glades") and R.ZoneAt(0, tx, ty) == zone("Hillsbrad Foothills")
+
+    def through(r, z):
+        pts = [r.pts[i] for i in range(1, len(r.pts) + 1)]
+        yd = 0
+        for i in range(0, len(pts) - 3, 2):
+            yd += (R.ZoneYards(0, pts[i], pts[i + 1], pts[i + 2], pts[i + 3])[z] or 0)
+        return yd
+
+    for offroad in (False, True):
+        opts = lua.table(offroad=offroad)
+        lua.execute("UnitLevel = function() return 60 end")
+        high = R.Route(0, sx, sy, tx, ty, opts)
+        assert through(high, alterac) > 500  # (the short way: over the mountains)
+        lua.execute("UnitLevel = function() return 13 end")
+        low = R.Route(0, sx, sy, tx, ty, opts)
+        assert through(low, alterac) < 50 and through(low, zone("Silverpine Forest")) > 1000
+        ns.settings.gps.avoidHighZones = False  # (the option off: the short way again)
+        assert through(R.Route(0, sx, sy, tx, ty, opts), alterac) > 500
+        ns.settings.gps.avoidHighZones = None
+
+
+def test_a_stop_in_a_zone_too_high_is_confirmed_first(nav_env):
+    lua, ns = nav_env
+    load(lua, ns, "Data/Terrain.lua", "Passability.lua", "Data/Zones.lua", "GPSFrame.lua")
+    N, R = ns.Nav, ns.Router
+    ns.settings = lua.eval("{ gps = {} }")
+    ns.Print = lua.eval("function() end")
+
+    def at(name, u, v):
+        k = next(k for k in ns.Maps.keys() if ns.Maps[k].name == name and ns.Maps[k].type == 3)
+        b = ns.Maps[k].bounds
+        return b[3] - v / 100 * (b[3] - b[1]), b[4] - u / 100 * (b[4] - b[2])
+
+    brill, tarren = at("Tirisfal Glades", 61, 52), at("Hillsbrad Foothills", 61, 20)
+    lua.execute("UnitLevel = function() return 13 end")
+    lua.execute(f"UnitPosition = function() return {brill[0]}, {brill[1]}, 0, 0 end")
+    ns.Ask = lua.eval("function(name, text, yes, no, onYes, onNo) ASKED = { text = text, data = { onYes, onNo } } end")
+    lua.execute("ASKED = nil")
+    stop = lua.table(x=tarren[0], y=tarren[1], cont=0, name="Tarren Mill")
+    ok, asked = N.SetStops(lua.table(stop))
+    assert ok is False and asked and len(N.stops) == 0  # not yet: asked first
+    popup = lua.eval("ASKED")
+    assert "Tarren Mill is in Hillsbrad Foothills (level 20-30)" in popup.text and "your level 13" in popup.text
+    popup.data[1]()  # Yes
+    assert len(N.stops) == 1 and N.stops[1].name == "Tarren Mill"
+    N.Clear()
+    lua.execute("ASKED = nil")
+    # No: nothing set (the popup just closes)
+    N.SetStops(lua.table(stop))
+    assert lua.eval("ASKED") is not None and len(N.stops) == 0
+    # adding one to a route: asked the same way
+    lua.execute("ASKED = nil")
+    N.SetStops(lua.table(lua.table(x=brill[0] + 50, y=brill[1], cont=0, name="Brill")))
+    assert lua.eval("ASKED") is None and len(N.stops) == 1  # (in the player's level: no question)
+    ok, asked = N.AddStop(stop)
+    assert not ok and asked and len(N.stops) == 1
+    lua.eval("ASKED").data[1]()
+    assert len(N.stops) == 2
+    # the player in that zone already, or the option off: no question
+    N.Clear()
+    lua.execute("ASKED = nil")
+    lua.execute(f"UnitPosition = function() return {tarren[0] + 30}, {tarren[1]}, 0, 0 end")
+    assert N.SetStops(lua.table(stop)) and lua.eval("ASKED") is None
+    N.Clear()
+    lua.execute(f"UnitPosition = function() return {brill[0]}, {brill[1]}, 0, 0 end")
+    ns.settings.gps.avoidHighZones = False
+    assert N.SetStops(lua.table(stop)) and lua.eval("ASKED") is None
+
+
+def test_zeppelin_timetable_learned_from_a_ride(env):
+    # Brill's zeppelin to Durotar: standing on the tower, then carried off it without walking
+    # (aboard): that departure, and the cycle, give every later arrival and departure.
+    lua, ns = env
+    lua.execute("GetRealmName = function() return 'Test' end")
+    lua.execute("CreateFrame = function() return { RegisterEvent = function() end, SetScript = function() end } end")
+    ns.db = lua.eval("{}")
+    load(lua, ns, "Data/Transports.lua", "Taxi.lua")
+    T = ns.Taxi
+    i = next(k for k in range(1, len(ns.Transports) + 1)
+             if ns.Transports[k][9] == "Jaggedswine Farm, Durotar" and ns.Transports[k][10] == "Brill, Tirisfal Glades")
+    t = ns.Transports[i]
+    bx, by = t[5], t[6]  # the Brill end (side 2)
+    assert T.DockAt(0, bx + 10, by) == (i, 2)
+    assert T.TransportTimes(i, 2, 1000) is None  # never seen
+    # waiting on the tower (walking about a little), then aboard: carried off at 10 yd/s
+    now, server = 0.0, 5000
+    T.TransportTick(now, server, bx + 12, by, 0, 7.0)
+    T.TransportTick(now + 0.5, server, bx + 12, by, 0, 0.0)  # (standing: not carried yet)
+    x = bx + 12
+    for k in range(1, 20):
+        x += 5
+        T.TransportTick(now + 0.5 + k * 0.5, server + 10 + k // 2, x, by, 0, 0.0)
+    seen = T.Sightings()[f"{t[9]} | {t[10]}"]
+    assert seen.side == 2 and seen.at == 5010  # (left when the carrying began)
+    # a cycle later: it leaves Brill again right then; it's at Durotar after the ride there
+    arr, dep, age = T.TransportTimes(i, 2, 5010 + t.cycle - 30)
+    assert dep == pytest.approx(30, abs=0.01) and arr == pytest.approx((30 - t.wait2) % t.cycle, abs=0.01)
+    arr1, dep1, _ = T.TransportTimes(i, 1, 5010 + 1)
+    assert arr1 == pytest.approx(t.ride2 - 1, abs=0.01)  # (Brill to Durotar: ride2, dock 2 round to 1)
+    assert dep1 == pytest.approx(t.ride2 + t.wait1 - 1, abs=0.01)
+    # walking off the tower down the stairs isn't a departure
+    T2 = T.Sightings()
+    T2[f"{t[9]} | {t[10]}"] = None
+    for k in range(20):
+        T.TransportTick(100 + k * 0.5, 9000 + k, bx + 10 + k * 4, by, 0, 7.0)
+    assert T.Sightings()[f"{t[9]} | {t[10]}"] is None
+
+
+def test_a_flight_is_timed_with_no_route_set(env):
+    # (QA, 2026-11-15: Sentinel Hill to Stormwind flown with no route set, and no trip
+    # recorded) this client fires no control events for flights and only a route's redraw looked at the flight: the
+    # half-second ticker looks at it too, so its take-off and landing are seen and its time learned
+    lua, ns = env
+    lua.execute("""
+      CreateFrame = function() return { RegisterEvent = function() end, SetScript = function() end } end
+      AGPS_TAXI, AGPS_NOW = false, 1000
+      UnitOnTaxi = function() return AGPS_TAXI end
+      GetTime = function() return AGPS_NOW end
+      GetServerTime = function() return 5000 end
+      UnitPosition = function() return nil end
+      TakeTaxiNode = function() end
+      hooksecurefunc = function(name, fn) if name == 'TakeTaxiNode' then AGPS_TAKE = fn end end
+      C_Timer = { After = function() end, NewTicker = function(_, fn) AGPS_TICK = fn return {} end }
+      NumTaxiNodes = function() return 2 end
+      TaxiNodeGetType = function(i) return i == 1 and 'CURRENT' or 'REACHABLE' end
+      TaxiNodeName = function(i) return i == 1 and 'Sentinel Hill, Westfall' or 'Stormwind, Elwynn' end
+    """)
+    store = lua.eval("{ flights = {} }")
+    ns.CharDB = lua.eval("function(s) return function() return s end end")(store)
+    ns.Print = lua.eval("function(s) AGPS_SAID = s end")
+    load(lua, ns, "Taxi.lua")
+    key = "Sentinel Hill, Westfall > Stormwind, Elwynn"
+    lua.execute("AGPS_TAKE(2)")  # (the Stormwind button clicked on the flight map)
+    lua.execute("AGPS_TAXI = true AGPS_TICK()")  # (taken off)
+    lua.execute("AGPS_NOW = 1050 AGPS_TICK()")
+    assert store.flights[key] is None  # (still flying)
+    lua.execute("AGPS_TAXI, AGPS_NOW = false, 1082 AGPS_TICK()")  # (landed)
+    f = store.flights[key]
+    assert f is not None and f.samples == 1 and f.seconds == pytest.approx(82)
+    assert "took" in lua.eval("AGPS_SAID")
+
+
+def test_a_zeppelin_ride_is_followed_like_a_flight(env):
+    # (asked 2026-10-02, a video: on the Grom'gol zeppelin the panel stayed on "18 yd to the zeppelin" the whole way)
+    # its departure seen: the ride, its other dock and the time left by its timetable; through a loading screen
+    # (no position) too; done once at the other dock and no longer carried, or long past its ride
+    lua, ns = env
+    lua.execute("GetRealmName = function() return 'Test' end")
+    lua.execute("CreateFrame = function() return { RegisterEvent = function() end, SetScript = function() end } end")
+    ns.db = lua.eval("{}")
+    load(lua, ns, "Data/Transports.lua", "Taxi.lua")
+    T = ns.Taxi
+    i = next(k for k in range(1, len(ns.Transports) + 1)
+             if ns.Transports[k][9] == "Grom'gol Base Camp, Stranglethorn Vale" and ns.Transports[k][10] == "Brill, Tirisfal Glades")
+    t = ns.Transports[i]
+    gx, gy = t[2], t[3]  # (Grom'gol: side 1)
+    assert T.CurrentRide(5000) is None
+    T.TransportTick(0, 5000, gx + 10, gy, 0, 0.0)  # (aboard at the dock)
+    x = gx + 10
+    for k in range(1, 20):  # (carried off)
+        x += 5
+        T.TransportTick(k * 0.5, 5000 + k // 2, x, gy, 0, 0.0)
+    r = T.CurrentRide(5010)
+    assert r and r.to == "Brill, Tirisfal Glades" and r.kind == "zeppelin"
+    assert (r.dock[1], r.dock[2], r.dock[3]) == (t[4], t[5], t[6])
+    assert r.left == pytest.approx(t.ride1 - 10, abs=1.01)
+    T.TransportTick(20, 5030, None, None, None, 0.0)  # (the loading screen on the way)
+    assert T.CurrentRide(5040).left == pytest.approx(t.ride1 - 40, abs=1.01)
+    # at Brill's dock, docked (not carried): off it after two checks
+    bx, by = t[5], t[6]
+    T.TransportTick(30, 5100, bx + 5, by, 0, 0.0)
+    assert T.CurrentRide(5100) is not None
+    T.TransportTick(30.5, 5100, bx + 5, by, 0, 0.0)
+    T.TransportTick(31, 5101, bx + 5, by, 0, 0.0)
+    assert T.CurrentRide(5101) is None
+    # a ride never seen arriving ends a while past its timetable's ride
+    T.StartRide(i, 1, 6000)
+    assert T.CurrentRide(6000 + t.ride1 + T.RIDE_GRACE - 1) is not None
+    assert T.CurrentRide(6000 + t.ride1 + T.RIDE_GRACE + 1) is None
+
+
+def test_the_route_on_a_zeppelin_counts_down_to_its_dock(nav_env):
+    # (asked 2026-10-02) on the zeppelin: "Riding the zeppelin to Brill, arrives in ..." in the panel, the steps
+    # and the arrow's line, the ride's line to the dock, then the walk on from there; across continents too
+    lua, ns = nav_env
+    load(lua, ns, "Turns.lua")
+    t = next(ns.Transports[k] for k in range(1, len(ns.Transports) + 1)
+             if ns.Transports[k][9] == "Grom'gol Base Camp, Stranglethorn Vale" and ns.Transports[k][10] == "Brill, Tirisfal Glades")
+    lua.execute(f"""
+      AGPS_RIDE = {{ kind = "zeppelin", from = "Grom'gol Base Camp, Stranglethorn Vale", to = "Brill, Tirisfal Glades",
+        dock = {{ 0, {t[5]}, {t[6]} }}, left = 75 }}
+      AGPS_TAXI_RIDE = {{ CurrentRide = function() return AGPS_RIDE end, Current = function() return nil end,
+        Riding = function() return true end }}
+    """)
+    ns.Taxi = lua.eval("AGPS_TAXI_RIDE")
+    N = ns.Nav
+    N.SetDestination(2254.0, 293.0, 0, "Brill")
+    r = N.Route(-2000.0, 100.0, 0)  # (over Arathi, on the way north)
+    assert r.flying and r.flying.to == "Brill, Tirisfal Glades" and r.flying.seconds == 75
+    assert (r.pts[1], r.pts[2]) == (-2000.0, 100.0) and (r.pts[3], r.pts[4]) == (t[5], t[6])
+    status = N.Status(-2000.0, 100.0, 0)
+    assert "Riding the zeppelin to Brill, Tirisfal Glades" in status and "arrives in 1m 15s" in status
+    steps = N.StepsText(3)
+    assert "Riding the zeppelin to Brill, Tirisfal Glades" in steps and "Walk" in steps
+    assert r.walkYards > 50  # (on from the dock to Brill)
+    # across continents (Durotar's zeppelin, the player still on Kalimdor's map): the ride, no line drawn over the sea
+    lua.execute("AGPS_RIDE.dock = { 0, 2062.4, 293.0 } AGPS_RIDE.to = 'Brill, Tirisfal Glades' AGPS_RIDE.left = 40")
+    r = N.Route(1200.0, -4500.0, 1)
+    assert r.flying and r.flying.seconds == 40 and r.pts[1] == r.pts[3] == 2062.4
+    # off it: an ordinary route again
+    lua.execute("AGPS_RIDE = nil AGPS_TAXI_RIDE.Riding = function() return false end")
+    r = N.Route(2062.0, 293.0, 0)
+    assert not r.flying
+
+
+def test_a_ride_after_a_server_restart_resets_the_timetable(env):
+    # (reported 2026-10-02: after a server restart the zeppelin's timer was off, and riding it didn't fix it) a
+    # departure seen after a restart replaces the old one, and the restart's shift in the timetable doesn't bend
+    # the cycle (a second sighting within 40 cycles sharpened it by up to 10%); the ride log says what was seen
+    lua, ns = env
+    lua.execute("GetRealmName = function() return 'Test' end")
+    lua.execute("CreateFrame = function() return { RegisterEvent = function() end, SetScript = function() end } end")
+    ns.db = lua.eval("{}")
+    load(lua, ns, "Data/Transports.lua", "Taxi.lua")
+    T = ns.Taxi
+    i = next(k for k in range(1, len(ns.Transports) + 1)
+             if ns.Transports[k][9] == "Jaggedswine Farm, Durotar" and ns.Transports[k][10] == "Brill, Tirisfal Glades")
+    t = ns.Transports[i]
+    key = f"{t[9]} | {t[10]}"
+    T.Departed(i, 2, 5000)
+    restart = 5000 + 3 * t.cycle + 0.07 * t.cycle  # (three cycles on, shifted 7% by the restart)
+    T.Departed(i, 2, restart)
+    seen = T.Sightings()[key]
+    assert seen.at == restart and seen.cycle is None  # (the data's cycle kept, not bent to the shift)
+    arr, dep, _ = T.TransportTimes(i, 2, restart + 5)
+    assert dep == pytest.approx(t.cycle - 5, abs=0.01)  # (the timer from the new departure)
+    T.Departed(i, 2, restart + 2 * t.cycle + 1.5)  # (a true second sighting: a little off the data's cycle)
+    assert T.Sightings()[key].cycle == pytest.approx((2 * t.cycle + 1.5) / 2, abs=0.01)
+    log = list(ns.db.rideLog.values())
+    assert len(log) == 3 and all("departed" in line and key in line for line in log)
+    # off the tower without a departure seen (walking down the stairs): logged with what the detector had
+    bx, by = t[5], t[6]
+    for k in range(20):
+        T.TransportTick(100 + k * 0.5, 9000 + k, bx + 10 + k * 4, by, 0, 7.0)
+    last = list(ns.db.rideLog.values())[-1]
+    assert "no departure seen" in last and "speed 7" in last and key in last
+
+
+def test_boats_and_zeppelins_only_of_the_players_faction(nav_env):
+    lua, ns = nav_env
+    load(lua, ns, "Data/Hostile.lua")
+    N = ns.Nav
+
+    def row(a, b):
+        return next(ns.Transports[k] for k in range(1, len(ns.Transports) + 1)
+                    if ns.Transports[k][9] == a and ns.Transports[k][10] == b)
+
+    zep = row("Jaggedswine Farm, Durotar", "Brill, Tirisfal Glades")
+    menethil = row("Menethil Harbor, Wetlands", "Theramore Isle, Dustwallow Marsh")
+    booty = row("Ratchet, The Barrens", "Booty Bay, Stranglethorn Vale")
+    store = lua.eval("{}")
+    ns.CharDB = lua.eval("function(s) return function() return s end end")(store)
+    store.faction = "Horde"
+    assert N.TransportUsable(zep) and not N.TransportUsable(menethil) and N.TransportUsable(booty)
+    store.faction = "Alliance"
+    assert not N.TransportUsable(zep) and N.TransportUsable(menethil) and N.TransportUsable(booty)
+    # planning: an Alliance character from Brill to Orgrimmar isn't put on the zeppelin
+    d = lua.table(cont=1, x=1600.0, y=-4400.0)
+    legs = N.Plan(0, 2066.0, 290.0, 7.0, d)
+    legs = legs[0] if isinstance(legs, tuple) else legs
+    rides = [legs[i].ride for i in range(1, len(legs) + 1) if legs[i].ride] if legs else []
+    assert all(r[9] != "Jaggedswine Farm, Durotar" and r[10] != "Brill, Tirisfal Glades" for r in rides)
+    store.faction = "Horde"
+    legs = N.Plan(0, 2066.0, 290.0, 7.0, d)[0]
+    assert any(legs[i].ride and legs[i].ride[10] == "Brill, Tirisfal Glades" for i in range(1, len(legs) + 1))
+
+
+def test_stormwind_to_ironforge_takes_the_deeprun_tram_for_the_alliance(nav_env):
+    lua, ns = nav_env
+    load(lua, ns, "Data/Hostile.lua")
+    N = ns.Nav
+    store = lua.eval("{}")
+    ns.CharDB = lua.eval("function(s) return function() return s end end")(store)
+    d = lua.table(cont=0, x=-4900.0, y=-1100.0)  # Ironforge
+    store.faction = "Alliance"
+    legs, secs = N.Plan(0, -8500.0, 600.0, 7.0, d)  # Stormwind's Dwarven District
+    rides = [legs[i].ride for i in range(1, len(legs) + 1) if legs[i].ride]
+    assert len(rides) == 1 and rides[0][8] == "tram" and rides[0][10] == "Ironforge"
+    assert secs < 8 * 60
+    # the Horde doesn't ride it (both its ends in Alliance cities)
+    store.faction = "Horde"
+    legs, _ = N.Plan(0, -8500.0, 600.0, 7.0, d)
+    assert not any(legs[i].ride and legs[i].ride[8] == "tram" for i in range(1, len(legs) + 1))
+
+
+def test_every_addon_file_compiles_under_the_games_lua_5_1():
+    # The tests run Lua 5.5; the game runs 5.1, whose limits are tighter (a function may use at
+    # most 60 variables from outside it: G.Init went over once and the whole map failed to load).
+    lua51 = pytest.importorskip("lupa.lua51")
+    lua = lua51.LuaRuntime()
+    comp = lua.eval("function(src, name) local f, err = loadstring(src, '@' .. name) return err end")
+    errors = []
+    for p in sorted(ADDON.rglob("*.lua")):
+        err = comp(p.read_text(encoding="utf-8"), p.name)
+        if err:
+            errors.append(err)
+    assert not errors, errors
+
+
+def test_a_route_walking_through_a_zone_too_high_asks_first(nav_env):
+    lua, ns = nav_env
+    load(lua, ns, "Data/Terrain.lua", "Passability.lua", "Data/Zones.lua", "GPSFrame.lua")
+    N, R = ns.Nav, ns.Router
+    ns.settings = lua.eval("{ gps = {} }")
+    ns.Print = lua.eval("function() end")
+
+    def zone(name):
+        return next(k for k in ns.Maps.keys() if ns.Maps[k].name == name and ns.Maps[k].type == 3)
+
+    def at(name, u, v):
+        b = ns.Maps[zone(name)].bounds
+        return b[3] - v / 100 * (b[3] - b[1]), b[4] - u / 100 * (b[4] - b[2])
+
+    brill, alterac, tarren = at("Tirisfal Glades", 61, 52), at("Alterac Mountains", 50, 50), at("Hillsbrad Foothills", 61, 20)
+    lua.execute("UnitLevel = function() return 13 end")
+    lua.execute(f"UnitPosition = function() return {brill[0]}, {brill[1]}, 0, 0 end")
+    ns.Ask = lua.eval("function(name, text, yes, no, onYes, onNo) ASKED = { text = text, data = { onYes, onNo } } end")
+    lua.execute("ASKED = nil")
+    N.stops = lua.table(lua.table(x=tarren[0], y=tarren[1], cont=0, name="Tarren Mill"))
+    N.dest = N.stops[1]
+    # a route over the mountains (as when there's no other way for the character's faction)
+    route = lua.eval("function(a, b, c, d, e, f) return { parts = { { cont = 0, kinds = { 0, 0 }, pts = { a, b, c, d, e, f } } } } end")(
+        brill[0], brill[1], alterac[0], alterac[1], tarren[0], tarren[1])
+    zones = N.RedOnRoute(route, brill[0], brill[1], 0)
+    assert zones and zones[1][1] == "Alterac Mountains"  # (Hillsbrad is where it goes: not asked about)
+    # asked on the map's confirm; No clears the route
+    N.route = route
+    N.CheckRedRoute(brill[0], brill[1], 0, 100)
+    popup = lua.eval("ASKED")
+    assert popup and "The only way there walks through Alterac Mountains" in popup.text
+    # (and not drawn or followed while asked: the map and the arrow leave it out, asked 2026-10-01)
+    assert N.RedAsking()
+    popup.data[2]()
+    assert len(N.stops) == 0 and not N.RedAsking()
+    # Yes: not asked again for that zone on this route
+    N.stops = lua.table(lua.table(x=tarren[0], y=tarren[1], cont=0, name="Tarren Mill"))
+    N.redOk = lua.table()
+    N.redOk[zone("Alterac Mountains")] = True
+    assert N.RedOnRoute(route, brill[0], brill[1], 0) is None
+
+
+def test_no_route_without_the_rides_removed_asks_to_put_them_back(nav_env):
+    # (asked: a route to another continent, the boats removed from it, no teleport: "Route not possible
+    # without" them) no route, rides removed: asked by name; yes puts them back, no clears the route
+    lua, ns = nav_env
+    load(lua, ns, "GPSFrame.lua")
+    N = ns.Nav
+    ns.Print = lua.eval("function() end")
+    ns.Ask = lua.eval("function(name, text, yes, no, onYes, onNo) ASKED = { text = text, data = { onYes, onNo } } end")
+    lua.execute("ASKED = nil")
+    N.SetDestination(9700.0, 2300.0, 1, "Darnassus")
+    boat = next(t for t in ns.Transports.values() if t[8] == "boat")
+    N.SkipRide(boat, None, "Boat to Auberdine")
+    assert N.AskSkipped()
+    popup = lua.eval("ASKED")
+    assert popup and popup.text.startswith("Route not possible without Boat to Auberdine.") and "Put it back?" in popup.text
+    assert not N.AskSkipped()  # (once)
+    popup.data[1]()
+    assert not any(True for _ in N.skipRides.keys())
+    N.Clear()
+
+
+def test_a_dungeons_way_in_is_learned_and_shared(env, tmp_path, monkeypatch):
+    lua, ns = env
+    lua.execute("CreateFrame = function() return { RegisterEvent = function() end, SetScript = function() end } end")
+    lua.execute("GetBuildInfo = function() return '1.60.1', '70009' end")
+    ns.db = lua.eval("{}")
+    ns.Nav = lua.eval("{ CurrentInstance = function() return nil end }")
+    load(lua, ns, "Taxi.lua", "Feedback.lua")
+    T, F = ns.Taxi, ns.Feedback
+    # walking up to Karazhan Crypts' door, then the loading screen into it (map 2875)
+    T.NoteOutside(10.0, -11050.0, -1990.0, 0)
+    T.NoteOutside(10.5, -11055.0, -1995.0, 0)
+    assert T.NoteEntrance(2875, 20.0)
+    assert T.NoteEntrance(2875, 30.0)  # (again, the same door: counted, not a second one)
+    e = ns.db.entrances[2875]
+    assert len(e) == 1 and e[1][1] == 0 and e[1][2] == -11055.0 and e[1].n == 2
+    assert not T.NoteEntrance(2875, 1000.0)  # (the spot outside too old: nothing)
+    text, n = F.RoadsText()
+    assert "E 2875 0 -11055.0,-1995.0" in text
+    # into the data (overrides/instance_entrances.json)
+    from azerothgps import instances as X
+    monkeypatch.setattr(X, "ENTRANCES", tmp_path / "instance_entrances.json")
+    assert X.merge_entrances(X.parse_shared_entrances(text), log=lambda *a: None) == 1
+    assert X.merge_entrances(X.parse_shared_entrances(text), log=lambda *a: None) == 0  # (known now)
+
+
+def test_a_gentle_bend_is_straight_on(turns):
+    lua, ns = turns
+    # off-road east, then a 30 degree bend (running straight along the route: no "Slight right")
+    p = path_of(lua, ns, [(0, 0), (0, -300), (-150, -560), (-300, -820)], [1, 1, 1])
+    got, _ = maneuvers(lua, ns, p)
+    assert [g[0] for g in got] == ["arrive"]
+    # a real turn still is one
+    p = path_of(lua, ns, [(0, 0), (0, -300), (300, -300), (600, -300)], [1, 1, 1])
+    got, _ = maneuvers(lua, ns, p)
+    assert got[0][2] == "Turn left"
+
+
+def test_stops_routed_and_drawn_ahead_is_an_option(nav_env):
+    # (asked) how many stops are routed and drawn at a time: a slider, 1 to 8, 3 by default (less
+    # to work out and draw; the next come in as they're reached)
+    lua, ns = nav_env
+    N = ns.Nav
+    N.stops = lua.eval("{ {x=1,y=1,cont=0}, {x=2,y=2,cont=0}, {x=3,y=3,cont=0}, {x=4,y=4,cont=0}, {x=5,y=5,cont=0} }")
+    ns.settings = lua.eval("{ gps = {} }")
+    assert N.PlannedStops() == 3  # (the default)
+    ns.settings.gps.stopsAhead = 8
+    assert N.PlannedStops() == 5
+    ns.settings.gps.stopsAhead = 1
+    assert N.PlannedStops() == 1
+    ns.settings.gps.stopsAhead = 20
+    assert N.PlannedStops() == 5  # (at most PLAN_AHEAD, 8)
+    addon = Path(__file__).parents[2] / "addon" / "AzerothGPS"
+    assert "stopsAhead = 3" in (addon / "Core.lua").read_text(encoding="utf-8")
+    assert 'slider(L["Stops routed and drawn ahead"], 1, 8, 1' in (addon / "Options.lua").read_text(encoding="utf-8")
+
+
+def test_the_stops_not_routed_yet_are_listed_too(nav_env):
+    # (asked) with the route worked out a few stops ahead (the option), the steps still list the
+    # stops after them: about how far (the straight line, as planning counts), not routed yet
+    lua, ns = nav_env
+    N = ns.Nav
+    ns.settings = lua.eval("{ gps = { stopsAhead = 2 } }")
+    N.SetStops(lua.eval("""{ { x = -600, y = -4180, cont = 1 }, { x = -650, y = -4250, cont = 1 },
+      { x = -700, y = -4300, cont = 1 }, { x = -760, y = -4350, cont = 1, name = 'Last' } }"""))
+    N.Route(-550.0, -4150.0, 1)
+    steps = [N.Steps()[i] for i in range(1, len(N.Steps()) + 1)]
+    assert "not routed yet" not in steps[0]
+    later = [t for t in steps if "not routed yet" in t]
+    assert len(later) == 2 and "stop 3" in later[0] and "Last" in later[1] and later[0].startswith("|cff9d9d9dAbout ")
+
+
+def test_the_map_windows_title_is_centered(env):
+    # (reported: "AzerothGPS" sat right of the window's middle) the client's PortraitFrameTemplate puts
+    # its TitleContainer 58 in from the left (past the portrait) and 24 from the right
+    lua, ns = env
+    chrome = lua.eval("""(function()
+      local tc = { pts = { { "TOPLEFT", nil, "TOPLEFT", 58, -1 }, { "TOPRIGHT", nil, "TOPRIGHT", -24, -1 } } }
+      function tc:GetPoint(i) local p = self.pts[i] return p[1], p[2], p[3], p[4], p[5] end
+      function tc:ClearAllPoints() self.pts = {} end
+      function tc:SetPoint(a, rel, b, x, y) self.pts[#self.pts + 1] = { a, rel, b, x, y } end
+      return { TitleContainer = tc }
+    end)()""")
+    assert ns.GPS.CenterTitle(chrome)
+    pts = chrome.TitleContainer.pts
+    (a1, x1, y1), (a2, x2, y2) = [(pts[i][1], pts[i][4], pts[i][5]) for i in (1, 2)]
+    assert (a1, a2) == ("TOPLEFT", "TOPRIGHT") and x1 == -x2 and y1 == y2 == -1
+
+
+
+def test_in_ironforge_the_route_keeps_to_its_halls_though_the_game_says_outdoors(capitals_env):
+    # (reported: in Ironforge the routes ran straight across the Great Forge and over the Forlorn
+    # Cavern's pool) IsIndoors said outdoors in its halls, and over its floor under the mountain that
+    # made the player up on the mountain, with no roads of the city's: the player's height tells now
+    # (the city's grid's `split`, between its floor and the ground over it)
+    lua, ns = capitals_env
+    R = ns.Router
+    forge, cavern, z = (-4763.4, -1107.8), (-4628.4, -1100.1), 502.0
+    assert R.CaveDown(0, *forge, False, z)
+    r = R.Route(0, *forge, *cavern, lua.table(offroad=False, z=z, indoors=False, tz=z))
+    share, closed, last = check_capital_route(ns, 0, r)
+    assert share > 0.6 and closed < 5 and last < 40, (share, closed, last)
+
+
+def test_out_of_stormwind_the_route_takes_the_gate_and_the_roads(capitals_env):
+    # (reported: from Stormwind to the Redridge border, a straight line out through the city's wall, then
+    # the Deeprun Tram and a 34-minute walk) the erasures drawn at its gate had left its streets no road
+    # out to Elwynn's: the nearest street runs out to the gate again (capitals.remouth)
+    lua, ns = capitals_env
+    pts_off = []
+    for start in ((-8832.0, 625.0), (-8750.0, 430.0)):  # (the Trade District, Old Town)
+        r = ns.Router.Route(0, *start, -9613.0, -2072.0, lua.table(offroad=False))
+        pts, kinds = route_pts(r)
+        off = sum(math.dist(pts[i], pts[i + 1]) for i, k in enumerate(kinds) if k != 0)
+        pts_off.append(off)
+        assert off < 300, (start, off, r.length)
+        assert min(_seg_dist(p, q, (-9095.0, 412.0)) for p, q in zip(pts, pts[1:])) < 40  # (out by the gate)
+
+
+def test_on_a_road_a_shortcut_to_another_road_must_save_a_fair_bit(env):
+    # (reported, a video: riding Mulgore's road, the route swapped every few seconds between the road and a
+    # shortcut over the fields onto another road) on a road already, a leg off it costs LEAVE_ROAD_FACTOR
+    # a yard: from A, the L by B to C is 2000 yd; 300 yd across onto D and down it to C, 1905: kept on the L
+    lua, ns = env
+    load(lua, ns, "Router.lua")
+    lua.eval("function(src) return assert(load('local _, ns = ...; ' .. src)) end")("""
+      ns.Roads = { [1] = { n = { 0,0, 0,-1000, 400,-1000, 1000,-1000, 300,0 },
+        e = { {1,2,1000,0, 0,0, 0,-1000}, {2,3,400,0, 0,-1000, 400,-1000}, {3,4,600,0, 400,-1000, 1000,-1000},
+              {5,3,1005,0, 300,0, 400,-1000} } } }""")(None, ns)
+    R = ns.Router
+    R.Reset()
+    r = R.Route(1, 0.0, 0.0, 1000.0, -1000.0, lua.table(offroad=False))
+    pts, kinds = route_pts(r)
+    assert (0, -1000) in [tuple(round(v) for v in p) for p in pts]  # (by B: on the road it's on)
+    R.LEAVE_ROAD_FACTOR = 1.0
+    R.Reset()
+    r = R.Route(1, 0.0, 0.0, 1000.0, -1000.0, lua.table(offroad=False))
+    pts, kinds = route_pts(r)
+    assert (300, 0) in [tuple(round(v) for v in p) for p in pts]  # (without it: across to D)
+
+
+def test_a_ride_to_zephras_isle_is_drawn_too(nav_env):
+    # (reported: on a hop by Zephras Isle's zeppelins, only one ride had its line) a ride's line is its
+    # boarding dock to its landing, both in the boarding continent's coordinates: the isle's weren't
+    # (an inset on the world map), and a ride from the land onto it wasn't drawn at all
+    lua, ns = nav_env
+    Geo, N = ns.Geo, ns.Nav
+    x, y = Geo.IntoAny(1, -800.0, 360.0, 2991)  # (Mulgore, in the isle's coordinates)
+    bx, by = Geo.IntoAny(2991, x, y, 1)
+    assert abs(bx + 800) < 0.5 and abs(by - 360) < 0.5  # (and back)
+    N.SetStops(lua.eval("{ { x = 2197.0, y = 772.0, cont = 2991, name = 'Isle' } }"), False, "red")
+    try:
+        r = N.Route(-800.0, 360.0, 1)
+        rides = [r.parts[i] for i in range(1, len(r.parts) + 1) if r.parts[i].kinds[1] == N.KIND_TRANSPORT]
+        assert rides, "the zeppelin to the isle: drawn"
+    finally:
+        N.Clear()
+
+
+def test_a_capital_stop_with_a_height_takes_the_road_on_its_floor(capitals_env):
+    # (asked: Ironforge's trainers "need to go up stairs and back down") the Priest trainer stands on the
+    # ground floor under the Hall of Mysteries' balcony: its nearest road was up there (stairs up, a step
+    # down); the capitals' roads have their floors' heights (`nz`) and a stop with a height (the NPC's)
+    # takes a road on its floor
+    lua, ns = capitals_env
+    R = ns.Router
+    b = ns.Maps[1455].bounds
+    tx, ty = b[3] - 0.090 * (b[3] - b[1]), b[4] - 0.244 * (b[4] - b[2])  # (the Priest trainer, 24.4, 9.0)
+    edges, g = R.Edges(0)
+    assert g.nz  # (the capitals' road heights)
+    r = R.Route(0, *IRONFORGE_OUTSIDE, tx, ty, lua.table(offroad=False, tz=501.2))
+    pts, _ = route_pts(r)
+    high = []
+    for x, y in pts:
+        for n in range(1, len(g.n) // 2 + 1):
+            h = g.nz[n]
+            if h and h > 515 and abs(g.n[2 * n - 1] - x) < 1 and abs(g.n[2 * n] - y) < 1:
+                high.append((round(x), round(y), h))
+    assert not high, high  # (not up on the balcony)
+
+
+# ---- Pins (Pins.lua, app/azerothgps/pins.py) ------------------------------------------------------
+
+def test_pins_are_kept_shared_and_shipped(env, tmp_path):
+    # (asked) pins the player makes, exported with the map data like roads and walls: the share text's
+    # "P" lines read back offline, written into Data/Pins.lua for everyone; the player's own copy then
+    # dropped at login, and a shared one they remove hidden and its removal shared
+    from azerothgps.pins import merge_pins, parse_shared_pins, pins_lua
+
+    lua, ns = env
+    lua.execute("time = function() return 1790000000 end")
+    ns.db = lua.eval("{}")
+    load(lua, ns, "Pins.lua")
+    P = ns.Pins
+    map02 = r"Interface\Icons\INV_Misc_Map02"
+    first = lua.eval("{ level = 20036, x = -47.25, y = -785.5, z = 18.4 }")
+    first.icon, first.name = map02, "  Van Cleef's |cffff0000ship|r\n "
+    P.Add(first)
+    P.Add(lua.eval('{ level = 0, x = 1600, y = 240, down = true, icon = 136001, name = "" }'))
+    pins = P.All()
+    assert len(pins) == 2 and pins[1].time != pins[2].time  # (unique ids, made in the same second)
+    assert pins[1].name == "Van Cleef's cffff0000shipr"  # (one line, no escape codes)
+    assert pins[2].name == "Pin"
+    lines = [P.ShareLines()[i] for i in range(1, len(P.ShareLines()) + 1)]
+    assert lines[0] == ("P add 20036 1790000000 -47.2,-785.5 z=18.4 icon=" + map02 + " name=Van Cleef's cffff0000shipr")
+    assert lines[1] == "P add 0 1790000001 1600.0,240.0 down=1 icon=136001 name=Pin"
+    added, removed = parse_shared_pins("AzerothGPS roads 1 (addon 1.1.0)\n" + "\n".join(lines) + "\nR add 0 1 1,1 2,2\n")
+    assert [(p["level"], p["time"], p.get("z"), p.get("down"), p["icon"], p["name"]) for p in added] == [
+        (20036, 1790000000, 18.4, None, map02, "Van Cleef's cffff0000shipr"),
+        (0, 1790000001, None, True, 136001, "Pin")]
+    store = tmp_path / "pins.json"
+    assert merge_pins(added, removed, store, log=lambda *a: None) == 2
+    assert merge_pins(added, removed, store, log=lambda *a: None) == 0  # (each once)
+    # the data as shipped: the player's own copies dropped at login, the shared ones shown
+    from azerothgps.pins import load_pins
+
+    loader = lua.eval("function(src) return assert(load(src, '@Data/Pins.lua')) end")
+    loader(pins_lua(load_pins(store)))("AzerothGPS", ns)
+    assert ns.PinsIn[1790000000] and ns.SharedPins[1].shipped and ns.SharedPins[1].name == "Van Cleef's cffff0000shipr"
+    assert ns.SharedPins[1].icon == map02 and ns.SharedPins[2].down is True
+    pins = P.All()  # (the player's own kept for good, keep data forever: each shown once, theirs)
+    assert len(P.Own()) == 2 and len(pins) == 2 and not any(pins[i].shipped for i in (1, 2))
+    assert len(P.ShareLines()) == 0  # (nothing new to share)
+    # removing a shared one: hidden here, its removal shared and applied offline
+    P.Remove(pins[1])
+    assert len(P.All()) == 1 and P.ShareLines()[1] == "P remove 1790000000"
+    added, removed = parse_shared_pins("P remove 1790000000")
+    assert merge_pins(added, removed, store, log=lambda *a: None) == 1
+    assert [p["time"] for p in load_pins(store)] == [1790000001]
+
+
+def test_shared_pins_text_is_data_only():
+    # (the share text is pasted by players: names one clean line, icons only a file id or an icon's path)
+    from azerothgps.pins import parse_shared_pins
+
+    added, _ = parse_shared_pins('P add 0 5 1,2 icon=foo";os.exit() name=a|b\x07c\n'
+                                 "P add 0 6 1,2 icon=Interface/Icons/Spell_Fire_Fire name=x name=y\n"
+                                 "P add 0 nope 1,2 icon=1 name=z\nP add 0 7 1 icon=1 name=z")
+    assert [(p["time"], p["icon"], p["name"]) for p in added] == [
+        (5, r"Interface\Icons\INV_Misc_QuestionMark", "ab c"), (6, "Interface/Icons/Spell_Fire_Fire", "x name=y")]
+
+
+def test_copy_map_data_includes_only_the_kinds_picked(env):
+    # (asked) Copy Map Data: roads, walls, routes (the faster trips kept) and pins, all in by default; an
+    # unticked one is left out; the routes' traces simplified; `agps import-shared` reads the routes back
+    from azerothgps.sharedtrips import parse_shared_trips
+
+    lua, ns = env
+    ns.db = lua.eval("""{ tracks = {
+        { op = "add", continent = 0, time = 11, pts = { 1, 2, 30, 40 } },
+        { op = "wall", continent = 0, time = 12, pts = { 5, 6, 7, 8 } } },
+      feedback = { trips = { { continent = 1, time = 13, estimate = 300, actual = 200, mounted = true,
+        to = { 50, 60, 1 }, pts = { 0, 0, 10, 0.5, 20, 0, 30, 0, 40, 25 } } } } }""")
+    ns.settings = lua.eval("{ gps = {} }")
+    lua.execute("time = function() return 1790000000 end")
+    load(lua, ns, "Pins.lua", "Feedback.lua")
+    ns.Pins.Add(lua.eval('{ level = 0, x = 1, y = 2, name = "Spot" }'))
+    F, gps = ns.Feedback, ns.settings.gps
+
+    def text():
+        return F.RoadsText()[0]
+
+    lines = text().splitlines()
+    assert lines[0].startswith("AzerothGPS roads 1")
+    assert lines[1:] == ["R add 0 11 1.0,2.0 30.0,40.0", "R wall 0 12 5.0,6.0 7.0,8.0",
+                         "T 1 13 300 200 1 to=50.0,60.0,1 0,0 30,0 40,25",  # (the trace simplified)
+                         r"P add 0 1790000000 1.0,2.0 icon=Interface\Icons\INV_Misc_QuestionMark name=Spot"]
+    for key, gone in (("copyWalls", "R wall"), ("copyRoutes", "T "), ("copyPins", "P "), ("copyRoads", "R add")):
+        gps[key] = False
+        assert not any(l.startswith(gone) for l in text().splitlines()), key
+    assert F.RoadsText()[0] == "" and F.RoadsText()[1] == 0  # (nothing picked)
+    counts = F.KindCounts()
+    assert (counts.roads, counts.walls, counts.routes, counts.pins) == (1, 1, 1, 1)  # (there all the same)
+    trips = parse_shared_trips("T 1 13 300 200 1 to=50.0,60.0,1 0,0 30,0 40,25\nT 1 nope\nR add 0 11 1,2 3,4")
+    assert trips == [{"continent": 1, "time": 13, "estimate": 300, "actual": 200, "mounted": True, "from": [0.0, 0.0],
+                      "to": [50.0, 60.0, 1], "pts": [0.0, 0.0, 30.0, 0.0, 40.0, 25.0], "source": "shared"}]
+
+
+def test_shared_map_data_is_taken_into_the_players_own(env):
+    # (asked: the dev tools' "Import into My Data") roads, walls, pins, faster trips and dungeons' ways in
+    # someone shared, taken in with their times (each once; not what the data has); pins marked shared so
+    # the road watcher takes them, never the player's own
+    from azerothgps.pins import saved_pins
+
+    lua, ns = env
+    ns.db = lua.eval("{ tracks = { { op = 'add', continent = 0, time = 5, pts = { 1, 2, 3, 4 } } } }")
+    ns.RoadTracksIn = lua.eval("{ [7] = true }")
+    ns.PinsIn = lua.eval("{ [30] = true }")
+    ns.settings = lua.eval("{ gps = {} }")
+    load(lua, ns, "Record.lua", "Pins.lua", "Feedback.lua")
+    tracks = lua.eval("""{ { op = "add", continent = 0, time = 5, pts = { 1, 2, 3, 4 } },
+      { op = "wall", continent = 0, time = 6, pts = { 5, 6, 7, 8 }, z = 55 },
+      { op = "remove", continent = 0, time = 7, pts = { 9, 9, 10, 10 } },
+      { op = "remove", continent = 1, time = 8, pts = { 1, 1, 2, 2, 3, 3 }, area = true } }""")
+    assert tuple(ns.Record.AddShared(tracks)) == (2, 2)  # (5: here already; 7: in the data)
+    assert tuple(ns.Record.AddShared(tracks)) == (0, 4)
+    got = {int(t.time): (t.op, bool(t.shared), bool(t.drawn), t.z) for t in ns.db.tracks.values()}
+    assert got[6] == ("wall", True, True, 55) and got[8][0] == "remove" and len(got) == 3
+    pins = lua.eval("""{ { add = true, level = 0, x = 1, y = 2, time = 20, name = "Shared spot", icon = 136001 },
+      { add = true, level = 0, x = 1, y = 2, time = 30, name = "In the data" }, { remove = true, time = 30 },
+      { remove = true, time = 99 } }""")
+    assert tuple(ns.Pins.AddShared(pins)) == (1, 1)
+    assert tuple(ns.Pins.AddShared(pins)) == (0, 0)
+    ns.Pins.Add(lua.eval('{ level = 0, x = 5, y = 5, name = "Mine" }'))
+    own = list(ns.Pins.Own().values())
+    assert [(p.name, bool(p.shared)) for p in own] == [("Shared spot", True), ("Mine", False)]
+    assert ns.db.pinsRemoved[30] == "shared"
+    # (the road watcher: the shared ones only)
+    sv = {"AzerothGPSDB": {"pins": [dict(level=0, x=1, y=2, time=20, name="Shared spot", shared=True),
+                                    dict(level=0, x=5, y=5, time=21, name="Mine")],
+                           "pinsRemoved": {30: "shared", 31: True}}}
+    added, removed = saved_pins(sv, shared_only=True)
+    assert [p["name"] for p in added] == ["Shared spot"] and removed == {30}
+    added, removed = saved_pins(sv)
+    assert len(added) == 2 and removed == {30, 31}
+    trips = lua.eval("""{ { continent = 1, time = 13, estimate = 300, actual = 200, mounted = true, to = { 9, 9, 1 },
+      pts = { 0, 0, 30, 0 } } }""")
+    ways = lua.eval("{ { map = 36, level = 0, x = -11208, y = 1672 } }")
+    assert tuple(ns.Feedback.AddShared(trips, ways)) == (1, 1)
+    assert tuple(ns.Feedback.AddShared(trips, ways)) == (0, 0)
+    assert ns.db.feedback.trips[1].shared and ns.db.entrances[36][1][2] == -11208
+
+
+def test_working_out_the_route_now_and_then_in_murloc(nav_env):
+    # (asked) "Working out the route..." about one time in five in Murloc: picked once while it's being
+    # worked out (no flicker), again the next time
+    lua, ns = nav_env
+    N = ns.Nav
+    N.FUN = True
+    try:
+        lua.execute("AGPS_ROLLS = { 0.03, 2, 0.5 }; AGPS_I = 0")
+        N.Random = lua.eval("function(n) AGPS_I = AGPS_I + 1 return AGPS_ROLLS[AGPS_I] end")
+        murloc = N.WorkingText()
+        assert murloc == N.WORKING_FLAVORS[1].lines[2] and N.WorkingText() == murloc  # (the same, till a route)
+        # (a route found: the next time it's picked again, the plain line on a roll past the shares)
+        N.SetDestination(-600.0, -4180.0, 1, "Valley of Trials")
+        assert N.Status(-450.0, -4700.0, 1) and "Mrgl" not in N.Status(-450.0, -4700.0, 1)
+        lua.execute("AGPS_ROLLS = { 0.9 }; AGPS_I = 0")
+        assert N.WorkingText() == N.WORKING_TEXT
+        # (and the gnome engineers: the next fifth of the rolls)
+        N.Status(-450.0, -4700.0, 1)
+        lua.execute("AGPS_ROLLS = { 0.15, 3 }; AGPS_I = 0")
+        assert N.WorkingText() == "Spinning up the Route-o-Tron 3000..."
+        assert [f.share for f in N.WORKING_FLAVORS.values()] == [0.05, 0.2, 0.2]  # (asked: Murloc 5%, gnomes 20%, goblins 20%)
+        N.Status(-450.0, -4700.0, 1)
+        lua.execute("AGPS_ROLLS = { 0.3, 1 }; AGPS_I = 0")
+        assert N.WorkingText() == "Time is money, friend! Routing..."
+    finally:
+        N.FUN = False
+        N.Random = lua.eval("math.random")
+
+
+def test_no_straight_line_through_a_wall_when_the_roads_dont_join(router):
+    # (asked, 2026-10-01: a broken road network drew a straight line over the mountains from Ironforge)
+    # no way by the roads (a wall cuts the L's second leg, and gap links don't cross walls), and the line
+    # straight there through the wall: `noWay`, which Nav doesn't draw
+    lua, ns = router
+    load(lua, ns, "Passability.lua")
+    P, R = ns.Passability, ns.Router
+    R.OFFROAD_WALK_AROUND, R.DETOUR_WALK_MAX = 0, 0  # (no terrain grid here to walk round on: it would walk through)
+    R.WALLS_CUT_ROADS = True  # (a broken network: drawn walls don't cut roads since 2026-11-15, the switch does)
+    try:
+        # (a short wall: no way by the roads either, but the line straight there is open: that's the way)
+        for wall, no_way in (("{ 500,-3000, 500,3000 }", True), ("{ 500,-1100, 500,-900 }", False)):
+            ns.db = lua.eval("{ tracks = { { op = 'wall', drawn = true, continent = 1, time = 1, pts = %s } } }" % wall)
+            P.RefreshWalls()
+            R.Reset()
+            r = R.Route(1, 0.0, 30.0, 1030.0, -1000.0, lua.table(offroad=False))
+            assert r.unconnected and bool(r.noWay) == no_way, wall
+    finally:
+        R.OFFROAD_WALK_AROUND, R.DETOUR_WALK_MAX = 3000, 8000
+        R.WALLS_CUT_ROADS = False
+        ns.db = lua.eval("{}")
+        P.RefreshWalls()
+        R.Reset()
+
+
+def test_nav_draws_no_line_when_there_is_no_way(nav_env):
+    # (asked, 2026-10-01) the Router's `noWay` walk (no roads, the line straight there blocked): no route
+    # drawn, "No way there found"; an unconnected walk over open ground (a swim to an island) still is one
+    lua, ns = nav_env
+    R, N = ns.Router, ns.Nav
+    real = R.Route
+    try:
+        for no_way in (True, False):
+            R.Route = lua.eval("""function(real, noWay) return function(...)
+                local r = real(...)
+                r.unconnected, r.noWay = true, noWay
+                return r
+              end end""")(real, no_way)
+            N.SetDestination(-600.0, -4180.0, 1, "Valley of Trials")
+            r = N.Route(-450.0, -4700.0, 1)
+            status = N.Status(-450.0, -4700.0, 1)
+            if no_way:
+                assert r is None and status == "No way there found"
+            else:
+                assert r is not None and status != "No way there found"
+            N.Clear()
+    finally:
+        R.Route = real
+        N.Clear()
+
+
+def test_a_character_knowing_no_flight_path_is_offered_detours(nav_env):
+    # (reported, 2026-10-01: an Alliance character with no flight path learned walked past Lakeshire's flight
+    # master with no detour) knowing none is no reason to suggest none: Brill toward Hammerfall, nothing learned
+    lua, ns = _flight_env(nav_env, [])
+    N = ns.Nav
+    ns.CharDB().faction = "Horde"
+    N.SetDestination(-1300.0, -3400.0, 0, "Hammerfall way")
+    r = N.Route(2254.0, 293.0, 0)
+    names = [h.name for h in (N.LearnOnRoute(r) or lua.table()).values()]
+    assert "Tarren Mill" in names
+
+
+def test_a_flight_with_stops_counts_down_along_its_path(nav_env):
+    # (reported 2026-10-01: the countdown in the air stalled on a flight with stops) the time left is at least
+    # the yards left along the flight's path (through the flight masters it stops over) at flight speed, not
+    # the straight line to the landing, which a path round a bend kept up; the line drawn follows the path
+    lua, ns = _flight_env(nav_env, [10, 13, 17])  # the Sepulcher, Tarren Mill, Hammerfall: no direct flight
+    N = ns.Nav
+    m = {p[5]: p for c in ns.Pois.values() for p in c.values() if p[1] == 1}
+    a, via, b = m[10], m[13], m[17]
+    L = lua.table(0, b[2], b[3])
+
+    def dist(x, y):
+        return ((b[2] - x) ** 2 + (b[3] - y) ** 2) ** 0.5
+
+    left0, path0 = N.FlightLeft(a[4], b[4], a[2], a[3], L)
+    assert len(path0) == 6 and left0 > dist(a[2], a[3])  # (through Tarren Mill)
+    # halfway to Tarren Mill: less left, still more than the straight line from there
+    hx, hy = (a[2] + via[2]) / 2, (a[3] + via[3]) / 2
+    left1, path1 = N.FlightLeft(a[4], b[4], hx, hy, L)
+    assert left1 < left0 and left1 > dist(hx, hy)
+    assert (path1[1], path1[2]) == (hx, hy) and (path1[5], path1[6]) == (b[2], b[3])
+    # past Tarren Mill, toward Hammerfall: the last leg only
+    qx, qy = via[2] + (b[2] - via[2]) * 0.5, via[3] + (b[3] - via[3]) * 0.5
+    left2, path2 = N.FlightLeft(a[4], b[4], qx, qy, L)
+    assert left2 < left1 and len(path2) == 4 and abs(left2 - dist(qx, qy)) < 1
+
+
+def test_the_times_line_shows_walking_and_the_fastest_other_way(nav_env):
+    # (asked 2026-10-02) "Walk (time)" and then only the fastest way the character has: a shaman with Ghost Wolf
+    # only sees the wolf; with riding too, the mount (faster), not the wolf; journeyman riding just makes the
+    # mount's time shorter; mounted, the mounted time alone
+    lua, ns = nav_env
+    N = ns.Nav
+    wolf = lua.eval("{ name = 'Ghost Wolf', speed = 9.8, active = false }")
+    yards = 1400.0
+    assert N.TimesLine(yards, 0, 7.0, None, False, wolf) == "Walk 3m 20s    Ghost Wolf 2m 23s"
+    assert N.TimesLine(yards, 0, 7.0, 11.2, False, wolf) == "Walk 3m 20s    Mount 2m 05s"  # (apprentice: 60%)
+    assert N.TimesLine(yards, 0, 7.0, 14.0, False, wolf) == "Walk 3m 20s    Mount 1m 40s"  # (journeyman: 100%)
+    assert N.TimesLine(yards, 0, 7.0, 11.2, True, wolf) == "Mount 2m 05s"
+    assert N.TimesLine(yards, 0, 7.0, None, False, None) == "Walk 3m 20s"
+    # the wolf on: it's the walking time, and a faster mount beside it
+    wolf.active = True
+    assert N.TimesLine(yards, 0, 9.8, 11.2, False, wolf) == "Ghost Wolf 2m 23s    Mount 2m 05s"
+    assert N.TimesLine(yards, 0, 9.8, None, False, wolf) == "Ghost Wolf 2m 23s"
+
+
+def test_group_members_offline_are_left_off_the_map(env):
+    # (reported 2026-10-03) a raid member logged out and their icon stayed on the map where they left:
+    # the game still gives an offline member's last position (UnitIsConnected false); and in a raid
+    # the icon's tooltip says "Raid member", not "Party member"
+    lua, ns = env
+    lua.execute("""
+        IsInRaid = function() return true end
+        local here = { raid1 = true, raid2 = true, raid3 = true }
+        UnitExists = function(u) return here[u] or false end
+        UnitIsUnit = function(u, v) return u == "raid1" and v == "player" end
+        UnitIsConnected = function(u) return u ~= "raid3" end
+        UnitPosition = function(u) return 2322, 51, 0, 0 end
+        UnitName = function(u) return u == "raid2" and "Online" or "Offline" end
+        UnitClass = function(u) return "Mage", "MAGE" end
+    """)
+    members = list(ns.GPS.party.io.members().values())
+    assert [m.name for m in members] == ["Online"]
+    assert members[0].raid is True
+
+
+def test_a_ride_coming_in_past_the_far_dock_is_an_arrival_not_a_departure(env):
+    # (reported 2026-10-03, the ride log: Brill to Grom'gol "departed" Grom'gol 80 s into the ride, Brill to Durotar
+    # 91 s in) coming in, the zeppelin passed the far dock's spot still moving and berthed past it: that was taken for
+    # its departure there, and every ride moved the timetable by the wait. Now: one departure (Brill), an arrival at
+    # Grom'gol with the ride's time learned, and the timer after it from the departure with that time.
+    lua, ns = env
+    lua.execute("GetRealmName = function() return 'Test' end")
+    lua.execute("CreateFrame = function() return { RegisterEvent = function() end, SetScript = function() end } end")
+    ns.db = lua.eval("{}")
+    load(lua, ns, "Data/Transports.lua", "Taxi.lua")
+    T = ns.Taxi
+    i = next(k for k in range(1, len(ns.Transports) + 1)
+             if ns.Transports[k][9] == "Grom'gol Base Camp, Stranglethorn Vale" and ns.Transports[k][10] == "Brill, Tirisfal Glades")
+    t = ns.Transports[i]
+    key = f"{t[9]} | {t[10]}"
+    gx, gy, bx, by = t[2], t[3], t[5], t[6]
+    clock = [0.0]
+
+    def tick(server, x, y, speed=0.0):
+        clock[0] += 0.5
+        T.TransportTick(clock[0], server, x, y, 0, speed)
+
+    # aboard at Brill (side 2), standing; then carried off it
+    tick(10000, bx + 10, by)
+    tick(10000, bx + 10, by)
+    x = bx + 10
+    for k in range(1, 20):
+        x += 5
+        tick(10000 + k // 2, x, by)
+    left = T.Sightings()[key].at
+    assert T.Sightings()[key].side == 2 and left == 10000
+    # on the way (far from both docks), then coming in over Grom'gol's spot still moving, berthing 90 yd past it
+    ride = t.ride2 * 0.85  # (the server's ride is quicker than the data's)
+    tick(10050, (bx + gx) / 2, (by + gy) / 2)
+    tick(10051, (bx + gx) / 2 + 10, (by + gy) / 2)
+    steps = list(range(-200, 91, 10))
+    for k, dx in enumerate(steps):
+        tick(left + ride - len(steps) + 1 + k, gx + dx, gy)
+    for _ in range(4):  # (berthed: standing aboard)
+        tick(left + ride + 2, gx + 90, gy)
+    seen = T.Sightings()[key]
+    assert seen.side == 2 and seen.at == left  # (no "departure" from Grom'gol: the timetable stays on Brill's)
+    assert T.CurrentRide(left + ride + 3) is None  # (arrived)
+    assert seen.ride2 == pytest.approx(ride, abs=1.01)  # (the ride's own time, learned)
+    log = list(ns.db.rideLog.values())
+    assert sum("departed" in line for line in log) == 1 and "arrived" in log[-1] and "side 1" in log[-1]
+    # the timer: at Grom'gol it berths a ride after leaving Brill, and leaves its wait later; a cycle on, the same
+    arr1, dep1, _ = T.TransportTimes(i, 1, left + 1)
+    assert arr1 == pytest.approx(ride - 1, abs=1.01) and dep1 == pytest.approx(ride + t.wait1 - 1, abs=1.01)
+    arr1, dep1, _ = T.TransportTimes(i, 1, left + t.cycle + 1)
+    assert dep1 == pytest.approx(ride + t.wait1 - 1, abs=1.01)
+    # a ride time far off the data's (a missed arrival, a loading screen) isn't learned
+    T.Arrived(i, 2, left, left + t.ride2 * 3)
+    assert T.Sightings()[key].ride2 == pytest.approx(ride, abs=1.01) and "not used" in list(ns.db.rideLog.values())[-1]
+
+
+def test_zeppelin_cycles_match_the_ones_timed_in_game(env):
+    # (2026-10-04, two videos from the towers) every zeppelin stood at the dock 62-63 s (the dump: 60); Grom'gol's cycle
+    # from Brill was 335.5-337 s (the dump: 333.0) and Durotar's from Orgrimmar's tower 356-356.5 (the dump's 356.3: an
+    # extra 3.6 s on every cycle, tried first, put that timer 4 s off a cycle). From a departure seen, the timer a
+    # cycle on is within 2 s of the video's, for both.
+    lua, ns = env
+    lua.execute("GetRealmName = function() return 'Test' end")
+    lua.execute("CreateFrame = function() return { RegisterEvent = function() end, SetScript = function() end } end")
+    ns.db = lua.eval("{}")
+    load(lua, ns, "Data/Transports.lua", "Taxi.lua")
+    T = ns.Taxi
+
+    def row(a, b):
+        return next(k for k in range(1, len(ns.Transports) + 1)
+                    if ns.Transports[k][9] == a and ns.Transports[k][10] == b)
+    g = row("Grom'gol Base Camp, Stranglethorn Vale", "Brill, Tirisfal Glades")
+    d = row("Jaggedswine Farm, Durotar", "Brill, Tirisfal Glades")
+    assert 335.0 <= ns.Transports[g].cycle <= 337.5
+    assert 355.8 <= ns.Transports[d].cycle <= 356.8
+    for k in (g, d):
+        assert 62 <= ns.Transports[k].wait1 <= 63 and 62 <= ns.Transports[k].wait2 <= 63
+    # the Brill video: Grom'gol's left Brill at 190 s and again at 525.5 s
+    T.Departed(g, 2, 10190)
+    _, dep, _ = T.TransportTimes(g, 2, 10200)
+    assert dep == pytest.approx(10525.5 - 10200, abs=2.0)
+    # the Orgrimmar video: Durotar's left at 393.5 s and again at 750 s, docked at 687 (side 1: Durotar)
+    T.Departed(d, 1, 20393.5)
+    arr, dep, _ = T.TransportTimes(d, 1, 20400)
+    assert dep == pytest.approx(20750 - 20400, abs=2.0) and arr == pytest.approx(20687 - 20400, abs=2.0)
+
+
+def test_a_town_guard_shows_all_its_towns_places(nav_env):
+    # (asked 2026-10-04: "some places have guards outside of major cities for directions to trainers, for example in
+    # Dolanaar") the starting zones' town guards: their menu (the inn, the stable master, trainers: no bank) is a
+    # guard's, and talking to one shows all that town's places (ns.TownPlaces), searchable by their side only
+    lua, ns, UC = undercity_env(nav_env)
+    load(lua, ns, "Layers.lua", "Data/CityPlaces.lua")
+    L = ns.Layers
+    town = lua.eval('{ { name = "The inn" }, { name = "The stable master" }, { name = "A class trainer" },'
+                    ' { name = "A profession trainer" } }')
+    keeper = lua.eval('{ { name = "Make this inn your home." }, { name = "What can I do at an inn?" } }')
+    assert L.IsGuardMenu(town) and not L.IsGuardMenu(keeper)
+    real = lua.eval("C_Map.GetBestMapForUnit")
+    try:
+        for ui, name, cont, side in ((1438, "Dolanaar", 1, "Alliance"), (1429, "Goldshire", 0, "Alliance"),
+                                     (1426, "Kharanos", 0, "Alliance"), (1420, "Brill", 0, "Horde"),
+                                     (1412, "Bloodhoof Village", 1, "Horde"), (1411, "Razor Hill", 1, "Horde")):
+            ns.db = lua.eval("{}")
+            lua.execute(f"C_Map.GetBestMapForUnit = function() return {ui} end")
+            assert len(L.RevealedPlaces(cont)) == 0
+            L.RevealCity()
+            names = [p[3] for p in L.RevealedPlaces(cont).values()]
+            assert len(names) >= 11 and f"{name} Inn" in names and f"{name} Stable Master" in names, name
+            lua.execute(f"UnitFactionGroup = function() return '{side}' end")
+            assert any(p.full == f"{name} Inn" and p.city == name for p in L.KnownPlaces().values()), name
+            other = "Horde" if side == "Alliance" else "Alliance"
+            lua.execute(f"UnitFactionGroup = function() return '{other}' end")
+            assert not any(p.city == name for p in L.KnownPlaces().values()), name
+        # Dolanaar's: the inn, its trainers; the leatherworker out by Wellspring Lake named where she is
+        ns.db = lua.eval("{ cityRevealed = { [1438] = true } }")
+        dol = {p[3]: (p[1], p[2]) for p in L.RevealedPlaces(1).values()}
+        assert "Dolanaar Hunter Trainer" in dol and "Wellspring Lake Leatherworking Trainer" in dol
+        x, y = dol["Dolanaar Inn"]
+        assert abs(x - 9821) < 1 and abs(y - 960) < 1
+    finally:
+        lua.globals().C_Map.GetBestMapForUnit = real
+
+
+def test_distances_show_in_the_units_picked(nav_env):
+    # (asked 2026-10-07 for 1.1.6: European distances) Options > General, "Show distances in": yards (the game's, the
+    # default; "3.7k yd" past 1,000), meters (kilometers past 1,000 m) or feet (miles from a tenth of one); `short`
+    # (a height: "12 yd above you") never the long unit
+    lua, ns = nav_env
+    F = ns.Nav.FormatDistance
+    saved = ns.settings
+    try:
+        ns.settings = lua.eval("{ gps = {} }")
+        assert [F(120), F(3700), F(3700, True)] == ["120 yd", "3.7k yd", "3700 yd"]
+        ns.settings.gps.distanceUnits = "metric"
+        assert [F(120), F(1093), F(1094), F(3700), F(12, True), F(3700, True)] == [
+            "110 m", "999 m", "1.0 km", "3.4 km", "11 m", "3383 m"]
+        ns.settings.gps.distanceUnits = "imperial"
+        assert [F(50), F(175), F(176), F(3700), F(12, True)] == ["150 ft", "525 ft", "0.1 mi", "2.1 mi", "36 ft"]
+    finally:
+        ns.settings = saved
+
+
+def test_no_retired_flight_master_ships():
+    # (the overnight sweep, 2026-10-07) the client keeps retired taxi nodes with their faction flags, named "zzOLD...":
+    # WoW Forever's three old Riverglades nodes shipped as flight master icons and, never learned, were suggested as
+    # detours "to learn the flight path" to nobody. extract.pipeline.taxi_pois leaves out every "zz" name
+    import re
+    text = (ADDON / "Data" / "Pois.lua").read_text(encoding="utf-8")
+    masters = re.findall(r'\{1,[-0-9.]+,[-0-9.]+,"([^"]*)"', text)
+    assert len(masters) > 50
+    assert not [m for m in masters if m.lower().startswith("zz")]
+
+def test_indoors_the_arrow_points_at_the_corner_not_through_the_wall(turns):
+    # (a test walk, 2026-10-07: from Brill's square to the Mage trainer the arrow aimed 30 yd ahead, past
+    # Gallows' End's doorway corner, 50 degrees off, through the inner wall, and the character walked into it) on a
+    # building's or a city's floors (the route's points have their floor) the arrow points no further than the route
+    # can be seen from the player; outdoors, 30 yd ahead as before
+    lua, ns = turns
+    T = ns.Turns
+    pts = [(0, 0), (0, -10), (30, -10)]  # (east 10 yd to the doorway's corner, then north 30)
+
+    def path(floors):
+        flat = [v for p in pts for v in p]
+        part = lua.table(cont=1, pts=lua.table(*flat), kinds=lua.table(0, 0), stop=1)
+        if floors:
+            part.fz = lua.table(34.5, 34.5, 34.5)
+        return T.Path(lua.table(parts=lua.table(part), legs=lua.table(lua.table(walk=True))))
+
+    lua.execute("IsIndoors = function() return true end")  # (the game says so, in Brill's inn)
+    tx, ty = T.Target(path(True), 0.0, 0.0)
+    assert abs(tx) <= T.CORNER_YD and -10.5 <= ty <= -4  # (along the hall to the corner)
+    tx, ty = T.Target(path(False), 0.0, 0.0)
+    assert tx > 10  # (outdoors: 30 yd ahead, round the corner, as before)
+    tx, ty = T.Target(path(True), 0.0, -9.5)  # (at the corner)
+    assert tx > 10  # (on round it)
+    tx, ty = T.Target(path(True))  # (no player spot given: as before)
+    assert tx > 10
+    lua.execute("IsIndoors = function() return false end")  # (out on a city's floors: the outdoor aim)
+    tx, ty = T.Target(path(True), 0.0, 0.0)
+    assert tx > 10
+
+def test_outdoors_a_jog_near_the_player_doesnt_swing_the_arrow_off_the_road(turns):
+    # (the Barrens, 2026-11-05: the route from the player jogged east onto the road, then ran on down it south-west;
+    # the player went straight down the road and the arrow, aimed 30 yd along, sat on the jog: 40 degrees left, white)
+    import math
+    lua, ns = turns
+    T = ns.Turns
+    pts = [(0, 0), (10, -12), (-25, -100), (-30, -400)]
+    flat = [v for p in pts for v in p]
+    part = lua.table(cont=1, pts=lua.table(*flat), kinds=lua.table(0, 0, 0), stop=1)
+    path = T.Path(lua.table(parts=lua.table(part), legs=lua.table(lua.table(walk=True))))
+    px, py = -6.0, -6.0
+    facing = math.atan2(-100 - py, -25 - px)  # (straight down the road)
+    tx, ty = T.Target(path, px, py)
+    assert abs(T.RelativeAngle(px, py, facing, tx, ty)) < math.radians(20)  # (green: straight on)
+
+
+def test_on_floors_a_player_beside_the_route_still_gets_the_arrow_straight_on(turns):
+    # (Orgrimmar, 2026-11-05: running the right way a couple of yards beside the route, the arrow turned to it — no
+    # corner was seen from the player's own spot, so it aimed 4 yd ahead, 25 degrees off) the corners are seen from
+    # the route where the player is along it: a straight street is 30 yd ahead, a few degrees off, still green
+    import math
+    lua, ns = turns
+    T = ns.Turns
+    flat = [v for x in range(0, 61, 3) for v in (x, 0)]
+    n = len(flat) // 2
+    part = lua.table(cont=1, pts=lua.table(*flat), kinds=lua.table(*([0] * (n - 1))), stop=1)
+    part.fz = lua.table(*([12.0] * n))
+    path = T.Path(lua.table(parts=lua.table(part), legs=lua.table(lua.table(walk=True))))
+    lua.execute("IsIndoors = function() return true end")  # (the corner rule's)
+    for side in (2.0, -2.5):
+        tx, ty = T.Target(path, 5.0, side)
+        assert tx >= 30
+        assert abs(T.RelativeAngle(5.0, side, 0.0, tx, ty)) < math.radians(20)  # (green: the arrow's straight-on)
+
+
+def test_stormwinds_mage_trainers_are_reached_through_the_wizards_sanctum_portal(nav_env):
+    # (asked 2026-11-17: "Path here says below but the trainer is actually at the top of the tower through a portal",
+    # issue #565) the trainers' room is under the city (z ~30), reached only by the portal at the top of the tower
+    # (AreaTrigger 704, z 151.6), which lands in the room by 702; 702 goes back up
+    lua, ns = nav_env
+    N = ns.Nav
+    rows = [t for t in ns.Transports.values() if t[8] == "teleporter" and t[1] == 0]
+    assert len(rows) == 1 and rows[0].room == 2 and rows[0].z1 > 140 and rows[0].z2 < 40
+    trainer = "{ x = -8990.0, y = 862.9, z = 29.6, cont = 0, name = 'Stormwind Mage Trainer' }"
+    street = (-8990.0, 830.0)
+
+    def plan(start, stop):
+        legs, _ = N.Plan(0, start[0], start[1], 7.0, lua.eval(stop))
+        return [("walk",) if legs[i].walk else (legs[i].ride[8], legs[i]["from"]) for i in range(1, len(legs) + 1)]
+
+    try:
+        N.roomIn = None
+        assert N.StopRoom(lua.eval(trainer))
+        # from the street: up to the portal, through it, then on to the trainer (not straight there, "below you")
+        assert plan(street, trainer) == [("walk",), ("teleporter", 1), ("walk",)]
+        # the same spot with no height (the street over the room, a spot clicked on the map): walked to as always
+        assert plan(street, "{ x = -8990.0, y = 862.9, cont = 0 }") == [("walk",)]
+        # the street's own places nearby stay walked to (not in the room: their height is the street's)
+        assert plan(street, "{ x = -8990.0, y = 862.9, z = 106.0, cont = 0 }") == [("walk",)]
+        # put on the room's landing facing the portal's way: in the room; the trainer is walked to, and the way out goes
+        # back up through the portal
+        was_facing = ns.Geo.Facing
+        ns.Geo.Facing = lua.eval("function() return 5.4978 end")
+        N.RoomWatch(-9017.46, 885.90, 0)
+        assert N.roomIn is not None
+        assert plan((-9017.46, 885.90), trainer) == [("walk",)]
+        assert plan((-9017.46, 885.90), "{ x = -8930.0, y = 760.0, cont = 0 }") == [("walk",), ("teleporter", 2), ("walk",)]
+        # standing at the same spots without the portal's facing changes nothing; the landing up top takes them out
+        ns.Geo.Facing = lua.eval("function() return 1.0 end")
+        N.RoomWatch(-9014.94, 873.33, 0)
+        assert N.roomIn is not None
+        ns.Geo.Facing = lua.eval("function() return 5.4978 end")
+        N.RoomWatch(-9014.94, 873.33, 0)
+        assert N.roomIn is None
+    finally:
+        N.roomIn = None
+        if "was_facing" in locals():
+            ns.Geo.Facing = was_facing

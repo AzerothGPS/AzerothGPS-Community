@@ -1,0 +1,7267 @@
+{
+ "source": {
+  "name": "World of Warcraft (retail)",
+  "product": "wow",
+  "build": "12.1.5.70391",
+  "url": "https://wago.tools/db2/UiMap?build=12.1.5.70391"
+ },
+ "client": {
+  "product": "wow_classic_beta",
+  "build": "1.60.1.70425"
+ },
+ "time": "2026-10-15",
+ "interiors": [
+  {
+   "name": "Blackrock Mountain",
+   "cont": 0,
+   "uis": [
+    33,
+    34,
+    35
+   ],
+   "floors": [
+    {
+     "ui": 33,
+     "name": "Blackrock Spire",
+     "index": 14,
+     "status": "skipped",
+     "why": "the models over it differ: 3 only in WoW Forever, 1 only in the source (blackrock2.wmo, blackwing_entrance.wmo, greatwall_tower_01.wmo, md_cavetunnel01.wmo)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 2
+     },
+     "bounds": [
+      -7800.0,
+      -1473.75,
+      -7325.0,
+      -761.25
+     ]
+    },
+    {
+     "ui": 34,
+     "name": "Blackrock Caverns",
+     "index": 15,
+     "status": "skipped",
+     "why": "the models over it differ: 2 only in WoW Forever, 1 only in the source (blackrock2.wmo, blackwing_entrance.wmo, md_cavetunnel01.wmo)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 1
+     },
+     "bounds": [
+      -7650.0,
+      -1400.0,
+      -7480.0,
+      -1145.0
+     ]
+    },
+    {
+     "ui": 35,
+     "name": "Blackrock Depths",
+     "index": 16,
+     "status": "skipped",
+     "why": "the models over it differ: 2 only in WoW Forever, 2 only in the source (blackrock2.wmo, blackwing_entrance.wmo, darkirontower.wmo, greatwall_tower_01.wmo)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 2
+     },
+     "bounds": [
+      -7593.34,
+      -1387.51,
+      -7086.66,
+      -627.49
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: the models over it differ: 2 only in WoW Forever, 1 only in the source (blackrock2.wmo, blackwing_entrance.wmo, md_cavetunnel01.wmo); the models over it differ: 2 only in WoW Forever, 2 only in the source (blackrock2.wmo, blackwing_entrance.wmo, darkirontower.wmo, greatwall_tower_01.wmo); the models over it differ: 3 only in WoW Forever, 1 only in the source (blackrock2.wmo, blackwing_entrance.wmo, greatwall_tower_01.wmo, md_cavetunnel01.wmo)"
+  },
+  {
+   "name": "Coldridge Pass",
+   "cont": 0,
+   "uis": [
+    28
+   ],
+   "floors": [
+    {
+     "ui": 28,
+     "name": "Coldridge Pass",
+     "index": 0,
+     "status": "accepted",
+     "why": "",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 1,
+      "source_group_ids_unknown": 0,
+      "groups": 11,
+      "renumbered": 0,
+      "vertices_matched": 1.0,
+      "footprint_matched": 1.0,
+      "inside_bounds": 1.0,
+      "ground_matched": 0.9693
+     },
+     "bounds": [
+      -6240.0,
+      -85.0,
+      -6020.0,
+      245.0
+     ],
+     "data": {
+      "bounds": [
+       -6240.0,
+       -85.0,
+       -6020.0,
+       245.0
+      ],
+      "z": [
+       405.3,
+       445.3
+      ],
+      "rooms": [
+       -6228.8,
+       21.8,
+       -6038.3,
+       152.4
+      ],
+      "places": [
+       [
+        -6255.83,
+        126.49
+       ]
+      ],
+      "art": {
+       "id": 32,
+       "w": 1002,
+       "h": 668,
+       "tiles": [
+        [
+         591993,
+         0,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         591997,
+         256,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         591998,
+         512,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         591999,
+         768,
+         0,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         592000,
+         0,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         592001,
+         256,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         592002,
+         512,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         592003,
+         768,
+         256,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         592004,
+         0,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         591994,
+         256,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         591995,
+         512,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         591996,
+         768,
+         512,
+         234,
+         156,
+         256,
+         256
+        ]
+       ]
+      }
+     }
+    }
+   ],
+   "status": "accepted",
+   "why": "1 of 1 floors match"
+  },
+  {
+   "name": "Coldridge Valley",
+   "cont": 0,
+   "uis": [
+    427
+   ],
+   "floors": [
+    {
+     "ui": 427,
+     "name": "Coldridge Valley",
+     "index": 0,
+     "status": "skipped",
+     "why": "the ground under it differs (94.4% of it the same)",
+     "evidence": {
+      "checked": "the whole map",
+      "art_tiles": 12,
+      "models_paired": 5,
+      "groups": 34,
+      "renumbered": 0,
+      "vertices_matched": 1.0,
+      "footprint_matched": 1.0,
+      "inside_bounds": 0.988,
+      "ground_matched": 0.9439
+     },
+     "bounds": [
+      -6606.25,
+      14.58,
+      -5962.5,
+      979.17
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: the ground under it differs (94.4% of it the same)"
+  },
+  {
+   "name": "Crypt of the Denied",
+   "cont": 0,
+   "uis": [
+    2639
+   ],
+   "floors": [
+    {
+     "ui": 2639,
+     "name": "Crypt of the Denied",
+     "index": 0,
+     "status": "skipped",
+     "why": "12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12
+     },
+     "bounds": [
+      4228.33,
+      -11117.5,
+      4475.0,
+      -10747.5
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: 12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)"
+  },
+  {
+   "name": "Crypt of the Disgraced",
+   "cont": 0,
+   "uis": [
+    2644
+   ],
+   "floors": [
+    {
+     "ui": 2644,
+     "name": "Crypt of the Disgraced",
+     "index": 0,
+     "status": "skipped",
+     "why": "12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12
+     },
+     "bounds": [
+      5000.0,
+      -13505.0,
+      5190.0,
+      -13220.0
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: 12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)"
+  },
+  {
+   "name": "Crypt of the Lost Mason",
+   "cont": 0,
+   "uis": [
+    2643
+   ],
+   "floors": [
+    {
+     "ui": 2643,
+     "name": "Crypt of the Lost Mason",
+     "index": 0,
+     "status": "skipped",
+     "why": "12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12
+     },
+     "bounds": [
+      6311.67,
+      -11500.0,
+      6488.33,
+      -11235.0
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: 12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)"
+  },
+  {
+   "name": "Crypt of the Lost Warrior",
+   "cont": 0,
+   "uis": [
+    2641
+   ],
+   "floors": [
+    {
+     "ui": 2641,
+     "name": "Crypt of the Lost Warrior",
+     "index": 0,
+     "status": "skipped",
+     "why": "12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12
+     },
+     "bounds": [
+      6751.67,
+      -12025.0,
+      7028.33,
+      -11610.0
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: 12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)"
+  },
+  {
+   "name": "Dalaran",
+   "cont": 0,
+   "uis": [
+    41
+   ],
+   "floors": [
+    {
+     "ui": 41,
+     "name": "Dalaran",
+     "index": 0,
+     "status": "skipped",
+     "why": "the models over it differ: 0 only in WoW Forever, 2 only in the source (7af_artifact_sewer.wmo, 7xp_karazhanroom01.wmo)",
+     "evidence": {
+      "checked": "the whole map",
+      "art_tiles": 12,
+      "models_paired": 11
+     },
+     "bounds": [
+      -11395.88,
+      -2437.92,
+      -10847.04,
+      -1614.67
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: the models over it differ: 0 only in WoW Forever, 2 only in the source (7af_artifact_sewer.wmo, 7xp_karazhanroom01.wmo)"
+  },
+  {
+   "name": "Echo Ridge Mine",
+   "cont": 0,
+   "uis": [
+    426
+   ],
+   "floors": [
+    {
+     "ui": 426,
+     "name": "Echo Ridge Mine",
+     "index": 0,
+     "status": "accepted",
+     "why": "",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 1,
+      "source_group_ids_unknown": 0,
+      "groups": 9,
+      "renumbered": 0,
+      "vertices_matched": 1.0,
+      "footprint_matched": 1.0,
+      "inside_bounds": 1.0,
+      "ground_matched": 0.9994
+     },
+     "bounds": [
+      -8686.0,
+      -306.0,
+      -8500.0,
+      -27.0
+     ],
+     "data": {
+      "bounds": [
+       -8686.0,
+       -306.0,
+       -8500.0,
+       -27.0
+      ],
+      "z": [
+       82.6,
+       107.4
+      ],
+      "rooms": [
+       -8678.4,
+       -245.0,
+       -8514.2,
+       -98.0
+      ],
+      "places": [
+       [
+        -8646.22,
+        -131.72
+       ]
+      ],
+      "art": {
+       "id": 438,
+       "w": 1002,
+       "h": 668,
+       "tiles": [
+        [
+         604067,
+         0,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604071,
+         256,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604072,
+         512,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604073,
+         768,
+         0,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         604074,
+         0,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604075,
+         256,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604076,
+         512,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604077,
+         768,
+         256,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         604078,
+         0,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604068,
+         256,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604069,
+         512,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604070,
+         768,
+         512,
+         234,
+         156,
+         256,
+         256
+        ]
+       ]
+      }
+     }
+    }
+   ],
+   "status": "accepted",
+   "why": "1 of 1 floors match"
+  },
+  {
+   "name": "Fargodeep Mine",
+   "cont": 0,
+   "uis": [
+    38,
+    39
+   ],
+   "floors": [
+    {
+     "ui": 38,
+     "name": "Fargodeep Mine",
+     "index": 1,
+     "status": "accepted",
+     "why": "",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 1,
+      "source_group_ids_unknown": 0,
+      "groups": 8,
+      "renumbered": 0,
+      "vertices_matched": 0.7489,
+      "footprint_matched": 0.9998,
+      "inside_bounds": 1.0,
+      "ground_matched": 0.9429
+     },
+     "bounds": [
+      -9860.0,
+      41.75,
+      -9700.0,
+      281.75
+     ],
+     "data": {
+      "bounds": [
+       -9860.0,
+       41.75,
+       -9700.0,
+       281.75
+      ],
+      "z": [
+       21.1,
+       42.6
+      ],
+      "rooms": [
+       -9855.9,
+       74.4,
+       -9711.2,
+       215.9
+      ],
+      "places": [
+       [
+        -9833.62,
+        193.52
+       ]
+      ],
+      "art": {
+       "id": 43,
+       "w": 1002,
+       "h": 668,
+       "tiles": [
+        [
+         603267,
+         0,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         603271,
+         256,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         603272,
+         512,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         603273,
+         768,
+         0,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         603274,
+         0,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         603275,
+         256,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         603276,
+         512,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         603277,
+         768,
+         256,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         603278,
+         0,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         603268,
+         256,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         603269,
+         512,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         603270,
+         768,
+         512,
+         234,
+         156,
+         256,
+         256
+        ]
+       ]
+      }
+     }
+    },
+    {
+     "ui": 39,
+     "name": "Lower Mines",
+     "index": 2,
+     "status": "accepted",
+     "why": "",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 1,
+      "source_group_ids_unknown": 0,
+      "groups": 11,
+      "renumbered": 0,
+      "vertices_matched": 0.7104,
+      "footprint_matched": 0.9997,
+      "inside_bounds": 1.0,
+      "ground_matched": 0.9502
+     },
+     "bounds": [
+      -9880.0,
+      34.25,
+      -9710.0,
+      289.25
+     ],
+     "data": {
+      "bounds": [
+       -9880.0,
+       34.25,
+       -9710.0,
+       289.25
+      ],
+      "z": [
+       -0.3,
+       29.3
+      ],
+      "rooms": [
+       -9870.7,
+       63.9,
+       -9723.1,
+       203.8
+      ],
+      "places": [
+       [
+        -9833.62,
+        193.52
+       ]
+      ],
+      "art": {
+       "id": 44,
+       "w": 1002,
+       "h": 668,
+       "tiles": [
+        [
+         603279,
+         0,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         603283,
+         256,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         603284,
+         512,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         603285,
+         768,
+         0,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         603286,
+         0,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         603287,
+         256,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         603288,
+         512,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         603289,
+         768,
+         256,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         603290,
+         0,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         603280,
+         256,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         603281,
+         512,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         603282,
+         768,
+         512,
+         234,
+         156,
+         256,
+         256
+        ]
+       ]
+      }
+     }
+    }
+   ],
+   "status": "accepted",
+   "why": "2 of 2 floors match"
+  },
+  {
+   "name": "Frostmane Hold",
+   "cont": 0,
+   "uis": [
+    470
+   ],
+   "floors": [
+    {
+     "ui": 470,
+     "name": "Frostmane Hold",
+     "index": 0,
+     "status": "skipped",
+     "why": "the models over it differ: 1 only in WoW Forever, 1 only in the source (md_icecave02.wmo, md_icecave_medium.wmo)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 0
+     },
+     "bounds": [
+      -5600.0,
+      584.0,
+      -5470.0,
+      779.0
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: the models over it differ: 1 only in WoW Forever, 1 only in the source (md_icecave02.wmo, md_icecave_medium.wmo)"
+  },
+  {
+   "name": "Frostmane Hovel",
+   "cont": 0,
+   "uis": [
+    428
+   ],
+   "floors": [
+    {
+     "ui": 428,
+     "name": "Frostmane Hovel",
+     "index": 0,
+     "status": "accepted",
+     "why": "",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 1,
+      "source_group_ids_unknown": 0,
+      "groups": 12,
+      "renumbered": 0,
+      "vertices_matched": 1.0,
+      "footprint_matched": 1.0,
+      "inside_bounds": 1.0,
+      "ground_matched": 0.9967
+     },
+     "bounds": [
+      -6623.33,
+      241.75,
+      -6445.67,
+      508.25
+     ],
+     "data": {
+      "bounds": [
+       -6623.33,
+       241.75,
+       -6445.67,
+       508.25
+      ],
+      "z": [
+       367.6,
+       413.5
+      ],
+      "rooms": [
+       -6618.8,
+       272.9,
+       -6459.9,
+       487.9
+      ],
+      "places": [
+       [
+        -6538.91,
+        471.35
+       ]
+      ],
+      "art": {
+       "id": 440,
+       "w": 1002,
+       "h": 668,
+       "tiles": [
+        [
+         604007,
+         0,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604011,
+         256,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604012,
+         512,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604013,
+         768,
+         0,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         604014,
+         0,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604015,
+         256,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604016,
+         512,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604017,
+         768,
+         256,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         604018,
+         0,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604008,
+         256,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604009,
+         512,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604010,
+         768,
+         512,
+         234,
+         156,
+         256,
+         256
+        ]
+       ]
+      }
+     }
+    }
+   ],
+   "status": "accepted",
+   "why": "1 of 1 floors match"
+  },
+  {
+   "name": "Gol'Bolar Quarry",
+   "cont": 0,
+   "uis": [
+    31
+   ],
+   "floors": [
+    {
+     "ui": 31,
+     "name": "Gol'Bolar Quarry",
+     "index": 0,
+     "status": "accepted",
+     "why": "",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 1,
+      "source_group_ids_unknown": 0,
+      "groups": 3,
+      "renumbered": 0,
+      "vertices_matched": 1.0,
+      "footprint_matched": 1.0,
+      "inside_bounds": 0.991,
+      "ground_matched": 0.9976
+     },
+     "bounds": [
+      -5736.17,
+      -1917.0,
+      -5486.83,
+      -1543.0
+     ],
+     "data": {
+      "bounds": [
+       -5736.17,
+       -1917.0,
+       -5486.83,
+       -1543.0
+      ],
+      "z": [
+       334.5,
+       399.0
+      ],
+      "rooms": [
+       -5734.5,
+       -1855.0,
+       -5486.8,
+       -1631.1
+      ],
+      "places": [
+       [
+        -5735.97,
+        -1680.15
+       ]
+      ],
+      "art": {
+       "id": 30,
+       "w": 1002,
+       "h": 668,
+       "tiles": [
+        [
+         604019,
+         0,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604023,
+         256,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604024,
+         512,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604025,
+         768,
+         0,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         604026,
+         0,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604027,
+         256,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604028,
+         512,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604029,
+         768,
+         256,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         604030,
+         0,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604020,
+         256,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604021,
+         512,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604022,
+         768,
+         512,
+         234,
+         156,
+         256,
+         256
+        ]
+       ]
+      }
+     }
+    }
+   ],
+   "status": "accepted",
+   "why": "1 of 1 floors match"
+  },
+  {
+   "name": "Gold Coast Quarry",
+   "cont": 0,
+   "uis": [
+    53
+   ],
+   "floors": [
+    {
+     "ui": 53,
+     "name": "Gold Coast Quarry",
+     "index": 0,
+     "status": "accepted",
+     "why": "",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 1,
+      "source_group_ids_unknown": 0,
+      "groups": 7,
+      "renumbered": 0,
+      "vertices_matched": 1.0,
+      "footprint_matched": 1.0,
+      "inside_bounds": 1.0,
+      "ground_matched": 0.9411
+     },
+     "bounds": [
+      -10605.0,
+      1833.75,
+      -10430.0,
+      2096.25
+     ],
+     "data": {
+      "bounds": [
+       -10605.0,
+       1833.75,
+       -10430.0,
+       2096.25
+      ],
+      "z": [
+       -14.5,
+       30.5
+      ],
+      "rooms": [
+       -10602.2,
+       1920.3,
+       -10449.2,
+       2025.5
+      ],
+      "places": [
+       [
+        -10472.3,
+        1957.22
+       ]
+      ],
+      "art": {
+       "id": 59,
+       "w": 1002,
+       "h": 668,
+       "tiles": [
+        [
+         604163,
+         0,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604167,
+         256,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604168,
+         512,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604169,
+         768,
+         0,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         604170,
+         0,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604171,
+         256,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604172,
+         512,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604173,
+         768,
+         256,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         604174,
+         0,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604164,
+         256,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604165,
+         512,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604166,
+         768,
+         512,
+         234,
+         156,
+         256,
+         256
+        ]
+       ]
+      }
+     }
+    }
+   ],
+   "status": "accepted",
+   "why": "1 of 1 floors match"
+  },
+  {
+   "name": "Greymane Manor",
+   "cont": 0,
+   "uis": [
+    1030,
+    1031
+   ],
+   "floors": [
+    {
+     "ui": 1030,
+     "name": "Main Floor",
+     "index": 0,
+     "status": "skipped",
+     "why": "the ground under it differs (98.9% of it the same)",
+     "evidence": {
+      "checked": "the whole map",
+      "art_tiles": 12,
+      "models_paired": 1,
+      "source_group_ids_unknown": 0,
+      "groups": 4,
+      "renumbered": 0,
+      "vertices_matched": 1.0,
+      "footprint_matched": 1.0,
+      "inside_bounds": 0.982,
+      "ground_matched": 0.9894
+     },
+     "bounds": [
+      -1666.99,
+      2459.77,
+      -1500.01,
+      2710.23
+     ]
+    },
+    {
+     "ui": 1031,
+     "name": "Upper Floor",
+     "index": 1,
+     "status": "accepted",
+     "why": "",
+     "evidence": {
+      "checked": "the whole map",
+      "art_tiles": 12,
+      "models_paired": 1,
+      "source_group_ids_unknown": 0,
+      "groups": 4,
+      "renumbered": 0,
+      "vertices_matched": 1.0,
+      "footprint_matched": 1.0,
+      "inside_bounds": 1.0,
+      "ground_matched": 0.9901
+     },
+     "bounds": [
+      -1666.99,
+      2444.77,
+      -1480.01,
+      2725.23
+     ],
+     "data": {
+      "bounds": [
+       -1666.99,
+       2444.77,
+       -1480.01,
+       2725.23
+      ],
+      "z": [
+       65.6,
+       321.7
+      ],
+      "rooms": [
+       -1659.9,
+       2482.3,
+       -1490.2,
+       2636.4
+      ],
+      "places": [
+       [
+        -1585.11,
+        2552.59
+       ]
+      ],
+      "art": {
+       "id": 187,
+       "w": 1002,
+       "h": 668,
+       "tiles": [
+        [
+         604228,
+         0,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604232,
+         256,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604233,
+         512,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604234,
+         768,
+         0,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         604235,
+         0,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604236,
+         256,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604237,
+         512,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604238,
+         768,
+         256,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         604239,
+         0,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604229,
+         256,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604230,
+         512,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604231,
+         768,
+         512,
+         234,
+         156,
+         256,
+         256
+        ]
+       ]
+      }
+     }
+    }
+   ],
+   "status": "accepted",
+   "why": "1 of 2 floors match"
+  },
+  {
+   "name": "Infested Tomb",
+   "cont": 0,
+   "uis": [
+    2640
+   ],
+   "floors": [
+    {
+     "ui": 2640,
+     "name": "Infested Tomb",
+     "index": 0,
+     "status": "skipped",
+     "why": "12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12
+     },
+     "bounds": [
+      6870.5,
+      -10990.3,
+      7017.5,
+      -10769.8
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: 12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)"
+  },
+  {
+   "name": "Jangolode Mine",
+   "cont": 0,
+   "uis": [
+    54
+   ],
+   "floors": [
+    {
+     "ui": 54,
+     "name": "Jangolode Mine",
+     "index": 0,
+     "status": "accepted",
+     "why": "",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 1,
+      "source_group_ids_unknown": 0,
+      "groups": 9,
+      "renumbered": 0,
+      "vertices_matched": 1.0,
+      "footprint_matched": 1.0,
+      "inside_bounds": 1.0,
+      "ground_matched": 1.0
+     },
+     "bounds": [
+      -9983.33,
+      1293.5,
+      -9798.67,
+      1570.5
+     ],
+     "data": {
+      "bounds": [
+       -9983.33,
+       1293.5,
+       -9798.67,
+       1570.5
+      ],
+      "z": [
+       35.5,
+       60.3
+      ],
+      "rooms": [
+       -9980.8,
+       1365.9,
+       -9806.0,
+       1487.7
+      ],
+      "places": [
+       [
+        -9948.55,
+        1452.86
+       ]
+      ],
+      "art": {
+       "id": 58,
+       "w": 1002,
+       "h": 668,
+       "tiles": [
+        [
+         604175,
+         0,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604179,
+         256,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604180,
+         512,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604181,
+         768,
+         0,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         604182,
+         0,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604183,
+         256,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604184,
+         512,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604185,
+         768,
+         256,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         604186,
+         0,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604176,
+         256,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604177,
+         512,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604178,
+         768,
+         512,
+         234,
+         156,
+         256,
+         256
+        ]
+       ]
+      }
+     }
+    }
+   ],
+   "status": "accepted",
+   "why": "1 of 1 floors match"
+  },
+  {
+   "name": "Jasperlode Mine",
+   "cont": 0,
+   "uis": [
+    40
+   ],
+   "floors": [
+    {
+     "ui": 40,
+     "name": "Jasperlode Mine",
+     "index": 0,
+     "status": "accepted",
+     "why": "",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 1,
+      "source_group_ids_unknown": 0,
+      "groups": 11,
+      "renumbered": 0,
+      "vertices_matched": 1.0,
+      "footprint_matched": 1.0,
+      "inside_bounds": 1.0,
+      "ground_matched": 0.9547
+     },
+     "bounds": [
+      -9200.5,
+      -769.12,
+      -8985.0,
+      -445.88
+     ],
+     "data": {
+      "bounds": [
+       -9200.5,
+       -769.12,
+       -8985.0,
+       -445.88
+      ],
+      "z": [
+       52.0,
+       78.7
+      ],
+      "rooms": [
+       -9184.1,
+       -634.2,
+       -9012.2,
+       -534.1
+      ],
+      "places": [
+       [
+        -9154.65,
+        -594.39
+       ]
+      ],
+      "art": {
+       "id": 42,
+       "w": 1002,
+       "h": 668,
+       "tiles": [
+        [
+         651675,
+         0,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         651679,
+         256,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         651680,
+         512,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         651681,
+         768,
+         0,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         651682,
+         0,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         651683,
+         256,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         651684,
+         512,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         651685,
+         768,
+         256,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         651686,
+         0,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         651676,
+         256,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         651677,
+         512,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         651678,
+         768,
+         512,
+         234,
+         156,
+         256,
+         256
+        ]
+       ]
+      }
+     }
+    }
+   ],
+   "status": "accepted",
+   "why": "1 of 1 floors match"
+  },
+  {
+   "name": "Karazhan Catacombs",
+   "cont": 0,
+   "uis": [
+    46
+   ],
+   "floors": [
+    {
+     "ui": 46,
+     "name": "Karazhan Catacombs",
+     "index": 0,
+     "status": "skipped",
+     "why": "the models over it differ: 0 only in WoW Forever, 1 only in the source (7af_artifact_sewer.wmo)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 2
+     },
+     "bounds": [
+      -11035.0,
+      -2068.75,
+      -10810.0,
+      -1731.25
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: the models over it differ: 0 only in WoW Forever, 1 only in the source (7af_artifact_sewer.wmo)"
+  },
+  {
+   "name": "Keeper's Rest",
+   "cont": 0,
+   "uis": [
+    20
+   ],
+   "floors": [
+    {
+     "ui": 20,
+     "name": "Keeper's Rest",
+     "index": 0,
+     "status": "skipped",
+     "why": "the models over it differ: 5 only in WoW Forever, 1 only in the source (20356.wmo, 7af_artifact_tirisfalcave.wmo, duskwood_human_farm.wmo, duskwoodabandoned_human_farm.wmo, ...)",
+     "evidence": {
+      "checked": "the whole map",
+      "art_tiles": 12,
+      "models_paired": 1
+     },
+     "bounds": [
+      1767.92,
+      1930.51,
+      2200.58,
+      2579.5
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: the models over it differ: 5 only in WoW Forever, 1 only in the source (20356.wmo, 7af_artifact_tirisfalcave.wmo, duskwood_human_farm.wmo, duskwoodabandoned_human_farm.wmo, ...)"
+  },
+  {
+   "name": "Kin's Rest",
+   "cont": 0,
+   "uis": [
+    2645
+   ],
+   "floors": [
+    {
+     "ui": 2645,
+     "name": "Kin's Rest",
+     "index": 0,
+     "status": "skipped",
+     "why": "12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12
+     },
+     "bounds": [
+      6630.7,
+      -10982.8,
+      6777.7,
+      -10762.3
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: 12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)"
+  },
+  {
+   "name": "Light's Hope Chapel",
+   "cont": 0,
+   "uis": [
+    24
+   ],
+   "floors": [
+    {
+     "ui": 24,
+     "name": "Light's Hope Chapel",
+     "index": 0,
+     "status": "skipped",
+     "why": "the models over it differ: 3 only in WoW Forever, 5 only in the source (7af_artifacthub_paladin.wmo, deathknightnecropolis_flyable.wmo, duskwoodchapel.wmo, md_crypt.wmo, ...)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 1
+     },
+     "bounds": [
+      2270.0,
+      -5596.25,
+      2565.0,
+      -5153.75
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: the models over it differ: 3 only in WoW Forever, 5 only in the source (7af_artifacthub_paladin.wmo, deathknightnecropolis_flyable.wmo, duskwoodchapel.wmo, md_crypt.wmo, ...)"
+  },
+  {
+   "name": "Loaknit Den",
+   "cont": 0,
+   "uis": [
+    2580
+   ],
+   "floors": [
+    {
+     "ui": 2580,
+     "name": "Loaknit Den",
+     "index": 0,
+     "status": "skipped",
+     "why": "12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12
+     },
+     "bounds": [
+      6700.0,
+      -6535.31,
+      6915.0,
+      -6212.81
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: 12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)"
+  },
+  {
+   "name": "New Tinkertown",
+   "cont": 0,
+   "uis": [
+    30
+   ],
+   "floors": [
+    {
+     "ui": 30,
+     "name": "New Tinkertown",
+     "index": 0,
+     "status": "skipped",
+     "why": "its rooms differ: 24.7% of their footprint is alike",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 1,
+      "source_group_ids_unknown": 0,
+      "groups": 19,
+      "renumbered": 0,
+      "footprint_matched": 0.2475
+     },
+     "bounds": [
+      -5242.5,
+      500.0,
+      -4862.5,
+      1070.0
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: its rooms differ: 24.7% of their footprint is alike"
+  },
+  {
+   "name": "Night Web's Hollow",
+   "cont": 0,
+   "uis": [
+    466
+   ],
+   "floors": [
+    {
+     "ui": 466,
+     "name": "Night Web's Hollow",
+     "index": 0,
+     "status": "accepted",
+     "why": "",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 1,
+      "source_group_ids_unknown": 0,
+      "groups": 11,
+      "renumbered": 0,
+      "vertices_matched": 1.0,
+      "footprint_matched": 1.0,
+      "inside_bounds": 1.0,
+      "ground_matched": 1.0
+     },
+     "bounds": [
+      1976.67,
+      1800.0,
+      2123.33,
+      2020.0
+     ],
+     "data": {
+      "bounds": [
+       1976.67,
+       1800.0,
+       2123.33,
+       2020.0
+      ],
+      "z": [
+       96.5,
+       123.3
+      ],
+      "rooms": [
+       1997.0,
+       1825.2,
+       2096.6,
+       1997.1
+      ],
+      "places": [
+       [
+        2041.03,
+        1854.19
+       ]
+      ],
+      "art": {
+       "id": 478,
+       "w": 1002,
+       "h": 668,
+       "tiles": [
+        [
+         651194,
+         0,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         651198,
+         256,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         651199,
+         512,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         651200,
+         768,
+         0,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         651201,
+         0,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         651202,
+         256,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         651203,
+         512,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         651204,
+         768,
+         256,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         651205,
+         0,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         651195,
+         256,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         651196,
+         512,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         651197,
+         768,
+         512,
+         234,
+         156,
+         256,
+         256
+        ]
+       ]
+      }
+     }
+    }
+   ],
+   "status": "accepted",
+   "why": "1 of 1 floors match"
+  },
+  {
+   "name": "OldIronforge",
+   "cont": 0,
+   "uis": [
+    1361
+   ],
+   "floors": [
+    {
+     "ui": 1361,
+     "name": "OldIronforge",
+     "index": 0,
+     "status": "skipped",
+     "why": "the models over it differ: 0 only in WoW Forever, 1 only in the source (nd_irondwarf_roundbuilding.wmo)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 1
+     },
+     "bounds": [
+      -4902.5,
+      -1137.5,
+      -4734.17,
+      -885.0
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: the models over it differ: 0 only in WoW Forever, 1 only in the source (nd_irondwarf_roundbuilding.wmo)"
+  },
+  {
+   "name": "Revantusk Sedge",
+   "cont": 0,
+   "uis": [
+    2584
+   ],
+   "floors": [
+    {
+     "ui": 2584,
+     "name": "Revantusk Sedge",
+     "index": 0,
+     "status": "skipped",
+     "why": "12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12
+     },
+     "bounds": [
+      4423.33,
+      -5625.0,
+      4576.67,
+      -5395.0
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: 12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)"
+  },
+  {
+   "name": "Ruins of Gilneas City",
+   "cont": 0,
+   "uis": [
+    218
+   ],
+   "floors": [
+    {
+     "ui": 218,
+     "name": "Ruins of Gilneas City",
+     "index": 0,
+     "status": "skipped",
+     "why": "the models over it differ: 2 only in WoW Forever, 2 only in the source (gilneas_cathedralquarter_brokenbridge.wmo, gilneas_city_wall_01.wmo, gilneas_city_wall_02.wmo, gilneas_industrialquarter_bridge02.wmo)",
+     "evidence": {
+      "checked": "the whole map",
+      "art_tiles": 12,
+      "models_paired": 10
+     },
+     "bounds": [
+      -1900.0,
+      1043.75,
+      -1306.25,
+      1933.33
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: the models over it differ: 2 only in WoW Forever, 2 only in the source (gilneas_cathedralquarter_brokenbridge.wmo, gilneas_city_wall_01.wmo, gilneas_city_wall_02.wmo, gilneas_industrialquarter_bridge02.wmo)"
+  },
+  {
+   "name": "Scarlet Monastery Entrance",
+   "cont": 0,
+   "uis": [
+    19
+   ],
+   "floors": [
+    {
+     "ui": 19,
+     "name": "Scarlet Monastery Entrance",
+     "index": 0,
+     "status": "accepted",
+     "why": "",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 1,
+      "source_group_ids_unknown": 0,
+      "groups": 12,
+      "renumbered": 0,
+      "vertices_matched": 0.7455,
+      "footprint_matched": 1.0,
+      "inside_bounds": 0.998,
+      "ground_matched": 0.9225
+     },
+     "bounds": [
+      2812.17,
+      -865.0,
+      2948.83,
+      -660.0
+     ],
+     "data": {
+      "bounds": [
+       2812.17,
+       -865.0,
+       2948.83,
+       -660.0
+      ],
+      "z": [
+       139.3,
+       172.4
+      ],
+      "rooms": [
+       2831.3,
+       -865.0,
+       2942.7,
+       -680.6
+      ],
+      "places": [
+       [
+        2844.01,
+        -691.99
+       ]
+      ],
+      "art": {
+       "id": 20,
+       "w": 1002,
+       "h": 668,
+       "tiles": [
+        [
+         604151,
+         0,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604155,
+         256,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604156,
+         512,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604157,
+         768,
+         0,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         604158,
+         0,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604159,
+         256,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604160,
+         512,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604161,
+         768,
+         256,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         604162,
+         0,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604152,
+         256,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604153,
+         512,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604154,
+         768,
+         512,
+         234,
+         156,
+         256,
+         256
+        ]
+       ]
+      }
+     }
+    }
+   ],
+   "status": "accepted",
+   "why": "1 of 1 floors match"
+  },
+  {
+   "name": "The Deadmines",
+   "cont": 0,
+   "uis": [
+    55
+   ],
+   "floors": [
+    {
+     "ui": 55,
+     "name": "The Deadmines",
+     "index": 0,
+     "status": "accepted",
+     "why": "",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 3,
+      "source_group_ids_unknown": 0,
+      "groups": 31,
+      "renumbered": 0,
+      "vertices_matched": 1.0,
+      "footprint_matched": 1.0,
+      "inside_bounds": 1.0,
+      "ground_matched": 0.9899
+     },
+     "bounds": [
+      -11355.0,
+      1342.5,
+      -11055.0,
+      1792.5
+     ],
+     "data": {
+      "bounds": [
+       -11355.0,
+       1342.5,
+       -11055.0,
+       1792.5
+      ],
+      "z": [
+       13.8,
+       56.7
+      ],
+      "rooms": [
+       -11355.0,
+       1450.7,
+       -11079.6,
+       1703.5
+      ],
+      "places": [
+       [
+        -11098.73,
+        1528.23
+       ]
+      ],
+      "art": {
+       "id": 60,
+       "w": 1002,
+       "h": 668,
+       "tiles": [
+        [
+         646940,
+         0,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         646944,
+         256,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         646945,
+         512,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         646946,
+         768,
+         0,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         646947,
+         0,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         646948,
+         256,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         646949,
+         512,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         646950,
+         768,
+         256,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         646951,
+         0,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         646941,
+         256,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         646942,
+         512,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         646943,
+         768,
+         512,
+         234,
+         156,
+         256,
+         256
+        ]
+       ]
+      }
+     }
+    }
+   ],
+   "status": "accepted",
+   "why": "1 of 1 floors match"
+  },
+  {
+   "name": "The Grizzled Den",
+   "cont": 0,
+   "uis": [
+    29
+   ],
+   "floors": [
+    {
+     "ui": 29,
+     "name": "The Grizzled Den",
+     "index": 0,
+     "status": "skipped",
+     "why": "the models over it differ: 1 only in WoW Forever, 0 only in the source (md_iceden.wmo)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 3
+     },
+     "bounds": [
+      -5650.0,
+      -472.75,
+      -5313.0,
+      32.75
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: the models over it differ: 1 only in WoW Forever, 0 only in the source (md_iceden.wmo)"
+  },
+  {
+   "name": "The Lycaneum",
+   "cont": 0,
+   "uis": [
+    2649
+   ],
+   "floors": [
+    {
+     "ui": 2649,
+     "name": "The Lycaneum",
+     "index": 0,
+     "status": "skipped",
+     "why": "12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12
+     },
+     "bounds": [
+      11332.5,
+      -5132.5,
+      11592.5,
+      -4742.5
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: 12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)"
+  },
+  {
+   "name": "The Master's Cellar",
+   "cont": 0,
+   "uis": [
+    43
+   ],
+   "floors": [
+    {
+     "ui": 43,
+     "name": "The Master's Cellar",
+     "index": 0,
+     "status": "skipped",
+     "why": "the models over it differ: 0 only in WoW Forever, 1 only in the source (7xp_karazhanroom01.wmo)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 4
+     },
+     "bounds": [
+      -11441.6,
+      -2450.77,
+      -11037.9,
+      -1845.23
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: the models over it differ: 0 only in WoW Forever, 1 only in the source (7xp_karazhanroom01.wmo)"
+  },
+  {
+   "name": "The Master's Cellar",
+   "cont": 0,
+   "uis": [
+    44,
+    45
+   ],
+   "floors": [
+    {
+     "ui": 44,
+     "name": "The Master's Cellar",
+     "index": 23,
+     "status": "skipped",
+     "why": "the models over it differ: 0 only in WoW Forever, 1 only in the source (7af_artifact_sewer.wmo)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 6
+     },
+     "bounds": [
+      -11215.0,
+      -2096.25,
+      -10990.0,
+      -1758.75
+     ]
+    },
+    {
+     "ui": 45,
+     "name": "Lower Cellar",
+     "index": 24,
+     "status": "skipped",
+     "why": "the models over it differ: 0 only in WoW Forever, 1 only in the source (7af_artifact_sewer.wmo)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 4
+     },
+     "bounds": [
+      -11225.0,
+      -2155.0,
+      -10885.0,
+      -1645.0
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: the models over it differ: 0 only in WoW Forever, 1 only in the source (7af_artifact_sewer.wmo)"
+  },
+  {
+   "name": "Tomb of the Lost Priest",
+   "cont": 0,
+   "uis": [
+    2642
+   ],
+   "floors": [
+    {
+     "ui": 2642,
+     "name": "Tomb of the Lost Priest",
+     "index": 0,
+     "status": "skipped",
+     "why": "12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12
+     },
+     "bounds": [
+      6079.17,
+      -11675.0,
+      6270.83,
+      -11387.5
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: 12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)"
+  },
+  {
+   "name": "Uldaman",
+   "cont": 0,
+   "uis": [
+    16
+   ],
+   "floors": [
+    {
+     "ui": 16,
+     "name": "Uldaman",
+     "index": 0,
+     "status": "skipped",
+     "why": "the models over it differ: 2 only in WoW Forever, 1 only in the source (10xt_exterior_uldamanentrance01.wmo, md_mushroomcave.wmo, md_mushroomden.wmo)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 4
+     },
+     "bounds": [
+      -6330.0,
+      -3311.25,
+      -5955.0,
+      -2748.75
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: the models over it differ: 2 only in WoW Forever, 1 only in the source (10xt_exterior_uldamanentrance01.wmo, md_mushroomcave.wmo, md_mushroomden.wmo)"
+  },
+  {
+   "name": "Wartha'nan Crypts",
+   "cont": 0,
+   "uis": [
+    2579
+   ],
+   "floors": [
+    {
+     "ui": 2579,
+     "name": "Wartha'nan Crypts",
+     "index": 0,
+     "status": "skipped",
+     "why": "12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12
+     },
+     "bounds": [
+      5875.0,
+      -5225.0,
+      6125.0,
+      -4850.0
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: 12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)"
+  },
+  {
+   "name": "Wit'Kalar Crypt",
+   "cont": 0,
+   "uis": [
+    2583
+   ],
+   "floors": [
+    {
+     "ui": 2583,
+     "name": "Wit'Kalar Crypt",
+     "index": 0,
+     "status": "skipped",
+     "why": "12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12
+     },
+     "bounds": [
+      6895.83,
+      -7250.0,
+      7069.17,
+      -6990.0
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: 12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)"
+  },
+  {
+   "name": "Ahn'Qiraj: The Fallen Kingdom",
+   "cont": 1,
+   "uis": [
+    327
+   ],
+   "floors": [
+    {
+     "ui": 327,
+     "name": "Ahn'Qiraj: The Fallen Kingdom",
+     "index": 0,
+     "status": "skipped",
+     "why": "the models over it differ: 14 only in WoW Forever, 94 only in the source (40manarmygeneral.wmo, 40mancanalinner.wmo, 40mancanalouter.wmo, 40mandroneboss.wmo, ...)",
+     "evidence": {
+      "checked": "the whole map",
+      "art_tiles": 12,
+      "models_paired": 12
+     },
+     "bounds": [
+      -10733.33,
+      -158.33,
+      -8033.33,
+      3891.67
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: the models over it differ: 14 only in WoW Forever, 94 only in the source (40manarmygeneral.wmo, 40mancanalinner.wmo, 40mancanalouter.wmo, 40mandroneboss.wmo, ...)"
+  },
+  {
+   "name": "Ban'ethil Barrow Den",
+   "cont": 1,
+   "uis": [
+    60,
+    61
+   ],
+   "floors": [
+    {
+     "ui": 60,
+     "name": "Upper Den",
+     "index": 4,
+     "status": "accepted",
+     "why": "",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 1,
+      "source_group_ids_unknown": 0,
+      "groups": 13,
+      "renumbered": 0,
+      "vertices_matched": 1.0,
+      "footprint_matched": 1.0,
+      "inside_bounds": 1.0,
+      "ground_matched": 1.0
+     },
+     "bounds": [
+      9728.33,
+      1455.0,
+      9881.67,
+      1685.0
+     ],
+     "data": {
+      "bounds": [
+       9728.33,
+       1455.0,
+       9881.67,
+       1685.0
+      ],
+      "z": [
+       1280.6,
+       1338.8
+      ],
+      "rooms": [
+       9733.9,
+       1539.1,
+       9871.8,
+       1649.5
+      ],
+      "places": [
+       [
+        9865.05,
+        1556.04
+       ]
+      ],
+      "art": {
+       "id": 65,
+       "w": 1002,
+       "h": 668,
+       "tiles": [
+        [
+         604115,
+         0,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604119,
+         256,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604120,
+         512,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604121,
+         768,
+         0,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         604122,
+         0,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604123,
+         256,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604124,
+         512,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604125,
+         768,
+         256,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         604126,
+         0,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604116,
+         256,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604117,
+         512,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604118,
+         768,
+         512,
+         234,
+         156,
+         256,
+         256
+        ]
+       ]
+      }
+     }
+    },
+    {
+     "ui": 61,
+     "name": "Lower Den",
+     "index": 5,
+     "status": "accepted",
+     "why": "",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 1,
+      "source_group_ids_unknown": 0,
+      "groups": 19,
+      "renumbered": 0,
+      "vertices_matched": 1.0,
+      "footprint_matched": 1.0,
+      "inside_bounds": 1.0,
+      "ground_matched": 0.9995
+     },
+     "bounds": [
+      9678.33,
+      1355.0,
+      9931.67,
+      1735.0
+     ],
+     "data": {
+      "bounds": [
+       9678.33,
+       1355.0,
+       9931.67,
+       1735.0
+      ],
+      "z": [
+       1253.2,
+       1307.5
+      ],
+      "rooms": [
+       9696.6,
+       1447.6,
+       9915.6,
+       1631.8
+      ],
+      "places": [
+       [
+        9865.05,
+        1556.04
+       ]
+      ],
+      "art": {
+       "id": 66,
+       "w": 1002,
+       "h": 668,
+       "tiles": [
+        [
+         604127,
+         0,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604131,
+         256,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604132,
+         512,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604133,
+         768,
+         0,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         604134,
+         0,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604135,
+         256,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604136,
+         512,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604137,
+         768,
+         256,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         604138,
+         0,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604128,
+         256,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604129,
+         512,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604130,
+         768,
+         512,
+         234,
+         156,
+         256,
+         256
+        ]
+       ]
+      }
+     }
+    }
+   ],
+   "status": "accepted",
+   "why": "2 of 2 floors match"
+  },
+  {
+   "name": "Burning Blade Coven",
+   "cont": 1,
+   "uis": [
+    2
+   ],
+   "floors": [
+    {
+     "ui": 2,
+     "name": "Burning Blade Coven",
+     "index": 0,
+     "status": "accepted",
+     "why": "",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 1,
+      "source_group_ids_unknown": 0,
+      "groups": 12,
+      "renumbered": 0,
+      "vertices_matched": 1.0,
+      "footprint_matched": 1.0,
+      "inside_bounds": 0.99,
+      "ground_matched": 0.7297
+     },
+     "bounds": [
+      -171.83,
+      -4432.5,
+      5.5,
+      -4166.5
+     ],
+     "data": {
+      "bounds": [
+       -171.83,
+       -4432.5,
+       5.5,
+       -4166.5
+      ],
+      "z": [
+       38.3,
+       93.3
+      ],
+      "rooms": [
+       -171.8,
+       -4389.4,
+       5.5,
+       -4169.4
+      ],
+      "places": [
+       [
+        -135.48,
+        -4370.84
+       ]
+      ],
+      "art": {
+       "id": 3,
+       "w": 1002,
+       "h": 668,
+       "tiles": [
+        [
+         611660,
+         0,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         611664,
+         256,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         611665,
+         512,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         611666,
+         768,
+         0,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         611667,
+         0,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         611668,
+         256,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         611669,
+         512,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         611670,
+         768,
+         256,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         611671,
+         0,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         611661,
+         256,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         611662,
+         512,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         611663,
+         768,
+         512,
+         234,
+         156,
+         256,
+         256
+        ]
+       ]
+      }
+     }
+    }
+   ],
+   "status": "accepted",
+   "why": "1 of 1 floors match"
+  },
+  {
+   "name": "Caverns of Time",
+   "cont": 1,
+   "uis": [
+    74,
+    75
+   ],
+   "floors": [
+    {
+     "ui": 74,
+     "name": "Timeless Tunnel",
+     "index": 0,
+     "status": "skipped",
+     "why": "the models over it differ: 2 only in WoW Forever, 3 only in the source (cavernsoftimeentrance.wmo, classicalelfruin10.wmo, orchut.wmo, prisonguardtower.wmo)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 1
+     },
+     "bounds": [
+      -8694.17,
+      -5271.25,
+      -7955.83,
+      -4163.75
+     ]
+    },
+    {
+     "ui": 75,
+     "name": "Caverns of Time",
+     "index": 1,
+     "status": "skipped",
+     "why": "12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12
+     },
+     "bounds": [
+      -8907.33,
+      -5013.5,
+      -8036.67,
+      -3707.5
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: 12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped); the models over it differ: 2 only in WoW Forever, 3 only in the source (cavernsoftimeentrance.wmo, classicalelfruin10.wmo, orchut.wmo, prisonguardtower.wmo)"
+  },
+  {
+   "name": "Durotar",
+   "cont": 1,
+   "uis": [
+    1535
+   ],
+   "floors": [
+    {
+     "ui": 1535,
+     "name": "Durotar",
+     "index": 0,
+     "status": "skipped",
+     "evidence": {},
+     "why": "its assignments don't give it one map's bounds (on maps 1, 2237)"
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: its assignments don't give it one map's bounds (on maps 1, 2237)"
+  },
+  {
+   "name": "Dustwind Cave",
+   "cont": 1,
+   "uis": [
+    6
+   ],
+   "floors": [
+    {
+     "ui": 6,
+     "name": "Dustwind Cave",
+     "index": 0,
+     "status": "skipped",
+     "why": "the models over it differ: 2 only in WoW Forever, 2 only in the source (md_warmcave_medium.wmo, md_warmcavetunnel01.wmo)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 0
+     },
+     "bounds": [
+      799.25,
+      -4880.5,
+      971.25,
+      -4622.5
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: the models over it differ: 2 only in WoW Forever, 2 only in the source (md_warmcave_medium.wmo, md_warmcavetunnel01.wmo)"
+  },
+  {
+   "name": "Fel Rock",
+   "cont": 1,
+   "uis": [
+    59
+   ],
+   "floors": [
+    {
+     "ui": 59,
+     "name": "Fel Rock",
+     "index": 0,
+     "status": "accepted",
+     "why": "",
+     "evidence": {
+      "checked": "the whole map",
+      "art_tiles": 12,
+      "models_paired": 2,
+      "source_group_ids_unknown": 0,
+      "groups": 13,
+      "renumbered": 0,
+      "vertices_matched": 1.0,
+      "footprint_matched": 1.0,
+      "inside_bounds": 0.948,
+      "ground_matched": 1.0
+     },
+     "bounds": [
+      10025.3,
+      970.2,
+      10211.7,
+      1249.8
+     ],
+     "data": {
+      "bounds": [
+       10025.3,
+       970.2,
+       10211.7,
+       1249.8
+      ],
+      "z": [
+       1260.7,
+       1391.1
+      ],
+      "rooms": [
+       10025.3,
+       995.1,
+       10211.7,
+       1249.4
+      ],
+      "places": [
+       [
+        10092.67,
+        1030.21
+       ]
+      ],
+      "art": {
+       "id": 64,
+       "w": 1002,
+       "h": 668,
+       "tiles": [
+        [
+         604139,
+         0,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604143,
+         256,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604144,
+         512,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604145,
+         768,
+         0,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         604146,
+         0,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604147,
+         256,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604148,
+         512,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         604149,
+         768,
+         256,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         604150,
+         0,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604140,
+         256,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604141,
+         512,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         604142,
+         768,
+         512,
+         234,
+         156,
+         256,
+         256
+        ]
+       ]
+      }
+     }
+    }
+   ],
+   "status": "accepted",
+   "why": "1 of 1 floors match"
+  },
+  {
+   "name": "Maraudon",
+   "cont": 1,
+   "uis": [
+    67,
+    68
+   ],
+   "floors": [
+    {
+     "ui": 67,
+     "name": "The Wicked Grotto",
+     "index": 21,
+     "status": "skipped",
+     "why": "the models over it differ: 1 only in WoW Forever, 1 only in the source (centaurtent02.wmo)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 8
+     },
+     "bounds": [
+      -1650.0,
+      2485.5,
+      -1250.0,
+      3085.5
+     ]
+    },
+    {
+     "ui": 68,
+     "name": "Foulspore Cavern",
+     "index": 22,
+     "status": "skipped",
+     "why": "the models over it differ: 2 only in WoW Forever, 1 only in the source (centaurtent02.wmo, desolacerockbridge.wmo)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 8
+     },
+     "bounds": [
+      -1465.67,
+      2604.99,
+      -1092.33,
+      3165.01
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: the models over it differ: 1 only in WoW Forever, 1 only in the source (centaurtent02.wmo); the models over it differ: 2 only in WoW Forever, 1 only in the source (centaurtent02.wmo, desolacerockbridge.wmo)"
+  },
+  {
+   "name": "Orgrimmar",
+   "cont": 1,
+   "uis": [
+    86
+   ],
+   "floors": [
+    {
+     "ui": 86,
+     "name": "Cleft of Shadow",
+     "index": 1,
+     "status": "skipped",
+     "why": "12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12
+     },
+     "bounds": [
+      1690.88,
+      -4526.06,
+      1932.27,
+      -4163.97
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: 12 of its 12 art tiles aren't in WoW Forever's client as the source has them (they'd have to be shipped)"
+  },
+  {
+   "name": "Orgrimmar",
+   "cont": 1,
+   "uis": [
+    1534
+   ],
+   "floors": [
+    {
+     "ui": 1534,
+     "name": "Orgrimmar",
+     "index": 0,
+     "status": "skipped",
+     "evidence": {},
+     "why": "its assignments don't give it one map's bounds (on maps 1, 2237)"
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: its assignments don't give it one map's bounds (on maps 1, 2237)"
+  },
+  {
+   "name": "Palemane Rock",
+   "cont": 1,
+   "uis": [
+    8
+   ],
+   "floors": [
+    {
+     "ui": 8,
+     "name": "Palemane Rock",
+     "index": 0,
+     "status": "skipped",
+     "why": "the models over it differ: 1 only in WoW Forever, 2 only in the source (azrclassicalelfruin_white10.wmo, classicalelfruin02.wmo, classicalelfruin05.wmo)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 1
+     },
+     "bounds": [
+      -2496.67,
+      229.99,
+      -2263.33,
+      580.01
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: the models over it differ: 1 only in WoW Forever, 2 only in the source (azrclassicalelfruin_white10.wmo, classicalelfruin02.wmo, classicalelfruin05.wmo)"
+  },
+  {
+   "name": "Shadowthread Cave",
+   "cont": 1,
+   "uis": [
+    58
+   ],
+   "floors": [
+    {
+     "ui": 58,
+     "name": "Shadowthread Cave",
+     "index": 0,
+     "status": "skipped",
+     "why": "the ground under it differs (64.3% of it the same)",
+     "evidence": {
+      "checked": "the whole map",
+      "art_tiles": 12,
+      "models_paired": 3,
+      "source_group_ids_unknown": 0,
+      "groups": 6,
+      "renumbered": 0,
+      "vertices_matched": 1.0,
+      "footprint_matched": 1.0,
+      "inside_bounds": 1.0,
+      "ground_matched": 0.6427
+     },
+     "bounds": [
+      10715.0,
+      660.0,
+      11035.0,
+      1140.0
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: the ground under it differs (64.3% of it the same)"
+  },
+  {
+   "name": "Skull Rock",
+   "cont": 1,
+   "uis": [
+    5
+   ],
+   "floors": [
+    {
+     "ui": 5,
+     "name": "Skull Rock",
+     "index": 0,
+     "status": "skipped",
+     "why": "the models over it differ: 0 only in WoW Forever, 2 only in the source (orctowerorgrimmar.wmo, orgrimmar2_ground_plates.wmo)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 2
+     },
+     "bounds": [
+      1400.5,
+      -4899.0,
+      1580.5,
+      -4629.0
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: the models over it differ: 0 only in WoW Forever, 2 only in the source (orctowerorgrimmar.wmo, orgrimmar2_ground_plates.wmo)"
+  },
+  {
+   "name": "Spitescale Cavern",
+   "cont": 1,
+   "uis": [
+    464
+   ],
+   "floors": [
+    {
+     "ui": 464,
+     "name": "Spitescale Cavern",
+     "index": 0,
+     "status": "skipped",
+     "why": "the models over it differ: 0 only in WoW Forever, 2 only in the source (md_nagacave.wmo, nagapagoda01.wmo)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 0
+     },
+     "bounds": [
+      -824.67,
+      -5738.75,
+      -576.33,
+      -5366.25
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: the models over it differ: 0 only in WoW Forever, 2 only in the source (md_nagacave.wmo, nagapagoda01.wmo)"
+  },
+  {
+   "name": "The Gaping Chasm",
+   "cont": 1,
+   "uis": [
+    73
+   ],
+   "floors": [
+    {
+     "ui": 73,
+     "name": "The Gaping Chasm",
+     "index": 0,
+     "status": "accepted",
+     "why": "",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 7,
+      "source_group_ids_unknown": 0,
+      "groups": 15,
+      "renumbered": 0,
+      "vertices_matched": 1.0,
+      "footprint_matched": 1.0,
+      "inside_bounds": 1.0,
+      "ground_matched": 0.9254
+     },
+     "bounds": [
+      -9490.0,
+      -4497.5,
+      -8900.0,
+      -3612.5
+     ],
+     "data": {
+      "bounds": [
+       -9490.0,
+       -4497.5,
+       -8900.0,
+       -3612.5
+      ],
+      "z": [
+       -56.4,
+       11.5
+      ],
+      "rooms": [
+       -9465.9,
+       -4265.0,
+       -8939.9,
+       -3876.8
+      ],
+      "places": [
+       [
+        -9363.18,
+        -3978.56
+       ],
+       [
+        -9097.65,
+        -4060.76
+       ]
+      ],
+      "art": {
+       "id": 77,
+       "w": 1002,
+       "h": 668,
+       "tiles": [
+        [
+         611805,
+         0,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         611809,
+         256,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         611810,
+         512,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         611811,
+         768,
+         0,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         611812,
+         0,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         611813,
+         256,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         611814,
+         512,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         611815,
+         768,
+         256,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         611816,
+         0,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         611806,
+         256,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         611807,
+         512,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         611808,
+         768,
+         512,
+         234,
+         156,
+         256,
+         256
+        ]
+       ]
+      }
+     }
+    }
+   ],
+   "status": "accepted",
+   "why": "1 of 1 floors match"
+  },
+  {
+   "name": "The Noxious Lair",
+   "cont": 1,
+   "uis": [
+    72
+   ],
+   "floors": [
+    {
+     "ui": 72,
+     "name": "The Noxious Lair",
+     "index": 0,
+     "status": "accepted",
+     "why": "",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 2,
+      "source_group_ids_unknown": 0,
+      "groups": 15,
+      "renumbered": 0,
+      "vertices_matched": 1.0,
+      "footprint_matched": 1.0,
+      "inside_bounds": 1.0,
+      "ground_matched": 0.9671
+     },
+     "bounds": [
+      -8140.0,
+      -2940.0,
+      -7640.0,
+      -2190.0
+     ],
+     "data": {
+      "bounds": [
+       -8140.0,
+       -2940.0,
+       -7640.0,
+       -2190.0
+      ],
+      "z": [
+       -60.0,
+       3.8
+      ],
+      "rooms": [
+       -8128.5,
+       -2678.4,
+       -7674.1,
+       -2306.6
+      ],
+      "places": [
+       [
+        -8076.14,
+        -2500.88
+       ],
+       [
+        -7807.34,
+        -2582.21
+       ]
+      ],
+      "art": {
+       "id": 78,
+       "w": 1002,
+       "h": 668,
+       "tiles": [
+        [
+         611817,
+         0,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         611821,
+         256,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         611822,
+         512,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         611823,
+         768,
+         0,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         611824,
+         0,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         611825,
+         256,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         611826,
+         512,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         611827,
+         768,
+         256,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         611828,
+         0,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         611818,
+         256,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         611819,
+         512,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         611820,
+         768,
+         512,
+         234,
+         156,
+         256,
+         256
+        ]
+       ]
+      }
+     }
+    }
+   ],
+   "status": "accepted",
+   "why": "1 of 1 floors match"
+  },
+  {
+   "name": "The Slithering Scar",
+   "cont": 1,
+   "uis": [
+    79
+   ],
+   "floors": [
+    {
+     "ui": 79,
+     "name": "The Slithering Scar",
+     "index": 0,
+     "status": "accepted",
+     "why": "",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 1,
+      "source_group_ids_unknown": 0,
+      "groups": 7,
+      "renumbered": 0,
+      "vertices_matched": 1.0,
+      "footprint_matched": 1.0,
+      "inside_bounds": 0.961,
+      "ground_matched": 0.9147
+     },
+     "bounds": [
+      -8185.0,
+      -1366.25,
+      -7930.0,
+      -983.75
+     ],
+     "data": {
+      "bounds": [
+       -8185.0,
+       -1366.25,
+       -7930.0,
+       -983.75
+      ],
+      "z": [
+       -347.5,
+       -293.9
+      ],
+      "rooms": [
+       -8185.0,
+       -1324.8,
+       -7940.5,
+       -1057.0
+      ],
+      "places": [
+       [
+        -7957.06,
+        -1321.55
+       ]
+      ],
+      "art": {
+       "id": 84,
+       "w": 1002,
+       "h": 668,
+       "tiles": [
+        [
+         624958,
+         0,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         624962,
+         256,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         624963,
+         512,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         624964,
+         768,
+         0,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         624965,
+         0,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         624966,
+         256,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         624967,
+         512,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         624968,
+         768,
+         256,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         624969,
+         0,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         624959,
+         256,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         624960,
+         512,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         624961,
+         768,
+         512,
+         234,
+         156,
+         256,
+         256
+        ]
+       ]
+      }
+     }
+    }
+   ],
+   "status": "accepted",
+   "why": "1 of 1 floors match"
+  },
+  {
+   "name": "The Venture Co. Mine",
+   "cont": 1,
+   "uis": [
+    9
+   ],
+   "floors": [
+    {
+     "ui": 9,
+     "name": "The Venture Co. Mine",
+     "index": 0,
+     "status": "skipped",
+     "why": "the ground under it differs (83.2% of it the same)",
+     "evidence": {
+      "checked": "the whole map",
+      "art_tiles": 12,
+      "models_paired": 1,
+      "source_group_ids_unknown": 0,
+      "groups": 10,
+      "renumbered": 0,
+      "vertices_matched": 1.0,
+      "footprint_matched": 1.0,
+      "inside_bounds": 1.0,
+      "ground_matched": 0.8324
+     },
+     "bounds": [
+      -1930.0,
+      -1559.0,
+      -1436.0,
+      -818.0
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: the ground under it differs (83.2% of it the same)"
+  },
+  {
+   "name": "Tiragarde Keep",
+   "cont": 1,
+   "uis": [
+    3,
+    4
+   ],
+   "floors": [
+    {
+     "ui": 3,
+     "name": "Tiragarde Keep",
+     "index": 10,
+     "status": "skipped",
+     "why": "the models over it differ: 2 only in WoW Forever, 2 only in the source (tirigardekeep01.wmo, tirigardekeep02.wmo, wallpost01.wmo, wallpostruined01.wmo)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 1
+     },
+     "bounds": [
+      -286.67,
+      -5177.5,
+      -203.33,
+      -5052.5
+     ]
+    },
+    {
+     "ui": 4,
+     "name": "Great Hall",
+     "index": 11,
+     "status": "skipped",
+     "why": "the models over it differ: 2 only in WoW Forever, 1 only in the source (tirigardekeep01.wmo, tirigardekeep02.wmo, wallpost01.wmo)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 1
+     },
+     "bounds": [
+      -286.67,
+      -5177.5,
+      -203.33,
+      -5052.5
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: the models over it differ: 2 only in WoW Forever, 1 only in the source (tirigardekeep01.wmo, tirigardekeep02.wmo, wallpost01.wmo); the models over it differ: 2 only in WoW Forever, 2 only in the source (tirigardekeep01.wmo, tirigardekeep02.wmo, wallpost01.wmo, wallpostruined01.wmo)"
+  },
+  {
+   "name": "Twilight's Run",
+   "cont": 1,
+   "uis": [
+    82
+   ],
+   "floors": [
+    {
+     "ui": 82,
+     "name": "Twilight's Run",
+     "index": 0,
+     "status": "skipped",
+     "why": "the models over it differ: 0 only in WoW Forever, 2 only in the source (md_mountaincave_medium_h.wmo)",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 1
+     },
+     "bounds": [
+      -6351.67,
+      -91.25,
+      -6183.33,
+      161.26
+     ]
+    }
+   ],
+   "status": "skipped",
+   "why": "no floor matches: the models over it differ: 0 only in WoW Forever, 2 only in the source (md_mountaincave_medium_h.wmo)"
+  },
+  {
+   "name": "Wailing Caverns",
+   "cont": 1,
+   "uis": [
+    11
+   ],
+   "floors": [
+    {
+     "ui": 11,
+     "name": "Wailing Caverns",
+     "index": 0,
+     "status": "accepted",
+     "why": "",
+     "evidence": {
+      "checked": "indoor rooms",
+      "art_tiles": 12,
+      "models_paired": 3,
+      "source_group_ids_unknown": 0,
+      "groups": 15,
+      "renumbered": 0,
+      "vertices_matched": 1.0,
+      "footprint_matched": 1.0,
+      "inside_bounds": 1.0,
+      "ground_matched": 0.8835
+     },
+     "bounds": [
+      -870.0,
+      -2472.5,
+      -490.0,
+      -1902.5
+     ],
+     "data": {
+      "bounds": [
+       -870.0,
+       -2472.5,
+       -490.0,
+       -1902.5
+      ],
+      "z": [
+       -7.0,
+       144.2
+      ],
+      "rooms": [
+       -848.2,
+       -2413.7,
+       -515.8,
+       -1983.4
+      ],
+      "places": [
+       [
+        -928.71,
+        -2095.25
+       ]
+      ],
+      "art": {
+       "id": 12,
+       "w": 1002,
+       "h": 668,
+       "tiles": [
+        [
+         647646,
+         0,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         647650,
+         256,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         647651,
+         512,
+         0,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         647652,
+         768,
+         0,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         647653,
+         0,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         647654,
+         256,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         647655,
+         512,
+         256,
+         256,
+         256,
+         256,
+         256
+        ],
+        [
+         647656,
+         768,
+         256,
+         234,
+         256,
+         256,
+         256
+        ],
+        [
+         647657,
+         0,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         647647,
+         256,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         647648,
+         512,
+         512,
+         256,
+         156,
+         256,
+         256
+        ],
+        [
+         647649,
+         768,
+         512,
+         234,
+         156,
+         256,
+         256
+        ]
+       ]
+      }
+     }
+    }
+   ],
+   "status": "accepted",
+   "why": "1 of 1 floors match"
+  }
+ ],
+ "cities": [
+  {
+   "name": "Stormwind City",
+   "status": "skipped",
+   "fv_maps": [
+    1453
+   ],
+   "why": "WoW Forever's client has its own map of it (uiMap 1453): nothing to fill in"
+  },
+  {
+   "name": "Ironforge",
+   "status": "skipped",
+   "fv_maps": [
+    1455
+   ],
+   "why": "WoW Forever's client has its own map of it (uiMap 1455): nothing to fill in"
+  },
+  {
+   "name": "Darnassus",
+   "status": "skipped",
+   "fv_maps": [
+    1457
+   ],
+   "why": "WoW Forever's client has its own map of it (uiMap 1457): nothing to fill in"
+  },
+  {
+   "name": "Orgrimmar",
+   "status": "skipped",
+   "fv_maps": [
+    1454
+   ],
+   "why": "WoW Forever's client has its own map of it (uiMap 1454): nothing to fill in; the source's maps inside it: see Orgrimmar above"
+  },
+  {
+   "name": "Thunder Bluff",
+   "status": "skipped",
+   "fv_maps": [
+    1456
+   ],
+   "why": "WoW Forever's client has its own map of it (uiMap 1456): nothing to fill in"
+  },
+  {
+   "name": "Undercity",
+   "status": "skipped",
+   "fv_maps": [
+    1458
+   ],
+   "why": "WoW Forever's client has its own map of it (uiMap 1458): nothing to fill in"
+  }
+ ],
+ "caves": [
+  {
+   "name": "(unnamed, at -10605, -1502)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -10680, -2535)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -1182, 1039)",
+   "cont": 0,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Ruins of Gilneas City"
+  },
+  {
+   "name": "(unnamed, at -1196, -2536)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -12865, -1395)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -4163, -1401)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -4233, -3096)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -4868, -1629)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5223, -1472)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5239, 106)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5345, -2526)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5390, -2706)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5398, -2714)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5532, -2718)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5542, -2719)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5546, -2731)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5637, -3029)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5648, -3924)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5661, -3964)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5666, -2122)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5679, -4016)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5690, -3918)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5726, -3998)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5730, -1875)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "not one of the models of the source's map beside it (Gol'Bolar Quarry): no map of its own"
+  },
+  {
+   "name": "(unnamed, at -5742, -2161)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5754, -3946)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5763, -3997)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5779, -2918)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5790, -2970)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5792, -1942)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5792, -2932)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5796, -2120)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5828, -2805)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5854, -2840)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5878, -2836)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5882, -2860)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5891, -2963)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5905, -2853)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5907, -1878)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -5956, -2879)",
+   "cont": 0,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Uldaman"
+  },
+  {
+   "name": "(unnamed, at -5961, -2892)",
+   "cont": 0,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Uldaman"
+  },
+  {
+   "name": "(unnamed, at -5977, -2864)",
+   "cont": 0,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Uldaman"
+  },
+  {
+   "name": "(unnamed, at -5978, -2790)",
+   "cont": 0,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Uldaman"
+  },
+  {
+   "name": "(unnamed, at -5980, -2762)",
+   "cont": 0,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Uldaman"
+  },
+  {
+   "name": "(unnamed, at -6008, -2964)",
+   "cont": 0,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Uldaman"
+  },
+  {
+   "name": "(unnamed, at -6026, -2765)",
+   "cont": 0,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Uldaman"
+  },
+  {
+   "name": "(unnamed, at -6065, -2748)",
+   "cont": 0,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Uldaman"
+  },
+  {
+   "name": "(unnamed, at -6090, -2770)",
+   "cont": 0,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Uldaman"
+  },
+  {
+   "name": "(unnamed, at -6104, -2797)",
+   "cont": 0,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Uldaman"
+  },
+  {
+   "name": "(unnamed, at -6539, 471)",
+   "cont": 0,
+   "models": 1,
+   "status": "accepted",
+   "why": "its map: Frostmane Hovel"
+  },
+  {
+   "name": "(unnamed, at -6898, -5200)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -7291, -1952)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -7651, -1285)",
+   "cont": 0,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Blackrock Mountain"
+  },
+  {
+   "name": "(unnamed, at -7691, -3707)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -814, -3512)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -8410, -1183)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -8535, -2936)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -8595, -1180)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -8759, -2898)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -8795, -1058)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -8815, -2699)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -8856, -2971)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -9238, -4532)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -9400, -275)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -9417, -565)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -9443, -977)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -9449, -547)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -9608, 514)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -9794, -1257)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 135, -2189)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 1509, -4871)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 2430, -5904)",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Agamand Family Crypt",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Alterac Valley",
+   "cont": 0,
+   "models": 2,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Amberstill Ranch",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Arathi Highlands",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Azurelode Mine",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Badlands",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Bandit Hideout",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Beren's Peril",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Blackchar Cave",
+   "cont": 0,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Blackrock Mountain"
+  },
+  {
+   "name": "Bogen's Ledge",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Boulderfist Hall",
+   "cont": 0,
+   "models": 2,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Boulderfist Outpost",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Chill Breeze Valley",
+   "cont": 0,
+   "models": 2,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: The Grizzled Den"
+  },
+  {
+   "name": "Coldridge Pass",
+   "cont": 0,
+   "models": 1,
+   "status": "accepted",
+   "why": "its map: Coldridge Pass"
+  },
+  {
+   "name": "Crushridge Hold",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Crypt",
+   "cont": 0,
+   "models": 7,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Dalaran, Karazhan Catacombs, The Master's Cellar"
+  },
+  {
+   "name": "Crystalvein Mine",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Darrow Hill",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Dawning Wood Catacombs",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Deep Elem Mine",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Defias Hideout",
+   "cont": 0,
+   "models": 2,
+   "status": "accepted",
+   "why": "its map: The Deadmines"
+  },
+  {
+   "name": "Dreadmaul Post",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Dreadmaul Rock",
+   "cont": 0,
+   "models": 3,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Drywhisker Gorge",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Dun Algaz",
+   "cont": 0,
+   "models": 4,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Dun Morogh",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Duskwood",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Dustbelch Grotto",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Echo Ridge Mine",
+   "cont": 0,
+   "models": 1,
+   "status": "accepted",
+   "why": "its map: Echo Ridge Mine"
+  },
+  {
+   "name": "Faldir's Cove",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Fargodeep Mine",
+   "cont": 0,
+   "models": 1,
+   "status": "accepted",
+   "why": "its map: Fargodeep Mine"
+  },
+  {
+   "name": "Farholde Iron Mine",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Firewatch Ridge",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Flame Crest",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Frostmane Hold",
+   "cont": 0,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Frostmane Hold"
+  },
+  {
+   "name": "Galardell Valley",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Garrison Armory",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Gol'Bolar Quarry Mine",
+   "cont": 0,
+   "models": 1,
+   "status": "accepted",
+   "why": "its map: Gol'Bolar Quarry"
+  },
+  {
+   "name": "Gold Coast Quarry",
+   "cont": 0,
+   "models": 1,
+   "status": "accepted",
+   "why": "its map: Gold Coast Quarry"
+  },
+  {
+   "name": "Grosh'gok Compound",
+   "cont": 0,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Dalaran, The Master's Cellar"
+  },
+  {
+   "name": "Growless Cave",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Hearthglen",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Iceflow Lake",
+   "cont": 0,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: The Grizzled Den"
+  },
+  {
+   "name": "Ironbeard's Tomb",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Jangolode Mine",
+   "cont": 0,
+   "models": 1,
+   "status": "accepted",
+   "why": "its map: Jangolode Mine"
+  },
+  {
+   "name": "Jasperlode Mine",
+   "cont": 0,
+   "models": 1,
+   "status": "accepted",
+   "why": "its map: Jasperlode Mine"
+  },
+  {
+   "name": "Jintha'Alor",
+   "cont": 0,
+   "models": 2,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Loch Modan",
+   "cont": 0,
+   "models": 3,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Misty Valley",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Mo'grosh Stronghold",
+   "cont": 0,
+   "models": 3,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Mosh'Ogg Ogre Mound",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Night Web's Hollow",
+   "cont": 0,
+   "models": 1,
+   "status": "accepted",
+   "why": "its map: Night Web's Hollow"
+  },
+  {
+   "name": "North Gate Pass",
+   "cont": 0,
+   "models": 2,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Plaguewood",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Raptor Ridge",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Ravenholdt Manor",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Render's Rock",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Render's Valley",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Rethban Caverns",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Riverglades",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Roland's Doom",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Ruins of Zul'Mamwe",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Serpent's Coil",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Shadow Grave",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Shadowvale Tomb",
+   "cont": 0,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Keeper's Rest"
+  },
+  {
+   "name": "Shimmer Ridge",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Silver Stream Mine",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Skulk Rock",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Slaughter Hollow",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Slither Rock",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "South Gate Pass",
+   "cont": 0,
+   "models": 2,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Spirit Den",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Stagalbog Cave",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Stonesplinter Valley",
+   "cont": 0,
+   "models": 3,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Uldaman"
+  },
+  {
+   "name": "Stonewrought Pass",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Stranglethorn Vale",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Sunken Hollow",
+   "cont": 0,
+   "models": 2,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Terrorweb Tunnel",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "The Cauldron",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "The Grizzled Den",
+   "cont": 0,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: The Grizzled Den"
+  },
+  {
+   "name": "The Sepulcher",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "The Skittering Dark",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "The Slag Pit",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "The Stockpile",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "The Undercroft",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "The Vice",
+   "cont": 0,
+   "models": 2,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Dalaran, The Master's Cellar"
+  },
+  {
+   "name": "The Weeping Cave",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Thelgen Rock",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Twilight Hollow",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Vul'Gol Ogre Mound",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Wetlands",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Whelgar's Excavation Site",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Witherbark Village",
+   "cont": 0,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -10057, 1067)",
+   "cont": 1,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Ahn'Qiraj: The Fallen Kingdom"
+  },
+  {
+   "name": "(unnamed, at -10742, 2191)",
+   "cont": 1,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Ahn'Qiraj: The Fallen Kingdom"
+  },
+  {
+   "name": "(unnamed, at -139, -3234)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -3160, -2907)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -3653, 243)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -39, 426)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -4135, -516)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -4170, -631)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -4194, -583)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -4198, -2220)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -510, 1832)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -603, -3163)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -6186, -3023)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -6316, 1029)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -6369, 1023)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -6388, 954)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -6518, 957)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -6545, 1070)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -6563, 868)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -6649, 1026)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -7109, 1785)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -7149, 1537)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -7269, 1700)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -7272, 1787)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -7353, 1480)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -7452, 1799)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -7469, 1891)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -7480, 1591)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -7483, 1505)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -7543, 1632)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -7584, 230)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -7594, 597)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -7729, 767)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -7839, 356)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -7854, 265)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at -7973, 765)",
+   "cont": 1,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Ahn'Qiraj: The Fallen Kingdom"
+  },
+  {
+   "name": "(unnamed, at -7987, 601)",
+   "cont": 1,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Ahn'Qiraj: The Fallen Kingdom"
+  },
+  {
+   "name": "(unnamed, at -8092, 580)",
+   "cont": 1,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Ahn'Qiraj: The Fallen Kingdom"
+  },
+  {
+   "name": "(unnamed, at -8112, 390)",
+   "cont": 1,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Ahn'Qiraj: The Fallen Kingdom"
+  },
+  {
+   "name": "(unnamed, at -8153, 409)",
+   "cont": 1,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Ahn'Qiraj: The Fallen Kingdom"
+  },
+  {
+   "name": "(unnamed, at -860, -2045)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "not one of the models of the source's map beside it (Wailing Caverns): no map of its own"
+  },
+  {
+   "name": "(unnamed, at -8841, 1680)",
+   "cont": 1,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Ahn'Qiraj: The Fallen Kingdom"
+  },
+  {
+   "name": "(unnamed, at -8845, 1547)",
+   "cont": 1,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Ahn'Qiraj: The Fallen Kingdom"
+  },
+  {
+   "name": "(unnamed, at -8896, 1616)",
+   "cont": 1,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Ahn'Qiraj: The Fallen Kingdom"
+  },
+  {
+   "name": "(unnamed, at -8937, 1616)",
+   "cont": 1,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Ahn'Qiraj: The Fallen Kingdom"
+  },
+  {
+   "name": "(unnamed, at -9059, -3942)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "not one of the models of the source's map beside it (The Gaping Chasm): no map of its own"
+  },
+  {
+   "name": "(unnamed, at -9138, -4025)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "not one of the models of the source's map beside it (The Gaping Chasm): no map of its own"
+  },
+  {
+   "name": "(unnamed, at -9165, -4092)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "not one of the models of the source's map beside it (The Gaping Chasm): no map of its own"
+  },
+  {
+   "name": "(unnamed, at -9262, -3982)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "not one of the models of the source's map beside it (The Gaping Chasm): no map of its own"
+  },
+  {
+   "name": "(unnamed, at -9398, -4001)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "not one of the models of the source's map beside it (The Gaping Chasm): no map of its own"
+  },
+  {
+   "name": "(unnamed, at -9857, 1100)",
+   "cont": 1,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Ahn'Qiraj: The Fallen Kingdom"
+  },
+  {
+   "name": "(unnamed, at -9894, 1078)",
+   "cont": 1,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Ahn'Qiraj: The Fallen Kingdom"
+  },
+  {
+   "name": "(unnamed, at -9964, 1037)",
+   "cont": 1,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Ahn'Qiraj: The Fallen Kingdom"
+  },
+  {
+   "name": "(unnamed, at 1456, 1274)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 1610, -2132)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 1824, -2469)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 1832, 277)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 1946, 1339)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 2729, 2294)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 2752, -4580)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 3117, -6355)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 3133, -4575)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 3501, -512)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 4857, -4508)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 4869, -3356)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 6718, -5241)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 7146, -3884)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 7423, -1668)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 7638, -3784)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 7731, -3886)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 7832, -4015)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 7841, -4275)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 7992, -3788)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 7996, -3987)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 8027, -4200)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 8029, -3824)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 8095, -4005)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 8114, -3835)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 8158, -3755)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "(unnamed, at 8206, -3842)",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Azshara",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Ban'ethil Barrow Den",
+   "cont": 1,
+   "models": 1,
+   "status": "accepted",
+   "why": "its map: Ban'ethil Barrow Den"
+  },
+  {
+   "name": "Ban'ethil Hollow",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Blackwood Den",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Bloodfen Burrow",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Bolgan's Hole",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Boulder Lode Mine",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Boulderslide Cavern",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Boulderslide Ravine",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Brambleblade Ravine",
+   "cont": 1,
+   "models": 2,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Burning Blade Coven",
+   "cont": 1,
+   "models": 1,
+   "status": "accepted",
+   "why": "its map: Burning Blade Coven"
+  },
+  {
+   "name": "Darkcloud Pinnacle",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Darkmist Cavern",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Darkshore",
+   "cont": 1,
+   "models": 8,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Darkwhisper Gorge",
+   "cont": 1,
+   "models": 8,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Deadwood Den",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Demon Fall Ridge",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Dreadmist Den",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Drygulch Ravine",
+   "cont": 1,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Dustwind Cave"
+  },
+  {
+   "name": "Dun Mandarr",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Dunemaul Compound",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Dustwind Cave",
+   "cont": 1,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Dustwind Cave"
+  },
+  {
+   "name": "Emberstrife's Den",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Fel Rock",
+   "cont": 1,
+   "models": 1,
+   "status": "accepted",
+   "why": "its map: Fel Rock"
+  },
+  {
+   "name": "Feral Scar Vale",
+   "cont": 1,
+   "models": 2,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Fire Plume Ridge",
+   "cont": 1,
+   "models": 2,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Fungal Rock",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Gordunni Outpost",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Hermit's Abode",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "High Wilderness",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Ice Thistle Hills",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Irontree Cavern",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Lake Al'Ameth",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Lost Rigger Cove",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Malaka'jin",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Marshal's Refuge",
+   "cont": 1,
+   "models": 2,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Moon Horror Den",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Mulgore",
+   "cont": 1,
+   "models": 2,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Owl Wing Thicket",
+   "cont": 1,
+   "models": 5,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Palemane Rock",
+   "cont": 1,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Palemane Rock"
+  },
+  {
+   "name": "Prismatic Talus",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Rage Scar Hold",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Roguefeather Den",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Scalebeard's Cave",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Shadow Hold",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Shadowthread Cave",
+   "cont": 1,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Shadowthread Cave"
+  },
+  {
+   "name": "Shalzaru's Lair",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Shriekling Den",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Shrine of the Deceiver",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Skull Rock",
+   "cont": 1,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Skull Rock"
+  },
+  {
+   "name": "Splintertree Post",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Splithoof Hold",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Stormrage Barrow Dens",
+   "cont": 1,
+   "models": 3,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "The Cleft",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "The Den",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "The Den of Flame",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "The Dor'Danil Barrow Den",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "The Gaping Chasm",
+   "cont": 1,
+   "models": 2,
+   "status": "accepted",
+   "why": "its map: The Gaping Chasm"
+  },
+  {
+   "name": "The Hidden Grove",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "The Hidden Wash",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "The Howling Vale",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "The Noxious Lair",
+   "cont": 1,
+   "models": 2,
+   "status": "accepted",
+   "why": "its map: The Noxious Lair"
+  },
+  {
+   "name": "The Rustmaul Dig Site",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "The Shady Nook",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "The Slithering Scar",
+   "cont": 1,
+   "models": 1,
+   "status": "accepted",
+   "why": "its map: The Slithering Scar"
+  },
+  {
+   "name": "The Talon Den",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "The Talondeep Path",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "The Venture Co. Mine",
+   "cont": 1,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: The Venture Co. Mine"
+  },
+  {
+   "name": "The Wailing Caverns",
+   "cont": 1,
+   "models": 1,
+   "status": "accepted",
+   "why": "its map: Wailing Caverns"
+  },
+  {
+   "name": "The Weathered Nook",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "The Writhing Deep",
+   "cont": 1,
+   "models": 2,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Timbermaw Hold",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Twilight's Run",
+   "cont": 1,
+   "models": 1,
+   "status": "skipped",
+   "why": "the source's map over it doesn't match: Twilight's Run"
+  },
+  {
+   "name": "Windshear Mine",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Woodpaw Den",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  },
+  {
+   "name": "Zalashji's Den",
+   "cont": 1,
+   "models": 1,
+   "status": "unavailable",
+   "why": "the source has no map of it (its models' minimap art stays its map)"
+  }
+ ]
+}

@@ -1,0 +1,38 @@
+COLUMNS
+int ID
+int ClassID
+int SubclassID
+int Material
+int InventoryType
+int SheatheType
+int SoundOverrideSubclassID
+int SoundOverride2
+int IconFileDataID
+int ItemGroupSoundsID
+int Field10
+int Field11
+int Field12
+int Field13
+int Field14
+int Field15
+int Field16
+
+LAYOUT 9A2A4834
+COMMENT written by hand for client 1.60.1 from the file's own field sizes (icons to scale: only IconFileDataID read)
+$noninline,id$ID<32>
+ClassID<32>
+SubclassID<32>
+Material<32>
+InventoryType<32>
+SheatheType<32>
+SoundOverrideSubclassID<32>
+SoundOverride2<32>
+IconFileDataID<32>
+ItemGroupSoundsID<32>
+Field10<32>
+Field11<32>
+Field12<32>
+Field13<32>
+Field14<32>
+Field15<32>
+Field16<32>
