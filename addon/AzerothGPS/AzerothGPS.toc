@@ -52,6 +52,14 @@ Data\GuideFloors.lua
 Data\NpcFloors.lua
 Data\Npcs.lua
 Data\VendorItems.lua
+Data\NpcNames\deDE.lua
+Data\NpcNames\esES.lua
+Data\NpcNames\esMX.lua
+Data\NpcNames\frFR.lua
+Data\NpcNames\koKR.lua
+Data\NpcNames\ruRU.lua
+Data\NpcNames\zhCN.lua
+Data\NpcNames\zhTW.lua
 Data\IconSizes.lua
 Passability.lua
 Router.lua

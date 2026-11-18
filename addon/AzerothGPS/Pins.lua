@@ -66,7 +66,7 @@ function P.PlaceName(pin)
   local name
   local lvl = pin.level
   if lvl and lvl >= 20000 and ns.Instances and ns.Instances[lvl] then
-    name = ns.Instances[lvl].name
+    name = ns.InstanceName(lvl) -- (in the game's language)
   elseif lvl and ns.GPS and ns.GPS.LocateWorld then
     local _, n = ns.GPS.LocateWorld(ns.Geo.Base(lvl), pin.x, pin.y)
     name = n

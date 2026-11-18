@@ -3,7 +3,8 @@ Menethil Harbor, Wetlands fliegen"; a French player asked the same for cities an
 
 The shipped data's names are the client's English ones. Each is looked up in the game by its id (ns.TaxiName,
 ns.ZoneName, ns.AreaName, ns.RideEndName, ns.ItemName, ns.NpcName in Core.lua), the English only the fallback, and
-the search finds both. On an English client nothing changes."""
+the search finds both. Dungeons and raids by their map id (ns.InstanceName: GetRealZoneText), the shipped NPCs
+never met by their translations (Data/NpcNames, AzerothCore's). On an English client nothing changes."""
 
 import pytest
 
@@ -12,6 +13,9 @@ pytest.importorskip("lupa.lua51")
 SENTINEL_HILL, MENETHIL = 4, 7
 MENETHIL_AREA, BRILL_AREA = 150, 159  # (Data/Pois.lua's place labels' AreaTable ids)
 WETLANDS, TIRISFAL, STORMWIND = 1437, 1420, 1453  # (uiMaps)
+WESTFALL, SM_LIBRARY = 1436, 303  # (uiMaps: a zone, the Scarlet Monastery's Library floor)
+DEADMINES, SM = 36, 189  # (instance map ids: Data/Instances.lua's levels 20036, 20189)
+BROG = 151  # (Brog Hamfist, General Supplies in Goldshire: shipped, never met in these tests)
 
 NAMES = {
     "deDE": {
@@ -19,12 +23,18 @@ NAMES = {
                  6: "Eisenschmiede, Dun Morogh"},
         "maps": {WETLANDS: "Sumpfland", TIRISFAL: "Tirisfal", STORMWIND: "Sturmwind"},
         "areas": {MENETHIL_AREA: "Hafen von Menethil", BRILL_AREA: "Brill"},
+        "instances": {DEADMINES: "Die Todesminen", SM: "Scharlachrotes Kloster"},
+        "floors": {SM_LIBRARY: "Bibliothek"},
+        "brog": ("Brog Grobschlacht", "Gemischtwaren"),  # (Data/NpcNames/deDE.lua's, AzerothCore's)
     },
     "frFR": {
         "taxi": {SENTINEL_HILL: "Colline des sentinelles, Marche de l'Ouest", MENETHIL: "Port de Menethil, Les Paluns",
                  2: "Hurlevent, Elwynn", 6: "Forgefer, Dun Morogh"},
         "maps": {WETLANDS: "Les Paluns", TIRISFAL: "Clairières de Tirisfal", STORMWIND: "Hurlevent"},
         "areas": {MENETHIL_AREA: "Port de Menethil", BRILL_AREA: "Brill"},
+        "instances": {DEADMINES: "Les Mortemines", SM: "Monastère Écarlate"},
+        "floors": {SM_LIBRARY: "Bibliothèque", WESTFALL: "Marche de l'Ouest"},
+        "brog": ("Brog Lacouenne", "Fournitures générales"),
     },
 }
 
@@ -43,6 +53,10 @@ def _start(locale):
       AGPS_TAXI_NAMES = {_lua_map(n["taxi"])}
       AGPS_MAP_NAMES = {_lua_map(n["maps"])}
       AGPS_AREA_NAMES = {_lua_map(n["areas"])}
+      AGPS_INSTANCE_NAMES = {_lua_map(n.get("instances", {}))}
+      for id, name in pairs({_lua_map(n.get("floors", {}))}) do AGPS_MAP_NAMES[id] = name end
+      -- (GetRealZoneText(mapID): an instance map's name, Map.db's, in the client's language; "" for none)
+      GetRealZoneText = function(id) return AGPS_INSTANCE_NAMES[id] or "" end
       C_TaxiMap.GetTaxiNodesForMap = function(mapID)
         if mapID ~= 1415 then return {{}} end
         local out = {{}}
@@ -52,7 +66,7 @@ def _start(locale):
       local info = C_Map.GetMapInfo
       C_Map.GetMapInfo = function(id)
         local i = info(id)
-        if i and AGPS_MAP_NAMES[id] then i.name = AGPS_MAP_NAMES[id] end
+        if AGPS_MAP_NAMES[id] then i = i or {{ mapID = id }}; i.name = AGPS_MAP_NAMES[id] end
         return i
       end
       C_Map.GetAreaInfo = function(id) return AGPS_AREA_NAMES[id] end
@@ -190,3 +204,144 @@ def test_an_english_client_keeps_the_datas_names():
     assert ns.TaxiName(MENETHIL, "Menethil Harbor, Wetlands") == "Menethil Harbor, Wetlands"
     steps = _plan_flight(lua, ns)
     assert "Menethil Harbor, Wetlands" in steps, steps
+
+
+# Dungeons and raids (Data/Instances.lua): by their map id, GetRealZoneText; a wing by its dungeon map floor's uiMap.
+def test_dungeon_entrances_on_the_map_in_the_games_language(game):
+    locale, lua, ns = game
+    n = NAMES[locale]
+    names = [str(e.name) for e in ns.GPS.InstanceEntrances(0).values() if e.level in (20036, 20189)]
+    assert n["instances"][DEADMINES] in names, names
+    assert f'{n["instances"][SM]}: {n["floors"][SM_LIBRARY]}' in names, names  # (a wing's: by its floor's uiMap)
+    assert f'{n["instances"][SM]}: Graveyard' in names, names  # (a floor the game didn't name: the English)
+    assert "Deadmines" not in names, names
+    # (its map's title and the info line: the dungeon's name)
+    assert ns.InstanceName(20036) == n["instances"][DEADMINES]
+
+
+def test_the_search_finds_a_dungeon_by_either_name_shown_in_the_games_language(game):
+    locale, lua, ns = game
+    shown = NAMES[locale]["instances"][DEADMINES]
+    for typed in (shown.split()[-1].lower(), "deadmines"):
+        hits = [str(e.name) for e in _search(ns, typed) if str(e.sub) == str(ns.L["Instance entrance"])]
+        assert hits == [shown], (typed, hits)
+
+
+def test_directions_to_a_dungeon_name_it_in_the_games_language(game):
+    locale, lua, ns = game
+    n = NAMES[locale]
+    N, G = ns.Nav, ns.GPS
+    ns.CharDB().faction = "Alliance"
+    lua.execute("AGPS_MAP = 1436; AGPS_POS = { -10628.9, 1036.7, 0 }")  # (Sentinel Hill)
+    N.SetStops(lua.eval("{ { x = -14.6, y = -385.5, cont = 20036 } }"), False, "red")  # (inside the Deadmines)
+    for _ in range(40):
+        lua.execute("AGPS_T = (AGPS_T or 1000) + 0.5")
+        G.Update()
+    steps = str(N.StepsText(99))
+    assert n["instances"][DEADMINES] in steps, steps
+    assert "Deadmines" not in steps, steps
+    # (the portal's other end, the zone: by its uiMap, found by its English name)
+    assert f'({n["floors"].get(WESTFALL, "Westfall")})' in steps, steps
+    N.SetStops(lua.eval("{}"), False, True)
+
+
+# The shipped NPCs in the client's language (Data/NpcNames/<locale>.lua, AzerothCore's): found and shown before
+# they're met, by either name.
+def test_a_never_met_npc_is_found_by_its_name_in_the_games_language_and_the_english(game):
+    locale, lua, ns = game
+    name, title = NAMES[locale]["brog"]
+    learned = ns.db.npcNames and ns.db.npcNames[locale]
+    assert not (learned and learned[BROG])  # (never met)
+    ns.CharDB().faction = "Alliance"
+    lua.execute("AGPS_MAP = 1429; AGPS_POS = { -9460.0, 30.0, 0 }")  # (Goldshire)
+    for typed in (name.lower(), "brog hamfist"):
+        hits = [e for e in _search(ns, typed) if e.npc and e.id == BROG]
+        assert hits and str(hits[0].name) == name, (typed, [str(e.name) for e in _search(ns, typed)])
+        assert str(hits[0].sub).startswith(title or "General Supplies"), str(hits[0].sub)
+    # (picked: the stop and the directions say its name)
+    e = [e for e in _search(ns, "brog hamfist") if e.npc and e.id == BROG][0]
+    N = ns.Nav
+    N.SetStops(lua.eval("{}"), False, True)
+    lua.execute("AGPS_POS = { -9300.0, 120.0, 0 }")  # (up the road from Goldshire)
+    N.AddStop(lua.table(x=e.x, y=e.y, cont=e.cont, name=e.name, z=e.z), False, True)
+    for _ in range(30):
+        lua.execute("AGPS_T = (AGPS_T or 1000) + 0.5")
+        ns.GPS.Update()
+    st = N.Steps()  # (one step, the walk to it: StepsText lists two or more)
+    steps = " ".join(str(st[i]) for i in range(1, len(st) + 1))
+    assert name in steps, steps
+    N.SetStops(lua.eval("{}"), False, True)
+
+
+def test_a_name_learned_in_game_overrides_the_shipped_one(game):
+    locale, lua, ns = game
+    lua.execute(f"""
+      AGPS_OLDU = {{ guid = UnitGUID, name = UnitName }}
+      UnitGUID = function(u) if u == "target" then return "Creature-0-1-2-3-{BROG}-00000ABC" end return AGPS_OLDU.guid(u) end
+      UnitName = function(u) if u == "target" then return "Brog im Spiel" end return AGPS_OLDU.name(u) end
+    """)
+    try:
+        ns.LearnNpcName("target")
+        assert ns.NpcName(BROG, "Brog Hamfist") == "Brog im Spiel"
+    finally:
+        lua.execute("UnitGUID, UnitName = AGPS_OLDU.guid, AGPS_OLDU.name")
+        ns.db.npcNames[locale][BROG] = None
+    assert ns.NpcName(BROG, "Brog Hamfist") == NAMES[locale]["brog"][0]
+
+
+def test_only_the_clients_own_npc_names_are_loaded(game):
+    locale, lua, ns = game
+    assert ns.NpcNamesLocale == locale
+    other = "frFR" if locale == "deDE" else "deDE"
+    assert ns.ShippedNpcNames()[0][BROG] == NAMES[locale]["brog"][0] != NAMES[other]["brog"][0]
+
+
+def test_npc_name_files_are_small_and_credit_azerothcore():
+    from azerothgps.gameharness import toc_files
+    from azerothgps.npc_names import LOCALES, OUT_DIR
+    files = sorted(OUT_DIR.glob("*.lua"))
+    assert [f.stem for f in files] == sorted(LOCALES)
+    toc = [t.replace(chr(92), "/") for t in toc_files()]
+    for f in files:
+        text = f.read_text(encoding="utf-8")
+        assert f.stat().st_size < 160 * 1024, f
+        assert "AzerothCore" in text and "GPL-2" in text, f
+        assert f'GetLocale() == "{f.stem}"' in text.splitlines()[6], f  # (another client returns at once)
+        assert any(t.endswith(f"Data/NpcNames/{f.name}") for t in toc), f
+
+
+def test_an_italian_client_has_no_shipped_npc_names_and_keeps_the_english():
+    lua, ns = _start("itIT")
+    assert ns.GameLocalized()
+    assert ns.NpcNamesLoc is None
+    assert ns.NpcName(BROG, "Brog Hamfist") == "Brog Hamfist"
+
+
+def test_an_english_client_keeps_the_dungeons_and_npcs_english_names():
+    lua, ns = _start("enUS")
+    assert ns.InstanceName(20036) == "Deadmines"
+    assert ns.InstanceName(20189, "Library") == "Scarlet Monastery: Library"
+    assert ns.NpcName(BROG, "Brog Hamfist") == "Brog Hamfist"
+    names = [str(e.name) for e in ns.GPS.InstanceEntrances(0).values() if e.level == 20036]
+    assert names == ["Deadmines"], names
+
+
+def test_the_generator_reads_the_dump_and_keeps_only_what_differs(tmp_path):
+    from azerothgps import npc_names as M
+    src = tmp_path / "thirdparty" / "azerothcore"
+    src.mkdir(parents=True)
+    (src / "creature_template.sql").write_text(
+        "INSERT INTO `creature_template` VALUES\n"
+        "(7,0,0,0,0,0,'Smith','Armorer',NULL,0),\n(8,0,0,0,0,0,'Not The Same',NULL,NULL,0);\n", encoding="utf-8")
+    (src / "creature_template_locale.sql").write_text(
+        "INSERT INTO `creature_template_locale` VALUES\n"
+        "(7,'deDE','Schmied','Rüstungsschmied',1),\n(7,'frFR','Smith','Fabricant d\\'armures',1),\n"
+        "(8,'deDE','Anders',NULL,1),\n(9,'deDE','Nicht geliefert',NULL,1);\n", encoding="utf-8")
+    npcs = tmp_path / "Npcs.lua"
+    npcs.write_text("ns.NpcsPacked = [==[\n7|Smith|Armorer|vr||A|0 1 2 3\n8|Other|||q||A|0 1 2 3\n]==]\n",
+                    encoding="utf-8")
+    names, rep = M.build(tmp_path, npcs)
+    assert names["deDE"] == {7: ("Schmied", "Rüstungsschmied")}  # (8: another English name there; 9: not shipped)
+    assert names["frFR"] == {7: (None, "Fabricant d'armures")}  # (the name the same: only the title)
+    text = M.lua_text("frFR", names["frFR"])
+    assert '"Fabricant d\'armures",' in text and "\n7||1\n" in text

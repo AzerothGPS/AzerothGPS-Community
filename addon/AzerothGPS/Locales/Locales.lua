@@ -38,7 +38,7 @@ end
 -- shipped data's names are the client's English ones; each is looked up in the game by its id, the English only the
 -- fallback (a name the game hasn't given). On an English client nothing is looked up: the data's names are the game's.
 -- Every name shown goes through these; logic (saved keys, matching) keeps the English. The search finds both.
-ns.names = { zone = {}, area = {}, poi = {}, item = {}, taxi = nil, taxiVer = 0, byEnglish = nil }
+ns.names = { zone = {}, area = {}, poi = {}, item = {}, instance = {}, taxi = nil, taxiVer = 0, byEnglish = nil }
 function ns.GameLocalized()
   local n = ns.names
   if n.localized == nil then
@@ -117,11 +117,63 @@ function ns.PlaceName(english)
   local id = n.byEnglish[english]
   return id and ns.AreaName(id, english) or english
 end
+-- A zone's or city's name from its English one alone (a dungeon's way in names its zone so: Data/Instances.lua's
+-- portals), by the uiMap of that name (Data/Maps.lua's zones and cities), else `english`.
+function ns.ZoneNameByEnglish(english)
+  if not (english and ns.GameLocalized()) then return english end
+  local n = ns.names
+  if not n.zoneByEnglish then
+    n.zoneByEnglish = {}
+    for id, m in pairs(ns.Maps or {}) do
+      if m.name and (m.type == 3 or m.type == 4) then
+        local have = n.zoneByEnglish[m.name]
+        if not have or id < have then n.zoneByEnglish[m.name] = id end
+      end
+    end
+  end
+  local id = n.zoneByEnglish[english]
+  return id and ns.ZoneName(id, english) or english
+end
+-- A dungeon's or raid's name (Data/Instances.lua's level `lvl`): GetRealZoneText by its map id (Map.db's name, the
+-- data's English; WoW Forever's API docs: ZoneScript's GetRealZoneText(mapID)), else the English. With `wing` (its
+-- English: "Library"), "Scarlet Monastery: Library", the wing by its dungeon map floor of that name (a uiMap, the
+-- Scarlet Monastery's four) else as it is; `door` its door's, "(...)", as it is.
+function ns.InstanceName(lvl, wing, door)
+  local info = lvl and ns.Instances and ns.Instances[lvl]
+  local english = info and info.name or (ns.CityLevels and ns.CityLevels[lvl] and ns.CityLevels[lvl].name)
+  local name = english
+  if english and ns.GameLocalized() then
+    local map = info and info.map or (ns.CityLevels[lvl] and ns.CityLevels[lvl].base)
+    name = Cached(ns.names.instance, map, function(id) return GetRealZoneText(id) end) or english
+  end
+  if not (name and wing) then return name end
+  return name .. ": " .. ns.WingName(lvl, wing) .. (door and (" (" .. door .. ")") or "")
+end
+-- A dungeon's wing's name (Data/Instances.lua's `wings`, English), by the dungeon map floor (Data/DungeonMaps.lua's
+-- uiMap) of that name; the others ("Front Entrance", "East": the data's own words, no id in the game) as they are.
+function ns.WingName(lvl, wing)
+  if not (wing and ns.GameLocalized()) then return wing end
+  local dm = ns.DungeonMaps and ns.DungeonMaps[lvl]
+  for _, f in ipairs(dm and dm.floors or {}) do
+    if f.name == wing and f.ui then return ns.ZoneName(f.ui, wing) end
+  end
+  return wing
+end
 -- A transport row's end (`side` 1 or 2: Data/Transports.lua's name1 / name2): its town by area (`area1`) and its zone
 -- by uiMap (`map1`), "Town, Zone" as the English is; a flight's (Nav's rows) are the game's names already.
 function ns.RideEndName(t, side)
   local english = t and t[side == 1 and 9 or 10]
   if not (english and ns.GameLocalized()) or t.from then return english end
+  if t[8] == "portal" then -- (a dungeon's way in, Data/Instances.lua: the dungeon's end by its map, the zone's by name)
+    local lvl = side == 1 and t[1] or t[4]
+    local info = ns.Instances and ns.Instances[lvl]
+    if info then
+      local base = info.name or ""
+      local wing = english:sub(1, #base + 2) == base .. ": " and english:sub(#base + 3) or nil
+      return ns.InstanceName(lvl, wing)
+    end
+    return ns.ZoneNameByEnglish(english)
+  end
   local area, map = t["area" .. side], t["map" .. side]
   if not (area or map) then return english end
   local town = area and ns.AreaName(area)
@@ -146,13 +198,41 @@ function ns.ItemName(id, english)
   end
   return english
 end
--- NPCs' names as the game showed them (UnitName by the creature id in its GUID: targeted, under the mouse, a window
--- opened), per client language, account-wide (ns.db.npcNames[locale][id]); the shipped English the fallback.
-function ns.NpcName(id, english)
-  if not (id and ns.GameLocalized() and ns.db) then return english end
+-- The shipped NPCs' names and titles in the client's language (Data/NpcNames/<locale>.lua, AzerothCore's; asked
+-- 2026-11-17, "All players should be able to search for NPCs they haven't met yet"): only the client's own file sets
+-- ns.NpcNamesLoc. Read at the first ask: { [id] = name }, { [id] = title }, only those that differ from the English.
+function ns.ShippedNpcNames()
+  local n = ns.names
+  if n.shippedNpcs then return n.shippedNpcs, n.shippedTitles end
+  local names, titles = {}, {}
+  local packed, list = ns.NpcNamesLoc, ns.NpcTitlesLoc or {}
   local ok, loc = pcall(GetLocale)
-  local names = ok and ns.db.npcNames and ns.db.npcNames[loc]
-  return names and names[tonumber(id)] or english
+  if type(packed) == "string" and ok and loc == ns.NpcNamesLocale then
+    for line in packed:gmatch("[^\n]+") do
+      local id, name, t = line:match("^(%d+)|([^|]*)|(%d*)$")
+      id = tonumber(id)
+      if id and name ~= "" then names[id] = name end
+      if id and t ~= "" then titles[id] = list[tonumber(t)] end
+    end
+  end
+  n.shippedNpcs, n.shippedTitles = names, titles
+  return names, titles
+end
+-- An NPC's name (its creature id): as the game showed it (UnitName by the creature id in its GUID: targeted, under the
+-- mouse, a window opened; per client language, account-wide, ns.db.npcNames[locale][id]), else the shipped one in the
+-- client's language (ns.ShippedNpcNames), else the English.
+function ns.NpcName(id, english)
+  if not (id and ns.GameLocalized()) then return english end
+  id = tonumber(id)
+  local ok, loc = pcall(GetLocale)
+  local learned = ok and ns.db and ns.db.npcNames and ns.db.npcNames[loc]
+  return learned and learned[id] or ns.ShippedNpcNames()[id] or english
+end
+-- An NPC's title ("Weaponsmith") in the client's language, shipped (ns.ShippedNpcNames), else the English.
+function ns.NpcTitle(id, english)
+  if not (id and english and ns.GameLocalized()) then return english end
+  local _, titles = ns.ShippedNpcNames()
+  return titles[tonumber(id)] or english
 end
 function ns.CreatureId(guid)
   if type(guid) ~= "string" or (ns.IsSecret and ns.IsSecret(guid)) then return nil end

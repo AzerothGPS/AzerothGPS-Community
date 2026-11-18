@@ -747,6 +747,26 @@ def cmd_npcs(args) -> int:
     return 0
 
 
+def cmd_npc_names(args) -> int:
+    """The shipped NPCs' names in each client language (Data/NpcNames/<locale>.lua, from AzerothCore)."""
+    from .npc_names import LOCALES, OUT_DIR, build, lua_text
+    from .paths import data_dir
+
+    names, rep = build(data_dir())
+    print(", ".join(f"{v} {k}" for k, v in rep.items()))
+    total = 0
+    for loc in LOCALES:
+        text = lua_text(loc, names[loc])
+        size = len(text.encode("utf-8"))
+        total += size
+        print(f"  {loc}: {len(names[loc])} NPCs, {size // 1024} KB")
+        if args.write:
+            OUT_DIR.mkdir(parents=True, exist_ok=True)
+            (OUT_DIR / f"{loc}.lua").write_text(text, encoding="utf-8", newline="\n")
+    print(f"  {total // 1024} KB in all" + ("" if args.write else " (nothing written: --write)"))
+    return 0
+
+
 def cmd_vendors(args) -> int:
     """What each shipped vendor sells, for the search (Data/VendorItems.lua)."""
     from .paths import data_dir
@@ -1212,6 +1232,10 @@ def main(argv: list[str] | None = None) -> int:
     sp = sub.add_parser("npcs", help="every friendly NPC, for the search (Data/Npcs.lua)")
     sp.add_argument("--write", action="store_true")
     sp.set_defaults(fn=cmd_npcs)
+
+    sp = sub.add_parser("npc-names", help="the shipped NPCs' names in each client language (Data/NpcNames/, AzerothCore)")
+    sp.add_argument("--write", action="store_true")
+    sp.set_defaults(fn=cmd_npc_names)
 
     sp = sub.add_parser("npc-spots", help="NPC spots marked in game into overrides/npc_spots.json and Data/Npcs.lua")
     sp.add_argument("--import", dest="import_file", metavar="MARKS_JSON",

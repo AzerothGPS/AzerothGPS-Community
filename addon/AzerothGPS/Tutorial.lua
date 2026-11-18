@@ -876,9 +876,9 @@ function T.BuildSections()
     { id = "dungeon", version = "1.2.0", title = L["Dungeon maps"], full = true, steps = {
       { title = L["A dungeon's map"],
         text = function()
-          local _, inst = T.Dungeon()
+          local lvl, inst = T.Dungeon()
           return Format(L["This is the map of %s. Click a dungeon's entrance on the map to open its map like this."],
-            inst and inst.name or "?")
+            inst and ns.InstanceName(lvl) or "?")
         end,
         enter = function() T.ShowDungeon() end, target = T.MapFrame },
       { title = L["Bosses in order"],
