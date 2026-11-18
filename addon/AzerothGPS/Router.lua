@@ -4144,7 +4144,30 @@ function R.Respliced(cont, r, i, j, o)
 end
 
 local RouteBody
+-- Another addon's walk for a leg (the developer tools' navmesh routing in a capital, 2026-11-17): R.SetLegProvider(fn),
+-- fn(cont, sx, sy, tx, ty, opts) called first for every leg routed. It returns a route as R.Route's own ({ pts, kinds
+-- (a kind per piece), length, road, and fz on a continent or zs on a level: each point's height }), taken as it is; nil
+-- for the Router's own; or "pending" for the Router's own marked `pending` (its walk is still worked out: the route is
+-- provisional, worked out again, never remembered as final). Called with pcall, so it must never yield: an error is the
+-- Router's own. None set (always, without the developer tools): routes are exactly as before.
+local legProvider
+function R.SetLegProvider(fn) legProvider = fn end
+function R.LegProvider() return legProvider end
 function R.Route(cont, sx, sy, tx, ty, opts)
+  if legProvider then
+    local ok, got = pcall(legProvider, cont, sx, sy, tx, ty, opts or {})
+    if ok and type(got) == "table" and type(got.pts) == "table" and #got.pts >= 4 and type(got.kinds) == "table" then
+      return got
+    end
+    if ok and got == "pending" then
+      local r = R.RouteOwn(cont, sx, sy, tx, ty, opts)
+      if r then r.pending = true end
+      return r
+    end
+  end
+  return R.RouteOwn(cont, sx, sy, tx, ty, opts)
+end
+function R.RouteOwn(cont, sx, sy, tx, ty, opts)
   local r = RouteBody(cont, sx, sy, tx, ty, opts)
   if r.unconnected and not r.pending then r = R.ToCaveWayIn(cont, sx, sy, tx, ty, opts) or r end
   r = R.BendRoundGuards(cont, R.Smooth(cont, r), sx, sy, tx, ty)
