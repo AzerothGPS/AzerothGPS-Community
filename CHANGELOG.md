@@ -21,6 +21,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Routes to Excavation Leader Whelgar in the Wetlands come in from the north through the dig site to his cave, not round the hills.
 - Flight masters, zones, cities, places, docks, items and NPCs you've met are shown in your game's language; the search finds them in English too.
 - Roads: a new road in Stormwind City.
+- Party and raid members show on the GPS map when it replaces the minimap.
 
 
 ## 1.3.7
