@@ -86,6 +86,12 @@ ns.DEFAULTS = {
     approachZoom = true, -- zoom in near the next stop, back out once there
     -- routing
     navCloseClears = true, -- the X on the map's route panel cancels the route (else just closes the panel)
+    -- the map's route panel (1.3.9, GPSFrame's G.PlaceNavPanel): its width, a share of the map's (30-100; 100 the whole
+    -- width, as before), its side when narrower ("left", "center", "right"), and detached in its own window
+    -- (navPanelPoint, navPanelDetachedWidth: where it was dragged and how wide; nil until then)
+    navPanelWidth = 100,
+    navPanelAlign = "left",
+    navPanelDetached = false,
     reopenFollow = false, -- hidden while looking around the map (a route set): reopens on the player
     questing = true, -- a stop in a quest area is done when the quest's objectives are
     questZoneOnly = false, -- the quest route: only the quests in the zone you're in

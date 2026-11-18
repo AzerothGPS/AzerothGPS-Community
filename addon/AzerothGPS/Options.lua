@@ -2150,6 +2150,24 @@ local function BuildWindow()
   anyNote:SetText(L["While Lock map position is off, you can also drag the map's bottom-right corner to any width and height."])
   place(anyNote, 28, 46)
   controls[#controls + 1] = function() anyNote:SetShown(ns.GPS.FreeSize() == true) end
+  -- (1.3.9, asked 2026-11-18: the route panel at the map's top, in its own window and in the game's world map alike:
+  -- its width, its side, or detached in a window of its own; GPSFrame's G.PlaceNavPanel)
+  header(L["Route panel"], L["The bar across the top of the map with the route's distance and times."])
+  local function Attached() return GPS().navPanelDetached ~= true end
+  Key("navPanelWidth")
+  slider(L["Panel width"], ns.GPS.NAV_MIN_PCT, ns.GPS.NAV_MAX_PCT, 5, "%d%%",
+    function() return ns.GPS.NavWidthPct() end, function(v) GPS().navPanelWidth = v end, Attached,
+    L["How much of the map's width the panel takes. Dragging its edge on the map sets it too."])
+  Key("navPanelAlign")
+  Choice(L["Panel position"], {
+    { value = "left", text = L["Left"] },
+    { value = "center", text = L["Middle"] },
+    { value = "right", text = L["Right"] },
+  }, function() return ns.GPS.NavAlign() end, function(v) GPS().navPanelAlign = v end,
+    function() return Attached() and ns.GPS.NavWidthPct() < ns.GPS.NAV_MAX_PCT end)
+  Key("navPanelDetached")
+  check(L["Detach the route panel"], L["Shows the panel in its own window you can drag anywhere and resize by its edge. It stays open while the map is closed or minimized (the world map too), as long as you have a route. The button on the panel detaches and attaches it too."],
+    function() return GPS().navPanelDetached == true end, function(v) GPS().navPanelDetached = v and true or false end)
   header(L["Frame and buttons"], L["Other windows keep the game's own look."])
   Key("windowFrame")
   check(L["Window frame"], L["The game-style window frame around the map: title bar, logo and close button. Off: just the map."],

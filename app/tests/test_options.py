@@ -46,7 +46,8 @@ NEW = ["mapEditIdle", "toolShiftClick", "language", "layerCity", "showRoads", "s
        "layerQuestAreasMinimap",
        "padControl", "padLegend",  # (2026-11-16: controller support, Pad.lua)  # (asked 2026-11-15: quest areas on the map and on the minimap apart)
        "showCoords",  # (asked 2026-11-17: hide the map's X, Y line)
-       "replaceMinimapRoute"]  # (asked 2026-11-17: the route off the minimap square)
+       "replaceMinimapRoute",  # (asked 2026-11-17: the route off the minimap square)
+       "navPanelWidth", "navPanelAlign", "navPanelDetached"]  # (1.3.9: the route panel's width, side, own window)
 # Where each setting's control is: the page a player would look on.
 HOME = {
     "General": "shown keyBlockedInCombat showCoords distanceUnits language quietChat searchCommonNpcs",
@@ -57,8 +58,8 @@ HOME = {
            "seamWorldBlend interiorZoomYd interiorHoldSec routeColor rotate approachZoom reopenFollow terrainZoomOut interiors "
            "replaceMinimap replaceMinimapSize replaceMinimapCollapseOnMove replaceMinimapCollapseOnCombat useWorldMap "
            "replaceMinimapIdle replaceMinimapKeepSquare replaceMinimapRoute",
-    "Window": "locked size width lockSize freeSize windowFrame windowTint windowClose windowButtons charm charmSwing "
-              "arrivalEffect",
+    "Window": "locked size width lockSize freeSize navPanelWidth navPanelAlign navPanelDetached windowFrame windowTint "
+              "windowClose windowButtons charm charmSwing arrivalEffect",
     "Layers": "iconSize roundIcons layerQuests layerQuestAreas layerQuestAreasMinimap poiTaxi poiPoi poiLabels layerCity layerInstances layerCaves layerHerbs "
               "layerOre showCustomPins otherAddonPins showParty iconYdQuests iconYdTaxi iconYdPoi iconYdCity iconYdInstances "
               "iconYdCaves iconYdHerbs iconYdOre iconYdPins minimap.hide minimapRoute minimapIcons minimapShape",

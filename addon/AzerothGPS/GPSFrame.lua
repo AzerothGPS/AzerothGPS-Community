@@ -5419,8 +5419,25 @@ G.wmOwnLevel = setmetatable({}, { __mode = "k" })
 G.wmSetLevel = setmetatable({}, { __mode = "k" }) -- (the level SetLevelTree set each frame to last)
 -- The window and every frame in it moved to `level` (the window's; the others keep their places over it, as `offsets`
 -- has them: read before the window was given another parent, which sets levels of its own).
+-- Whether frame `f` is the route panel or in it.
+function G.InNavPanel(f)
+  local p, n = f, 0
+  while type(p) == "table" and n < 6 do
+    if p == G.navPanel then return true end
+    p = p.GetParent and p:GetParent() or nil
+    n = n + 1
+  end
+  return false
+end
 function G.SetLevelTree(level, offsets, boost)
   offsets = offsets or G.LevelOffsets()
+  if G.navDetached then -- (the route panel in its own window: not the map's any more, left at its own level)
+    local kept = {}
+    for _, e in ipairs(offsets) do
+      if not G.InNavPanel(e[1]) then kept[#kept + 1] = e end
+    end
+    offsets = kept
+  end
   local top = level
   if frame:GetFrameLevel() ~= level then frame:SetFrameLevel(level) end
   for _, e in ipairs(offsets) do
@@ -7419,6 +7436,158 @@ function G.WalkTurnsText(route, label, all)
   return table.concat(lines, "\n"), count or 99
 end
 
+-- The route panel's width, side and detaching (1.3.9, asked 2026-11-18: "make this section's width resizable and its
+-- position like left, right, or middle ... add an option to 'detach this' as a separate window similar to the
+-- direction's text box and this stays open even when map in collapsed"). On the map (its own window and in the world
+-- map alike): `navPanelWidth`, a share of the room right of the inset (100, the whole of it: as before), placed by
+-- `navPanelAlign` left, center or right; its free edge dragged sets the width too. Detached (`navPanelDetached`): the
+-- same panel, a child of UIParent, a panel like the directions' (their dark box, no frame), dragged anywhere
+-- (`navPanelPoint`), as wide as `navPanelDetachedWidth`; shown while there's a route whether the map shows or not
+-- (kept up to date by the pump frame while the map's hidden, G.RefreshDetachedNav). Attach (its button, or the
+-- option off) puts it back on the map.
+G.NAV_EDGE_W = 6 -- (UI units: the edge dragged for the width, just outside the panel)
+G.NAV_MIN_PCT, G.NAV_MAX_PCT = 30, 100
+G.NAV_MIN_W = 160 -- (UI units: room for the times line and the panel's buttons)
+G.NAV_DETACHED_W, G.NAV_DETACHED_MAX_W = 320, 900
+G.NAV_DETACHED_Y = 140 -- (from the screen's top, the first time)
+G.NAV_DETACHED_STRATA = "MEDIUM" -- (the directions' own)
+G.NAV_DETACHED_EVERY = 0.25 -- (seconds: its text while the map's hidden, as the arrow's)
+G.NAV_ALIGNS = { left = true, center = true, right = true }
+function G.NavAlign()
+  local a = S().navPanelAlign
+  return G.NAV_ALIGNS[a] and a or "left"
+end
+function G.NavWidthPct()
+  local v = tonumber(S().navPanelWidth) or G.NAV_MAX_PCT
+  return math.max(G.NAV_MIN_PCT, math.min(G.NAV_MAX_PCT, v))
+end
+function G.NavDetachedWidth()
+  local v = tonumber(S().navPanelDetachedWidth) or G.NAV_DETACHED_W
+  return math.max(G.NAV_MIN_W, math.min(G.NAV_DETACHED_MAX_W, v))
+end
+-- The room it has on the map: right of the inset (the frame's portrait, the world map's corner buttons) to the edge.
+function G.NavRoom()
+  local home = G.navHome
+  local w = home and home.GetWidth and home:GetWidth() or 0
+  return math.max(0, w - (G.topInset or 4) - 4)
+end
+-- The panel showing on the map (what goes under it: the floor buttons, the path color, the tools' hint).
+function G.NavOnMap()
+  return navPanel ~= nil and not G.navDetached and navPanel:IsShown()
+end
+function G.PlaceNavPanel()
+  if not navPanel then return end
+  local edge, align = G.navEdge, G.NavAlign()
+  if G.navDetached then
+    navPanel:SetWidth(G.NavDetachedWidth())
+    align = "left" -- (its right edge)
+  else
+    local inset, pct = G.topInset or 4, G.NavWidthPct()
+    navPanel:ClearAllPoints()
+    if pct >= G.NAV_MAX_PCT then
+      navPanel:SetPoint("TOPLEFT", inset, -4)
+      navPanel:SetPoint("TOPRIGHT", -4, -4)
+    else
+      local room = G.NavRoom()
+      navPanel:SetWidth(math.min(room, math.max(G.NAV_MIN_W, room * pct / 100)))
+      if align == "right" then
+        navPanel:SetPoint("TOPRIGHT", -4, -4)
+      elseif align == "center" then
+        navPanel:SetPoint("TOP", (inset - 4) / 2, -4) -- (the middle of its room)
+      else
+        navPanel:SetPoint("TOPLEFT", inset, -4)
+      end
+    end
+  end
+  if edge then
+    edge:ClearAllPoints()
+    if align == "right" then
+      edge:SetPoint("TOPRIGHT", navPanel, "TOPLEFT", 1, 0)
+      edge:SetPoint("BOTTOMRIGHT", navPanel, "BOTTOMLEFT", 1, 0)
+    else
+      edge:SetPoint("TOPLEFT", navPanel, "TOPRIGHT", -1, 0)
+      edge:SetPoint("BOTTOMLEFT", navPanel, "BOTTOMRIGHT", -1, 0)
+    end
+  end
+end
+-- The edge dragged `dx` from where it was when the panel was `w0` wide: the width it takes now.
+function G.DragNavEdge(w0, dx)
+  local st = S()
+  if G.navDetached then
+    st.navPanelDetachedWidth = math.floor(math.max(G.NAV_MIN_W, math.min(G.NAV_DETACHED_MAX_W, w0 + dx)) + 0.5)
+  else
+    local align = G.NavAlign()
+    local grow = align == "right" and -dx or (align == "center" and 2 * dx or dx) -- (in the middle: both sides)
+    local room = G.NavRoom()
+    if room <= 0 then return end
+    st.navPanelWidth = math.floor(math.max(G.NAV_MIN_PCT, math.min(G.NAV_MAX_PCT, (w0 + grow) / room * 100)) + 0.5)
+  end
+  G.PlaceNavPanel()
+end
+function G.SaveNavPoint()
+  local l, t = navPanel:GetLeft(), navPanel:GetTop()
+  if l and t then S().navPanelPoint = { "TOPLEFT", "UIParent", "BOTTOMLEFT", math.floor(l + 0.5), math.floor(t + 0.5) } end
+end
+-- Detached or on the map, as the setting says (ApplySettings; the second map never: it has the first's panel).
+function G.ApplyNavDetach()
+  if not navPanel then return end
+  local st = S()
+  local want = st.navPanelDetached == true and not G.clone
+  if want ~= (G.navDetached == true) then
+    G.navDetached = want or nil
+    if want then
+      navPanel:SetParent(UIParent)
+      navPanel:SetScale(1)
+      navPanel:SetFrameStrata(G.NAV_DETACHED_STRATA)
+      navPanel:SetFrameLevel(10)
+      navPanel:EnableMouse(true)
+    else
+      local home = G.navHome
+      navPanel:SetParent(home)
+      navPanel:SetFrameStrata(home:GetFrameStrata())
+      navPanel:SetFrameLevel((home:GetFrameLevel() or 0) + 1)
+      navPanel:EnableMouse(false)
+    end
+    G.navPanelSig = nil -- (laid out again)
+    -- (the use button: set again with the panel's strata, out of combat)
+    if G.useBtn and not (InCombatLockdown and InCombatLockdown()) then G.useBtn.key = nil end
+  end
+  if want and not G.navMoving then -- (not while it's being dragged: a settings change meanwhile)
+    local p = st.navPanelPoint
+    navPanel:ClearAllPoints()
+    if type(p) == "table" and p[1] then
+      navPanel:SetPoint(p[1], _G[p[2] or "UIParent"] or UIParent, p[3] or p[1], tonumber(p[4]) or 0, tonumber(p[5]) or 0)
+    else
+      navPanel:SetPoint("TOP", UIParent, "TOP", 0, -G.NAV_DETACHED_Y)
+    end
+  end
+  G.PlaceNavPanel()
+  if fl.bar and fl.bar:IsShown() then G.PlaceFloorBar() end
+  if G.pathColorBox and G.pathColorBox:IsShown() then G.PlacePathColorPicker() end
+  if want and not G.IsVisible() then G.RefreshDetachedNav() end -- (shown now, the map closed)
+end
+function G.SetNavDetached(on)
+  S().navPanelDetached = on and true or false
+  local main = ns.GPS or G -- (the second map's button: the first map's panel)
+  main.ApplySettings()
+  if ns.Options and ns.Options.Refresh then ns.Options.Refresh() end
+end
+-- Detached, with the map hidden (closed, minimized, the world map closed): its text from the pump frame.
+function G.RefreshDetachedNav()
+  if not (G.navDetached and navPanel) then return false end
+  local px, py, pc = Geo.PlayerWorld()
+  if not px then
+    navPanel:Hide() -- (no position: a dungeon's boss list is the map's)
+    G.navPanelSig = nil
+    return false
+  end
+  ns.Nav.Tick()
+  local r = ns.Nav.Route(px, py, pc)
+  if r and ns.Nav.RedAsking and ns.Nav.RedAsking() then r = nil end
+  G.UpdateNavPanel(px, py, pc, nil, r, ns.Nav.dest)
+  return true
+end
+
 -- The directions panel over the map: the status (distances, ETAs, the stops), the steps, and their buttons; laid
 -- out again only when its text or states changed. From each redraw, and on its own while the still map with a route
 -- waits for its idle redraw (issue #191: the ETAs and countdowns tick, nothing else on the map moves).
@@ -7476,7 +7645,7 @@ function G.UpdateNavPanel(px, py, cont, hidden, route, dest)
     if left then
       G.shareButton:SetPoint("RIGHT", left, "LEFT", -2, 0)
     else
-      G.shareButton:SetPoint("TOPRIGHT", navPanel, "TOPRIGHT", -24, -4)
+      G.shareButton:SetPoint("RIGHT", G.navDetach, "LEFT", -2, 0)
     end
   end
   local rowsH = G.LayoutGroupRows(navPanel, steps ~= "" and stepsText or navText, status ~= nil and not collapsed and not hidden)
@@ -8734,14 +8903,14 @@ function G.PlaceFloorBar()
   if not bar then return end
   bar:ClearAllPoints()
   if G.wmState.on then -- (in the world map: right of that window's own buttons in the corner, seen in game 2026-11-10)
-    if navPanel and navPanel:IsShown() then
+    if G.NavOnMap() then
       bar:SetPoint("TOPLEFT", navPanel, "BOTTOMLEFT", 2, -4)
     else
       bar:SetPoint("TOPLEFT", bar:GetParent(), "TOPLEFT", G.WORLD_MAP_INSET, -6)
     end
   elseif G.chrome and G.chrome:IsShown() then
     bar:SetPoint("TOPLEFT", bar:GetParent(), "TOPLEFT", 6, -(CHROME_PORTRAIT_INSET + 4))
-  elseif navPanel and navPanel:IsShown() then
+  elseif G.NavOnMap() then
     bar:SetPoint("TOPLEFT", navPanel, "BOTTOMLEFT", 2, -4)
   else
     bar:SetPoint("TOPLEFT", bar:GetParent(), "TOPLEFT", 6, -6)
@@ -8781,7 +8950,7 @@ function G.PlacePathColorPicker()
   if not box then return end
   G.RefreshPathColorPicker() -- (the setting changed elsewhere: Restore Defaults, a profile)
   box:ClearAllPoints()
-  if navPanel and navPanel:IsShown() then
+  if G.NavOnMap() then
     box:SetPoint("TOPRIGHT", navPanel, "BOTTOMRIGHT", -2, -4)
   else
     box:SetPoint("TOPRIGHT", box:GetParent(), "TOPRIGHT", -6, -6)
@@ -9018,13 +9187,14 @@ function G.ApplySettings()
     G.chrome:SetShown(framed)
     G.ApplyFrameLook() -- (another addon's look for it, kept over the frame's own changes)
     G.PlaceInfo() -- (the coordinates in its title bar, or at the bottom without it)
-    -- the portrait hangs over the map's top-left corner: the top panel starts right of it
-    navPanel:SetPoint("TOPLEFT", inset, -4)
   end
   if inset ~= G.topInset then
     G.topInset = inset
     for _, fn in pairs(G.layoutHooks) do pcall(fn, inset) end
   end
+  -- (the portrait hangs over the map's top-left corner: the top panel starts right of it; its width and side, or
+  -- detached: G.PlaceNavPanel)
+  G.ApplyNavDetach()
   if G.moveTab then G.moveTab:SetShown(not st.locked and not framed and not mmSide and not host) end
   -- (kept on the screen with what's over its top: the title bar and the logo, or the Move tab; G.SizeMax leaves room)
   local over = (framed and not mmSide) and G.TopRoom() or (not st.locked and not mmSide and not host and G.moveTab and G.MOVE_TAB_ROOM) or 0
@@ -11456,7 +11626,7 @@ function G.PlaceDrawHint()
   if not drawHint then return end
   local top = drawHint:GetParent()
   local y = G.DRAW_HINT_Y
-  if navPanel and navPanel:IsShown() and top then
+  if G.NavOnMap() and top then
     local tt, nb = top:GetTop(), navPanel:GetBottom()
     if type(tt) == "number" and type(nb) == "number" then y = math.min(y, math.floor(nb - tt - G.DRAW_HINT_GAP)) end
   end
@@ -15180,7 +15350,7 @@ function G.Init()
     local tt, tb = top:GetTop(), top:GetBottom()
     if type(tt) ~= "number" or type(tb) ~= "number" then return nil end
     local y = -G.PAD_BOX_GAP - 2
-    if navPanel and navPanel:IsShown() then
+    if G.NavOnMap() then
       local nb = navPanel:GetBottom()
       if type(nb) == "number" then y = math.min(y, math.floor(nb - tt - G.PAD_BOX_GAP)) end
     end
@@ -15245,10 +15415,28 @@ function G.Init()
   navPanel:SetHeight(36)
   navPanel:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8" })
   navPanel:SetBackdropColor(0, 0, 0, 0.7)
+  G.navPanel, G.navHome = navPanel, top -- (its width, side and detaching: G.PlaceNavPanel, G.ApplyNavDetach)
+  -- (detached, its own window: dragged anywhere; on the map it takes no mouse, so the map under it still drags)
+  navPanel:SetMovable(true)
+  navPanel:SetClampedToScreen(true)
+  navPanel:RegisterForDrag("LeftButton")
+  navPanel:SetScript("OnDragStart", function(self)
+    if G.navDetached then
+      G.navMoving = true
+      self:StartMoving()
+    end
+  end)
+  navPanel:SetScript("OnDragStop", function(self)
+    self:StopMovingOrSizing()
+    G.navMoving = nil
+    if G.navDetached then G.SaveNavPoint() end
+  end)
+  navPanel:EnableMouse(false)
   navText = navPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   navText:SetPoint("TOPLEFT", 6, -6)
-  navText:SetPoint("TOPRIGHT", -40, -6)
+  navText:SetPoint("TOPRIGHT", -58, -6) -- (clear of the X and the Detach button, and a steps box beside them)
   navText:SetJustifyH("LEFT")
+  G.navText = navText -- (the tests)
   -- The route's steps (several stops, zeppelins, boats): the first three, then "... more".
   stepsText = navPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   stepsText:SetPoint("TOPLEFT", navText, "BOTTOMLEFT", 0, -4)
@@ -15305,7 +15493,71 @@ function G.Init()
     b:Hide()
     return b
   end
-  local toggle = SmallBox(cancel, "-")
+  -- (asked 2026-11-18) Detach: the panel in its own window, kept open with the map closed; on it, Attach puts it back.
+  -- Drawn: a small window with a corner arrow out of it (no game art that may be missing).
+  local detach = SmallBox(cancel, "")
+  do
+    local box = detach:CreateTexture(nil, "ARTWORK")
+    box:SetSize(8, 7)
+    box:SetPoint("BOTTOMLEFT", 3, 3)
+    box:SetColorTexture(1, 0.82, 0, 0.9)
+    local hole = detach:CreateTexture(nil, "ARTWORK", nil, 1)
+    hole:SetPoint("TOPLEFT", box, "TOPLEFT", 1, -2)
+    hole:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -1, 1)
+    hole:SetColorTexture(0.12, 0.07, 0.03, 1)
+    local out = detach:CreateTexture(nil, "ARTWORK", nil, 2)
+    out:SetSize(5, 5)
+    out:SetPoint("TOPRIGHT", -3, -3)
+    out:SetColorTexture(1, 0.82, 0, 0.9)
+    detach.glyph = { box, hole, out }
+  end
+  detach:SetScript("OnClick", function() G.SetNavDetached(not G.navDetached) end)
+  detach:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    if G.navDetached then
+      GameTooltip:SetText(L["Attach to Map"], 1, 1, 1)
+      GameTooltip:AddLine(L["Puts this panel back at the top of the map."], nil, nil, nil, true)
+    else
+      GameTooltip:SetText(L["Detach Panel"], 1, 1, 1)
+      GameTooltip:AddLine(L["Shows this panel in its own window you can drag anywhere. It stays open while the map is closed or minimized, as long as you have a route."], nil, nil, nil, true)
+    end
+    GameTooltip:Show()
+  end)
+  detach:Show()
+  G.navDetach = detach
+  -- (the panel's width, dragged by its free edge: the right one, the left one while it's on the right)
+  local edge = CreateFrame("Button", nil, navPanel)
+  edge:SetWidth(G.NAV_EDGE_W)
+  edge:SetFrameLevel(navPanel:GetFrameLevel() + 6)
+  local edgeHi = edge:CreateTexture(nil, "HIGHLIGHT")
+  edgeHi:SetAllPoints()
+  edgeHi:SetColorTexture(1, 0.82, 0, 0.35)
+  edge:SetScript("OnMouseDown", function(self, button)
+    if button ~= "LeftButton" then return end
+    local x = GetCursorPosition()
+    self.drag = { x = x / (navPanel:GetEffectiveScale() or 1), w = navPanel:GetWidth() or 0 }
+  end)
+  edge:SetScript("OnMouseUp", function(self)
+    if self.drag then
+      self.drag = nil
+      if ns.Options and ns.Options.Refresh then ns.Options.Refresh() end
+    end
+  end)
+  edge:SetScript("OnUpdate", function(self)
+    local d = self.drag
+    if not d then return end
+    local x = GetCursorPosition() / (navPanel:GetEffectiveScale() or 1)
+    G.DragNavEdge(d.w, x - d.x)
+  end)
+  edge:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:SetText(L["Drag to change the panel's width"], 1, 1, 1)
+    GameTooltip:Show()
+  end)
+  edge:SetScript("OnLeave", GameTooltip_Hide)
+  G.navEdge = edge
+  top:HookScript("OnSizeChanged", function() G.PlaceNavPanel() end) -- (a share of the map's width: kept as it's sized)
+  local toggle = SmallBox(detach, "-")
   toggle:SetScript("OnClick", function()
     local st = S()
     if st.stepsCollapsed then st.stepsCollapsed = false -- "+": back to the next few
@@ -15427,7 +15679,18 @@ function G.Init()
       -- arrival: Nav.Status, which the arrow's text does 4 times a second while the arrow shows. With the map hidden
       -- AND the arrow off nothing did it, and the minimap's route stood still: the user's 1.1.6 test pass, 2026-10-07)
       local arrow = _G.AzerothGPSArrow
-      if ns.Nav.dest and not (arrow and arrow:IsVisible()) then
+      -- (the route panel detached: kept up to date, the route's upkeep with it)
+      local navShown = false
+      if G.navDetached then
+        G.navT = (G.navT or 0) + (dt or 0)
+        if G.navT >= G.NAV_DETACHED_EVERY then
+          G.navT = 0
+          local okN, errN = pcall(G.RefreshDetachedNav)
+          if not okN then G.LogError("route panel", errN) end
+        end
+        navShown = ns.Nav.dest ~= nil
+      end
+      if ns.Nav.dest and not navShown and not (arrow and arrow:IsVisible()) then
         G.upkeepT = (G.upkeepT or 0) + (dt or 0)
         if G.upkeepT >= G.UPKEEP_EVERY then
           G.upkeepT = 0
