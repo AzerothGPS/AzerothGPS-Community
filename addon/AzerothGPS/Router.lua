@@ -3114,6 +3114,11 @@ R.CAVE_GAP_STEP = 2 -- (looked for this often out to CAVE_GAP_YD)
 R.CAVE_NEAR_YD = 24 -- yards: a stop with a height in a closed hole of a floored city's grid, its cells this near (CaveNearDown)
 R.CAVE_NEAR_LAND_YD = 40 -- (and taken down only with no land road this near it, its last step open)
 R.CAVE_NEAR_DIRS = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 }, { 0.7071, 0.7071 }, { 0.7071, -0.7071 }, { -0.7071, 0.7071 }, { -0.7071, -0.7071 } }
+-- Whether (x, y) is over a cave's own grid (Data/Caves.lua's; not a capital's floors laid like one).
+function R.InCaveGrid(cont, x, y)
+  local v, o = ns.Passability.OverlayRaw(cont, x, y)
+  return v ~= nil and o and o.cave and not o.capital and true or false
+end
 function R.CaveDown(cont, x, y, indoors, z, swimming)
   local P = ns.Passability
   local v, o = P.OverlayRaw(cont, x, y)
@@ -4669,9 +4674,13 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
   -- the caves (Data/Caves.lua): in one, on by its roads; outside, not onto them, but for a
   -- way in to a cave at the other end. Over a mine under walkable ground the player may be
   -- up top: opts.indoors, from IsIndoors, tells (under a capital's floor, opts.z: their height).
+  -- (an end down in a cave over its own grid: its legs straight only, R.InCaveGrid)
+  local caveEnd = {}
   if g.cave and next(g.cave) and Pass and Pass.OverlayRaw then
     local sDown = R.CaveDown(cont, sx, sy, opts and opts.indoors, opts and opts.z, opts and opts.swimming)
     local tDown = R.CaveDown(cont, tx, ty, nil, opts and opts.tz)
+    caveEnd.s = sDown and R.InCaveGrid(cont, sx, sy)
+    caveEnd.t = tDown and R.InCaveGrid(cont, tx, ty)
     -- (a stop in a closed hole of a city under a mountain, R.CaveNearDown: down when no land road is near with an
     -- open last step, and a cave road on the stop's floor is)
     if not tDown and opts and opts.tz and R.CaveNearDown(cont, tx, ty, opts.tz) then
@@ -4809,6 +4818,10 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
     -- and blind to its floors over each other; a leg there is straight, its walls real)
     local capital = not c and (R.CapitalAt(cont, x1, y1) or R.CapitalAt(cont, x2, y2))
     if capital then walk = false end
+    -- (nor to or from a spot down in a cave: the terrain search doesn't see the cave's rock, and within STOP_SLACK of
+    -- the stop it crossed it; Whelgar in his dig site's cave was walked to 40 yd through the rock from a road by the
+    -- mouth, not along the cave's road in. Its roads lead through it; straight over its floor from them)
+    if (caveEnd.t and x2 == tx and y2 == ty) or (caveEnd.s and x1 == sx and y1 == sy) then walk = false end
     local stopgap, walked = false, false
     if not c and walk and Pass and Pass.FindPath then
       local searching

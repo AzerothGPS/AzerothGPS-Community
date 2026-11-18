@@ -12,6 +12,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 ### Fixed
 
 - Fewer hitches in the first seconds after logging in, while the roads load (smoother on G-Sync and FreeSync screens).
+- Routes to Excavation Leader Whelgar in the Wetlands come in from the north through the dig site to his cave, not round the hills.
 - Flight masters, zones, cities, places, docks, items and NPCs you've met are shown in your game's language; the search finds them in English too.
 
 
