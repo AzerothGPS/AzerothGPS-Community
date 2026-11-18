@@ -1,4 +1,4 @@
-"""Router.SetLegProvider: another addon's walk for a leg (the developer tools' navmesh routing in a capital, asked
+"""Router.SetLegProvider: another addon's walk for a leg (a navigation mesh's walk inside a capital, asked
 2026-11-17). The provider is asked first for every leg; its route is taken as it is, nil (or an error) is the Router's
 own, "pending" the Router's own marked provisional. With none set, routes are exactly as before."""
 
