@@ -5317,6 +5317,11 @@ function G.MinimapMode()
   local m = G.mmState
   return m.on == true and not m.expanded and not G.WorldMapHosted()
 end
+-- The route's line left off the square (asked 2026-11-17, option `replaceMinimapRoute` off): only there, the map opened
+-- out of it and in the world map keep it, and the stops' markers stay.
+function G.SquareHidesRoute()
+  return S().replaceMinimapRoute == false and G.MinimapMode()
+end
 
 -- The GPS map in the game's own world map window (the option `useWorldMap`, asked 2026-11-10: "an option that uses the
 -- in game map instead of the GPS map, adding the buttons to that map instead, including the seamless map. So instead
@@ -7987,7 +7992,8 @@ function G.Update()
   local dest = ns.Nav.dest
   local route = not hidden and ns.Nav.Route(px, py, cont) or nil
   if route and ns.Nav.RedAsking and ns.Nav.RedAsking() then route = nil end -- (asked "keep this route?": not drawn yet)
-  if route and not G.Held() then -- (held by another addon: the route goes on, not drawn)
+  -- (held by another addon: the route goes on, not drawn; the square with its route off, G.SquareHidesRoute: same)
+  if route and not G.Held() and not G.SquareHidesRoute() then
     -- Every part of the route, converted into this view's continent coordinates.
     local reach = half * 1.5
     local function toScreen(x, y)

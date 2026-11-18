@@ -4,7 +4,8 @@
 -- `dirStopsOnly`). Snapped (`arrowSnap`) the arrow sits on a side of the directions (`arrowSide`) and the two move as
 -- one; apart, each is placed on its own (`arrowFreePoint`, `dirPoint`). Dragged, the arrow comes off the directions, and
 -- dropped against a side of them it snaps there (A.SnapSide; asked 2026-10-30: "support snapping and detaching").
--- Sizes: `arrowPx`, `dirTextScale`. Toggle: gps.arrow.
+-- Sizes: `arrowPx`, `dirTextScale`. Toggle: gps.arrow (both panels). The arrow alone hidden: `arrowSide` "hide" (asked
+-- 2026-11-17), only while the directions show (A.Hidden); the directions alone hidden: `dirShown` false.
 local _, ns = ...
 local L = ns.L or setmetatable({}, { __index = function(_, k) return k end }) -- (the game's language: Locales.lua)
 local Format = ns.Format or string.format
@@ -55,10 +56,16 @@ end
 -- snapped: with the directions hidden, the arrow is placed on its own
 local function Snapped() return S().arrowSnap ~= false and S().dirShown ~= false end
 A.Snapped = Snapped
+-- The arrow hidden, the directions alone (Arrow side "Hide", asked 2026-11-17: "a fifth option that is 'Hide' that
+-- hides the arrow"). Only while the directions show: with them hidden too the arrow shows, never an empty window (the
+-- whole of it off is "Show direction arrow"). Its panel stays shown (its OnUpdate keeps the text going) at alpha 0 and
+-- click-through, and shows anyway while the route's first step is a hearthstone or teleport: its button is there.
+local function Hidden() return S().arrowSide == "hide" and S().dirShown ~= false end
+A.Hidden = Hidden
 -- The directions' least height: snapped on its left or right, the arrow's column
 local function MinHeight()
   local side = Side()
-  return (Snapped() and (side == "left" or side == "right")) and Px() + 2 * A.PAD or 40
+  return (Snapped() and not Hidden() and (side == "left" or side == "right")) and Px() + 2 * A.PAD or 40
 end
 
 local function PointOf(f)
@@ -456,19 +463,22 @@ local function Update(dt)
       lastSet.rot = nil -- (set outside the cache: the next route sets the arrow again)
     end
     local show = active or placing
+    -- (the arrow hidden: its panel unseen and click-through, but for a hearthstone's or teleport's button there)
+    local arrowShow = show and (not Hidden() or useIcon:IsShown())
     -- click-through (options): in combat, and/or while moving
     local st = S()
     local moving = ns.GPS and ns.GPS.PlayerMoving and ns.GPS.PlayerMoving()
     -- locked: always click-through (nothing to click on it then; unlocked it's dragged)
     local through = st.arrowLocked or (st.clickThroughCombat and ns.inCombat) or (st.clickThroughMoving and moving)
     for _, f in ipairs({ frame, dir }) do
-      f:SetAlpha(show and Alpha() or 0)
-      f:EnableMouse(show and not through)
+      local on = f == dir and show or f == frame and arrowShow
+      f:SetAlpha(on and Alpha() or 0)
+      f:EnableMouse(on and not through)
     end
     grip:SetShown(show and not st.arrowLocked)
     if not active then return end
   end
-  if not px or not path then return end
+  if not px or not path or Hidden() then return end
   local tx, ty = ns.Turns.Target(path, px, py)
   if not tx then return end
   local rel = ns.Turns.RelativeAngle(px, py, Geo.Facing(), tx, ty)
@@ -560,6 +570,7 @@ local function Layout()
       frame:SetHeight(col)
     end
     frame:SetClampedToScreen(false)
+    if Hidden() then col = 0 end -- (no arrow to keep on the screen with them)
     dir:SetClampRectInsets(side == "left" and -col or 0, side == "right" and col or 0, side == "top" and col or 0,
       side == "bottom" and -col or 0)
   else

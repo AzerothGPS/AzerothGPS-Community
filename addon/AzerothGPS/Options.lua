@@ -1927,6 +1927,10 @@ local function BuildWindow()
     { value = "medium", text = L["Medium"] },
     { value = "large", text = L["Large"] },
   }, function() return GPS().replaceMinimapSize or "small" end, function(v) GPS().replaceMinimapSize = v end, Replacing, INDENT)
+  -- (asked 2026-11-17: "add option to not show the route on our minimap replacement"; GPSFrame's G.SquareHidesRoute)
+  Key("replaceMinimapRoute")
+  check(L["Route on the minimap square"], L["Your route's line on the GPS map in the minimap corner. Off: only the stops' markers there. The GPS map opened out of it, and the one in the world map, still show the route."],
+    function() return GPS().replaceMinimapRoute ~= false end, function(v) GPS().replaceMinimapRoute = v end, Replacing, INDENT)
   -- (asked 2026-11-15: the square left as it is while the map is open out of it, both shown)
   Key("replaceMinimapKeepSquare")
   check(L["Keep the minimap while the map is open"], L["The opened GPS map grows out of the minimap corner while the minimap stays as it is, so both show. Off: the game's own minimap goes back to its usual place and shape while the GPS map is open."],
@@ -2329,6 +2333,9 @@ local function BuildWindow()
   Page(L["Directions"], nil, "Directions")
   local function ArrowOn() return GPS().arrow and true or false end
   local function DirOn() return ArrowOn() and GPS().dirShown ~= false end
+  -- (Arrow side "Hide", asked 2026-11-17: the directions alone; Arrow.lua's A.Hidden)
+  local function ArrowHidden() return GPS().arrowSide == "hide" end
+  local function ArrowShown() return ArrowOn() and not (ArrowHidden() and GPS().dirShown ~= false) end
   header(L["Quests"])
   -- Questing objective tracker, with the ! the arrow shows in a quest's area (on this page since 2026-10-16; at its top since 2026-11-15, asked)
   local qholder = CreateFrame("Frame", nil, page)
@@ -2368,30 +2375,39 @@ local function BuildWindow()
     function() return GPS().arrowLocked end, function(v) GPS().arrowLocked = v end, ArrowOn, INDENT)
   Key("arrowPx")
   slider(L["Arrow size"], ns.Arrow.ARROW_PX_MIN, ns.Arrow.ARROW_PX_MAX, 2, L["%d px"],
-    function() return GPS().arrowPx or ns.Arrow.ARROW_PX end, function(v) GPS().arrowPx = v end, ArrowOn)
+    function() return GPS().arrowPx or ns.Arrow.ARROW_PX end, function(v) GPS().arrowPx = v end, ArrowShown)
   Key("arrowBg")
   slider(L["Arrow background"], 0, 100, 5, "%d%%",
-    function() return math.floor((GPS().arrowBg or 0.55) * 100 + 0.5) end, function(v) GPS().arrowBg = v / 100 end, ArrowOn,
+    function() return math.floor((GPS().arrowBg or 0.55) * 100 + 0.5) end, function(v) GPS().arrowBg = v / 100 end, ArrowShown,
     L["How dark the panel behind the arrow is. At 0, the arrow alone."])
   -- (the arrow and the directions two panels, asked 2026-10-30)
   header(L["Directions panel"])
   Key("dirShown")
-  check(L["Show the directions"], L["The panel beside the arrow with the next turn, the stop's distance and ETA and the stops after it. Off: the arrow alone."],
-    function() return GPS().dirShown ~= false end, function(v) GPS().dirShown = v end, ArrowOn)
+  -- (asked 2026-11-17, "hide the text separately and only show the arrow": this one, named for the text; gray while the
+  -- arrow is hidden, so the two are never both hidden)
+  check(L["Show the directions text"], L["The panel beside the arrow with the next turn, the stop's distance and ETA and the stops after it. Off: the arrow alone, without the text."],
+    function() return GPS().dirShown ~= false end, function(v) GPS().dirShown = v end,
+    function() return ArrowOn() and not ArrowHidden() end)
   Key("dirStopsOnly")
   check(L["List the stops only"], L["The directions list the route's stops, each with its distance and ETA, without the turns (\"Continue straight, then turn left in 280 yd\")."],
     function() return GPS().dirStopsOnly == true end, function(v) GPS().dirStopsOnly = v end, DirOn, INDENT)
   Key("arrowSnap")
   check(L["Snap the arrow to the directions"], L["The arrow sits against a side of the directions and the two move as one: drag the directions to move both. Unlocked, drag the arrow away to move it on its own, and drop it against a side of the directions to snap it there again."],
-    function() return GPS().arrowSnap ~= false end, function(v) GPS().arrowSnap = v end, DirOn, INDENT)
+    function() return GPS().arrowSnap ~= false end, function(v) GPS().arrowSnap = v end,
+    function() return DirOn() and not ArrowHidden() end, INDENT)
+  -- (a side picked snaps the arrow there, as dropping it against that side does; Hide hides it, snapped or not, so it's
+  -- there with the arrow on its own too: asked 2026-11-17)
   Key("arrowSide")
   Choice(L["Arrow side"], {
     { value = "left", text = L["Left"] },
     { value = "right", text = L["Right"] },
     { value = "top", text = L["Above"] },
     { value = "bottom", text = L["Below"] },
-  }, function() return GPS().arrowSide or "left" end, function(v) GPS().arrowSide = v end,
-    function() return DirOn() and GPS().arrowSnap ~= false end, INDENT * 2)
+    { value = "hide", text = L["Hide"], tip = L["No arrow: the directions text alone. The arrow's place shows a hearthstone or teleport to use when the route starts with one."] },
+  }, function() return GPS().arrowSide or "left" end, function(v)
+    GPS().arrowSide = v
+    if v ~= "hide" then GPS().arrowSnap = true end
+  end, DirOn, INDENT * 2)
   Key("dirTextScale")
   slider(L["Text size"], 70, 160, 5, "%d%%",
     function() return math.floor((GPS().dirTextScale or 1) * 100 + 0.5) end, function(v) GPS().dirTextScale = v / 100 end, DirOn)
@@ -2404,6 +2420,7 @@ local function BuildWindow()
   note(L["The directions' lines: the next turn and its distance, the road or place you're heading toward, the stop with its distance and ETA, then the turn after that. With List the stops only, just the stops."])
   note(L["To move them, untick Lock arrow position, then drag them; drag the directions' bottom-right corner to resize them. Made taller, they list the later stops too. Unlocked with no route, they show a placeholder so you can place them."])
   note(L["Drag the arrow off the directions to move it on its own; drop it against any side of them and it snaps there. Dragging the directions takes a snapped arrow along."])
+  note(L["Only the text: pick Hide under Arrow side. Only the arrow: untick Show the directions text."])
   note(L["In a quest's area the arrow shows a ! and the directions the quest's objectives. A small Sprint icon pulsing in the directions' top-right corner means you picked up or finished a quest after making your quest route: click it (or the quest route button on the map) to make the route again with it or its turn-in."])
 
   ---------------------------------------------------------------- Quick buttons

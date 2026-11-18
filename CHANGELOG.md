@@ -8,6 +8,12 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 - Azeroth Pilot Route: follow your Azeroth Pilot Reloaded guide, each step your next stop (shown with Azeroth Pilot Reloaded installed).
 - The flight map rings the flight master your route flies to (Options > Routing to turn it off).
+- Options > Directions: Arrow side Hide shows the directions text without the arrow.
+- Options > Map: Route on the minimap square can leave the route line off the GPS map in the minimap corner.
+
+### Changed
+
+- Options > Directions: "Show the directions" is now "Show the directions text" (off: the arrow alone).
 
 ### Fixed
 

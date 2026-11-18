@@ -45,7 +45,8 @@ NEW = ["mapEditIdle", "toolShiftClick", "language", "layerCity", "showRoads", "s
        "autoPauseRouting", "autoPauseSeconds",
        "layerQuestAreasMinimap",
        "padControl", "padLegend",  # (2026-11-16: controller support, Pad.lua)  # (asked 2026-11-15: quest areas on the map and on the minimap apart)
-       "showCoords"]  # (asked 2026-11-17: hide the map's X, Y line)
+       "showCoords",  # (asked 2026-11-17: hide the map's X, Y line)
+       "replaceMinimapRoute"]  # (asked 2026-11-17: the route off the minimap square)
 # Where each setting's control is: the page a player would look on.
 HOME = {
     "General": "shown keyBlockedInCombat showCoords distanceUnits language quietChat searchCommonNpcs",
@@ -55,7 +56,7 @@ HOME = {
     "Map": "style seamExploredOnly seamTerrainYd seamTerrainBlend seamContinentAt seamContinentBlend seamWorldAt "
            "seamWorldBlend interiorZoomYd interiorHoldSec routeColor rotate approachZoom reopenFollow terrainZoomOut interiors "
            "replaceMinimap replaceMinimapSize replaceMinimapCollapseOnMove replaceMinimapCollapseOnCombat useWorldMap "
-           "replaceMinimapIdle replaceMinimapKeepSquare",
+           "replaceMinimapIdle replaceMinimapKeepSquare replaceMinimapRoute",
     "Window": "locked size width lockSize freeSize windowFrame windowTint windowClose windowButtons charm charmSwing "
               "arrivalEffect",
     "Layers": "iconSize roundIcons layerQuests layerQuestAreas layerQuestAreasMinimap poiTaxi poiPoi poiLabels layerCity layerInstances layerCaves layerHerbs "
@@ -161,7 +162,7 @@ def test_every_old_page_id_still_opens_a_page(game):
 DEPENDENTS = [
     ("replaceMinimapSize", "replaceMinimap", False), ("replaceMinimapCollapseOnMove", "replaceMinimap", False),
     ("replaceMinimapCollapseOnCombat", "replaceMinimap", False), ("replaceMinimapIdle", "replaceMinimap", False),
-    ("replaceMinimapKeepSquare", "replaceMinimap", False),
+    ("replaceMinimapKeepSquare", "replaceMinimap", False), ("replaceMinimapRoute", "replaceMinimap", False),
     ("movingAlpha", "fadeMoving", False), ("combatAlpha", "combatHideMap", True),
     ("arrowCombatAlpha", "combatHideArrow", True),
     ("lockSize", "locked", True), ("freeSize", "locked", True), ("freeSize", "lockSize", True),
@@ -176,7 +177,10 @@ DEPENDENTS = [
     ("arrowLocked", "arrow", False), ("arrowPx", "arrow", False), ("arrowBg", "arrow", False),
     ("dirShown", "arrow", False), ("dirStopsOnly", "dirShown", False), ("dirStopsOnly", "arrow", False),
     ("arrowSnap", "dirShown", False), ("dirTextScale", "dirShown", False), ("dirBg", "dirShown", False),
-    ("arrowSide", "arrowSnap", False), ("arrowSide", "dirShown", False),
+    ("arrowSide", "dirShown", False),
+    # (asked 2026-11-17: Arrow side's Hide; the arrow's own options gray, and the text can't be hidden too)
+    ("arrowPx", "arrowSide", "hide"), ("arrowBg", "arrowSide", "hide"), ("arrowSnap", "arrowSide", "hide"),
+    ("dirShown", "arrowSide", "hide"),
     ("iconYdQuests", "layerQuests", False), ("iconYdTaxi", "poiTaxi", False), ("iconYdPoi", "poiPoi", False),
     ("iconYdCity", "layerCity", False), ("iconYdInstances", "layerInstances", False), ("iconYdCaves", "layerCaves", False),
     ("iconYdHerbs", "layerHerbs", False), ("iconYdOre", "layerOre", False), ("iconYdPins", "showCustomPins", False),
@@ -184,7 +188,7 @@ DEPENDENTS = [
 # (the parents' values with every dependent on)
 ALL_ON = {"replaceMinimap": True, "fadeMoving": True, "combatHideMap": False, "combatHideArrow": False,
           "locked": False, "lockSize": False, "windowFrame": True, "charm": "thunderfury", "fastestOrder": True,
-          "layerQuests": True, "style": "seamless", "arrow": True, "dirShown": True, "arrowSnap": True,
+          "layerQuests": True, "style": "seamless", "arrow": True, "dirShown": True, "arrowSnap": True, "arrowSide": "left",
           "poiTaxi": True, "poiPoi": True, "layerCity": True, "layerInstances": True, "layerCaves": True,
           "layerHerbs": True, "layerOre": True, "showCustomPins": True}
 
@@ -781,3 +785,35 @@ def test_the_icon_distance_sliders_set_each_kinds_yards_and_reset():
     finally:
         for k in keys:
             st[k] = ns.DEFAULTS.gps[k]
+
+
+def test_arrow_side_hide_and_the_directions_text_alone(game):
+    # (asked 2026-11-17: "add a fifth option that is 'Hide' that hides the arrow", and "hide the text separately and only
+    # show the arrow") Hide is the fifth Arrow side, there with the arrow snapped or not; a side picked snaps the arrow
+    # there (as dropping it against that side does), Hide leaves the snapping as it was; the text's own checkbox is
+    # named for the text, and gray while the arrow is hidden (never both hidden)
+    lua, ns = game
+    st, O = ns.settings.gps, ns.Options
+    by_key = {c.key: c.control for c in _controls(ns)}
+    buttons = by_key["arrowSide"]
+    radio = {buttons[i].value: buttons[i] for i in range(1, len(buttons) + 1)}
+    assert list(radio) == ["left", "right", "top", "bottom", "hide"]
+    assert radio["hide"].text._text == "Hide"
+    saved = {k: st[k] for k in ("arrow", "arrowSnap", "arrowSide", "dirShown")}
+    try:
+        st.arrow, st.dirShown, st.arrowSnap, st.arrowSide = True, True, False, "left"
+        O.Refresh()
+        assert buttons.agpsOn is True  # (the arrow on its own: still there to pick)
+        radio["hide"]._scripts.OnClick(radio["hide"])
+        assert st.arrowSide == "hide" and st.arrowSnap is False
+        O.Refresh()
+        assert by_key["dirShown"].agpsOn is False and by_key["arrowSnap"].agpsOn is False
+        radio["right"]._scripts.OnClick(radio["right"])
+        assert st.arrowSide == "right" and st.arrowSnap is True
+        O.Refresh()
+        assert by_key["dirShown"].agpsOn is True
+        assert [w for w in lua.eval("AGPS_WIDGETS").values() if w._text == "Show the directions text"]
+    finally:
+        for k, v in saved.items():
+            st[k] = v
+        O.Refresh()

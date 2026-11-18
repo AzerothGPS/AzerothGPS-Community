@@ -22,6 +22,8 @@ ns.DEFAULTS = {
     replaceMinimapIdle = 5, -- s of quiet before the map grown out of the square goes back (0: never; asked 2026-11-11)
     replaceMinimapCollapseOnMove = false, -- the map grown out of the square goes back as the player starts moving
     replaceMinimapCollapseOnCombat = false, -- ... as combat starts (both asked 2026-11-09, off by default)
+    replaceMinimapRoute = true, -- the route's line on the square (asked 2026-11-17; off: not drawn there, the opened map
+    -- and the world map keep it; GPSFrame's G.SquareHidesRoute)
     replaceMinimapSize = "small", -- its square: "small" (200), "medium" (260), "large" (320) (G.MINIMAP_SIDES)
     replaceMinimapHide = "ground", -- how the minimap's ground is hidden: "ground" (C_Minimap.SetDrawGroundTextures) or
     -- "mask" (a fully transparent mask); /agps replace ground|mask
@@ -123,7 +125,8 @@ ns.DEFAULTS = {
     -- and arrowSize the first time, Arrow.FromOld)
     arrowPx = 58, -- the arrow's size
     arrowSnap = true, -- the arrow against a side of the directions, the two moved as one (off: each on its own)
-    arrowSide = "left", -- that side: "left", "right", "top", "bottom"
+    arrowSide = "left", -- that side: "left", "right", "top", "bottom"; "hide": no arrow, the directions alone (asked
+    -- 2026-11-17; only while the directions show: Arrow.lua's Hidden)
     dirShown = true, -- the directions panel (off: the arrow alone)
     dirStopsOnly = false, -- the directions list the stops only, no turns
     dirTextScale = 1, -- the directions' text size
