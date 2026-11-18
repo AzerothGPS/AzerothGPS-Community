@@ -2,6 +2,13 @@
 
 Each version's section is its release notes (GitHub and CurseForge).
 
+## 1.3.9 (in progress)
+
+### New
+
+- The route panel at the top of the map can be narrower and sit left, in the middle or right (Options > Map window, or drag its edge).
+- Detach the route panel into its own window that stays open while the map is closed (its button on the panel, or Options > Map window).
+
 ## 1.3.8
 
 ### New
