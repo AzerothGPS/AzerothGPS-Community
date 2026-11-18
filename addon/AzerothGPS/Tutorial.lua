@@ -522,6 +522,7 @@ end
 function T.ArrowOn()
   local st = S()
   st.arrow, st.arrowLocked, st.dirShown = true, false, true
+  if st.arrowSide == "hide" then st.arrowSide = "left" end -- (the arrow hidden: shown for its steps, put back after)
   T.EnsureRoute(1)
   if ns.Arrow and ns.Arrow.Apply then ns.Arrow.Apply() end
 end

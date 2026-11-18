@@ -11105,3 +11105,124 @@ def test_at_the_wizards_sanctum_portal_it_says_the_portal_and_through_it_youve_a
             ns.CharDB().faction = was_faction
         lua.globals().AGPS_POS = was_pos
         lua.execute("UnitFactionGroup = AGPS_UFG")
+
+
+def _arrow_route(lua, ns, t0):
+    # (a route the arrow window shows: set, drawn, "keep this route?" answered)
+    N, G = ns.Nav, ns.GPS
+    N.SetStops(lua.eval("{ { x = -1441, y = -2332, cont = 0 } }"), False, "red")
+    for k in range(2):
+        lua.execute(f"AGPS_T = {t0 + k * 0.5}")
+        G.Update()
+        if N.RedAsking():
+            G.confirmBox.yes._scripts.OnClick(G.confirmBox.yes)
+    assert N.route and not N.RedAsking()
+
+
+def test_arrow_side_hide_hides_the_arrow_and_keeps_the_directions(game):
+    # (asked 2026-11-17: "add a fifth option that is 'Hide' that hides the arrow") the arrow's panel unseen and
+    # click-through, the directions as ever (their own clamp, no arrow column); a hearthstone to use at the route's start
+    # brings the panel back for its button; with the directions hidden too the arrow shows (never an empty window)
+    lua, ns = game
+    A, N, G, st = ns.Arrow, ns.Nav, ns.GPS, ns.settings.gps
+    af, dirf = lua.globals().AzerothGPSArrow, lua.globals().AzerothGPSDirections
+    lua.execute("""AzerothGPSArrow.EnableMouse = function(s, v) s._mouse = v end
+      AzerothGPSDirections.EnableMouse = function(s, v) s._mouse = v end""")
+    saved = _arrow_settings(st)
+    real = N.UseNow
+    try:
+        st.arrowLocked = False
+        _arrow_route(lua, ns, 1200)
+        A.Apply()
+        af._scripts.OnUpdate(af, 1)
+        assert af._alpha > 0 and af._mouse and dirf._alpha > 0  # (as before: both seen)
+        st.arrowSide = "hide"
+        A.Apply()
+        lua.execute("AGPS_T = 1201")
+        af._scripts.OnUpdate(af, 1)
+        assert A.Hidden() and af._shown and af._alpha == 0 and not af._mouse  # (shown: its OnUpdate runs the text)
+        assert dirf._shown and dirf._alpha > 0 and dirf._mouse
+        assert tuple(dirf._clamp.values()) == (0, 0, 0, 0)
+        # the route starts with the hearthstone: its icon and button where the arrow was, the panel seen for it
+        hearth = lua.eval("{ 0, 2254, 293, 0, -8900, -160, 10, 'your Hearthstone', '', 'Northshire Valley', 'your Hearthstone', use = true, item = 6948 }")
+        N.UseNow = lua.eval("function(t) return function() return t end end")(hearth)
+        lua.execute("AGPS_T = 1202")
+        af._scripts.OnUpdate(af, 1)
+        assert lua.globals().AzerothGPSArrowUseButton._shown and af._alpha > 0 and af._mouse
+        N.UseNow = real
+        lua.execute("AGPS_T = 1203")
+        af._scripts.OnUpdate(af, 1)
+        assert af._alpha == 0
+        # the text hidden too: the arrow shows after all
+        st.dirShown = False
+        A.Apply()
+        lua.execute("AGPS_T = 1204")
+        af._scripts.OnUpdate(af, 1)
+        assert not A.Hidden() and af._alpha > 0 and not dirf._shown
+    finally:
+        N.UseNow = real
+        lua.execute("AzerothGPSArrow.EnableMouse = nil AzerothGPSDirections.EnableMouse = nil")
+        N.Clear()
+        _arrow_restore(ns, saved)
+
+
+def test_the_directions_text_hidden_leaves_the_arrow(game):
+    # (asked 2026-11-17: "hide the text separately and only show the arrow": dirShown, Options > Directions > Show the
+    # directions text) the directions' panel hidden, the arrow seen on its own with its route
+    lua, ns = game
+    A, N, st = ns.Arrow, ns.Nav, ns.settings.gps
+    af, dirf = lua.globals().AzerothGPSArrow, lua.globals().AzerothGPSDirections
+    saved = _arrow_settings(st)
+    try:
+        _arrow_route(lua, ns, 1300)
+        st.dirShown = False
+        A.Apply()
+        lua.execute("AGPS_T = 1301")
+        af._scripts.OnUpdate(af, 1)
+        assert not dirf._shown and af._shown and af._alpha > 0 and A.arrowTex._shown
+        # Hide picked with the text hidden (a saved setting, a slash command): the arrow still shows
+        st.arrowSide = "hide"
+        A.Apply()
+        lua.execute("AGPS_T = 1302")
+        af._scripts.OnUpdate(af, 1)
+        assert not dirf._shown and af._alpha > 0 and A.arrowTex._shown
+    finally:
+        N.Clear()
+        _arrow_restore(ns, saved)
+
+
+def test_the_route_can_be_left_off_the_minimap_square(minimap):
+    # (asked 2026-11-17: "add option to not show the route on our minimap replacement") replaceMinimapRoute off: no route
+    # line on the square; on (the default): drawn; the map opened out of the square keeps its route either way
+    lua, ns = minimap
+    G, st, N = ns.GPS, ns.settings.gps, ns.Nav
+    blue = "0.05,0.28,0.85"
+
+    def route_drawn(t):
+        for k in range(2):
+            lua.execute(f"AGPS_T = {t + k * 0.5}")
+            G.Update()
+            if N.RedAsking():
+                G.confirmBox.yes._scripts.OnClick(G.confirmBox.yes)
+        return blue in _colors(_lines(lua))
+    assert ns.DEFAULTS.gps.replaceMinimapRoute is True
+    try:
+        st.replaceMinimap = True
+        G.ApplySettings()
+        N.SetStops(lua.eval("{ { x = 2050, y = 520, cont = 0 } }"), False, "red")
+        assert G.MinimapMode() and route_drawn(1400)
+        st.replaceMinimapRoute = False
+        G.ApplySettings()
+        assert not route_drawn(1402) and N.route
+        G.SetMinimapExpanded(True)  # (opened out of the square: the usual map, its route)
+        _tick(lua, ns)
+        assert not G.MinimapMode() and route_drawn(1404)
+        G.SetMinimapExpanded(False)
+        _tick(lua, ns)
+        assert G.MinimapMode() and not route_drawn(1406)
+        st.replaceMinimapRoute = True
+        G.ApplySettings()
+        assert route_drawn(1408)
+    finally:
+        st.replaceMinimapRoute = True
+        N.Clear()
