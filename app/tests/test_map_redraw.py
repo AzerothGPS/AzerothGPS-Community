@@ -8567,6 +8567,75 @@ MM_SETUP = """
   AGPS_OLD_GETCVAR = GetCVar
   GetCVar = function(n) if n == "rotateMinimap" then return AGPS_MM_CVAR end end
 """
+def test_party_members_show_on_the_minimap_square(minimap):
+    # (asked 2026-11-17: "party member icons don't show on our square minimap? they should", with the dev addon's fake
+    # party) the GPS map as the minimap square draws our party dots too: members fed as the dev addon's fake party
+    # feeds them (GPS.party.io.members swapped, no unit), named on hover; Show party off: none. One of the game's group
+    # (read from a unit) has the game's blip over the square with its ground hidden: not ours too (no double); under
+    # the all-clear mask, and opened out into the window, ours
+    lua, ns = minimap
+    G, st = ns.GPS, ns.settings.gps
+    old_members = G.party.io.members
+    lua.execute("""
+      AGPS_PARTY = { party1 = { 2250, 305 } }
+      UnitExists = function(u) return AGPS_PARTY[u] ~= nil end
+      UnitIsUnit = function(a, b) return a == b end
+      IsInRaid = function() return false end
+      UnitClass = function(u) return "Mage", "MAGE" end
+      AGPS_POS_REAL = UnitPosition
+      UnitPosition = function(u)
+        local p = AGPS_PARTY[u]
+        if p then return p[1], p[2], 0, 0 end
+        return AGPS_POS_REAL(u)
+      end
+    """)
+
+    def dots():
+        lua.execute("AGPS_T = AGPS_T + 1")
+        G.Update()
+        return sorted(w.name for w in lua.eval("AGPS_WIDGETS").values() if w.dot and w._shown)
+
+    try:
+        st.showParty = True
+        st.replaceMinimap = True
+        G.ApplySettings()
+        assert G.MinimapMode() and G.MinimapHideMode() == "ground"
+        # the game's own group: its blip on the Minimap over the square, ours left off
+        assert dots() == []
+        # the dev addon's fake party: { name, class, cont, x, y } through the hook, on the square
+        G.party.io.members = lua.eval("""function() return {
+          { name = "Fakey", class = "PRIEST", cont = 0, x = AGPS_POS[1] + 20, y = AGPS_POS[2] - 10 },
+          { name = "Faraway", class = "MAGE", cont = 0, x = AGPS_POS[1] + 5000, y = AGPS_POS[2] },
+        } end""")
+        assert dots() == ["Fakey"]  # (only those in the square's view)
+        b = next(w for w in lua.eval("AGPS_WIDGETS").values() if w.dot and w._shown)
+        lua.globals().AGPS_B = b
+        lua.execute("AGPS_B.IsMouseOver = function() return true end")
+        try:
+            assert G.MinimapTipAt() == "Fakey"
+        finally:
+            lua.execute("AGPS_B.IsMouseOver = nil")
+        st.showParty = False
+        assert dots() == []
+        st.showParty = True
+        # the game's group under the all-clear mask (its blips may be clipped there): ours
+        G.party.io.members = old_members
+        st.replaceMinimapHide = "mask"
+        G.ApplySettings()
+        assert dots() == ["Tester"]
+        # opened out into the usual window: the map's own dots, as ever
+        st.replaceMinimapHide = "ground"
+        G.ApplySettings()
+        assert dots() == []
+        G.SetMinimapExpanded(True)
+        assert not G.MinimapMode() and dots() == ["Tester"]
+        G.SetMinimapExpanded(False)
+    finally:
+        G.party.io.members = old_members
+        st.showParty = True
+        lua.execute("AGPS_PARTY = {} UnitPosition = AGPS_POS_REAL")
+
+
 MM_TEARDOWN = """
   for _, k in ipairs({ "GetNumPoints", "GetPoint", "GetWidth", "GetHeight", "GetZoom", "SetMaskTexture", "SetAlpha" }) do Minimap[k] = nil end
   AzerothGPSFrame.SetFrameStrata, AzerothGPSFrame.IsMouseOver = nil, nil

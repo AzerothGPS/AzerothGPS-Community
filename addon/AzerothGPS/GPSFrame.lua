@@ -4405,7 +4405,8 @@ function G.party.io.members()
       if ok and x and y and not ns.IsSecret(x) and not ns.IsSecret(y) then
         local class
         if UnitClass then class = select(2, UnitClass(u)) end -- (its file name: MAGE; not `a and f()`, one value)
-        out[#out + 1] = { name = UnitName and UnitName(u) or u, cont = inst, x = x, y = y, class = class, raid = raid }
+        out[#out + 1] = { name = UnitName and UnitName(u) or u, cont = inst, x = x, y = y, class = class, raid = raid,
+          unit = u } -- (one of the game's group: the game's Minimap has its blip, G.DrawParty)
       end
     end
   end
@@ -4621,11 +4622,17 @@ function G.PoiGameIcon(p)
 end
 function G.DrawParty(cx, cy, rot, s, viewCont)
   local n = 0
-  if S().showParty ~= false and not G.Held() and canvas and not G.MinimapMode() then -- (as the minimap: its blips)
+  if S().showParty ~= false and not G.Held() and canvas then
     local half = canvas:GetWidth() / 2
     local ok, list = pcall(G.party.io.members)
+    -- (as the minimap square, asked 2026-11-17: "party member icons don't show on our square minimap": none were drawn
+    -- there, left to the game's Minimap over it, which has no blip for members not in the game's group, the dev addon's
+    -- fake ones. Now ours, but not for a member read from a unit while the ground is hidden ("ground"): its own blip is
+    -- over the map there, ours under it a double. Under the all-clear mask ("mask") the blips may be clipped: ours.)
+    local square = G.MinimapMode() and G.MinimapHideMode() == "ground"
     for _, m in ipairs(ok and list or {}) do
-      local x, y = Geo.ToContinent(m.cont, m.x, m.y, viewCont)
+      local x, y
+      if not (square and m.unit) then x, y = Geo.ToContinent(m.cont, m.x, m.y, viewCont) end
       local sx, sy
       if x and y then
         local dx, dy = Geo.ScreenOffset(cx, cy, x, y)
@@ -5146,6 +5153,10 @@ function G.MinimapTipAt()
     for i = #stopPins, 1, -1 do
       local b = stopPins[i]
       if b:IsVisible() and b:IsMouseOver() then return b.title end
+    end
+    for i = #partyPins, 1, -1 do
+      local b = partyPins[i]
+      if b:IsVisible() and b:IsMouseOver() then return b.name end
     end
     for i = #poiButtons, 1, -1 do
       local b = poiButtons[i]
