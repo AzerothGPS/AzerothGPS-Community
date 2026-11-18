@@ -25,6 +25,8 @@ def load(lua, ns, *names, data=None):
     loader = lua.eval("function(src, name) return assert(load(src, '@' .. name)) end")
     if NEEDS_MAPTEXT & set(names) and ns.MapText is None and "MapText.lua" not in names:
         names = ("MapText.lua",) + names
+    if ns.PoiName is None and "Locales/Locales.lua" not in names:  # (the names in the game's language, first in the toc)
+        names = ("Locales/Locales.lua",) + names
     for name in names:
         src = (ADDON / name).read_text(encoding="utf-8")
         loader(src, name)("AzerothGPS", ns)

@@ -54,7 +54,7 @@ T.NODES = {
   { -75, 25, "Tin Vein", "ore" }, { -60, -50, "Earthroot", "herb" }, { 30, -70, "Copper Vein", "ore" },
 }
 -- what of the character's saved record the snapshot takes (the route, and the guide routes that put stops in it)
-T.CHAR_KEYS = { "stops", "loop", "dest", "redOk", "skipLearn", "skipRides", "rxpFollow", "zygorFollow", "polestarFollow", "questifyFollow" }
+T.CHAR_KEYS = { "stops", "loop", "dest", "redOk", "skipLearn", "skipRides", "rxpFollow", "zygorFollow", "polestarFollow", "questifyFollow", "aprFollow" }
 
 local function GPS() return ns.GPS end
 local function S() return ns.settings.gps end

@@ -39,7 +39,7 @@ function P.On()
   if not cdb then return false end
   if cdb.polestarFollow ~= nil then return cdb.polestarFollow == true end
   local X, Z = ns.RestedXP, ns.Zygor
-  return P.Available() and not (X and X.On and X.On()) and not (Z and Z.On and Z.On()) and cdb.questifyFollow ~= true
+  return P.Available() and not (X and X.On and X.On()) and not (Z and Z.On and Z.On()) and cdb.questifyFollow ~= true and cdb.aprFollow ~= true
 end
 
 local function Call(f, ...)
@@ -158,7 +158,7 @@ function P.Toggle()
     ns.Print(L["Polestar Route: off."])
     return
   end
-  for _, k in ipairs({ "RestedXP", "Zygor", "Questify" }) do -- (one guide at a time)
+  for _, k in ipairs({ "RestedXP", "Zygor", "Questify", "AzerothPilot" }) do -- (one guide at a time)
     local g = ns[k]
     if g and g.On and g.On() then g.Toggle() end
   end

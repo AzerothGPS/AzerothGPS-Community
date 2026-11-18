@@ -2,18 +2,20 @@
 
 Each version's section is its release notes (GitHub and CurseForge).
 
-## 1.3.7 (in progress)
+## 1.3.8 (in progress)
 
-### Changed
+### New
 
-- Undo in the road and wall tools takes back only what you changed since your last /reload or login.
+- Azeroth Pilot Route: follow your Azeroth Pilot Reloaded guide, each step your next stop (shown with Azeroth Pilot Reloaded installed).
+- The flight map rings the flight master your route flies to (Options > Routing to turn it off).
 
 ### Fixed
 
-- Stormwind's mage trainers: the route goes up the Wizard's Sanctum and through its portal, not "below you".
-- Stormwind's mage trainers: the route follows the Wizard's Sanctum's stairs all the way up, says the portal in front of it, and you've arrived once through it.
-- Roads drawn or recorded in a city with no floor picked now take the height of the roads they join, rising evenly between them, so routes use them.
-- Stormwind: routes from Cut-Throat Alley leave by its west door and cross the plaza to the bridge, not round the canals.
+- Fewer hitches in the first seconds after logging in, while the roads load (smoother on G-Sync and FreeSync screens).
+- Flight masters, zones, cities, places, docks, items and NPCs you've met are shown in your game's language; the search finds them in English too.
+
+
+## 1.3.7
 
 ### New
 
@@ -21,11 +23,14 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 ### Changed
 
-- Roads: new and fixed roads in Stormwind City.
-- Roads: the way up the Wizard's Sanctum in Stormwind City to the mage trainers.
+- Undo in the road and wall tools takes back only what you changed since your last /reload or login.
+- Roads: new and fixed roads in Stormwind City, and the way up the Wizard's Sanctum to the mage trainers.
 
 ### Fixed
 
+- Stormwind's mage trainers: the route climbs the Wizard's Sanctum's stairs and goes through its portal, not "below you", and you've arrived once through it.
+- Roads drawn or recorded in a city with no floor picked now take the height of the roads they join, rising evenly between them, so routes use them.
+- Stormwind: routes from Cut-Throat Alley leave by its west door and cross the plaza to the bridge, not round the canals.
 - The No Spoiler Map's explored areas no longer flicker or drop out, and the world map's inset maps no longer show unexplored areas.
 
 ## 1.3.6

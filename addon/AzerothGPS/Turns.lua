@@ -235,10 +235,10 @@ local function Toward(path, s)
     if p[1] == 2 or p[1] == 3 then
       local d = Dist(qx, qy, p[2], p[3])
       local ahead = (p[2] - px) * (qx - px) + (p[3] - py) * (qy - py) > 0
-      if d <= T.TOWARD_RADIUS and ahead and (not bestD or d < bestD) then best, bestD = p[4], d end
+      if d <= T.TOWARD_RADIUS and ahead and (not bestD or d < bestD) then best, bestD = p, d end
     end
   end
-  return best
+  return best and ns.PoiName(best)
 end
 
 -- Stairs on the path, in order: { s0, s1, dir = 1 up | -1 down }, flights the same way with a landing
@@ -535,7 +535,7 @@ function T.Maneuvers(path, stopLabel, horizon)
   end
   if path.ends == "ride" and path.ride then
     local t = path.ride
-    local to = path.from == 1 and t[10] or t[9]
+    local to = ns.RideEndName(t, path.from == 1 and 2 or 1)
     local board = T.BOARD[t[8]]
     local m = { dist = path.total, kind = "board" }
     if t.use then

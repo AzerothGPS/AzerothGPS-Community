@@ -87,7 +87,7 @@ local function Copy(d)
   -- (a stop with no height of its own at an NPC's spot: that NPC's, N.SpawnZ. Not a guide's: theirs is looked up their
   -- own way, the guides' shipped waypoint heights first, RestedXP.lua's X.HeightXY; nor a corpse's)
   local z = d.z
-  if z == nil and not (d.corpse or d.rxp or d.zygor or d.polestar or d.questify) and N.SpawnZ then
+  if z == nil and not (d.corpse or d.rxp or d.zygor or d.polestar or d.questify or d.apr) and N.SpawnZ then
     z = N.SpawnZ(d.cont, d.x, d.y)
   end
   return { x = d.x, y = d.y, cont = d.cont, name = d.name, icon = d.icon, corpse = d.corpse, questRoute = d.questRoute,
@@ -97,6 +97,7 @@ local function Copy(d)
     zygor = d.zygor, -- (a Zygor step's: its key, Zygor.lua)
     polestar = d.polestar, -- (a Polestar step's: its key, Polestar.lua)
     questify = d.questify, -- (a Questify step's: its key, Questify.lua)
+    apr = d.apr, -- (an Azeroth Pilot Reloaded step's: its key, AzerothPilot.lua)
     questie = d.questie } -- (Questie's "Set TomTom Target", Import.QuestieTarget)
 end
 
@@ -332,15 +333,15 @@ local function GuardPlace(c, x, y)
     for _, p in ipairs(ns.Pois and ns.Pois[c] or {}) do
       if p[1] == kind and p[4] then
         local d = (p[2] - x) ^ 2 + (p[3] - y) ^ 2
-        if d < bd then best, bd = p[4], d end
+        if d < bd then best, bd = p, d end
       end
     end
-    if best then return best end
+    if best then return ns.PoiName(best) end
   end
   local R = ns.Router
   local z = R and R.ZoneAt and R.ZoneAt(c, x, y)
   local m = z and ns.Maps and ns.Maps[z]
-  return m and m.name or nil
+  return m and ns.ZoneName(z, m.name) or nil
 end
 -- The other faction's towns the route walks through: { { name, yards }, ... } most first, or nil. Not the towns at a
 -- walk's own ends (a stop in one, the player in one: R.HostileTownsNear, as the router leaves them out).
@@ -729,15 +730,16 @@ N.FLIGHT_OVERHEAD = 15 -- s: talking to the flight master, taking off and landin
 
 local flightCache -- { key, masters = { [node] = { cont, x, y, name } }, trips = { [from] = { [to] = row } } }
 
--- Flight masters (Data/Pois.lua kind 1): { [nodeID] = { cont, x, y, name, faction } }; cont
--- is the city level for one down in a city (Undercity's: p[7]).
+-- Flight masters (Data/Pois.lua kind 1): { [nodeID] = { cont, x, y, name, faction, en = the data's English name } };
+-- cont is the city level for one down in a city (Undercity's: p[7]). The name is the game's (ns.TaxiName: in its
+-- language, as the flight map and Taxi.lua's recorded flights have it), else the data's.
 local function Masters()
   local m = {}
   for cont, list in pairs(ns.Pois or {}) do
     for _, p in ipairs(list) do
       if p[1] == 1 then
         local lvl = p[7] and ns.CityLevels and ns.CityLevels[p[7]] and p[7] -- (with the city's data)
-        m[p[5]] = { lvl or cont, p[2], p[3], p[4], p[6] }
+        m[p[5]] = { lvl or cont, p[2], p[3], ns.TaxiName and ns.TaxiName(p[5], p[4]) or p[4], p[6], en = p[4] }
       end
     end
   end
@@ -900,7 +902,7 @@ local function Flights()
   local known, count = N.KnownFlightNodes()
   if count < 1 then return nil end
   local fac = Faction()
-  local key = count .. (fac or "")
+  local key = count .. (fac or "") .. ":" .. (ns.names and ns.names.taxiVer or 0) -- (and the game's names for them)
   if flightCache and flightCache.key == key then return flightCache end
   local masters = Masters()
   local adj, fresh = {}, {}
@@ -928,6 +930,8 @@ local function Flights()
   -- the overhead made landing and boarding again (A > B, B > C) cost less than the one flight A > C.
   local byName, recorded = {}, {}
   for node, m in pairs(masters) do
+    -- (recorded flights are keyed by the game's names, in its language; older ones the English too)
+    if m.en and known[node] then byName[m.en] = node end
     if m[4] and known[node] then byName[m[4]] = node end
   end
   local hopsSkipped = false
@@ -1056,7 +1060,7 @@ function N.RidePins(r)
           end
           local i = rowIndex[t]
           add({ cont = back and t[4] or t[1], x = back and t[5] or t[2], y = back and t[6] or t[3], kind = t[8], ride = t,
-            title = Format(N.RIDE_TO[t[8]] or L["Ride to %s"], tostring(back and t[9] or t[10])),
+            title = Format(N.RIDE_TO[t[8]] or L["Ride to %s"], tostring(ns.RideEndName(t, back and 1 or 2))),
             dock = i and { i, back and 2 or 1 } or nil })
         end
       end
@@ -1224,7 +1228,7 @@ function N.DescribePlan()
   local R = ns.Router
   local red = R and R.RedZones and R.RedZones()
   local names = {}
-  for z in pairs(red or {}) do names[#names + 1] = ns.Maps and ns.Maps[z] and ns.Maps[z].name or tostring(z) end
+  for z in pairs(red or {}) do names[#names + 1] = ns.Maps and ns.Maps[z] and ns.ZoneName(z, ns.Maps[z].name) or tostring(z) end
   table.sort(names)
   local _, known = N.KnownFlightNodes()
   local legs, secs = N.Plan(cont, px, py, walk, d)
@@ -2519,8 +2523,9 @@ N.FLYING_REST_EVERY = 2
 
 local function MasterNamed(name)
   if not name then return nil end
+  -- (the flight being flown names them as the game does, in its language: Taxi.lua's TaxiNodeName)
   for node, m in pairs(Masters()) do
-    if m[4] == name then return m, node end
+    if m[4] == name or m.en == name then return m, node end
   end
 end
 
@@ -4106,8 +4111,8 @@ function N.Steps()
           steps[#steps + 1] = t.flying and N.RidingText(r.flying and r.flying.kind, t[10])
             or t.use and Format(L["Use %s (to %s)"], t[8], t[10])
             or t.learn and Format(L["Learn the flight path, then take the flight to %s"], t[10])
-            or N.TAKE[t[8]] and Format(N.TAKE[t[8]], from == 1 and t[10] or t[9])
-            or Format(L["Take the %s to %s"], t[8], from == 1 and t[10] or t[9])
+            or N.TAKE[t[8]] and Format(N.TAKE[t[8]], ns.RideEndName(t, from == 1 and 2 or 1))
+            or Format(L["Take the %s to %s"], t[8], ns.RideEndName(t, from == 1 and 2 or 1))
           -- (the hearthstone or a teleport kept for a later stop, AssignTeleports: N.TeleportAheadText)
           if t.use and i > 1 and not steps.teleportAt then
             steps.teleportAt = #steps
@@ -4120,8 +4125,9 @@ function N.Steps()
           if nxt and nxt.ride then
             local t = nxt.ride
             local at = N.WALK_TO[t[11] or t[8]]
-            steps[#steps + 1] = at and Format(at, dist, nxt.from == 1 and t[9] or t[10])
-              or Format(L["Walk %s to the %s (%s)"], dist, t[11] or t[8], nxt.from == 1 and t[9] or t[10])
+            local here = ns.RideEndName(t, nxt.from == 1 and 1 or 2)
+            steps[#steps + 1] = at and Format(at, dist, here)
+              or Format(L["Walk %s to the %s (%s)"], dist, t[11] or t[8], here)
           else
             steps[#steps + 1] = Format(L["Walk %s to %s"], dist, StopLabel(i, d, count))
               .. (count > 1 and took or "")
@@ -4607,7 +4613,7 @@ local function CheckArrival(px, py, cont)
       d.spotReached = true -- at the spot, its quests still open: stay (see QuestCheck)
       at = false
     end
-    if d.rxp or d.zygor or d.polestar or d.questify then at = false end -- a guide's step: done when its guide checks it off, not by getting there
+    if d.rxp or d.zygor or d.polestar or d.questify or d.apr then at = false end -- a guide's step: done when its guide checks it off, not by getting there
     if d.boss then -- a boss: done when it dies (wherever you are), not by getting there
       at = false
       if not d.bossDone and N.BossDead(d) then d.bossDone = true end
@@ -4871,7 +4877,7 @@ function N.Status(px, py, cont)
   if r.flying then
     head = "|cffffd100" .. N.RidingText(r.flying.kind, r.flying.to) .. "|r  " .. N.RidingWhen(r.flying.kind, r.flying.seconds)
   elseif t then
-    local to = from == 1 and t[10] or t[9]
+    local to = ns.RideEndName(t, from == 1 and 2 or 1)
     if t.use then
       head = Format(L["|cffffd100Use %s|r (to %s)"], t[8], to)
     elseif atDock and t.learn then
@@ -4949,8 +4955,9 @@ function N.LearnOnRoute(r)
   if not fac then return nil end
   local at = math.floor((r.consumed or 0) / 50)
   if r.learnAt == at then return r.learnHint or nil end
-  if not mastersList then
-    mastersList = {}
+  local namesVer = ns.names and ns.names.taxiVer or 0
+  if not mastersList or mastersList.ver ~= namesVer then -- (again when the game's names for them came)
+    mastersList = { ver = namesVer }
     for node, m in pairs(Masters()) do mastersList[#mastersList + 1] = { node, m } end
   end
   local cands = {}

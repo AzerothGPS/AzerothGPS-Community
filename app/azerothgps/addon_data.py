@@ -283,12 +283,24 @@ def transports_lua(cd: ClientData) -> str:
     for cont in CONTINENTS:
         grid, _ = extract_area_grid(cd, cont)
         towns[cont] = town_labels(cd, cont, grid)
-    zones = {m["areaId"]: m["name"] for m in build_uimaps(cd) if m.get("areaId") and m["type"] == 3}
+    uimaps = [m for m in build_uimaps(cd) if m.get("areaId") and m["type"] == 3]
+    zones = {m["areaId"]: m["name"] for m in uimaps}
+    zone_maps = {m["areaId"]: m["id"] for m in uimaps}
+    ids = {}  # (name: the ids its parts are looked up by in the game's language, place_ids)
 
     def place_name(cont, x, y):
         best = min(towns[cont], key=lambda t: (t["wx"] - x) ** 2 + (t["wy"] - y) ** 2)
-        zone = next((zones[a] for a in best["ancestors"] if a in zones), None)
-        return f"{best['name']}, {zone}" if zone and zone != best["name"] else best["name"]
+        za = next((a for a in best["ancestors"] if a in zones), None)
+        zone = zones.get(za)
+        name = f"{best['name']}, {zone}" if zone and zone != best["name"] else best["name"]
+        ids[name] = (best["id"], zone_maps[za] if zone and zone != best["name"] else None)
+        return name
+
+    def place_ids(side, name):
+        # (`area1`: the town's AreaTable id, `map1`: its zone's uiMap; the addon names the dock by them in the game's
+        # language, C_Map.GetAreaInfo / GetMapInfo, the English as the fallback)
+        area, umap = ids.get(name, (None, None))
+        return (f", area{side} = {area}" if area else "") + (f", map{side} = {umap}" if umap else "")
 
     nodes = defaultdict(list)
     for n in cd.table("TaxiPathNode"):
@@ -344,7 +356,7 @@ def transports_lua(cd: ClientData) -> str:
                     f'{_lua_str(name1)}, {_lua_str(name2)}, '
                     f'cycle = {cycle:.1f}, ride1 = {ride1:.1f}, ride2 = {ride2:.1f}, wait1 = {wait1}, wait2 = {wait2}'
                     f'{", server = true" if pid in periods else ""}'
-                    f'{_faction_field(name1, name2)} }},')
+                    f'{_faction_field(name1, name2)}{place_ids(1, name1)}{place_ids(2, name2)} }},')
     # The Deeprun Tram: its own map (369), in by an area trigger at each end (Stormwind, Ironforge), with the triggers'
     # heights (`z1`, `z2`: the walks to and from them on their floor. Without, the walk to Stormwind's ended on the keep's
     # road 25 yd over its way in and went round by the keep, reported 1.3.4 from the Dwarven District)
@@ -353,7 +365,7 @@ def transports_lua(cd: ClientData) -> str:
     if a and b:
         (x1, y1, z1), (x2, y2, z2) = a["Pos"][:3], b["Pos"][:3]
         rows.append(f'  {{ {a["ContinentID"]}, {x1:.1f}, {y1:.1f}, {b["ContinentID"]}, {x2:.1f}, {y2:.1f}, {TRAM_SECONDS:.0f}, '
-                    f'"tram", "Stormwind City", "Ironforge", "Deeprun Tram", z1 = {z1:.1f}, z2 = {z2:.1f} }},')
+                    f'"tram", "Stormwind City", "Ironforge", "Deeprun Tram", z1 = {z1:.1f}, z2 = {z2:.1f}, map1 = 1453, map2 = 1455 }},')
     # Portals (TELEPORTERS): each end where its trigger is, the first's height (`z1`: the walk to it on its floor); a room
     # reached only through one (`room`: its end, 2), the other end's height too (`z2`) and the room's name
     for ia, ib, *more in TELEPORTERS:
@@ -367,7 +379,8 @@ def transports_lua(cd: ClientData) -> str:
                         f'{_lua_str(n1)}, {_lua_str(n2)}, "teleporter", '
                         f'z1 = {z1:.1f}' + (f', z2 = {z2:.1f}, room = {room}' if room else '')
                         + (f', land1 = {{ {opts["land"][0][0]:.2f}, {opts["land"][0][1]:.2f} }}, land2 = {{ {opts["land"][1][0]:.2f}, '
-                           f'{opts["land"][1][1]:.2f} }}, face = {opts["face"]:.4f}' if opts.get("land") else '') + ' },')
+                           f'{opts["land"][1][1]:.2f} }}, face = {opts["face"]:.4f}' if opts.get("land") else '')
+                        + ('' if opts.get("names") else place_ids(1, n1) + place_ids(2, n2)) + ' },')
     return "\n".join([_header(cd, "Zeppelins and boats: docks, ride + average wait; the timetable: cycle (s), ride1 (dock 1"
                               " to 2), ride2 (back round), wait1 / wait2 (at each dock). And the Deeprun Tram, and"
                               " portals used like a lift (Darnassus's to Rut'theran Village)."),
@@ -430,7 +443,8 @@ def pois_lua(cd: ClientData) -> str:
     """ns.Pois[continent] = { {kind, x, y, name, extra}, ... }
     kind: 1 flight master (extra = nodeID, faction "A"/"H"/"AH", and the city level it's down
     in, if it is: Undercity's), 2 map point of interest (extra = importance), 3 town/place
-    label (extra = parent zone areaId)."""
+    label (extra = parent zone areaId). Kinds 2 and 3 end with their id (AreaPOI's, AreaTable's): the addon names
+    them by it in the game's language (C_AreaPoiInfo, C_Map.GetAreaInfo), the English as the fallback."""
     from .extract.pipeline import CONTINENTS, area_pois, extract_area_grid, taxi_pois, town_labels
 
     rows: dict[int, list[str]] = {c: [] for c in CONTINENTS}
@@ -440,12 +454,12 @@ def pois_lua(cd: ClientData) -> str:
         tail = f",{level}" if level else ""
         rows[p["continent"]].append(f'{{1,{p["wx"]},{p["wy"]},{_lua_str(p["name"])},{p["id"]},"{fac}"{tail}}}')
     for p in area_pois(cd):
-        rows[p["continent"]].append(f'{{2,{p["wx"]},{p["wy"]},{_lua_str(p["name"])},{p["importance"]}}}')
+        rows[p["continent"]].append(f'{{2,{p["wx"]},{p["wy"]},{_lua_str(p["name"])},{p["importance"]},{p["id"]}}}')
     for cont in CONTINENTS:
         grid, _ = extract_area_grid(cd, cont)
         for p in town_labels(cd, cont, grid):
             zone = p["ancestors"][-1] if p["ancestors"] else 0
-            rows[cont].append(f'{{3,{p["wx"]},{p["wy"]},{_lua_str(p["name"])},{zone}}}')
+            rows[cont].append(f'{{3,{p["wx"]},{p["wy"]},{_lua_str(p["name"])},{zone},{p["id"]}}}')
     out = [_header(cd, "Points of interest: flight masters, map POIs, place labels."), "ns.Pois = {"]
     for cont, items in rows.items():
         out.append(f"  [{cont}] = {{")

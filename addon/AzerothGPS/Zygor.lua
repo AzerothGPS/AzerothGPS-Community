@@ -33,7 +33,7 @@ function Z.On()
   if not cdb then return false end
   if cdb.zygorFollow ~= nil then return cdb.zygorFollow == true end
   local X = ns.RestedXP
-  return Z.Available() and not (X and X.On and X.On()) and cdb.polestarFollow ~= true and cdb.questifyFollow ~= true
+  return Z.Available() and not (X and X.On and X.On()) and cdb.polestarFollow ~= true and cdb.questifyFollow ~= true and cdb.aprFollow ~= true
 end
 
 -- The waypoint Zygor is taking the player to, if it's a guide step's place: the waypoint, else nil (a corpse's, a
@@ -141,7 +141,7 @@ function Z.Toggle()
     ns.Print(L["Zygor Route: off."])
     return
   end
-  for _, k in ipairs({ "RestedXP", "Polestar", "Questify" }) do -- (one guide at a time)
+  for _, k in ipairs({ "RestedXP", "Polestar", "Questify", "AzerothPilot" }) do -- (one guide at a time)
     local g = ns[k]
     if g and g.On and g.On() then g.Toggle() end
   end
