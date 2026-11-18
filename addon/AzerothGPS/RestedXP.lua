@@ -29,7 +29,7 @@ function X.On()
   local cdb = CDB()
   if not cdb then return false end
   if cdb.rxpFollow ~= nil then return cdb.rxpFollow == true end
-  return X.Available() and cdb.zygorFollow ~= true and cdb.polestarFollow ~= true and cdb.questifyFollow ~= true
+  return X.Available() and cdb.zygorFollow ~= true and cdb.polestarFollow ~= true and cdb.questifyFollow ~= true and cdb.aprFollow ~= true
 end
 
 -- The waypoint RestedXP's arrow points at, if it's a step's place to go: the element, else nil.
@@ -105,7 +105,7 @@ end
 function X.Height(e, cont)
   return X.HeightXY(cont, e.wy, e.wx)
 end
--- (the same at (x, y): every guide route's, Zygor's, Polestar's and Questify's too)
+-- (the same at (x, y): every guide route's, Zygor's, Polestar's, Questify's and Azeroth Pilot's too)
 function X.HeightXY(cont, x, y)
   local N = ns.Nav
   return X.TableHeight(cont, x, y) or (N and N.SpawnZ and N.SpawnZ(cont, x, y)) or X.HeightAt(cont, x, y)
@@ -218,7 +218,7 @@ function X.Toggle()
     ns.Print(L["RestedXP Route: off."])
     return
   end
-  for _, k in ipairs({ "Zygor", "Polestar", "Questify" }) do -- (one guide at a time)
+  for _, k in ipairs({ "Zygor", "Polestar", "Questify", "AzerothPilot" }) do -- (one guide at a time)
     local g = ns[k]
     if g and g.On and g.On() then g.Toggle() end
   end

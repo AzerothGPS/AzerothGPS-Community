@@ -94,6 +94,7 @@ ns.DEFAULTS = {
     useHearthstone = true, -- start a route with the hearthstone (or Astral Recall) when faster
     useTeleports = true, -- ... or a class teleport (mage teleports, Teleport: Moonglade)
     useFlights = true, -- take flights between the flight masters this character knows
+    flightMapRing = true, -- a ring round the route's next flight on the flight map (Taxi.MarkTaxiMap)
     fastestOrder = true, -- routes with several stops: visit them in the fastest order
     autoPauseRouting = false, -- routing paused when you're not following it (Nav.WatchFollowing; the low-end settings turn it on)
     autoPauseSeconds = 120, -- ... the time to the stop grown by this many seconds over its lowest
@@ -827,14 +828,22 @@ do
     end
     -- (a dead boss looked at: targeted, moused over, looted, or still targeted when combat ends)
     local seen = CreateFrame("Frame")
-    for _, ev in ipairs({ "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "PLAYER_REGEN_ENABLED", "LOOT_OPENED" }) do
+    -- (and NPCs' names in the game's language, ns.LearnNpcName: targeted, under the mouse, a window opened)
+    for _, ev in ipairs({ "PLAYER_TARGET_CHANGED", "UPDATE_MOUSEOVER_UNIT", "PLAYER_REGEN_ENABLED", "LOOT_OPENED",
+      "GOSSIP_SHOW", "MERCHANT_SHOW", "TRAINER_SHOW", "QUEST_DETAIL", "QUEST_GREETING", "BANKFRAME_OPENED" }) do
       pcall(seen.RegisterEvent, seen, ev)
     end
+    local window = { GOSSIP_SHOW = true, MERCHANT_SHOW = true, TRAINER_SHOW = true, QUEST_DETAIL = true,
+      QUEST_GREETING = true, BANKFRAME_OPENED = true }
     seen:SetScript("OnEvent", function(_, ev)
       if not ns.db then return end
-      if ev == "UPDATE_MOUSEOVER_UNIT" then
+      if window[ev] then
+        pcall(ns.LearnNpcName, "npc")
+      elseif ev == "UPDATE_MOUSEOVER_UNIT" then
+        pcall(ns.LearnNpcName, "mouseover")
         pcall(ns.CheckDeadUnit, "mouseover")
       else
+        if ev == "PLAYER_TARGET_CHANGED" then pcall(ns.LearnNpcName, "target") end
         pcall(ns.CheckDeadUnit, "target")
         pcall(ns.CheckDeadUnit, "focus")
       end
@@ -1105,6 +1114,7 @@ function ns.SpellIcon(id)
   end
   return nil
 end
+
 
 -- The windows' corner logo (the map's and the options' PortraitFrameTemplate), pre-scaled
 -- (`agps media`, app/azerothgps/media.py): the size nearest the pixels it covers on this screen, shown

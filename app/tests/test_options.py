@@ -40,6 +40,7 @@ NEW = ["mapEditIdle", "toolShiftClick", "language", "layerCity", "showRoads", "s
        "iconYdQuests", "iconYdTaxi", "iconYdPoi", "iconYdCity", "iconYdInstances", "iconYdCaves", "iconYdHerbs",
        "iconYdOre", "iconYdPins",
        "replaceMinimapKeepSquare",
+       "flightMapRing",  # (asked 2026-11-17: the route's flight ringed on the flight map)
        # (1.3.6: pause routing when not following it, Performance)
        "autoPauseRouting", "autoPauseSeconds",
        "layerQuestAreasMinimap",
@@ -62,7 +63,7 @@ HOME = {
               "iconYdCaves iconYdHerbs iconYdOre iconYdPins minimap.hide minimapRoute minimapIcons minimapShape",
     "Opacity": "alpha fadeMoving movingAlpha combatHideMap combatAlpha combatHideArrow arrowCombatAlpha "
                "clickThroughMoving clickThroughCombat",
-    "Routing": "useFlights useHearthstone useTeleports avoidHighZones avoidHostile roadTolerance fastestOrder "
+    "Routing": "useFlights flightMapRing useHearthstone useTeleports avoidHighZones avoidHostile roadTolerance fastestOrder "
                "cityKeepOrder questZoneOnly questAutoReroute questPickRoute navCloseClears acceptWay acceptMapPins acceptShared",
     "Directions": "arrow arrowLocked arrowPx arrowBg dirShown dirStopsOnly arrowSnap arrowSide dirTextScale dirBg "
                   "questing",

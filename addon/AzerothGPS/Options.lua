@@ -2232,6 +2232,10 @@ local function BuildWindow()
       GPS().useFlights = v
       ns.Nav.OptionsChanged()
     end)
+  Key("flightMapRing")
+  check(L["Ring the flight on the flight map"], L["When the route takes a flight, the flight master it flies to has a ring round it on the flight map, so you can click it straight away."],
+    function() return GPS().flightMapRing ~= false end, function(v) GPS().flightMapRing = v end,
+    function() return GPS().useFlights ~= false end)
   Key("useHearthstone")
   check(L["Use hearthstone"], L["Routes may start with your Hearthstone (or a shaman's Astral Recall) when it's in your bags, off cooldown, and faster. Home is your inn's town; the exact spot is learned after your first hearth. The directions say when; click the button beside them to use it."],
     function() return GPS().useHearthstone ~= false end, function(v)
@@ -2313,8 +2317,9 @@ local function BuildWindow()
       place(sub, 20, 4)
       table.sort(rows, function(a, b) return Town(a[9]) .. Town(a[10]) < Town(b[9]) .. Town(b[10]) end)
       for _, t in ipairs(rows) do
-        local label = Town(t[9]) .. " - " .. Town(t[10])
-        place(Checkbox(page, label, Format(kind[3], t[9] or "?", t[10] or "?"),
+        local n1, n2 = ns.RideEndName(t, 1), ns.RideEndName(t, 2) -- (in the game's language)
+        local label = Town(n1) .. " - " .. Town(n2)
+        place(Checkbox(page, label, Format(kind[3], n1 or "?", n2 or "?"),
           function() return ns.Nav.RideAllowed(t) end, function(v) ns.Nav.SetRideAllowed(t, v) end), 26, 20)
       end
     end

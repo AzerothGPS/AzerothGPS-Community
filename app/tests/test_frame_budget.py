@@ -351,3 +351,30 @@ def test_walking_by_brills_buildings_keeps_the_terrain_search_small(faction):
     assert slices < (400 if faction == "Horde" else 1000), f"{slices} slices of terrain search in 30 s"
     ride = lua.eval("AGPS_RIDE_SLICES")
     assert ride < 1000, f"{ride} slices of the ride check in 30 s"  # (12,000 as Alliance before)
+
+
+def test_floor_heights_asked_in_the_frame_never_build_the_road_index_there(game):
+    # (website issue #548, 2026-11-17: "screen tearing on a Variable Refresh Rate monitor with g-sync" with the addon on.
+    # With V-Sync off G-Sync tears on a sudden long frame: walking in Brill after a login, the floor followed
+    # (Nav.TrackCityZ) asked for the heights near and built the whole road index in the frame, 37 ms. Now none yet,
+    # and the index built in the background's slices.)
+    lua, ns = game
+    R = ns.Router
+    assert R.HeightsNear(0, -8990.0, 830.0, 10) is not None  # (built at once: the tests' way)
+    g = R.DebugGraph(0)
+    idx = g.segIndex
+    assert idx is not None
+    g.segIndex = None
+    R.WARM, R.SYNC_WALKS = True, False
+    try:
+        assert R.HeightsNear(0, -8990.0, 830.0, 10) is None
+        assert g.segIndex is None and R.HasWork()
+        clock = lua.eval("function() return os.clock() * 1000 end")
+        while R.HasWork():
+            R.Pump(clock() + 1, clock)
+        assert g.segIndex is not None
+        assert R.HeightsNear(0, -8990.0, 830.0, 10) is not None
+    finally:
+        R.WARM, R.SYNC_WALKS = False, True
+        if g.segIndex is None:
+            g.segIndex = idx

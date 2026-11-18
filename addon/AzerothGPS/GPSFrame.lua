@@ -1258,7 +1258,7 @@ function G.CityLabelPois(pois, viewCont, cx, cy, rot, s, half, zoom)
     local dx, dy = Geo.ScreenOffset(cx, cy, l[1], l[2])
     dx, dy = Geo.Rotate(dx * s, dy * s, rot)
     if math.abs(dx) <= half and math.abs(dy) <= half then
-      pois[#pois + 1] = { 3, dx, dy, l[3], l[1], l[2] }
+      pois[#pois + 1] = { 3, dx, dy, ns.PlaceName(l[3]), l[1], l[2] }
     end
   end
   return pois
@@ -1592,7 +1592,7 @@ function G.LayoutPois(cx, cy, cont, rot, zoom, half, show, faction)
       if math.abs(dx) < reach and math.abs(dy) < reach then
         dx, dy = Geo.Rotate(dx * s, dy * s, rot)
         if math.abs(dx) <= half and math.abs(dy) <= half then
-          out[#out + 1] = { kind, dx, dy, p[4], p[2], p[3], p[5], p[6], level = kind == 1 and p[7] or nil }
+          out[#out + 1] = { kind, dx, dy, ns.PoiName(p), p[2], p[3], p[5], p[6], level = kind == 1 and p[7] or nil }
           if #out >= G.MAX_POIS then break end
         end
       end
@@ -3777,7 +3777,7 @@ function G.DockShareText(i, side)
   local arr, dep = T.TransportTimes(i, side, now)
   if not arr then return nil end
   local function Town(name) return (((name or "?"):match("^[^,]+") or "?"):gsub("|", "")) end
-  local here, there = Town(side == 1 and t[9] or t[10]), Town(side == 1 and t[10] or t[9])
+  local here, there = Town(ns.RideEndName(t, side)), Town(ns.RideEndName(t, 3 - side))
   local boat = t[8] == "boat"
   local wait = side == 1 and t.wait1 or t.wait2
   if dep <= wait then
@@ -3794,7 +3794,7 @@ function G.AskRideOff(dock)
   local t = dock and ns.Transports and ns.Transports[dock[1]]
   if not (t and ns.Nav.RIDE_KINDS[t[8]]) then return end
   local on = ns.Nav.RideAllowed(t)
-  local a, b = (t[9] or "?"):match("^[^,]+"), (t[10] or "?"):match("^[^,]+")
+  local a, b = (ns.RideEndName(t, 1) or "?"):match("^[^,]+"), (ns.RideEndName(t, 2) or "?"):match("^[^,]+")
   local text
   if t[8] == "tram" then
     text = on and Format(L["Don't use the Deeprun Tram between %s and %s in routes?\n\nOptions -> Routing turns it back on."], a, b)
@@ -4887,7 +4887,7 @@ function G.MinimapIconList(px, py, cont, reach)
         for side = 1, 2 do
           local o = side == 1 and 0 or 3
           if t[1 + o] == base then
-            local to = side == 1 and t[10] or t[9] -- (as the map names it)
+            local to = ns.RideEndName(t, side == 1 and 2 or 1) -- (as the map names it)
             add(t[2 + o], t[3 + o], DOCK_ICON[t[8]], nil, G.MINIMAP_ICON_SIZE + 2, nil, nil, nil, dim,
               DOCK_NAME[t[8]] and Format(DOCK_NAME[t[8]], to or "?") or to)
           end
@@ -8390,7 +8390,7 @@ function G.Update()
           local dx, dy = Geo.ScreenOffset(cx, cy, x, y)
           dx, dy = Geo.Rotate(dx * s, dy * s, rot)
           if math.abs(dx) <= half and math.abs(dy) <= half then
-            pois[#pois + 1] = { 5, dx, dy, m.name, x, y, cityMap = id }
+            pois[#pois + 1] = { 5, dx, dy, ns.ZoneName(id, m.name), x, y, cityMap = id }
           end
         end
       end
@@ -8407,7 +8407,7 @@ function G.Update()
               local dx, dy = Geo.ScreenOffset(cx, cy, x, y)
               dx, dy = Geo.Rotate(dx * s, dy * s, rot)
               if math.abs(dx) <= half and math.abs(dy) <= half then
-                local to = side == 1 and t[10] or t[9]
+                local to = ns.RideEndName(t, side == 1 and 2 or 1)
                 local off = not ns.Nav.RideAllowed(t) -- (turned off: still shown, faded; right-click turns it back on)
                 pois[#pois + 1] = { 10, dx, dy, DOCK_NAME[t[8]] and Format(DOCK_NAME[t[8]], to or "?") or (to or "?"), x, y,
                   dock = { i, side }, kind = t[8], level = c, dim = off or nil, rideOff = off }
@@ -8447,7 +8447,7 @@ function G.Update()
         local dx, dy = Geo.ScreenOffset(cx, cy, c.x, c.y)
         dx, dy = Geo.Rotate(dx * s, dy * s, rot)
         if math.abs(dx) <= half and math.abs(dy) <= half then
-          pois[#pois + 1] = { 5, dx, dy, c.name, c.x, c.y, cityMap = c.id }
+          pois[#pois + 1] = { 5, dx, dy, ns.ZoneName(c.id, c.name), c.x, c.y, cityMap = c.id }
         end
       end
     end
@@ -8462,7 +8462,7 @@ function G.Update()
         local dx, dy = Geo.ScreenOffset(cx, cy, l[1], l[2])
         dx, dy = Geo.Rotate(dx * s, dy * s, rot)
         if math.abs(dx) <= half and math.abs(dy) <= half then
-          pois[#pois + 1] = { 3, dx, dy, l[3], l[1], l[2] }
+          pois[#pois + 1] = { 3, dx, dy, ns.PlaceName(l[3]), l[1], l[2] }
         end
       end
     end
@@ -8601,11 +8601,11 @@ InfoParts = function()
   local cm = G.cityGridMap and ns.Maps and ns.Maps[G.cityGridMap]
   if x and cm and cm.bounds and ns.Passability.InGridRect(G.cityGrid, x, y) then -- (the city's map shown: its name)
     local b = cm.bounds
-    return mark, cm.name, string.format("%.1f, %.1f", (b[4] - y) / (b[4] - b[2]) * 100, (b[3] - x) / (b[3] - b[1]) * 100)
+    return mark, ns.ZoneName(G.cityGridMap, cm.name), string.format("%.1f, %.1f", (b[4] - y) / (b[4] - b[2]) * 100, (b[3] - x) / (b[3] - b[1]) * 100)
   end
   if x and view.cont then
-    local _, name, u, v = G.LocateWorld(view.cont, x, y)
-    if name then return mark, name, string.format("%.1f, %.1f", u * 100, v * 100) end
+    local zid, name, u, v = G.LocateWorld(view.cont, x, y)
+    if name then return mark, ns.ZoneName(zid, name), string.format("%.1f, %.1f", u * 100, v * 100) end
     return mark, nil, nil
   end
   -- (in a dungeon or a map passed through, the Deeprun Tram: its name, and the spot in its own yards)
@@ -8616,8 +8616,8 @@ InfoParts = function()
   end
   if Geo.override then -- (the dev tools' simulated player: its zone and spot, as the game gives the player's)
     local o = Geo.override
-    local _, name, u, v = G.LocateWorld(o.cont, o.x, o.y)
-    return nil, name, u and string.format("%.1f, %.1f", u * 100, v * 100) or nil
+    local zid, name, u, v = G.LocateWorld(o.cont, o.x, o.y)
+    return nil, ns.ZoneName(zid, name), u and string.format("%.1f, %.1f", u * 100, v * 100) or nil
   end
   local mapID = C_Map.GetBestMapForUnit("player")
   local info = mapID and C_Map.GetMapInfo(mapID)
@@ -10501,28 +10501,31 @@ local searchIndex
 local function SearchIndex()
   -- (built for the character's faction: the other's docks left out; made again once it's known)
   local fac = ns.Nav.Faction and ns.Nav.Faction() or false
-  if searchIndex and G.searchFaction == fac then return searchIndex end
-  G.searchFaction = fac
+  local namesVer = ns.names and ns.names.taxiVer or 0 -- (and again when the game named the flight masters)
+  if searchIndex and G.searchFaction == fac and G.searchNamesVer == namesVer then return searchIndex end
+  G.searchFaction, G.searchNamesVer = fac, namesVer
   local list, seen = {}, {}
-  local function add(name, sub, cont, x, y, generic)
+  -- (`name` in the game's language, `en` the data's English: found by either, ns.PoiName and the like)
+  local function add(name, sub, cont, x, y, generic, en)
     if not name or name == "" or not cont then return end
     local key = name:lower() .. ":" .. cont .. ":" .. math.floor(x / 200) .. ":" .. math.floor(y / 200)
     if seen[key] then return end
     seen[key] = true
     -- (what it is, for the search's generic words: "flight master", "boat dock"; not a place's or a zone's)
     local kind = generic and sub:lower() or nil
-    list[#list + 1] = { name = name, lower = G.SearchLower(name), sub = sub, cont = cont, x = x, y = y, kind = kind }
+    list[#list + 1] = { name = name, lower = G.SearchLower(name), sub = sub, cont = cont, x = x, y = y, kind = kind,
+      en = en and en ~= name and G.SearchLower(en) or nil }
   end
   for cont, pois in pairs(ns.Pois or {}) do
     for _, p in ipairs(pois) do
-      add(p[4], p[1] == 1 and L["Flight master"] or p[1] == 2 and L["Point of interest"] or L["Place"], cont, p[2], p[3],
-        p[1] == 1)
+      add(ns.PoiName(p), p[1] == 1 and L["Flight master"] or p[1] == 2 and L["Point of interest"] or L["Place"], cont,
+        p[2], p[3], p[1] == 1, p[4])
     end
   end
-  for _, m in pairs(ns.Maps or {}) do
+  for id, m in pairs(ns.Maps or {}) do
     if m.type == 3 and m.bounds and m.continent and m.continent >= 0 then
       local b = m.bounds
-      add(m.name, L["Zone (its middle)"], m.continent, (b[1] + b[3]) / 2, (b[2] + b[4]) / 2)
+      add(ns.ZoneName(id, m.name), L["Zone (its middle)"], m.continent, (b[1] + b[3]) / 2, (b[2] + b[4]) / 2, nil, m.name)
     end
   end
   for _, t in ipairs(ns.Transports or {}) do
@@ -10534,8 +10537,8 @@ local function SearchIndex()
     else
       local what = t[8] == "teleporter" and L["Teleporter"] or t[8] == "boat" and L["boat dock"] -- (Darnassus's portal: no dock)
         or t[8] == "zeppelin" and L["zeppelin dock"] or t[8] == "tram" and L["tram dock"] or (t[8] .. " dock")
-      add(t[9], what, t[1], t[2], t[3], true)
-      add(t[10], what, t[4], t[5], t[6], true)
+      add(ns.RideEndName(t, 1), what, t[1], t[2], t[3], true, t[9])
+      add(ns.RideEndName(t, 2), what, t[4], t[5], t[6], true, t[10])
     end
   end
   searchIndex = list
@@ -10707,16 +10710,31 @@ end
 -- Each seller by a key: a shipped NPC's id, else "r<id>" (one talked to the data doesn't have). { stock = { [key] =
 -- { item ids } }, ammo = { [key] = { "ammo", "arrows" }, or false }, items = { { id, name, lowers } ... } shorter
 -- names first, sellers = { [item id] = { keys } } }.
+G.ITEM_NAMES_AGAIN, G.ITEM_NAMES_TRIES = 10, 6 -- (s between tries; tries in all: an item the game never names stays English)
 function G.VendorIndex()
   local Lay = ns.Layers
   if not (Lay and Lay.VendorItems) then return nil end
   local items, sells = Lay.VendorItems()
   local db = ns.db and ns.db.npcs
   local c = G.vendorIndex
-  if c and c.from == items and c.db == db and c.ver == Lay.sellsVersion then return c end
+  -- (items' names in the game's language once it has them cached, ns.ItemName: made again, at most every
+  -- ITEM_NAMES_AGAIN s, while some are still missing)
+  local now = GetTime and GetTime() or 0
+  local fresh = not (c and c.missing and c.missing > 0 and (c.tries or 0) < G.ITEM_NAMES_TRIES and now - c.at >= G.ITEM_NAMES_AGAIN)
+  if c and c.from == items and c.db == db and c.ver == Lay.sellsVersion and fresh then return c end
   local stock, names, kinds = {}, {}, {}
+  local missing = 0
   for npc, list in pairs(sells) do stock[npc] = list end
-  for id, it in pairs(items) do names[id], kinds[id] = { it.name }, it.kind end
+  for id, it in pairs(items) do
+    local shown = ns.ItemName(id, it.name)
+    if shown ~= it.name then
+      names[id] = { shown, it.name } -- (found by either, shown in the game's language)
+    else
+      names[id] = { it.name }
+      if ns.GameLocalized() then missing = missing + 1 end
+    end
+    kinds[id] = it.kind
+  end
   for id, n in pairs(db or {}) do
     if type(n) == "table" and type(n.sells) == "table" and next(n.sells) and not n.imported then
       local s = Lay.ShippedFor and Lay.ShippedFor(id, n)
@@ -10758,7 +10776,8 @@ function G.VendorIndex()
     if #a.name ~= #b.name then return #a.name < #b.name end
     return a.id < b.id
   end)
-  c = { from = items, db = db, ver = Lay.sellsVersion, stock = stock, ammo = ammo, items = list, sellers = sellers }
+  c = { from = items, db = db, ver = Lay.sellsVersion, stock = stock, ammo = ammo, items = list, sellers = sellers,
+    missing = missing, at = now, tries = c and c.from == items and (c.tries or 0) + 1 or 0 }
   G.vendorIndex = c
   return c
 end
@@ -10815,7 +10834,9 @@ function G.ShippedNpcEntries(class)
   local fac = ns.Nav.Faction and ns.Nav.Faction() or false
   local c = G.shippedSearch
   local vi = G.VendorIndex() -- (what they sell: their ammo kinds, made again when it changes)
-  if c and c.list == list and c.fac == fac and c.class == class and c.vi == vi then return c.entries end
+  if c and c.list == list and c.fac == fac and c.class == class and c.vi == vi and c.names == ns.npcNamesVer then
+    return c.entries
+  end
   local profs = {}
   for _, p in ipairs(G.PROFESSIONS) do profs[p] = true end
   local out = {}
@@ -10841,13 +10862,16 @@ function G.ShippedNpcEntries(class)
       -- (ammo by what it sells, asked 2026-11-15: Trak'gen, General Goods, sells Sharp Arrow; by its title only where
       -- nothing is known of its stock)
       for _, k in ipairs(G.StockAmmoKinds(n.id, n.title, Lay.NpcOffers(n, "v")) or {}) do add(k) end
-      local e = { name = n.name, lower = G.SearchLower(n.name), title = n.title, sub = n.title or L["NPC"], npc = true,
+      -- (its name as the game showed it, in its language, ns.NpcName; found by the English too, `en`)
+      local shown = ns.NpcName(n.id, n.name)
+      local e = { name = shown, lower = G.SearchLower(shown), en = shown ~= n.name and G.SearchLower(n.name) or nil,
+        title = n.title, sub = n.title or L["NPC"], npc = true,
         shipped = n, id = n.id, kind = n.title and G.SearchLower(n.title) or nil, kinds = kinds }
       e.tex = ns.Pins and ns.Pins.NpcIcon and ns.Pins.NpcIcon(e) or nil
       out[#out + 1] = e
     end
   end
-  G.shippedSearch = { list = list, fac = fac, class = class, entries = out, vi = vi }
+  G.shippedSearch = { list = list, fac = fac, class = class, entries = out, vi = vi, names = ns.npcNamesVer }
   return out
 end
 -- Search entry `e` of a shipped NPC, found: at its spawn nearest the player (px, py on level `pc`), its floor the one
@@ -10952,16 +10976,27 @@ function G.SearchPlaceNames()
   local set = G.searchPlaceSet
   if set then return set end
   set = {}
-  for _, list in pairs(ns.Pois or {}) do
-    for _, p in ipairs(list) do
-      if p[1] ~= 1 and p[4] then set[G.SearchLower(p[4])] = true end
+  -- (each name in the game's language and the data's English, each the other's twin: [lower] = twin or true; a
+  -- place typed in either finds what's named in either)
+  local function both(shown, en)
+    if not en then return end
+    local a, b = G.SearchLower(shown or en), G.SearchLower(en)
+    if a ~= b then
+      set[a], set[b] = b, a
+    elseif set[a] == nil then
+      set[a] = true
     end
   end
-  for _, m in pairs(ns.Maps or {}) do
-    if m.name and (m.type == 3 or m.type == 4) then set[G.SearchLower(m.name)] = true end
+  for _, list in pairs(ns.Pois or {}) do
+    for _, p in ipairs(list) do
+      if p[1] ~= 1 and p[4] then both(ns.PoiName(p), p[4]) end
+    end
+  end
+  for id, m in pairs(ns.Maps or {}) do
+    if m.name and (m.type == 3 or m.type == 4) then both(ns.ZoneName(id, m.name), m.name) end
   end
   for _, l in pairs(ns.CityLevels or {}) do
-    if l.name then set[G.SearchLower(l.name)] = true end
+    if l.name then both(ns.ZoneName(l.map, l.name), l.name) end
   end
   G.searchPlaceSet = set
   return set
@@ -10970,10 +11005,11 @@ end
 function G.SearchPlacesTyped(typed)
   if #typed < G.SEARCH_PLACE_MIN then return nil end
   local out
-  for name in pairs(G.SearchPlaceNames()) do
+  for name, twin in pairs(G.SearchPlaceNames()) do
     if name:sub(1, #typed) == typed then
       out = out or {}
       out[name] = true
+      if twin ~= true then out[twin] = true end -- (its name in the other language too)
     end
   end
   return out
@@ -11195,21 +11231,21 @@ end
 G.NPC_PLACE_YD = 250
 function G.NpcPlaceName(level, x, y)
   local lv = ns.CityLevels and ns.CityLevels[level]
-  if lv and lv.name then return lv.name end
+  if lv and lv.name then return ns.ZoneName(lv.map, lv.name) end
   local cont = Geo.Base(level)
   local city = G.CityMapAt and G.CityMapAt(cont, x, y)
-  if city and ns.Maps and ns.Maps[city] then return ns.Maps[city].name end
+  if city and ns.Maps and ns.Maps[city] then return ns.ZoneName(city, ns.Maps[city].name) end
   local best, bd = nil, G.NPC_PLACE_YD ^ 2
   for _, p in ipairs(ns.Pois and ns.Pois[cont] or {}) do
     if p[1] ~= 1 then -- (not a flight master's: "Undercity, Tirisfal")
       local d = (p[2] - x) ^ 2 + (p[3] - y) ^ 2
-      if d < bd then best, bd = p[4], d end
+      if d < bd then best, bd = p, d end
     end
   end
-  if best then return best end
+  if best then return ns.PoiName(best) end
   if G.LocateWorld then
-    local _, z = G.LocateWorld(cont, x, y)
-    return z
+    local zid, z = G.LocateWorld(cont, x, y)
+    return z and ns.ZoneName(zid, z)
   end
   return nil
 end
@@ -14291,6 +14327,14 @@ function G.Init()
         if G.mapMenu then G.mapMenu:Hide() end
         ns.Questify.Toggle()
       end },
+    { id = "aprRoute", icon = "Interface\\Icons\\INV_Misc_Spyglass_03", label = L["Azeroth Pilot Route"],
+      tip = L["Routes to each step of your Azeroth Pilot Reloaded guide in turn: the place Azeroth Pilot's arrow points at is your next stop, done when Azeroth Pilot checks it off (not by getting there), then on to the next. Click again to stop. Replaces the current route. (Shown with Azeroth Pilot Reloaded installed)"],
+      when = function() return ns.AzerothPilot and ns.AzerothPilot.Available() end,
+      isOn = function() return ns.AzerothPilot and ns.AzerothPilot.On() end,
+      action = function()
+        if G.mapMenu then G.mapMenu:Hide() end
+        ns.AzerothPilot.Toggle()
+      end },
     { id = "hearth", key = "useHearthstone", icon = "Interface\\Icons\\INV_Misc_Rune_01", label = L["Use Hearthstone"],
       tip = L["A route may start with your Hearthstone when it's ready and faster."], route = true, defaultOn = true },
     { id = "quests", key = "layerQuests", icon = ns.Layers and ns.Layers.ICON and ns.Layers.ICON.objective, label = L["Quests"],
@@ -14423,7 +14467,7 @@ function G.Init()
   -- (the questing addons' routes, shown only with their addon loaded: on the bar to the right, always shown; asked
   -- 2026-11-16 for 1.3.5, "if using RestedXP or any of the supported questing addons, these buttons are always shown by
   -- default to the right")
-  G.QUICK_DEFAULT = { search = "menuUp", quickFind = "menuUp", questRoute = "menuRight", rxpRoute = "barRight", zygorRoute = "barRight", polestarRoute = "barRight", questifyRoute = "barRight", hearth = "menuRight", pauseRoute = "menuRight",
+  G.QUICK_DEFAULT = { search = "menuUp", quickFind = "menuUp", questRoute = "menuRight", rxpRoute = "barRight", zygorRoute = "barRight", polestarRoute = "barRight", questifyRoute = "barRight", aprRoute = "barRight", hearth = "menuRight", pauseRoute = "menuRight",
     city = "hidden", dungeonsG = "menuUp", styles = "hidden", gather = "menuUp", questsG = "menuUp", mapEdit = "barUp" }
   -- Groups: one button in the bar or menu; clicked, its buttons slide out beside it (to the
   -- right from a column going up, upward from a row going right).
@@ -15556,7 +15600,8 @@ end
 -- player's level: red far below it, orange below, yellow in it, green above, gray far above).
 function G.ZoneHoverText(id, name, playerLevel)
   local lo, hi = G.ZoneLevels(id, name)
-  if not lo then return name end
+  local shown = ns.ZoneName(id, name) -- (the game's language; the levels by the English)
+  if not lo then return shown end
   local pl = playerLevel or 1
   local r, g, b
   if pl < lo - 4 then r, g, b = 1, 0.1, 0.1
@@ -15564,7 +15609,7 @@ function G.ZoneHoverText(id, name, playerLevel)
   elseif pl <= hi then r, g, b = 1, 1, 0
   elseif pl <= hi + 5 then r, g, b = 0.25, 0.75, 0.25
   else r, g, b = 0.6, 0.6, 0.6 end
-  return name, lo == hi and Format(L["Level %d"], lo) or Format(L["Level %d-%d"], lo, hi), r, g, b
+  return shown, lo == hi and Format(L["Level %d"], lo) or Format(L["Level %d-%d"], lo, hi), r, g, b
 end
 
 -- The insets' frames (gold under the mouse) and names, on the world map.
@@ -15591,7 +15636,7 @@ function G.DrawInsetFrames(cx, cy, rot, s)
         label = lineLayer:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
         G.insetLabels[i] = label
       end
-      label:SetText(ns.Maps[it.map].name)
+      label:SetText(ns.ZoneName(it.map, ns.Maps[it.map].name))
       G.PinText(label, canvas, "BOTTOM", (pts[1][1] + pts[2][1]) / 2, (pts[1][2] + pts[2][2]) / 2 + 2)
       label:Show()
     elseif label then

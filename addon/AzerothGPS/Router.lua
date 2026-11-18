@@ -1548,6 +1548,7 @@ function R.JoinCavePieces(cont, n, e, base, nz)
   end
   local adj, deg = {}, {}
   for k = 1, #e do
+    Breathe(k, 2000)
     local a, b, len = e[k][1], e[k][2], e[k][3] or 0
     adj[a] = adj[a] or {}
     adj[b] = adj[b] or {}
@@ -1591,8 +1592,10 @@ function R.JoinCavePieces(cont, n, e, base, nz)
     return false
   end
   local made, linked = {}, {}
+  -- (pauses at every other end, and after each walk tried: 20 ends between pauses, each with its walks over the grids,
+  -- were 13 ms slices of the warm-up after a login; with G-Sync and V-Sync off a frame that long tears, issue #548)
   for k, nd in ipairs(ends) do
-    Breathe(k, 20)
+    Breathe(k, 2)
     local x, y = n[nd * 2 - 1], n[nd * 2]
     local best, bd, bpts = nil, B, nil
     local bx, by = math.floor(x / B), math.floor(y / B)
@@ -1604,6 +1607,7 @@ function R.JoinCavePieces(cont, n, e, base, nz)
             if d < bd and not near(nd, m, d * R.CAVE_JOIN_ROAD_FACTOR + 1) then
               -- (a walk over the grids, round the sliver: not through a wall)
               local total, pts = P.FindPath(cont, x, y, n[m * 2 - 1], n[m * 2], true, true)
+              Breathe(1, 1)
               if total and pts and total <= d * R.CAVE_JOIN_WALK_FACTOR + R.CAVE_JOIN_WALK_EXTRA and onFloor(x, y, pts) then
                 best, bd, bpts = m, d, pts
               end
@@ -1848,7 +1852,10 @@ function BuildGraph(cont)
   for _, extra in ipairs(ns.RoadOverlays and ns.RoadOverlays[cont] or {}) do
     local base = #nodes / 2
     local n2, e2 = {}, {}
-    for i = 1, #nodes do n2[i] = nodes[i] end
+    for i = 1, #nodes do
+      Breathe(i, 20000)
+      n2[i] = nodes[i]
+    end
     for i = 1, #extra.n do n2[#nodes + i] = extra.n[i] end
     local ox0, ox1, oy0, oy1 = math.huge, -math.huge, math.huge, -math.huge
     for i = 1, #extra.n, 2 do
@@ -2049,7 +2056,7 @@ function BuildGraph(cont)
   end
   local drops, caveEdges, indoorEdges = {}, {}, {}
   for ei, ed in ipairs(edges) do
-    Breathe(ei, 2000)
+    Breathe(ei, 500)
     drops[ei] = dropOf[ed]
     caveEdges[ei] = caveOf[ed]
     -- (a building's own roads, both ends on its floors: not a door's join onto the land's road)
@@ -2938,6 +2945,13 @@ R.FLAT_Z = 0.5
 function R.HeightsNear(cont, x, y, r)
   local g = GraphQuery(cont, x, y)
   if not (g and (g.z or g.nz)) then return nil end
+  -- (its index not built yet, asked in the frame: none yet, the index built in the background's slices. Built here it
+  -- was a 37 ms frame walking in Brill after a login; with G-Sync and V-Sync off a frame that long tears the screen,
+  -- website issue #548)
+  if not g.segIndex and R.WARM and not R.SYNC_WALKS and not CanYield() then
+    R.Background("segIndex:" .. tostring(cont), function() SegIndex(g) end)
+    return nil
+  end
   local idx = SegIndex(g)
   local out, seen, r2 = {}, {}, r * r
   local bx, by, reach = math.floor(x / SEG_BUCKET), math.floor(y / SEG_BUCKET), math.ceil(r / SEG_BUCKET)

@@ -25,6 +25,16 @@ function T.KnownKey(nodes)
   return table.concat(ids, ",")
 end
 
+-- The names among `nodes` as one text (node ids in order, each with its name).
+function T.NamesKey(nodes)
+  local parts = {}
+  for _, n in ipairs(nodes or {}) do
+    if n.nodeID then parts[#parts + 1] = n.nodeID .. "=" .. tostring(n.name) end
+  end
+  table.sort(parts)
+  return table.concat(parts, ";")
+end
+
 local function StoreNodes(mapID, nodes, source)
   if not nodes then return 0 end
   local cdb = ns.CharDB()
@@ -52,7 +62,10 @@ local function StoreNodes(mapID, nodes, source)
   -- (only when the flights known changed: every talk to a flight master threw the route away and worked it out
   -- again, the map refreshing each time, a player's report 2026-11-10)
   local changed = T.KnownKey(cdb.taxiNodes[mapID] and cdb.taxiNodes[mapID].nodes) ~= T.KnownKey(out)
+  local renamed = T.NamesKey(cdb.taxiNodes[mapID] and cdb.taxiNodes[mapID].nodes) ~= T.NamesKey(out)
   cdb.taxiNodes[mapID] = { time = time(), source = source, nodes = out }
+  -- (the game's names for the flight masters, shown in its language: ns.TaxiName; the flights' names made again)
+  if renamed and ns.TaxiNamesChanged then ns.TaxiNamesChanged() end
   if changed and ns.Nav and ns.Nav.FlightsChanged then ns.Nav.FlightsChanged() end -- routes may fly now
   return #out
 end
@@ -178,14 +191,145 @@ OnTaxiChanged = function()
   end
 end
 
+---------------------------------------------------------------------------
+-- The route's flight on the flight map (a player's request, 2026-11-17: "put a ring round X, so I can click the right
+-- one straight away"): with the flight master the route boards at open, a pulsing ring round the flight master it
+-- flies to (the game's own TaxiButton, or the flight map's pin), the next flight of the route only. Display only:
+-- the ring takes no clicks, and nothing is picked for the player. Option `flightMapRing` (Options > Routing, on).
+---------------------------------------------------------------------------
+T.RING_PX = 32 -- the ring's size (Media\IconRing32, drawn at its own size): round the game's 16 px button
+T.RING_PULSE = 1.2 -- s, one pulse
+T.RING_COLOR = { 1, 0.82, 0 } -- gold, as the game's own highlights
+
+-- The route's next flight: the flight master it boards at, the one it lands at (node ids, as Data/Pois.lua's and the
+-- game's) and that one's name, else nil. Only the first flight of the route (and none while flying).
+function T.RouteFlight()
+  local N = ns.Nav
+  local r = N and N.route
+  if not r then return nil end
+  local function first(legs)
+    for _, leg in ipairs(legs or {}) do
+      local t = leg.ride
+      if t and t[8] == "flight" and not t.flying and t.to then return t end
+    end
+  end
+  local t = first(r.legs)
+  local stretches = r.stretches
+  for i = 2, (not t and stretches and N.PlannedStops) and N.PlannedStops() or 0 do
+    t = t or (stretches[i] and first(stretches[i].legs))
+  end
+  if not t then return nil end
+  return t.from, t.to, t[10]
+end
+
+-- The flight map's slot of node `to`, when the flight master open is node `from` (the route boards here): else nil.
+function T.RingSlot(from, to, toName)
+  local mapID = GetTaxiMapID and GetTaxiMapID()
+  local nodes = mapID and C_TaxiMap and C_TaxiMap.GetAllTaxiNodes and C_TaxiMap.GetAllTaxiNodes(mapID) or {}
+  local here, slot
+  for _, n in ipairs(nodes) do
+    if n.state == 0 then here = n.nodeID end -- (Enum.FlightPathState.Current)
+    if n.nodeID == to then slot = n.slotIndex end
+  end
+  if here ~= nil and from ~= nil and here ~= from then return nil end -- (another flight master than the route's)
+  if not slot and toName and NumTaxiNodes then -- (no ids from the game: by its name)
+    for i = 1, NumTaxiNodes() do
+      if TaxiNodeName(i) == toName then slot = i end
+    end
+  end
+  if slot and TaxiNodeGetType and TaxiNodeGetType(slot) == "CURRENT" then return nil end
+  return slot
+end
+
+local ring
+local function Ring()
+  if ring then return ring end
+  ring = CreateFrame("Frame", nil, UIParent)
+  ring:SetSize(T.RING_PX, T.RING_PX)
+  if ring.EnableMouse then ring:EnableMouse(false) end -- (display only: clicks go to the game's button)
+  local tex = ring:CreateTexture(nil, "OVERLAY")
+  tex:SetAllPoints()
+  tex:SetTexture("Interface\\AddOns\\AzerothGPS\\Media\\IconRing" .. T.RING_PX)
+  tex:SetVertexColor(T.RING_COLOR[1], T.RING_COLOR[2], T.RING_COLOR[3])
+  ring.tex = tex
+  ring:SetScript("OnUpdate", function(self)
+    local p = (GetTime() % T.RING_PULSE) / T.RING_PULSE
+    self.tex:SetAlpha(0.45 + 0.55 * math.abs(math.cos(p * math.pi)))
+  end)
+  ring:Hide()
+  T.ring = ring
+  return ring
+end
+
+-- The button (or pin) of slot `slot` on the flight map shown: the classic flight map's TaxiButton<slot>, else the
+-- flight map's pin for it.
+function T.RingButton(slot, to)
+  local tf = rawget(_G, "TaxiFrame")
+  if tf and tf.IsShown and tf:IsShown() then
+    local b = rawget(_G, "TaxiButton" .. slot)
+    if b then return b end
+  end
+  local fm = rawget(_G, "FlightMapFrame")
+  if fm and fm.IsShown and fm:IsShown() and fm.EnumeratePinsByTemplate then
+    for pin in fm:EnumeratePinsByTemplate("FlightMap_FlightPointPinTemplate") do
+      local d = pin.taxiNodeData
+      if d and (d.nodeID == to or d.slotIndex == slot) then return pin end
+    end
+  end
+end
+
+-- The ring put round the route's next flight master on the flight map open (or hidden: none, or the option off).
+-- True when shown.
+function T.MarkTaxiMap()
+  local r = Ring()
+  r:Hide()
+  if ns.settings and ns.settings.gps and ns.settings.gps.flightMapRing == false then return false end
+  local from, to, toName = T.RouteFlight()
+  local slot = to and T.RingSlot(from, to, toName)
+  local b = slot and T.RingButton(slot, to)
+  if not b then return false end
+  r:SetParent(b)
+  r:ClearAllPoints()
+  r:SetPoint("CENTER", b, "CENTER")
+  r:SetFrameStrata(b.GetFrameStrata and b:GetFrameStrata() or "HIGH")
+  r:SetFrameLevel((b.GetFrameLevel and b:GetFrameLevel() or 1) + 2)
+  r:Show()
+  r.slot = slot
+  return true
+end
+
+-- The ring a moment after the flight map opens (the game sets its buttons as it shows, after TAXIMAP_OPENED), and
+-- again while it stays open with none yet: a flight master's flights read for the first time put the route aside
+-- until it's worked out again (Nav.FlightsChanged), and the ring waits for it.
+T.RING_TRIES = { 0, 0.2, 0.5, 1, 2, 3 } -- s after the flight map opens
+function T.MarkSoon()
+  for _, d in ipairs(T.RING_TRIES) do
+    C_Timer.After(d, function()
+      if T.taxiOpen and not (ring and ring:IsShown()) then pcall(T.MarkTaxiMap) end
+    end)
+  end
+end
+
+function T.UnmarkTaxiMap()
+  if not ring then return end
+  ring:Hide()
+  ring:SetParent(UIParent)
+end
+
 local ev = CreateFrame("Frame")
 ev:RegisterEvent("TAXIMAP_OPENED")
+pcall(ev.RegisterEvent, ev, "TAXIMAP_CLOSED")
 ev:RegisterEvent("PLAYER_CONTROL_LOST")
 ev:RegisterEvent("PLAYER_CONTROL_GAINED")
 pcall(ev.RegisterEvent, ev, "UI_INFO_MESSAGE") -- ("New flight path discovered!")
 ev:SetScript("OnEvent", function(_, event, _, message)
   if event == "TAXIMAP_OPENED" then
     pcall(OnTaxiMapOpened)
+    T.taxiOpen = true
+    T.MarkSoon()
+  elseif event == "TAXIMAP_CLOSED" then
+    T.taxiOpen = false
+    pcall(T.UnmarkTaxiMap)
   elseif event == "UI_INFO_MESSAGE" then
     if ERR_NEWTAXIPATH and message == ERR_NEWTAXIPATH then
       C_Timer.After(T.DISCOVER_AFTER, function() pcall(T.OnDiscovered) end)

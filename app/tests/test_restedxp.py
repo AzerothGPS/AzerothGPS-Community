@@ -36,7 +36,7 @@ def test_the_button_is_there_only_with_restedxp():
     # (asked 2026-11-16 for 1.3.5: "if using RestedXP or any of the supported questing addons, these buttons are always
     # shown by default to the right") on the bar to the right, shown; a place the player chose stays theirs
     G = ns.GPS
-    for i in ("rxpRoute", "zygorRoute", "polestarRoute", "questifyRoute"):
+    for i in ("rxpRoute", "zygorRoute", "polestarRoute", "questifyRoute", "aprRoute"):
         assert G.QuickPlace(i) == "barRight", i
     G.LayoutQuick()
     b = next(t for t in G.QUICK.values() if t.id == "rxpRoute").button
