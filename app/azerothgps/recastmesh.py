@@ -9,6 +9,12 @@ data/thirdparty/recastnavigation, compiled with zig: `agps navmesh build-tool`),
 - the terrain round it (caves.Ground, every 2 yards; not holes nor under the water: the canals' beds aren't walked).
 Walkable is decided here by each face's slope (the collision faces' winding can't be trusted): at most WALK_SLOPE.
 The agent is a player: AGENT_HEIGHT tall, AGENT_RADIUS round, steps up AGENT_CLIMB.
+
+Undercity (not one of capitals.CAPITALS: its floors are a level of their own, cities.py) gets a mesh too, from its one
+model (cities.placement: the city down there, its lift shafts and the Ruins of Lordaeron over it) as the game collides
+with it (cities._floors' solid faces, either side up: its drawn floors over them are decoration), its canals' floors under
+their slime not walked, and the doodads and the land round it as a capital's. Its floors over floors are Recast's spans
+one over the other; its mesh is exported with its level (cities.UNDERCITY_ID) for the dev addon to pick it there.
 """
 
 from __future__ import annotations
@@ -30,6 +36,7 @@ WALK_SLOPE = 50.0  # degrees: the steepest face walked (the terrain grid's, capi
 MAX_EDGE = 12.0
 GROUND_STEP = 2.0
 PAD = 40.0  # yards round the city's models: the ground at its gates
+WADE = 1.0  # yards: a model's floor deeper than this under its liquid (Undercity's canals' slime) is swum, not walked
 
 
 def tool() -> Path:
@@ -46,8 +53,7 @@ def _walkable(T: np.ndarray) -> np.ndarray:
 
 def capital_triangles(cd, cap, log=print) -> tuple[np.ndarray, tuple]:
     """The triangles (N, 3, 3) of a capital and round it, and the box (x0, y0, x1, y1)."""
-    from . import capitals, doodads
-    from .caves import Ground
+    from . import capitals
 
     fl, wl, lq, _named = capitals.city_faces(cd, cap, log)
     tris = []
@@ -55,17 +61,67 @@ def capital_triangles(cd, cap, log=print) -> tuple[np.ndarray, tuple]:
         tris.append([(xy[k][0], xy[k][1], zs[k]) for k in range(3)])
     for (_zlo, _zhi), xy, zs in wl:
         tris.append([(xy[k][0], xy[k][1], zs[k]) for k in range(3)])
-    T = np.array(tris, float)
+    T, box = _with_surroundings(cd, cap.cont, np.array(tris, float))
+    log(f"  {cap.name}: {len(fl)} floor and {len(wl)} wall faces, {len(T)} triangles with doodads and ground")
+    return T, box
+
+
+def under_liquid(T: np.ndarray, liquids, wade: float = WADE) -> np.ndarray:
+    """Each triangle (N, 3, 3) a floor under a liquid deeper than `wade`: its middle inside one of the liquids' tiles
+    ((x0, y0, x1, y1), surface z; in the triangles' frame) more than `wade` under the surface."""
+    out = np.zeros(len(T), bool)
+    if not len(T) or not liquids:
+        return out
+    c = T.mean(axis=1)
+    for (x0, y0, x1, y1), lz in liquids:
+        out |= (c[:, 0] >= x0) & (c[:, 0] <= x1) & (c[:, 1] >= y0) & (c[:, 1] <= y1) & (c[:, 2] < lz - wade)
+    return out
+
+
+def to_world(local: np.ndarray, x: float, y: float, z: float, yaw: float) -> np.ndarray:
+    """Triangles (N, 3, 3) in a model's frame placed in the world as cities.undercity places Undercity's: turned by
+    yaw + 180 degrees about the up axis, then moved to (x, y, z)."""
+    t = math.radians(yaw + 180)
+    c, s = math.cos(t), math.sin(t)
+    W = np.empty_like(local)
+    W[..., 0] = x + local[..., 0] * c - local[..., 1] * s
+    W[..., 1] = y + local[..., 0] * s + local[..., 1] * c
+    W[..., 2] = local[..., 2] + z
+    return W
+
+
+def undercity_triangles(cd, log=print) -> tuple[np.ndarray, tuple, np.ndarray]:
+    """Undercity's triangles (N, 3, 3; world x, y and the game's height: the model's + its placement's) and round it, the
+    box, and which of them may be walked (by the slope, but not its canals' beds under the slime)."""
+    from . import cities
+
+    p, names = cities.placement(cd)
+    floors, walls, _gz = cities._floors(cd, p.wmo, names, solid=True)
+    local = np.array([f[-1] for f in floors] + [w[-1] for w in walls], float)
+    wet = under_liquid(local, [(box, lz) for _gi, box, lz in cities._liquids(cd, p.wmo)])
+    T, box = _with_surroundings(cd, 0, to_world(local, p.x, p.y, p.z, p.yaw))
+    walk = _walkable(T)
+    walk[:len(local)] &= ~wet
+    log(f"  Undercity: {len(floors)} floor and {len(walls)} wall faces ({int(wet.sum())} under the canals' slime), "
+        f"{len(T)} triangles with doodads and ground")
+    return T, box, walk
+
+
+def _with_surroundings(cd, cont: int, T: np.ndarray) -> tuple[np.ndarray, tuple]:
+    """A city's model triangles (first, as they are) and the doodads and terrain round them, and the box."""
+    from . import doodads
+    from .caves import Ground
+
     x0, y0 = T[:, :, 0].min() - PAD, T[:, :, 1].min() - PAD
     x1, y1 = T[:, :, 0].max() + PAD, T[:, :, 1].max() + PAD
     parts = [T]
     # the doodads with collision: their faces as they are
-    for d in doodads.doodads(cd, cap.cont, (x0, y0, x1, y1), wmos=None):
+    for d in doodads.doodads(cd, cont, (x0, y0, x1, y1), wmos=None):
         D = doodads.triangles(cd, d)
         if D is not None and len(D):
             parts.append(np.asarray(D, float))
     # the terrain, every GROUND_STEP yards: two triangles a square where all four corners are walkable ground
-    g = Ground(cd, cap.cont)
+    g = Ground(cd, cont)
     xs = np.arange(x0, x1 + GROUND_STEP, GROUND_STEP)
     ys = np.arange(y0, y1 + GROUND_STEP, GROUND_STEP)
     X, Y = np.meshgrid(xs, ys, indexing="ij")
@@ -80,15 +136,26 @@ def capital_triangles(cd, cap, log=print) -> tuple[np.ndarray, tuple]:
         A, B, Cc, Dd = p(ii, jj), p(ii + 1, jj), p(ii, jj + 1), p(ii + 1, jj + 1)
         parts.append(np.stack([A, B, Dd], 1))
         parts.append(np.stack([A, Dd, Cc], 1))
-    T = np.concatenate(parts)
-    log(f"  {cap.name}: {len(fl)} floor and {len(wl)} wall faces, {len(T)} triangles with doodads and ground")
-    return T, (x0, y0, x1, y1)
+    return np.concatenate(parts), (x0, y0, x1, y1)
 
 
-def run_recast(T: np.ndarray, log=print) -> dict:
+def sources() -> list:
+    """The meshes built: (name, cont, level or None, triangles(cd, log) -> (T, box, walkable or None)): each capital's,
+    and Undercity's (its level's, cities.UNDERCITY_ID, over continent 0)."""
+    from .capitals import CAPITALS
+    from .cities import UNDERCITY_ID
+
+    out = [(cap.name, cap.cont, None, (lambda cd, log, cap=cap: (*capital_triangles(cd, cap, log), None)))
+           for cap in CAPITALS]
+    out.append(("Undercity", 0, UNDERCITY_ID, undercity_triangles))
+    return out
+
+
+def run_recast(T: np.ndarray, log=print, walk: np.ndarray | None = None) -> dict:
     """navbuild.exe over the triangles: the mesh's tiles, {(tx, ty): navmesh.Tile} (world x, y, z; neis 1-based, 0 none,
-    0x8000 a tile's side)."""
-    walk = _walkable(T)
+    0x8000 a tile's side). `walk`: which triangles may be walked (else by their slope)."""
+    if walk is None:
+        walk = _walkable(T)
     # (Recast's axes: x, up, z = world x, height, world y; the solid faces' area 0)
     V = T.reshape(-1, 3)[:, [0, 2, 1]].astype(np.float32)
     n = len(T)
@@ -194,14 +261,16 @@ GRID_YD = 16.0  # the export's lookup cells: each cell lists the polys touching 
 
 
 def export_lua(meshes: dict, out: Path, log=print) -> None:
-    """The meshes ({name: (cont, tiles)}) as one Lua file for the developer addon's route comparison:
-    AzerothGPSDevNav[name] = { cont, box = {x0, y0, x1, y1}, cell, gx0, gy0, gw, vs = "x,y,z,...", ps = "vi,vi,..;..."
+    """The meshes ({name: (cont, tiles) or (cont, tiles, level)}) as one Lua file for the developer addon's route
+    comparison: AzerothGPSDevNav[name] = { cont, level (an underground city's: its routes' cont down there), box = {x0,
+    y0, x1, y1}, cell, gx0, gy0, gw, vs = "x,y,z,...", ps = "vi,vi,..;..."
     (a poly's vertices, 1-based), ns = "nb,va,vb,...;..." (each poly's neighbors and the portal's vertices), gs =
     "k:pid,pid;..." (the grid cells' polys, k = gx * gw + gy) }.
     Never shipped: local, git-ignored."""
     lines = ["-- GENERATED by azerothgps.recastmesh.export_lua: Recast meshes for the dev tools' route comparison.",
              "-- Local only, never committed or shipped.", "AzerothGPSDevNav = AzerothGPSDevNav or {}"]
-    for name, (cont, tiles) in meshes.items():
+    for name, (cont, tiles, *rest) in meshes.items():
+        level = rest[0] if rest else None
         m = RecastMesh(tiles, cont)
         ids, verts, vindex, polys = {}, [], {}, []
 
@@ -237,7 +306,8 @@ def export_lua(meshes: dict, out: Path, log=print) -> None:
                     grid.setdefault(gx * gw + gy, []).append(pid)
         # (as strings, read on first use: Lua 5.1 allows 262143 constants a function, a city's numbers are more)
         flat = ",".join(f"{v[0]:.1f},{v[1]:.1f},{v[2]:.1f}" for v in verts)
-        lines.append(f'AzerothGPSDevNav[{name!r}] = {{ cont = {cont}, box = {{ {x0:.1f}, {y0:.1f}, {max(xs):.1f}, {max(ys):.1f} }},')
+        lv = f" level = {level}," if level is not None else ""
+        lines.append(f'AzerothGPSDevNav[{name!r}] = {{ cont = {cont},{lv} box = {{ {x0:.1f}, {y0:.1f}, {max(xs):.1f}, {max(ys):.1f} }},')
         lines.append(f"  cell = {GRID_YD}, gx0 = {x0:.1f}, gy0 = {y0:.1f}, gw = {gw},")
         lines.append(f'  vs = "{flat}",')
         lines.append('  ps = "' + ";".join(",".join(map(str, pv)) for pv in polys) + '",')
