@@ -372,6 +372,33 @@ def test_an_overlay_draws_icons_until_removed(game):
     G.Update()
     assert not _shown(lua, lambda w: w._tex == 136777)
 
+def test_an_overlay_is_told_the_level_the_map_shows(game):
+    # (API 21, for the dev tools' road and navmesh views: down in Undercity the map shows its level, 10001, while
+    # ctx.cont is still the continent) ctx.level: the city's level on its map, the continent on the land
+    lua, ns = game
+    G, A = ns.GPS, lua.globals().AzerothGPS
+    lua.execute("AGPS_LEVELS = {} AGPS_MAP_REAL = AGPS_MAP AGPS_T = AGPS_T + 1000")
+    A.SetOverlay("test level", lua.eval("""function(ctx)
+      AGPS_LEVELS[#AGPS_LEVELS + 1] = { ctx.cont, ctx.level }
+    end"""))
+    try:
+        lua.execute("AGPS_MAP = 1458 AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = 1593.5, 157.3, 0 AGPS_T = AGPS_T + 1")
+        G.Follow()
+        G.Update()
+        last = lua.eval("AGPS_LEVELS[#AGPS_LEVELS]")
+        assert (last[1], last[2]) == (0, 10001)  # (down in Undercity: its level on the continent's coordinates)
+        lua.execute("AGPS_MAP = AGPS_MAP_REAL AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = 2254.0, 293.0, 0 AGPS_T = AGPS_T + 1")
+        G.Follow()
+        G.Update()
+        last = lua.eval("AGPS_LEVELS[#AGPS_LEVELS]")
+        assert (last[1], last[2]) == (0, 0)  # (the land)
+    finally:
+        A.SetOverlay("test level", None)
+        lua.execute("AGPS_MAP = AGPS_MAP_REAL AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = 2254.0, 293.0, 0 AGPS_T = AGPS_T + 1")
+        G.Follow()
+        G.Update()
+
+
 def test_a_route_starting_with_the_hearthstone_says_so_in_both_windows(game):
     # (reported, screenshot) the route's step 1 "Use your Hearthstone" while the arrow window gave the turns
     # of the walk after it; asked: its button in the arrow window too, and the map's hidden while the
