@@ -688,15 +688,59 @@ def cmd_npc_floors(args) -> int:
     return 0
 
 
+def cmd_npc_spots(args) -> int:
+    """NPC spots marked in game (a JSON list of marks: npcspots.py) into overrides/npc_spots.json, and the overrides
+    into Data/Npcs.lua (only the spawns marked change; the dump isn't needed)."""
+    import json
+
+    from . import npcspots
+
+    path = Path(args.overrides) if args.overrides else npcspots.FILE
+    lua = Path(args.npcs_lua) if args.npcs_lua else npcspots.NPCS_LUA
+    if args.import_file:
+        marks = json.loads(Path(args.import_file).read_text(encoding="utf-8"))
+        marks = marks.get("marks", []) if isinstance(marks, dict) else marks
+        if args.write:
+            new = npcspots.merge_marks(marks, path)
+        else:  # (what it would take in)
+            have = npcspots.times(path)
+            new = [g for g in map(npcspots.spot_of, marks) if g and g[1]["time"] not in have]
+        print(f"{len(new)} new NPC spot(s) of {len(marks)} mark(s)")
+        doc = npcspots.load(path)
+        if not args.write:  # (as it would be)
+            for nid, s in new:
+                doc["npcs"].setdefault(str(nid), []).append(s)
+    else:
+        doc = npcspots.load(path)
+        new = []
+    text, applied = npcspots.patch_lua(lua.read_text(encoding="utf-8"), doc, log=print)
+    for nid, done in sorted(applied.items()):
+        for s, moved in done:
+            how = "added as a spawn" if moved is None else f"moved {moved:.1f} yd"
+            print(f"  {nid} {s['name'] or '?'} ({s['zone'] or '?'}, {'live' if s.get('live') else 'other client'}, "
+                  f"time {s['time']}): {s['x']:.1f}, {s['y']:.1f} on level {s['level']}, {how}")
+    if args.write:
+        lua.write_text(text, encoding="utf-8", newline="\n")
+        print(f"wrote {lua}")
+    else:
+        print("(nothing written: --write)")
+    return 0
+
+
 def cmd_npcs(args) -> int:
     """Every friendly NPC, for the search (Data/Npcs.lua)."""
     from .npcs import FILE, build, lua_text
     from .paths import data_dir
 
+    from . import npcspots
+
     npcs, rep = build(data_dir())
     spawns = sum(len(n["spawns"]) for n in npcs.values())
     print(f"{len(npcs)} NPCs, {spawns} spawns; left out: " +
           ", ".join(f"{v} {k}" for k, v in sorted(rep.items()) if k != "kept"))
+    fixed = npcspots.apply(npcs, npcspots.load(), log=print)  # (the spots marked in game: overrides/npc_spots.json)
+    if fixed:
+        print(f"{sum(len(v) for v in fixed.values())} spot(s) of {len(fixed)} NPC(s) from overrides/npc_spots.json")
     if args.write:
         FILE.write_text(lua_text(npcs), encoding="utf-8", newline="\n")
         print(f"wrote {FILE} ({FILE.stat().st_size // 1024} KB)")
@@ -1166,6 +1210,14 @@ def main(argv: list[str] | None = None) -> int:
     sp = sub.add_parser("npcs", help="every friendly NPC, for the search (Data/Npcs.lua)")
     sp.add_argument("--write", action="store_true")
     sp.set_defaults(fn=cmd_npcs)
+
+    sp = sub.add_parser("npc-spots", help="NPC spots marked in game into overrides/npc_spots.json and Data/Npcs.lua")
+    sp.add_argument("--import", dest="import_file", metavar="MARKS_JSON",
+                    help="marks to take in (a JSON list: id, name, level, cont, x, y, z, zone, time, client)")
+    sp.add_argument("--write", action="store_true", help="write the overrides and Data/Npcs.lua")
+    sp.add_argument("--overrides", help=argparse.SUPPRESS)
+    sp.add_argument("--npcs-lua", help=argparse.SUPPRESS)
+    sp.set_defaults(fn=cmd_npc_spots)
 
     sp = sub.add_parser("vendors", help="what each shipped vendor sells, for the search (Data/VendorItems.lua)")
     sp.add_argument("--write", action="store_true")
