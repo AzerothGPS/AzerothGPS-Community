@@ -47,7 +47,8 @@ NEW = ["mapEditIdle", "toolShiftClick", "language", "layerCity", "showRoads", "s
        "padControl", "padLegend",  # (2026-11-16: controller support, Pad.lua)  # (asked 2026-11-15: quest areas on the map and on the minimap apart)
        "showCoords",  # (asked 2026-11-17: hide the map's X, Y line)
        "replaceMinimapRoute",  # (asked 2026-11-17: the route off the minimap square)
-       "navPanelWidth", "navPanelAlign", "navPanelDetached"]  # (1.3.9: the route panel's width, side, own window)
+       "navPanelWidth", "navPanelAlign", "navPanelDetached",  # (1.3.9: the route panel's width, side, own window)
+       "navPanelHideButtons", "navPanelAlpha"]  # (1.3.9: detached, its buttons hidden and its background's opacity)
 # Where each setting's control is: the page a player would look on.
 HOME = {
     "General": "shown keyBlockedInCombat showCoords distanceUnits language quietChat searchCommonNpcs",
@@ -58,7 +59,8 @@ HOME = {
            "seamWorldBlend interiorZoomYd interiorHoldSec routeColor rotate approachZoom reopenFollow terrainZoomOut interiors "
            "replaceMinimap replaceMinimapSize replaceMinimapCollapseOnMove replaceMinimapCollapseOnCombat useWorldMap "
            "replaceMinimapIdle replaceMinimapKeepSquare replaceMinimapRoute",
-    "Window": "locked size width lockSize freeSize navPanelWidth navPanelAlign navPanelDetached windowFrame windowTint "
+    "Window": "locked size width lockSize freeSize navPanelWidth navPanelAlign navPanelDetached navPanelHideButtons "
+              "navPanelAlpha windowFrame windowTint "
               "windowClose windowButtons charm charmSwing arrivalEffect",
     "Layers": "iconSize roundIcons layerQuests layerQuestAreas layerQuestAreasMinimap poiTaxi poiPoi poiLabels layerCity layerInstances layerCaves layerHerbs "
               "layerOre showCustomPins otherAddonPins showParty iconYdQuests iconYdTaxi iconYdPoi iconYdCity iconYdInstances "
@@ -185,13 +187,15 @@ DEPENDENTS = [
     ("iconYdQuests", "layerQuests", False), ("iconYdTaxi", "poiTaxi", False), ("iconYdPoi", "poiPoi", False),
     ("iconYdCity", "layerCity", False), ("iconYdInstances", "layerInstances", False), ("iconYdCaves", "layerCaves", False),
     ("iconYdHerbs", "layerHerbs", False), ("iconYdOre", "layerOre", False), ("iconYdPins", "showCustomPins", False),
+    # (1.3.9: the detached route panel's own looks)
+    ("navPanelHideButtons", "navPanelDetached", False), ("navPanelAlpha", "navPanelDetached", False),
 ]
 # (the parents' values with every dependent on)
 ALL_ON = {"replaceMinimap": True, "fadeMoving": True, "combatHideMap": False, "combatHideArrow": False,
           "locked": False, "lockSize": False, "windowFrame": True, "charm": "thunderfury", "fastestOrder": True,
           "layerQuests": True, "style": "seamless", "arrow": True, "dirShown": True, "arrowSnap": True, "arrowSide": "left",
           "poiTaxi": True, "poiPoi": True, "layerCity": True, "layerInstances": True, "layerCaves": True,
-          "layerHerbs": True, "layerOre": True, "showCustomPins": True}
+          "layerHerbs": True, "layerOre": True, "showCustomPins": True, "navPanelDetached": True}
 
 
 def test_a_dependent_option_is_gray_while_its_parent_is_off(game):

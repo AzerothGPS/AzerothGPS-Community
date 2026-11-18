@@ -7480,6 +7480,8 @@ function G.PlaceNavPanel()
   local edge, align = G.navEdge, G.NavAlign()
   if G.navDetached then
     navPanel:SetWidth(G.NavDetachedWidth())
+    local h = G.NavDetachedHeight()
+    if h then navPanel:SetHeight(h) end -- (sized by its corner: else as tall as its text)
     align = "left" -- (its right edge)
   else
     local inset, pct = G.topInset or 4, G.NavWidthPct()
@@ -7550,7 +7552,11 @@ function G.ApplyNavDetach()
     end
     G.navPanelSig = nil -- (laid out again)
     -- (the use button: set again with the panel's strata, out of combat)
-    if G.useBtn and not (InCombatLockdown and InCombatLockdown()) then G.useBtn.key = nil end
+    -- (hidden till then: with nothing to use next, a nil key left the old one showing)
+    if G.useBtn and not (InCombatLockdown and InCombatLockdown()) then
+      G.useBtn:Hide()
+      G.useBtn.key = nil
+    end
   end
   if want and not G.navMoving then -- (not while it's being dragged: a settings change meanwhile)
     local p = st.navPanelPoint
@@ -7562,9 +7568,148 @@ function G.ApplyNavDetach()
     end
   end
   G.PlaceNavPanel()
+  G.ApplyNavLook()
   if fl.bar and fl.bar:IsShown() then G.PlaceFloorBar() end
   if G.pathColorBox and G.pathColorBox:IsShown() then G.PlacePathColorPicker() end
   if want and not G.IsVisible() then G.RefreshDetachedNav() end -- (shown now, the map closed)
+end
+-- Detached, two looks of its own (1.3.9, asked 2026-11-18: "for the detached route panel, add options to hide all
+-- buttons in it and set the opacity of the background"). `navPanelHideButtons`: only its text, every button in it
+-- hidden (the X, Attach, the steps' -/+, Share, the use button, the quest rows' Leave Out / Put Back); it still drags
+-- anywhere, a right-click on it puts it back on the map (as Attach does), and its edge still sizes it. `navPanelAlpha`:
+-- its dark box's opacity in percent (70, as before; 0 leaves the text alone, which keeps its own). It has no border to
+-- keep. On the map neither: all its buttons, the usual box.
+G.NAV_ALPHA_DEFAULT = 70
+function G.NavBare()
+  return G.navDetached == true and S().navPanelHideButtons == true
+end
+function G.NavAlphaPct()
+  local v = tonumber(S().navPanelAlpha) or G.NAV_ALPHA_DEFAULT
+  return math.max(0, math.min(100, v))
+end
+function G.ApplyNavLook()
+  if not navPanel then return end
+  navPanel:SetBackdropColor(0, 0, 0, (G.navDetached and G.NavAlphaPct() or G.NAV_ALPHA_DEFAULT) / 100)
+  local bare = G.NavBare()
+  if bare ~= G.navBareWas then
+    G.navBareWas = bare
+    -- (its text out to the right edge without the buttons there)
+    navText:SetPoint("TOPRIGHT", bare and -6 or -58, -6)
+    stepsText:SetPoint("RIGHT", bare and -6 or -32, 0)
+    G.navPanelSig = nil -- (laid out again: the buttons)
+  end
+  -- (sized by its corner: a line too long for it cut short, not wrapped past its bottom)
+  local fixed = G.NavFixed()
+  navText:SetWordWrap(not fixed)
+  stepsText:SetWordWrap(not fixed)
+  if G.navGrip then
+    G.navGrip:SetShown(G.navDetached == true)
+    G.navGrip:SetAlpha((bare and not G.navHover) and 0 or 1) -- (buttons hidden: the grip only under the mouse)
+  end
+end
+function G.NavHover(on)
+  G.navHover = on or nil
+  if G.navGrip then G.navGrip:SetAlpha((G.NavBare() and not G.navHover) and 0 or 1) end
+end
+
+-- Detached, sized by its bottom-right corner (1.3.9, asked 2026-11-18: "add a corner resizer for the window so text
+-- would only stay within that, steps that would go past it show as '... X more steps'"): `navPanelDetachedWidth` and
+-- `navPanelDetachedHeight` (nil until it's sized: as tall as its text, as before). Sized, its text stays inside: the
+-- status lines first, then the quest rows, then as many whole steps as fit, the last line saying how many more there
+-- are (G.FitSteps); a line too long for its width cut short.
+G.NAV_DETACHED_MIN_H, G.NAV_DETACHED_MAX_H = 36, 600
+G.NAV_PAD_H = 12 -- (UI units: above and below its text)
+G.NAV_STEPS_GAP, G.NAV_STEPS_SPACING = 4, 2 -- (the steps under the status, and between their lines: as laid out)
+function G.NavDetachedHeight()
+  local v = tonumber(S().navPanelDetachedHeight)
+  if not v then return nil end
+  return math.max(G.NAV_DETACHED_MIN_H, math.min(G.NAV_DETACHED_MAX_H, v))
+end
+function G.NavFixed()
+  return G.navDetached == true and G.NavDetachedHeight() ~= nil
+end
+-- Its corner dragged to `w` x `h` (clamped, kept).
+function G.SizeNavDetached(w, h)
+  local st = S()
+  st.navPanelDetachedWidth = math.floor(math.max(G.NAV_MIN_W, math.min(G.NAV_DETACHED_MAX_W, w)) + 0.5)
+  st.navPanelDetachedHeight = math.floor(math.max(G.NAV_DETACHED_MIN_H, math.min(G.NAV_DETACHED_MAX_H, h)) + 0.5)
+  G.PlaceNavPanel()
+  G.ApplyNavLook()
+  G.navPanelSig = nil -- (its text fitted again, on the next update)
+  if G.navDetached and not G.IsVisible() then G.RefreshDetachedNav() end
+end
+function G.NavLineH(fs)
+  local ok, h = pcall(function() return fs:GetLineHeight() end)
+  if ok and type(h) == "number" and h > 0 then return h end
+  local _, size = fs:GetFont()
+  return tonumber(size) or 12
+end
+function G.SplitLines(text)
+  local t = {}
+  if text == nil or text == "" then return t end
+  for l in (text .. "\n"):gmatch("(.-)\n") do t[#t + 1] = l end
+  return t
+end
+-- A numbered step's line ("2. Take the boat ...", any language: "%d. %s"), its colors aside.
+function G.IsStepLine(l)
+  return (l:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")):match("^%d+%. ") ~= nil
+end
+function G.MoreStepsLine(n)
+  return Format(n > 1 and L["|cff808080... %d more steps|r"] or L["|cff808080... %d more step|r"], n)
+end
+-- The steps' lines (`text`) that fit in `fit` lines: all of them, or the first ones and, last, "... N more steps"
+-- (`total`, the steps in all; false: not known, "... more turns further on"). Gives the text and how many were left out.
+function G.FitSteps(text, fit, total)
+  local lines = G.SplitLines(text)
+  if #lines <= fit then return text, 0 end
+  local numbered = 0
+  for _, l in ipairs(lines) do
+    if G.IsStepLine(l) then numbered = numbered + 1 end
+  end
+  if fit <= 0 then return "", total or numbered end
+  local out, kept = {}, 0
+  for i = 1, fit - 1 do
+    out[i] = lines[i]
+    if G.IsStepLine(lines[i]) then kept = kept + 1 end
+  end
+  local more = (total or numbered) - kept
+  if total == false then
+    out[#out + 1] = L["|cff808080... more turns further on|r"]
+  elseif more > 0 then
+    out[#out + 1] = G.MoreStepsLine(more)
+  else -- (only lines after the steps left over: the one more that fits)
+    out[#out + 1] = lines[fit]
+  end
+  return table.concat(out, "\n"), math.max(0, more)
+end
+-- Sized: its text fitted inside it (from G.UpdateNavPanel, the full text set). `steps` the steps' text, `total` their
+-- count, `rowsH` the quest rows' height. G.navMore: how many steps were left out (the tests).
+function G.FitNavPanel(steps, total, rowsH)
+  local h = G.NavDetachedHeight()
+  local room = h - G.NAV_PAD_H
+  local lh = G.NavLineH(navText)
+  local status = G.SplitLines(navText:GetText() or "")
+  local fitS = math.max(1, math.floor(room / lh))
+  if #status > fitS then
+    for i = #status, fitS + 1, -1 do status[i] = nil end
+    navText:SetText(table.concat(status, "\n"))
+  end
+  room = room - #status * lh
+  if rowsH > 0 and rowsH > room then -- (no room for the quest rows)
+    G.LayoutGroupRows(navPanel, navText, false)
+    rowsH = 0
+  end
+  G.navMore = 0
+  if steps ~= "" then
+    local sl = G.NavLineH(stepsText)
+    local fit = math.floor((room - rowsH - G.NAV_STEPS_GAP + G.NAV_STEPS_SPACING) / (sl + G.NAV_STEPS_SPACING))
+    local out
+    out, G.navMore = G.FitSteps(steps, fit, total)
+    stepsText:SetText(out)
+    stepsText:SetShown(out ~= "")
+    if out == "" and rowsH > 0 then G.LayoutGroupRows(navPanel, navText, true) end
+  end
+  navPanel:SetHeight(h)
 end
 function G.SetNavDetached(on)
   S().navPanelDetached = on and true or false
@@ -7625,7 +7770,8 @@ function G.UpdateNavPanel(px, py, cont, hidden, route, dest)
   local psig = table.concat({ status or "", steps, collapsed and "c" or "-", hidden and "h" or "-",
     grouped and "g" or "-", manySteps and "m" or "-", st.stepsAll and "a" or "-",
     #ns.Nav.stops > 0 and "s" or "-", tostring(ns.Nav.Version()), tostring(navClosedAt),
-    G.Held() and "H" or "-", tostring(G.drawVersion), G.tpAhead or "", G.hostileNote or "" }, "|")
+    G.Held() and "H" or "-", tostring(G.drawVersion), G.tpAhead or "", G.hostileNote or "",
+    G.NavBare() and "b" or "-", G.NavFixed() and tostring(G.NavDetachedHeight()) or "-" }, "|")
   if psig ~= G.navPanelSig then
   G.navPanelSig = psig
   navText:SetText((collapsed and G.CollapsedStatus(status) or status or "") .. (G.tpAhead and "\n" .. G.tpAhead or "")
@@ -7633,12 +7779,16 @@ function G.UpdateNavPanel(px, py, cont, hidden, route, dest)
   if collapsed then steps = "" end
   stepsText:SetText(steps)
   stepsText:SetShown(steps ~= "")
-  G.stepsToggle:SetShown(status ~= nil and (steps ~= "" or collapsed))
+  -- (detached with its buttons hidden: none of them, G.NavBare)
+  local bare = G.NavBare()
+  G.navCancel:SetShown(not bare)
+  G.navDetach:SetShown(not bare)
+  G.stepsToggle:SetShown(not bare and status ~= nil and (steps ~= "" or collapsed))
   G.stepsToggle.label:SetText(collapsed and "+" or "-")
   -- "+" for all of them: when there are more than the few shown
-  G.stepsMore:SetShown(status ~= nil and not collapsed and not st.stepsAll and manySteps)
+  G.stepsMore:SetShown(not bare and status ~= nil and not collapsed and not st.stepsAll and manySteps)
   -- Share (in a group, with a route): left of the boxes shown
-  G.shareButton:SetShown(status ~= nil and #ns.Nav.stops > 0 and grouped and true or false)
+  G.shareButton:SetShown(not bare and status ~= nil and #ns.Nav.stops > 0 and grouped and true or false)
   if G.shareButton:IsShown() then
     local left = G.stepsMore:IsShown() and G.stepsMore or (G.stepsToggle:IsShown() and G.stepsToggle) or nil
     G.shareButton:ClearAllPoints()
@@ -7649,14 +7799,19 @@ function G.UpdateNavPanel(px, py, cont, hidden, route, dest)
     end
   end
   local rowsH = G.LayoutGroupRows(navPanel, steps ~= "" and stepsText or navText, status ~= nil and not collapsed and not hidden)
-  navPanel:SetHeight(navText:GetStringHeight() + 12 + (steps ~= "" and stepsText:GetStringHeight() + 4 or 0) + rowsH)
+  if G.NavFixed() then -- (detached and sized by its corner: its text kept inside it)
+    G.FitNavPanel(steps, G.walkTurns and (G.walkTurns < 99 and G.walkTurns or false) or #ns.Nav.Steps(), rowsH)
+  else
+    G.navMore = 0
+    navPanel:SetHeight(navText:GetStringHeight() + 12 + (steps ~= "" and stepsText:GetStringHeight() + 4 or 0) + rowsH)
+  end
   -- closed with its X: hidden until the route changes (unless the X clears the route)
   navPanel:SetShown(status ~= nil and navClosedAt ~= ns.Nav.Version() and not G.Held() and not ns.InBattleground())
   elseif collapsed then
     steps = "" -- (as the laid-out path leaves it: what follows reads it)
   end
   -- (not while the steps are collapsed: asked, 2026-10-01; the arrow window has its own)
-  G.UpdateUseButton(navPanel:IsShown() and not hidden and not collapsed and ns.Nav.UseNow() or nil)
+  G.UpdateUseButton(navPanel:IsShown() and not hidden and not collapsed and not G.NavBare() and ns.Nav.UseNow() or nil)
   -- (a dungeon's floor and route note: under the panel while it shows, not under its text)
   if fl.bar and fl.bar:IsShown() then G.PlaceFloorBar() end
   if G.pathColorBox and G.pathColorBox:IsShown() then G.PlacePathColorPicker() end
@@ -12718,7 +12873,8 @@ function G.UseWaitClick(b)
   ns.Print(Format(L["%s is on its cooldown: ready in %s."], what, G.UseWaitText(b)))
 end
 -- The directions panel's: at its corner.
-local function PlaceUse(b) b:SetPoint("BOTTOMRIGHT", b.panel, "BOTTOMRIGHT", -5, 5) end
+-- (detached: left of its corner grip)
+local function PlaceUse(b) b:SetPoint("BOTTOMRIGHT", b.panel, "BOTTOMRIGHT", G.navDetached and -20 or -5, 5) end
 -- (not on the minimap square: the directions it belongs to aren't shown there. Asked 2026-11-10: "when route is
 -- suggesting hearthstone its on the minimap as well, don't show that". The arrow window's own stays.)
 function G.UpdateUseButton(t)
@@ -13157,7 +13313,7 @@ function G.LayoutGroupRows(panel, below, show)
         or (q.group and L["|cffb0b0b0Group quest:|r %s"] or L["|cffff4040Red quest:|r %s"]), q.title or "?"))
       row.button.label:SetText(left and L["Put Back"] or L["Leave Out"])
       row.button:SetWidth(row.button.label:GetStringWidth() + 12)
-      row.button:SetShown(left or n > 1)
+      row.button:SetShown((left or n > 1) and not G.NavBare())
       row:ClearAllPoints()
       row:SetPoint("TOPLEFT", below, "BOTTOMLEFT", 0, -4 - (shown - 1) * G.GROUP_ROW_H)
       row:SetPoint("RIGHT", panel, "RIGHT", -32, 0)
@@ -15431,6 +15587,25 @@ function G.Init()
     G.navMoving = nil
     if G.navDetached then G.SaveNavPoint() end
   end)
+  -- (detached: a right-click puts it back on the map, the way back with its buttons hidden; said on the mouse over then)
+  navPanel:SetScript("OnMouseUp", function(_, button)
+    if button == "RightButton" and G.navDetached then
+      GameTooltip_Hide()
+      G.SetNavDetached(false)
+    end
+  end)
+  navPanel:SetScript("OnEnter", function(self)
+    G.NavHover(true)
+    if not G.NavBare() then return end
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:SetText(L["Route panel"], 1, 1, 1)
+    GameTooltip:AddLine(L["Drag to move it. Right-click to put it back on the map."], nil, nil, nil, true)
+    GameTooltip:Show()
+  end)
+  navPanel:SetScript("OnLeave", function()
+    G.NavHover(false)
+    GameTooltip_Hide()
+  end)
   navPanel:EnableMouse(false)
   navText = navPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   navText:SetPoint("TOPLEFT", 6, -6)
@@ -15443,7 +15618,8 @@ function G.Init()
   stepsText:SetPoint("RIGHT", -32, 0) -- (clear of the use button)
   G.MakeUseButton(navPanel)
   stepsText:SetJustifyH("LEFT")
-  stepsText:SetSpacing(2)
+  stepsText:SetSpacing(G.NAV_STEPS_SPACING)
+  G.stepsText = stepsText -- (the tests)
   local cancel = CreateFrame("Button", nil, navPanel, "UIPanelCloseButton")
   cancel.agpsClose = true -- (an X: the look's close color, G.TintButtons)
   G.navCancel = cancel -- (the tutorial points at it)
@@ -15556,6 +15732,49 @@ function G.Init()
   end)
   edge:SetScript("OnLeave", GameTooltip_Hide)
   G.navEdge = edge
+  -- (detached: its bottom-right corner sizes it, the directions' grip; with its buttons hidden, seen under the mouse)
+  local grip = CreateFrame("Button", nil, navPanel)
+  grip:SetSize(14, 14)
+  grip:SetPoint("BOTTOMRIGHT", -1, 1)
+  grip:SetFrameLevel(navPanel:GetFrameLevel() + 8)
+  grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+  grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
+  grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
+  grip:SetScript("OnMouseDown", function(self, button)
+    if button ~= "LeftButton" or not G.navDetached then return end
+    -- (kept by its top-left corner while it's sized: the corner dragged follows the mouse)
+    G.SaveNavPoint()
+    local l, t = navPanel:GetLeft(), navPanel:GetTop()
+    if l and t then
+      navPanel:ClearAllPoints()
+      navPanel:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", l, t)
+    end
+    local es = navPanel:GetEffectiveScale() or 1
+    local x, y = GetCursorPosition()
+    self.drag = { x = x / es, y = (y or 0) / es, w = navPanel:GetWidth() or 0, h = navPanel:GetHeight() or 0 }
+  end)
+  grip:SetScript("OnMouseUp", function(self)
+    self.drag = nil
+  end)
+  grip:SetScript("OnUpdate", function(self)
+    local d = self.drag
+    if not d then return end
+    local es = navPanel:GetEffectiveScale() or 1
+    local x, y = GetCursorPosition()
+    G.SizeNavDetached(d.w + (x / es - d.x), d.h - ((y or 0) / es - d.y))
+  end)
+  grip:SetScript("OnEnter", function(self)
+    G.NavHover(true)
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    GameTooltip:SetText(L["Drag to resize the panel"], 1, 1, 1)
+    GameTooltip:Show()
+  end)
+  grip:SetScript("OnLeave", function()
+    G.NavHover(false)
+    GameTooltip_Hide()
+  end)
+  grip:Hide()
+  G.navGrip = grip
   top:HookScript("OnSizeChanged", function() G.PlaceNavPanel() end) -- (a share of the map's width: kept as it's sized)
   local toggle = SmallBox(detach, "-")
   toggle:SetScript("OnClick", function()

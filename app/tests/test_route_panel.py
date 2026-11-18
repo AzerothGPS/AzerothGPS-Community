@@ -11,7 +11,8 @@ from test_map_redraw import game  # noqa: F401
 from test_world_map_host import SETUP
 
 KEYS = ("useWorldMap", "replaceMinimap", "shown", "minimized", "windowFrame", "navPanelWidth", "navPanelAlign",
-        "navPanelDetached", "navPanelPoint", "navPanelDetachedWidth")
+        "navPanelDetached", "navPanelPoint", "navPanelDetachedWidth", "navPanelHideButtons", "navPanelAlpha",
+        "navPanelDetachedHeight", "stepsAll", "stepsCollapsed")
 
 
 @pytest.fixture
@@ -220,3 +221,202 @@ def test_the_route_panel_options_are_on_the_map_window_page(game):  # noqa: F811
     assert {k: pages.get(k) for k in ("navPanelWidth", "navPanelAlign", "navPanelDetached")} == {
         "navPanelWidth": "Window", "navPanelAlign": "Window", "navPanelDetached": "Window"}
     assert st is not None
+
+
+# The detached panel's own looks (1.3.9, asked 2026-11-18: "for the detached route panel, add options to hide all
+# buttons in it and set the opacity of the background") and its corner grip ("add a corner resizer for the window so
+# text would only stay within that, steps that would go past it show as '... X more steps'").
+
+def _detach(lua, ns, **kw):
+    G, st = ns.GPS, ns.settings.gps
+    st.navPanelPoint, st.navPanelDetachedHeight, st.navPanelDetachedWidth = None, None, None
+    st.navPanelDetached, st.stepsCollapsed = True, False  # (collapsed: no use button)
+    for k, v in kw.items():
+        st[k] = v
+    G.ApplySettings()
+    _route(lua, ns)
+    G.navPanelSig = None
+    G.Update()
+    return G.navPanel
+
+
+def _buttons_shown(ns):
+    G = ns.GPS
+    return [b._shown for b in (G.navCancel, G.navDetach, G.stepsToggle, G.stepsMore, G.shareButton)]
+
+
+def test_hide_the_buttons_leaves_only_the_text_and_attaching_brings_them_back(rp):
+    lua, ns = rp
+    G, st = ns.GPS, ns.settings.gps
+    old = ns.Nav.UseNow
+    # (the route's first step a hearthstone: the use button; in a group: Share)
+    ns.Nav.UseNow = lua.eval("function() return { item = 6948, [8] = 'Hearthstone', [10] = 'Far' } end")
+    lua.execute("IsInGroup = function() return true end")
+    try:
+        p = _detach(lua, ns, navPanelHideButtons=False)
+        assert G.navCancel._shown and G.navDetach._shown and G.shareButton._shown and G.useBtn._shown
+        assert G.navGrip._shown and G.navGrip._alpha == 1
+        st.navPanelHideButtons = True
+        G.ApplySettings()
+        G.Update()
+        assert G.NavBare() and p._shown and str(G.navText._text) != ""
+        assert not any(_buttons_shown(ns)) and not G.useBtn._shown
+        assert (G.navText._pts["TOPRIGHT"][2], G.navText._pts["TOPRIGHT"][3]) == (-6, -6)  # (the text out to the edge)
+        # (the corner grip: there, seen only under the mouse)
+        assert G.navGrip._shown and G.navGrip._alpha == 0
+        p._scripts.OnEnter(p)
+        assert G.navGrip._alpha == 1
+        p._scripts.OnLeave(p)
+        assert G.navGrip._alpha == 0
+        # (still dragged anywhere)
+        p._scripts.OnDragStop(p)
+        assert list(st.navPanelPoint.values())[0] == "TOPLEFT"
+        # (a right-click: back on the map, with every button)
+        p._scripts.OnMouseUp(p, "RightButton")
+        assert st.navPanelDetached is False and not G.navDetached and not G.NavBare()
+        assert lua.eval("rawequal")(p.GetParent(p), G.navHome) and not G.navGrip._shown
+        G.Update()
+        assert G.navCancel._shown and G.navDetach._shown and G.shareButton._shown and G.useBtn._shown
+        assert (G.navText._pts["TOPRIGHT"][2], G.navText._pts["TOPRIGHT"][3]) == (-58, -6)
+        # (the option kept: detached again, bare again)
+        G.navDetach._scripts.OnClick(G.navDetach, "LeftButton")
+        G.Update()
+        assert G.NavBare() and not any(_buttons_shown(ns)) and not G.useBtn._shown
+        # (a left click does nothing of the sort)
+        p._scripts.OnMouseUp(p, "LeftButton")
+        assert G.navDetached
+    finally:
+        ns.Nav.UseNow = old
+        lua.execute("IsInGroup = nil")
+
+
+def test_the_background_opacity_is_the_detached_panels_alone(rp):
+    lua, ns = rp
+    G, st = ns.GPS, ns.settings.gps
+    assert ns.DEFAULTS.gps.navPanelAlpha == 70 and ns.DEFAULTS.gps.navPanelHideButtons is False
+    p = _detach(lua, ns, navPanelAlpha=25)
+    assert p._bg[4] == pytest.approx(0.25)
+    st.navPanelAlpha = 0
+    G.ApplySettings()
+    assert p._bg[4] == 0 and str(G.navText._text) != ""  # (only the text)
+    st.navPanelAlpha = 250  # (clamped)
+    G.ApplySettings()
+    assert p._bg[4] == 1
+    # (on the map: the usual box, whatever it's set to)
+    st.navPanelAlpha = 10
+    st.navPanelDetached = False
+    G.ApplySettings()
+    assert p._bg[4] == pytest.approx(0.7)
+
+
+STEPS = "\n".join(("|cffffffff" if i == 1 else "|cffb0b0b0") + "%d. Step %d|r" % (i, i) for i in range(1, 11))
+
+
+def test_the_more_steps_line_counts_what_is_left_out(rp):
+    lua, ns = rp
+    G = ns.GPS
+    lines = STEPS.split("\n")
+    out, more = G.FitSteps(STEPS, 4, 10)  # (3 steps and the line saying the rest)
+    assert out.split("\n") == lines[:3] + ["|cff808080... 7 more steps|r"] and more == 7
+    out, more = G.FitSteps(STEPS, 10, 10)
+    assert out == STEPS and more == 0
+    out, more = G.FitSteps(STEPS, 9, 10)  # (8 and "2 more": a line never says "1 more" in place of the step itself)
+    assert out.split("\n")[-1] == "|cff808080... 2 more steps|r" and more == 2
+    out, more = G.FitSteps("\n".join(lines[:2]), 1, 2)
+    assert out == "|cff808080... 2 more steps|r" and more == 2
+    # (singular: a list already cut short, one step past it)
+    out, more = G.FitSteps("\n".join(lines[:3] + ["|cff808080... 7 more steps|r"]), 4, 4)
+    assert more == 0
+    out, more = G.FitSteps("\n".join(lines[:3]), 3, 4)  # (3 of 4 listed, all fit: nothing said here)
+    assert more == 0 and out == "\n".join(lines[:3])
+    # (a list already cut at 3, "... 7 more steps", 10 in all: what's left out counted from the whole route)
+    cut = "\n".join(lines[:3] + ["|cff808080... 7 more steps|r"])
+    out, more = G.FitSteps(cut, 3, 10)
+    assert out.split("\n") == lines[:2] + ["|cff808080... 8 more steps|r"] and more == 8
+    out, more = G.FitSteps(cut, 4, 10)
+    assert out == cut and more == 0
+    # (the walk's turns with no count: "... more turns further on")
+    out, more = G.FitSteps(cut, 2, False)
+    assert out.split("\n") == lines[:1] + ["|cff808080... more turns further on|r"]
+    # (no room at all: none of them)
+    assert G.FitSteps(STEPS, 0, 10)[0] == ""
+    assert G.MoreStepsLine(1) == "|cff808080... 1 more step|r"
+    assert G.MoreStepsLine(2) == "|cff808080... 2 more steps|r"
+    # (in the player's language: the locale's own words, the step lines still told apart)
+    assert G.IsStepLine("|cffb0b0b012. Нажмите|r") and not G.IsStepLine("|cff808080... 3 more steps|r")
+
+
+def test_a_sized_panel_keeps_its_text_inside_it(rp):
+    lua, ns = rp
+    G, st = ns.GPS, ns.settings.gps
+    p = _detach(lua, ns)
+    assert not G.NavFixed() and G.navText._wrap is not False  # (not sized yet: as tall as its text)
+    G.SizeNavDetached(300, 200)
+    status = "Walk 4m 35s\nAll stops 9m"
+    # (the stand-in's lines: 12 high; the steps' 12 and 2 between: 14 a line)
+    def fit(h):
+        st.navPanelDetachedHeight = h
+        G.navText._text = status
+        G.FitNavPanel(STEPS, 10, 0)
+        return str(G.stepsText._text).split("\n"), G.navMore
+
+    base = 12 + 2 * 12 + 4 - 2
+    lines, more = fit(base + 14 * 4)
+    assert len(lines) == 4 and lines[-1] == "|cff808080... 7 more steps|r" and more == 7
+    assert p._h == base + 14 * 4 and str(G.navText._text) == status
+    lines, more = fit(base + 14 * 10)
+    assert more == 0 and "\n".join(lines) == STEPS
+    lines, more = fit(base + 14 * 9 + 13)  # (not quite room for the last: the line says the 2)
+    assert more == 2 and lines[-1] == "|cff808080... 2 more steps|r"
+    # (the smallest: the status lines, no room for a step)
+    lines, more = fit(G.NAV_DETACHED_MIN_H)
+    assert str(G.navText._text) == "Walk 4m 35s\nAll stops 9m" and lines == [""] and not G.stepsText._shown
+    st.navPanelDetachedHeight = None
+    # (through the panel's own update: the route's text, the height kept, no line wrapped)
+    G.SizeNavDetached(300, 60)
+    G.Update()
+    assert G.NavFixed() and p._h == 60 and G.navText._wrap is False and G.stepsText._wrap is False
+
+
+def test_the_corner_grip_sizes_it_clamped_and_kept_over_a_reload(rp):
+    lua, ns = rp
+    G, st = ns.GPS, ns.settings.gps
+    p = _detach(lua, ns)
+    g = G.navGrip
+    assert g._shown
+    try:
+        # (the stand-in panel is 400 x 400: dragged 100 right and 250 down, then far up and left)
+        lua.execute("AGPS_CUR = { 0, 0 } GetCursorPosition = function() return AGPS_CUR[1], AGPS_CUR[2] end")
+        g._scripts.OnMouseDown(g, "LeftButton")
+        assert p._pts["TOPLEFT"][2] is not None and p._pts["TOPLEFT"][3] == "BOTTOMLEFT"
+        lua.execute("AGPS_CUR = { 100, -150 }")
+        g._scripts.OnUpdate(g, 0.01)
+        assert (st.navPanelDetachedWidth, st.navPanelDetachedHeight) == (500, 550)
+        assert (p._w, p._h) == (500, 550)
+        lua.execute("AGPS_CUR = { -5000, 5000 }")
+        g._scripts.OnUpdate(g, 0.01)
+        assert (st.navPanelDetachedWidth, st.navPanelDetachedHeight) == (G.NAV_MIN_W, G.NAV_DETACHED_MIN_H)
+        lua.execute("AGPS_CUR = { 5000, -5000 }")
+        g._scripts.OnUpdate(g, 0.01)
+        assert (st.navPanelDetachedWidth, st.navPanelDetachedHeight) == (G.NAV_DETACHED_MAX_W, G.NAV_DETACHED_MAX_H)
+        lua.execute("AGPS_CUR = { -100, 100 }")
+        g._scripts.OnUpdate(g, 0.01)
+        g._scripts.OnMouseUp(g, "LeftButton")
+        lua.execute("AGPS_CUR = { 0, 0 }")
+        g._scripts.OnUpdate(g, 0.01)  # (let go: no more sizing)
+        assert (st.navPanelDetachedWidth, st.navPanelDetachedHeight) == (300, 300)
+        # (kept: in the saved variables, and set again as it's detached after a reload)
+        assert lua.eval("rawequal")(ns.db, lua.eval("AzerothGPSDB"))
+        saved = ns.settings.gps
+        assert (saved.navPanelDetachedWidth, saved.navPanelDetachedHeight) == (300, 300)
+        st.navPanelDetached = False
+        G.ApplySettings()
+        p._w, p._h = None, None
+        st.navPanelDetached = True
+        G.ApplySettings()
+        assert (p._w, p._h) == (300, 300) and G.NavFixed()
+        # (a saved size out of range: clamped as it's read)
+        st.navPanelDetachedHeight = 3
+        assert G.NavDetachedHeight() == G.NAV_DETACHED_MIN_H
+    finally:
+        lua.execute("GetCursorPosition = function() return 0, 0 end")
