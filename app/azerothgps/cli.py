@@ -522,8 +522,9 @@ def _dev_addon() -> Path | None:
 
 
 def cmd_navmesh(args) -> int:
-    """The capitals' Recast meshes (recastmesh.py, a dev tool: nothing ships): `build-tool` compiles navbuild.exe with
-    zig over Recast's sources in data/thirdparty/recastnavigation; `build` makes each capital's mesh (data/navmesh/) and
+    """The capitals' and Undercity's Recast meshes (recastmesh.py, a dev tool: nothing ships): `build-tool` compiles
+    navbuild.exe with zig over Recast's sources in data/thirdparty/recastnavigation; `build` makes each city's mesh
+    (data/navmesh/: recastmesh.sources) and
     the developer addon's NavMeshData.lua (where one is checked out: _dev_addon()), for its route comparison."""
     import shutil
     import subprocess
@@ -544,21 +545,20 @@ def cmd_navmesh(args) -> int:
         r = subprocess.run(cmd)
         print(f"built {RM.tool()}" if r.returncode == 0 else "build failed (pip install ziglang?)")
         return r.returncode
-    from .capitals import CAPITALS
-
     if not RM.tool().exists():
         print(f"no {RM.tool()}: agps navmesh build-tool first")
         return 1
     cd = _client(args)
     meshes = {}
-    for cap in CAPITALS:
-        if args.only and not any(o.lower() in cap.name.lower() for o in args.only):
-            continue
-        p = RM.mesh_path(cap.name)
-        if args.rebuild or not p.exists():
-            T, _box = RM.capital_triangles(cd, cap)
-            RM.save(RM.run_recast(T), p)
-        meshes[cap.name] = (cap.cont, RM.load(p))
+    # (--only: only those built; the others already in data/navmesh/ are exported as they are)
+    for name, cont, level, triangles in RM.sources():
+        p = RM.mesh_path(name)
+        if not args.only or any(o.lower() in name.lower() for o in args.only):
+            if args.rebuild or not p.exists():
+                T, _box, walk = triangles(cd, print)
+                RM.save(RM.run_recast(T, walk=walk), p)
+        if p.exists():
+            meshes[name] = (cont, RM.load(p), level)
     out = DATA / "navmesh" / "NavMeshData.lua"
     RM.export_lua(meshes, out)
     dev = _dev_addon()
@@ -1112,10 +1112,12 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--write", action="store_true", help="also write Data/Caves.lua (gen-addon-data writes it too)")
     sp.set_defaults(fn=cmd_caves)
 
-    sp = sub.add_parser("navmesh", help="the capitals' Recast meshes for the dev tools' route comparison (never shipped)")
+    sp = sub.add_parser("navmesh", help="the capitals' and Undercity's Recast meshes for the dev tools' route comparison "
+                                        "(never shipped)")
     client_args(sp)
     sp.add_argument("what", choices=["build-tool", "build"], help="build-tool: compile navbuild.exe; build: the meshes")
-    sp.add_argument("--only", nargs="+", help="only capitals whose name contains one of these")
+    sp.add_argument("--only", nargs="+", help="only build the cities whose name contains one of these (the others' "
+                                              "meshes already built are kept in NavMeshData.lua)")
     sp.add_argument("--rebuild", action="store_true", help="build the meshes again (else the ones in data/navmesh/)")
     sp.set_defaults(fn=cmd_navmesh)
     sp = sub.add_parser("capitals", help="build the capitals' grids and roads; renders in data/debug/capitals/")

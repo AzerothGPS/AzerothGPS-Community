@@ -168,8 +168,8 @@ def _liquids(cd: ClientData, wmo: int) -> list:
     return out
 
 
-def undercity(cd: ClientData, log=print) -> dict:
-    """Undercity's level: grid, roads and lifts, in world coordinates."""
+def placement(cd: ClientData):
+    """Undercity's model as placed on the continent (the biggest with a "Trade Quarter" group), and its groups' names."""
     area_names = {(r["WMOID"], r["WMOGroupID"]): r["AreaName_lang"] or "" for r in cd.table("WMOAreaTable")}
     best = None
     for p in I.placements(cd, 0):
@@ -182,6 +182,12 @@ def undercity(cd: ClientData, log=print) -> dict:
             if not best or area > best[0]:
                 best = (area, p, names)
     _, p, names = best
+    return p, names
+
+
+def undercity(cd: ClientData, log=print) -> dict:
+    """Undercity's level: grid, roads and lifts, in world coordinates."""
+    p, names = placement(cd)
     t = math.radians(p.yaw + 180)
     c, s = math.cos(t), math.sin(t)
 
