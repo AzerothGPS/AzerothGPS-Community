@@ -24,6 +24,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Dungeon and raid names are shown in your game's language too, on the map, in the search and in directions.
 - Search finds NPCs by their name in your game's language, also ones you haven't met yet.
 - Party and raid members show on the GPS map when it replaces the minimap.
+- A /reload or relog on a flight keeps the route paused and "lands in" counting down; the flight's time is still learned.
 
 
 ## 1.3.7
