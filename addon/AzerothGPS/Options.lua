@@ -2168,6 +2168,17 @@ local function BuildWindow()
   Key("navPanelDetached")
   check(L["Detach the route panel"], L["Shows the panel in its own window you can drag anywhere and resize by its edge. It stays open while the map is closed or minimized (the world map too), as long as you have a route. The button on the panel detaches and attaches it too."],
     function() return GPS().navPanelDetached == true end, function(v) GPS().navPanelDetached = v and true or false end)
+  -- (1.3.9, asked 2026-11-18: "for the detached route panel, add options to hide all buttons in it and set the opacity
+  -- of the background": only while it's detached, gray else; G.NavBare, G.ApplyNavLook)
+  local function Detached() return GPS().navPanelDetached == true end
+  Key("navPanelHideButtons")
+  check(L["Hide the buttons"], L["While the panel is detached, it shows only the route's text: no close, Attach, steps or other buttons. Drag it to move it, and right-click it to put it back on the map."],
+    function() return GPS().navPanelHideButtons == true end, function(v) GPS().navPanelHideButtons = v and true or false end,
+    Detached, 20)
+  Key("navPanelAlpha")
+  slider(L["Background opacity"], 0, 100, 5, "%d%%",
+    function() return ns.GPS.NavAlphaPct() end, function(v) GPS().navPanelAlpha = v end, Detached,
+    L["How dark the detached panel's background is. All the way down, only the text shows. The text always stays fully visible."])
   header(L["Frame and buttons"], L["Other windows keep the game's own look."])
   Key("windowFrame")
   check(L["Window frame"], L["The game-style window frame around the map: title bar, logo and close button. Off: just the map."],
