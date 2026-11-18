@@ -340,6 +340,13 @@ def test_walking_by_brills_buildings_keeps_the_terrain_search_small(faction):
     assert N.route
     for _ in range(fps * 2):
         step()
+    # (a background job finishing in the last frame may have dropped the route for its recalculation, N.Invalidate:
+    # back on the next frames)
+    for _ in range(fps * 10):
+        if N.route:
+            break
+        step()
+    assert N.route
     lua.execute("AGPS_SEARCH_SLICES, AGPS_RIDE_SLICES = 0, 0")
     path, yd = T.Path(N.route), 0.0
     for i in range(fps * 30):
