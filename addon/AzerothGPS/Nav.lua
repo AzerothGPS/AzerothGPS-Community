@@ -2521,7 +2521,10 @@ local flyingRest -- { key, st, at }: the route on from the landing, worked out o
 -- for the whole flight, a straight line's guess kept, "Walk 33m" for a 10m walk)
 N.FLYING_REST_EVERY = 2
 
-local function MasterNamed(name)
+local function MasterNamed(name, node)
+  -- (by its node id first, when the flight map gave it: Taxi.lua's toNode)
+  local byNode = node and Masters()[node]
+  if byNode then return byNode, node end
   if not name then return nil end
   -- (the flight being flown names them as the game does, in its language: Taxi.lua's TaxiNodeName)
   for node, m in pairs(Masters()) do
@@ -2530,12 +2533,12 @@ local function MasterNamed(name)
 end
 
 -- The flight's seconds from boarding to landing: learned, or the flight network's estimate.
-local function FlightSeconds(from, to)
+local function FlightSeconds(from, to, fromNode, toNode)
   local cdb = ns.CharDB and ns.CharDB()
   local took = from and to and cdb and cdb.flights and cdb.flights[from .. " > " .. to]
   if took then return took.seconds end
-  local _, a = MasterNamed(from)
-  local _, b = MasterNamed(to)
+  local _, a = MasterNamed(from, fromNode)
+  local _, b = MasterNamed(to, toNode)
   local fl = a and b and Flights()
   local row = fl and fl.trips[a] and fl.trips[a][b]
   return row and row[7] - N.FLIGHT_OVERHEAD
@@ -2544,9 +2547,9 @@ end
 -- On a flight from `from` to `to` (names), at (px, py), landing at L: the yards left along its path
 -- (through the flight masters it stops over, Flights()' trip), and that path from the player on
 -- ({ x, y, ... }). Without the trip: the straight line to the landing.
-function N.FlightLeft(from, to, px, py, L)
-  local _, a = MasterNamed(from)
-  local _, b = MasterNamed(to)
+function N.FlightLeft(from, to, px, py, L, fromNode, toNode)
+  local _, a = MasterNamed(from, fromNode)
+  local _, b = MasterNamed(to, toNode)
   local fl = a and b and Flights()
   local trip = fl and fl.trips[a] and fl.trips[a][b]
   local p = trip and trip.pts
@@ -2631,7 +2634,7 @@ local function RideOn(px, py, cont, walk, offroad, L, key, path, secs, row, info
 end
 
 function N.FlyingRoute(px, py, cont, walk, offroad, f)
-  local land = MasterNamed(f.to)
+  local land = MasterNamed(f.to, f.toNode)
   -- (a city's level counts as its continent: the bat out of Undercity flies through the city and its
   -- sewers on Undercity's map, and the route went back to the flight master there, a video 2026-10-02)
   cont = Geo.Base(cont)
@@ -2641,9 +2644,9 @@ function N.FlyingRoute(px, py, cont, walk, offroad, f)
   -- time left in the air: the planned flight time counting down, at least the distance left
   -- along the flight's path at flight speed (N.FlightLeft: through its stops on the way; a
   -- straight line to the landing held a flight with stops up, reported 2026-10-01)
-  local left, path = N.FlightLeft(f.from, f.to, px, py, land)
+  local left, path = N.FlightLeft(f.from, f.to, px, py, land, f.fromNode, f.toNode)
   local secs = left / N.FLIGHT_SPEED
-  local total = FlightSeconds(f.from, f.to)
+  local total = FlightSeconds(f.from, f.to, f.fromNode, f.toNode)
   if total then secs = math.max(secs, total - (GetTime() - f.start)) end
   local row = { cont, px, py, land[1], land[2], land[3], secs, "flight", f.from or "?", f.to, "flight master", flying = true }
   return RideOn(px, py, cont, walk, offroad, land, version .. ":" .. f.to .. ":" .. tostring(offroad), path, secs, row,

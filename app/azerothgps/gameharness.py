@@ -35,13 +35,14 @@ def toc_files() -> list[str]:
     return out
 
 
-def start(replace: dict | None = None, saved: str | None = None, locale: str | None = None):
+def start(replace: dict | None = None, saved: str | None = None, locale: str | None = None, pre: str | None = None):
     """(lua, ns): the addon loaded and started up (ADDON_LOADED, PLAYER_LOGIN), the player in Brill
     (AGPS_POS), GetTime from AGPS_T. Router: no background warm-up, walks searched at once (the
     tests' defaults; a caller sets WARM / SYNC_WALKS for the game's way). `replace`: a toc file's text to load
     instead of its own ({"Data/Indoors.lua": text}: data being checked before it's written). `saved`: a saved
     variables file's text (`AzerothGPSDB = { ... }`), run as the game does, after the files and before ADDON_LOADED.
-    `locale`: what GetLocale() says (the game client's language, "deDE"...; the mock's "enUS" otherwise)."""
+    `locale`: what GetLocale() says (the game client's language, "deDE"...; the mock's "enUS" otherwise). `pre`: Lua run
+    before the files load (game functions the files hook as they load: TakeTaxiNode...)."""
     from lupa import lua51
 
     lua = lua51.LuaRuntime()
@@ -50,6 +51,8 @@ def start(replace: dict | None = None, saved: str | None = None, locale: str | N
     if locale is not None:
         lua.globals().AGPS_LOCALE = locale
         lua.execute("GetLocale = function() return AGPS_LOCALE end")
+    if pre is not None:
+        lua.execute(pre)
     ns = lua.table()
     lua.globals().AGPS_NS = ns
     loader = lua.eval("function(src, name) return assert(loadstring(src, '@' .. name)) end")

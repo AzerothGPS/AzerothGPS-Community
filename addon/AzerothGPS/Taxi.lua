@@ -7,8 +7,9 @@ local Format = ns.Format or string.format
 local T = {}
 ns.Taxi = T
 
-local pending -- { fromNode, toNode, toName } set when a flight is chosen
+local pending -- { from, to, fromNode, toNode } set when a flight is chosen
 local flightStart
+local loadedAt = GetTime and GetTime() or 0 -- (and again at login: T.RESTORE_GRACE)
 
 local function KnownState(state)
   -- Enum.FlightPathState: 0 Current, 1 Reachable, 2 Unreachable
@@ -101,6 +102,7 @@ function T.Refresh(source)
 end
 
 function T.OnLogin()
+  loadedAt = GetTime()
   -- If the API exposes known nodes without visiting a flight master, keep
   -- a fresh copy from login. Phase 0 probe reports whether this works.
   T.Refresh("login")
@@ -141,40 +143,95 @@ function T.OnDiscovered()
   if not T.Refresh("discovered") then T.MarkNearest() end
 end
 
+-- The flight being flown, kept in the character's saved data (cdb.flying) so a /reload in the air (or a relog the
+-- game keeps them flying through) still knows where it lands and when it took off ("/reload on a flight breaks the
+-- routing pause and timer", 2026-11-17: both were only in this file's locals, the route worked out again from the
+-- moving player and "lands in" the whole flight again). { from, to (names, as the flight map's), fromNode, toNode
+-- (node ids, as Data/Pois.lua's, when the game gave them), at (server time it took off), start (GetTime then) }.
+T.FLIGHT_STALE = 1800 -- s: a flight saved longer ago than this isn't the one being flown
+T.RESTORE_GRACE = 10 -- s after the files load: not on a taxi yet isn't taken as landed (the game puts them back on)
+local function ServerNow() return (GetServerTime and GetServerTime()) or time() end
+local function Saved()
+  local ok, cdb = pcall(ns.CharDB)
+  return ok and cdb or nil
+end
+
+-- The flight master's node id for slot `slot` of the flight map open (and the one there: `here`), when the game says.
+local function SlotNodes(slot)
+  local mapID = GetTaxiMapID and GetTaxiMapID()
+  local nodes = mapID and C_TaxiMap and C_TaxiMap.GetAllTaxiNodes and C_TaxiMap.GetAllTaxiNodes(mapID) or {}
+  local here, to
+  for _, n in ipairs(nodes) do
+    if n.state == 0 then here = n.nodeID end -- (Enum.FlightPathState.Current)
+    if n.slotIndex == slot then to = n.nodeID end
+  end
+  return here, to
+end
+
+-- The flight master picked on the flight map (slot `slot`): the flight that follows is to it.
+function T.Took(slot)
+  local from = CurrentNode()
+  pending = { from = from and TaxiNodeName(from), to = TaxiNodeName(slot) }
+  local ok, fromNode, toNode = pcall(SlotNodes, slot)
+  if ok then pending.fromNode, pending.toNode = fromNode, toNode end
+  local cdb = Saved()
+  if cdb then
+    cdb.flying = { from = pending.from, to = pending.to, fromNode = pending.fromNode, toNode = pending.toNode }
+  end
+end
+
 -- Remember which node the player picked (hook only observes the call).
 if TakeTaxiNode then
-  hooksecurefunc("TakeTaxiNode", function(slot)
-    pcall(function()
-      local from = CurrentNode()
-      pending = {
-        from = from and TaxiNodeName(from),
-        to = TaxiNodeName(slot),
-      }
-    end)
-  end)
+  hooksecurefunc("TakeTaxiNode", function(slot) pcall(T.Took, slot) end)
+end
+
+-- In the air with no take-off seen this session: the saved flight, when it's the one being flown (it took off, not
+-- long ago), else it took off now. Its take-off kept in the saved data either way.
+local function Airborne()
+  local now, snow = GetTime(), ServerNow()
+  local cdb = Saved()
+  local s = cdb and cdb.flying
+  if s and s.at and not pending and snow - s.at >= 0 and snow - s.at <= T.FLIGHT_STALE then
+    -- (after a /reload GetTime runs on; after a relog or a restart it doesn't: then by the server's clock)
+    local start = s.start
+    if not (start and start <= now and math.abs((now - start) - (snow - s.at)) <= 3) then start = now - (snow - s.at) end
+    pending = { from = s.from, to = s.to, fromNode = s.fromNode, toNode = s.toNode }
+    flightStart = start
+    s.start = start
+    return
+  end
+  flightStart = now
+  if cdb then
+    local p = pending or {}
+    cdb.flying = { from = p.from, to = p.to, fromNode = p.fromNode, toNode = p.toNode, at = snow, start = now }
+  end
 end
 
 -- The flight the player is on: { from, to (flight master names, as the flight map shows
--- them), start (GetTime) }, or nil when not flying. `to` is unknown when the flight was
--- picked before this session (e.g. a /reload in the air).
+-- them), fromNode, toNode (node ids, when known), start (GetTime) }, or nil when not flying. `to` is unknown when
+-- the flight was picked another way than the flight map (a quest's flight) or saved before this version.
 local OnTaxiChanged
 function T.Current()
   local on = UnitOnTaxi and UnitOnTaxi("player")
   if not on then
     if flightStart and OnTaxiChanged then pcall(OnTaxiChanged) end -- (landed: its time recorded)
+    -- (a saved flight not flown any more: landed while away, or logged in on the ground)
+    local cdb = not flightStart and GetTime() - loadedAt > T.RESTORE_GRACE and Saved()
+    if cdb and cdb.flying and cdb.flying.at then cdb.flying = nil end
     return nil
   end
   -- (taken off: the clock starts now if the control events didn't start it. This client doesn't fire
   -- them for flights, so the start was "now" at every redraw and the countdown sat at the whole flight's
   -- time, reported 2026-10-01; and no flight's time was ever learned)
-  if not flightStart then flightStart = GetTime() end
-  return { from = pending and pending.from, to = pending and pending.to, start = flightStart }
+  if not flightStart then Airborne() end
+  return { from = pending and pending.from, to = pending and pending.to, fromNode = pending and pending.fromNode,
+    toNode = pending and pending.toNode, start = flightStart }
 end
 
 OnTaxiChanged = function()
   local onTaxi = UnitOnTaxi("player")
   if onTaxi and not flightStart then
-    flightStart = GetTime()
+    Airborne()
   elseif not onTaxi and flightStart then
     local secs = GetTime() - flightStart
     flightStart = nil
@@ -188,6 +245,8 @@ OnTaxiChanged = function()
       ns.Print(string.format(L["flight %s took %.0fs"], key, secs))
     end
     pending = nil
+    local cdb = Saved()
+    if cdb then cdb.flying = nil end
   end
 end
 
