@@ -3322,6 +3322,9 @@ local function RunOverlays(cx, cy, viewCont, rot, s, half, zoom)
   overlayIconsUsed = 0
   if next(G.overlays) then
     ctx.x, ctx.y, ctx.cont, ctx.rot, ctx.scale, ctx.half, ctx.zoom, ctx.reach = cx, cy, viewCont, rot, s, half, zoom, half * 1.5
+    -- (API 21) the level the map shows: an underground city's own (Undercity: 10001) on its map, else ctx.cont; this
+    -- map's, the window's or the world map's (G.shownLevel, set earlier in the same redraw)
+    ctx.level = G.shownLevel or viewCont
     for name, fn in pairs(G.overlays) do
       local ok, err = pcall(fn, ctx)
       if not ok then G.LogError("overlay " .. tostring(name), err) end

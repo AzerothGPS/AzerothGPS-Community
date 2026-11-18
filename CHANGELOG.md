@@ -14,6 +14,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 ### Changed
 
 - Options > Directions: "Show the directions" is now "Show the directions text" (off: the arrow alone).
+- For plugin addons (API 21): map overlays are told the level the map shows (Undercity's own down there). See docs/api.md.
 
 ### Fixed
 

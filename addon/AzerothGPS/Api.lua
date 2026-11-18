@@ -4,7 +4,7 @@
 -- order). Everything here is safe to call before the map exists; it returns nil then.
 local _, ns = ...
 
-local API = { version = 20 }
+local API = { version = 21 }
 _G.AzerothGPS = API
 
 local function GPS() return ns.GPS end
@@ -150,6 +150,8 @@ end
 -- from the center; ctx.zoom is yards from center to edge. fn = nil removes it.
 -- (Version 10) ctx.Icon(x, y, texture, size, alpha): an icon there (a file id, a path, or
 -- "atlas:<name>"), `size` UI units across.
+-- (Version 21) ctx.level: the level the map shows, an underground city's own (Undercity: 10001)
+-- on its map, else ctx.cont.
 function API.SetOverlay(name, fn)
   if not GPS() then return end
   GPS().overlays[name] = fn
