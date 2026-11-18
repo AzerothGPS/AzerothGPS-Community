@@ -1172,7 +1172,8 @@ function G.InteriorNpcs(place, wmo, room, cont)
                 local I = ns.Pins and ns.Pins.NPC_ICONS
                 -- (no icon of its own, or a quest giver's: a dot; asked 2026-11-14, "don't use quest indicators")
                 if I and (icon == I.npc or icon == I.quest) then icon = nil end
-                out[#out + 1] = { x = x, y = y, z = z, name = n.name, title = n.title, icon = icon, id = n.id, level = sp[i] }
+                out[#out + 1] = { x = x, y = y, z = z, name = ns.NpcName(n.id, n.name), title = ns.NpcTitle(n.id, n.title),
+                  icon = icon, id = n.id, level = sp[i] }
                 break
               end
             end
@@ -5140,7 +5141,7 @@ end
 function G.MinimapTipText(name, title, city, cont, x, y)
   if city then
     local n = G.PlaceNpc(name, cont, x, y)
-    if n then return G.NpcLabel(n.name, n.title) end
+    if n then return G.NpcLabel(ns.NpcName(n.id, n.name), ns.NpcTitle(n.id, n.title)) end
   end
   if not name or name == "" then return nil end
   return G.NpcLabel(name, title)
@@ -7814,9 +7815,9 @@ function G.Update()
       local route = G.DungeonPathsOn(st) and G.PathColorNote(G.DungeonPathColor(st.dungeonPathColor)) or ""
       -- (another addon's Shift-click on the bosses, e.g. StreetView's street views: API.OnIconShiftClick)
       local shift = G.IconHint({ kind = "boss", cont = inst })
-      fl.text:SetText((n < 2 and ns.Instances[inst].name or instFloor == 0 and Format(L["All %d floors"], n)
+      fl.text:SetText((n < 2 and ns.InstanceName(inst) or instFloor == 0 and Format(L["All %d floors"], n)
         or Format(L["Floor %d of %d, from the top"], instFloor, n)) .. route
-        .. (view.dungeonMap and #ns.DungeonMaps[inst].floors > 1 and ("\n" .. Format(L["|cff9d9d9dMap: %s|r"], view.dungeonMap.name)) or "")
+        .. (view.dungeonMap and #ns.DungeonMaps[inst].floors > 1 and ("\n" .. Format(L["|cff9d9d9dMap: %s|r"], ns.ZoneName(view.dungeonMap.ui, view.dungeonMap.name))) or "")
         .. (shift and ("\n" .. Format(L["|cff9d9d9dShift-click a boss: %s|r"], shift)) or ""))
       fl.count:SetText(n < 2 and "" or instFloor == 0 and L["All"] or (instFloor .. "/" .. n))
       fl.up:SetShown(n >= 2)
@@ -8353,7 +8354,7 @@ function G.Update()
     end
     local info = ns.Instances[inst]
     for _, e in ipairs(info.entrances or {}) do
-      if e[4] then add({ 8, 0, 0, Format(L["Way out: %s"], info.name), e[4], e[5], exit = e }) end
+      if e[4] then add({ 8, 0, 0, Format(L["Way out: %s"], ns.InstanceName(inst)), e[4], e[5], exit = e }) end
     end
     -- stairs to another floor: along the usual way through, and the route's next one
     local function stairs(list, next_)
@@ -8609,7 +8610,7 @@ InfoParts = function()
   end
   if x and view.instance and ns.Instances[view.instance] then -- (a dungeon's map)
     local wing = G.InstanceWing(view.instance)
-    return mark, ns.Instances[view.instance].name .. (wing and (": " .. wing) or ""), string.format("%.0f, %.0f", x, y)
+    return mark, ns.InstanceName(view.instance, wing), string.format("%.0f, %.0f", x, y)
   end
   if x and view.cave and view.cont then -- (a cave's map: its name, the spot on the zone's map)
     local _, _, u, v = G.LocateWorld(view.cont, x, y)
@@ -8629,7 +8630,7 @@ InfoParts = function()
   local own = view.mine and view.instance and ns.Instances[view.instance]
   if own then
     local wx, wy = Geo.PlayerWorld()
-    return nil, own.name, wx and string.format("%.0f, %.0f", wx, wy) or nil
+    return nil, ns.InstanceName(view.instance), wx and string.format("%.0f, %.0f", wx, wy) or nil
   end
   if Geo.override then -- (the dev tools' simulated player: its zone and spot, as the game gives the player's)
     local o = Geo.override
@@ -9626,7 +9627,7 @@ function G.SeamOutOfInstance(z)
     if S().zoom < limit then G.SetZoom(limit) end
     if not G.seamNoted[inst] then
       G.seamNoted[inst] = true
-      ns.Print(info.name and Format(L["%s isn't on the world map and has no known way in: its map zooms out no further."], info.name)
+      ns.Print(info.name and Format(L["%s isn't on the world map and has no known way in: its map zooms out no further."], ns.InstanceName(inst))
         or L["This dungeon isn't on the world map and has no known way in: its map zooms out no further."])
     end
     return true
@@ -9638,7 +9639,7 @@ function G.SeamOutOfInstance(z)
     G.seamNoted[inst] = true
     ns.Print(Format(how == "guess" and L["Zoomed out of %s to the land at its way in (a guess); zoom back in for its map."]
       or how == "ghost" and L["Zoomed out of %s to the land at the game's marker for its way in; zoom back in for its map."]
-      or L["Zoomed out of %s to the land at its way in; zoom back in for its map."], info.name or L["the dungeon"]))
+      or L["Zoomed out of %s to the land at its way in; zoom back in for its map."], ns.InstanceName(inst) or L["the dungeon"]))
   end
   G.SetZoom(z)
   if recenter then recenter:Show() end
@@ -10080,9 +10081,9 @@ function G.InstanceEntrances(cont)
           if o.level == lvl and o.wing == wing and (o.x - e[2]) ^ 2 + (o.y - e[3]) ^ 2 <= 10 * 10 then same = true break end
         end
         if not same then
-          local name = wing and (info.name .. ": " .. wing .. (e.door and (" (" .. e.door .. ")") or "")) or info.name
+          local name = ns.InstanceName(lvl, wing, e.door) -- (in the game's language)
           list[#list + 1] = { level = lvl, name = name, raid = info.raid, cont = e[1], x = e[2], y = e[3], shared = shared,
-            wing = wing, base = info.name }
+            wing = wing, base = ns.InstanceName(lvl) }
         end
       end
     end
@@ -10114,7 +10115,7 @@ function G.InstanceStopEntrance(lvl, x, y, pcont, px, py)
     end
     if d and (not bd or d < bd) then best, bd = e, d end
   end
-  return best and { cont = best[1], x = best[2], y = best[3], name = info.name .. (best[7] and (": " .. best[7]) or "") } or nil
+  return best and { cont = best[1], x = best[2], y = best[3], name = ns.InstanceName(lvl, best[7]) } or nil
 end
 
 -- Dungeons reached through a cave of their own on the continent (asked 2026-10-01: the Deadmines, through the
@@ -10144,7 +10145,7 @@ function G.ApproachEntrance(stopCont, x, y, pcont, px, py)
               local d = px and Geo.Base(pcont or base) == base and ((w[k] - px) ^ 2 + (w[k + 1] - py) ^ 2) or k
               if not bd or d < bd then best, bd = k, d end
             end
-            return { cont = base, x = w[best], y = w[best + 1], name = Format(L["%s (way to %s)"], c[1], info.name) }
+            return { cont = base, x = w[best], y = w[best + 1], name = Format(L["%s (way to %s)"], c[1], ns.InstanceName(lvl)) }
           end
         end
       end
@@ -10547,7 +10548,7 @@ local function SearchIndex()
   end
   for _, t in ipairs(ns.Transports or {}) do
     if t[8] == "portal" then -- (a dungeon's or raid's way in, Data/Instances.lua: its end on the continent)
-      add(t[10], L["Instance entrance"], t[1], t[2], t[3], true)
+      add(ns.RideEndName(t, 2), L["Instance entrance"], t[1], t[2], t[3], true, t[10])
     elseif ns.Nav.TransportUsable and not ns.Nav.TransportUsable(t) then
       -- (the other faction's: not offered, as on the map, in the routes and the options; asked 2026-10-08, "why does
       -- zeppelins show for alliance players?")
@@ -10880,11 +10881,16 @@ function G.ShippedNpcEntries(class)
       -- nothing is known of its stock)
       for _, k in ipairs(G.StockAmmoKinds(n.id, n.title, Lay.NpcOffers(n, "v")) or {}) do add(k) end
       -- (its name as the game showed it, in its language, ns.NpcName; found by the English too, `en`)
+      -- (and the shipped one in the client's language for one never met, Data/NpcNames; its title so too: shown, and
+      -- found by it as by the English)
       local shown = ns.NpcName(n.id, n.name)
+      local title = ns.NpcTitle(n.id, n.title)
+      if title and title ~= n.title then add(G.SearchLower(title)) end
       local e = { name = shown, lower = G.SearchLower(shown), en = shown ~= n.name and G.SearchLower(n.name) or nil,
-        title = n.title, sub = n.title or L["NPC"], npc = true,
+        title = n.title, sub = title or L["NPC"], npc = true,
         shipped = n, id = n.id, kind = n.title and G.SearchLower(n.title) or nil, kinds = kinds }
-      e.tex = ns.Pins and ns.Pins.NpcIcon and ns.Pins.NpcIcon(e) or nil
+      e.tex = ns.Pins and ns.Pins.NpcIcon and ns.Pins.NpcIcon(e) or nil -- (by the English title)
+      e.title = title
       out[#out + 1] = e
     end
   end
@@ -11248,7 +11254,10 @@ end
 G.NPC_PLACE_YD = 250
 function G.NpcPlaceName(level, x, y)
   local lv = ns.CityLevels and ns.CityLevels[level]
-  if lv and lv.name then return ns.ZoneName(lv.map, lv.name) end
+  if lv and lv.name then
+    if lv.instance then return ns.InstanceName(level) end -- (a dungeon's: by its map id)
+    return ns.ZoneName(lv.map, lv.name)
+  end
   local cont = Geo.Base(level)
   local city = G.CityMapAt and G.CityMapAt(cont, x, y)
   if city and ns.Maps and ns.Maps[city] then return ns.ZoneName(city, ns.Maps[city].name) end
@@ -12088,7 +12097,7 @@ function G.AddStopAt(x, y, name, stopCont, tex, z, exact, questID)
   if inst then
     local e = G.InstanceStopEntrance(inst, x, y, cont, px, py)
     if not e then
-      ns.Print(Format(L["%s: no way in known to route to"], ns.Instances[inst].name or L["that dungeon"]))
+      ns.Print(Format(L["%s: no way in known to route to"], ns.InstanceName(inst) or L["that dungeon"]))
       return false
     end
     x, y, name, tex, z = e.x, e.y, e.name, INSTANCE_ICON, nil
@@ -13092,16 +13101,16 @@ function G.BossRoute(quiet)
   local stops, dead = G.BossStops(lvl)
   if #stops == 0 then
     if G.NextBoss(lvl) then -- (bosses up, but none with a spot: WoW Forever's own dungeons, their map only)
-      ns.Print(Format(L["Boss Route: %s's bosses have no spots on its map yet; the map still shows which is next."], info.name))
+      ns.Print(Format(L["Boss Route: %s's bosses have no spots on its map yet; the map still shows which is next."], ns.InstanceName(lvl)))
     else
-      ns.Print(Format(L["Boss Route: %s's bosses are all down."], info.name))
+      ns.Print(Format(L["Boss Route: %s's bosses are all down."], ns.InstanceName(lvl)))
     end
     return
   end
   ns.Nav.SetStops(stops, false, true) -- (the usual order: kept)
   G.RouteChanged()
   local wing = G.InstanceWing(lvl)
-  local what, place = quiet and L["Dungeon route"] or L["Boss Route"], info.name .. (wing and (": " .. wing) or "")
+  local what, place = quiet and L["Dungeon route"] or L["Boss Route"], ns.InstanceName(lvl, wing)
   if #stops == 1 then
     ns.Print(dead > 0 and Format(L["%s: %s, 1 boss in the usual order (%d already down). Each is done when it dies; remove one to skip it."], what, place, dead)
       or Format(L["%s: %s, 1 boss in the usual order. Each is done when it dies; remove one to skip it."], what, place))
