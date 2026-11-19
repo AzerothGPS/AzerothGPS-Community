@@ -2,19 +2,32 @@
 -- major options ... One popup for setup on initial install. Then tutorials would not be a popup, just a dialog panel
 -- message where route directions go, until the player does their first route").
 --
--- THE SETUP: one window (ns.Window, its corner logo), a page a choice, each a row of big cards (a little drawing made of
--- plain color boxes, a title, a line); the card picked is lit. Shown once, some seconds after the world is entered, on
--- a first install only (`db.setup.due`, set by InitDB when there were no saved variables at all: a player updating
--- keeps their settings and never sees it). Any time again: Options > Help's Run Setup Again, or /agps setup.
--- Every pick is applied at once (a live preview: the GPS map takes the minimap's corner at the size picked as it's
--- clicked); Finish keeps them, Skip, the X and Escape put back what was there when it opened (S.before). Either way it
--- isn't shown by itself again. A controller (Pad.Device) moves through the cards with the D-pad, A picks, B goes back;
--- override bindings of our own owner frame, out of combat, as Pad.lua's (nothing of Blizzard's touched).
+-- THE SETUP: one window (ns.Window, its corner logo), a page a choice, each a row of big cards (a picture, a title, a
+-- line); the card picked is lit. Shown once to everyone, a first install and a player updating alike (Kooki3z,
+-- 2026-11-19: "Setup runs once for everyone after the next update"), some seconds after the world is entered: due
+-- while the saved stamp `db.setup.shown` is under S.VERSION (raise S.VERSION to show it to everyone once more). The
+-- stamp is set as it opens, so a /reload meanwhile doesn't bring it back. Any time again: Options > Help's Run Setup
+-- Again, or /agps setup. It opens on the player's own settings (the cards lit to what they have) and every pick is
+-- applied at once (a live preview: the GPS map takes the minimap's corner at the size picked as it's clicked); Finish
+-- keeps them, Skip, the X and Escape put back what was there when it opened (S.before, saved in `db.setup.before`
+-- while it's open: a /reload or a crash meanwhile puts them back at the next login, S.RestoreSaved). A controller
+-- (Pad.Device) moves through the cards with the D-pad, A picks, B goes back; override bindings of our own owner frame,
+-- out of combat, as Pad.lua's (nothing of Blizzard's touched).
+--
+-- THE PICTURES: a card shows Media/Setup/<art>.tga (or .blp) when the client has the file (S.ImageKnown), else its
+-- drawing of plain color boxes (S.ART). Exact size, never filtered above LINEAR: the picture is S.IMAGE_PX[cards on
+-- the page] pixels (the top left of a power-of-two canvas, the rest clear, as Media's CornerLogo files), shown pixel
+-- for pixel on a 1440-high screen at UI scale 1 (S.REF_PPU) and at the same size in UI units on any other.
+--
+-- THE POPUPS: the setup comes first. The tutorial's offer (T.MaybePrompt: "what's new", a tutorial cut short) waits
+-- while the setup is due or open (S.Holds) and is offered S.PROMPT_GAP s after it's closed; the setup opened by hand
+-- over the offer puts the offer away till then. Never two at once.
 --
 -- THE TIPS: until the first route is done (a trip's last stop reached, Nav's arrive hooks), a fresh install shows a
 -- short tip at a time where the route's directions go (the map's route panel, on the map or detached: the same
--- place) while there's no route to show, Next / Got It and Hide Tips on it. The tutorial's offer isn't popped up on
--- that install (Tutorial.lua's T.MaybePrompt); it's still in Options > Help and /agps tutorial.
+-- place) while there's no route to show, Next / Got It and Hide Tips on it. A fresh install's only (`db.tips.due`):
+-- a player who has done routes never sees them. The tutorial's offer isn't popped up on that install
+-- (Tutorial.lua's T.MaybePrompt); it's still in Options > Help and /agps tutorial.
 local _, ns = ...
 local L = ns.L or setmetatable({}, { __index = function(_, k) return k end })
 local Format = ns.Format or string.format
@@ -22,7 +35,9 @@ local Format = ns.Format or string.format
 local S = {}
 ns.Setup = S
 
-S.DELAY = 6 -- seconds after the world is entered before the setup shows (a first install)
+S.VERSION = 1 -- the setup shown once to everyone whose `db.setup.shown` is lower (raise it to show it again)
+S.DELAY = 6 -- seconds after the world is entered before the setup shows
+S.PROMPT_GAP = 2 -- seconds after the setup is closed before the tutorial's offer that waited for it
 S.W, S.H = 600, 380 -- the window
 S.CARD_H = 176
 S.PAD_OWNER = "AzerothGPSSetupPadOwner" -- (the controller's bindings' owner: never UIParent's)
@@ -30,7 +45,7 @@ S.PAD_KEYS = { PADDUP = "up", PADDDOWN = "down", PADDLEFT = "left", PADDRIGHT = 
   PADLSHOULDER = "lb", PADRSHOULDER = "rb" }
 S.TIP_OWNER = "AzerothGPS tips" -- (Nav.arriveHooks)
 -- The settings the setup can change: taken as it opens, put back by Skip / closing.
-S.KEYS = { "replaceMinimap", "replaceMinimapSize", "useWorldMap", "navPanelDetached", "iconSize", "padControl" }
+S.KEYS = { "replaceMinimap", "replaceMinimapSize", "useWorldMap", "navPanelDetached", "iconSize" }
 S.SIZES = { { "small", L["Small"] }, { "medium", L["Medium"] }, { "large", L["Large"] } }
 
 local function GPS() return ns.settings.gps end
@@ -72,15 +87,9 @@ function S.BuildPages()
       { value = "medium", title = L["Medium"], art = "icons2", text = L["The usual size."] },
       { value = "large", title = L["Large"], art = "icons3", text = L["Easier to see."] },
       { value = "xlarge", title = L["Extra large"], art = "icons4", text = L["Twice the small size."] } } },
-    { id = "pad", title = L["Controller"], key = "padControl",
-      when = function() return ns.Pad ~= nil and ns.Pad.Device() ~= nil end, cards = {
-      { value = true, title = L["Use the controller"], art = "pad",
-        text = L["Move the map and set stops with your controller."] },
-      { value = false, title = L["Mouse and keyboard"], art = "mouse",
-        text = L["The controller is left to the game."] } } },
   }
 end
--- The pages shown this time (a controller's only with one in use).
+-- The pages shown this time (a page's `when()` false: left out).
 function S.Pages()
   if not S.PAGES then S.BuildPages() end
   local out = {}
@@ -91,8 +100,56 @@ function S.Pages()
 end
 
 ---------------------------------------------------------------------------
--- The cards' drawings: plain color boxes (no texture files: nothing filtered, nothing to relog for)
+-- The cards' pictures: a screenshot file where the client has one, else a drawing of plain color boxes
 ---------------------------------------------------------------------------
+
+S.IMAGE_DIR = "Interface\\AddOns\\AzerothGPS\\Media\\Setup\\"
+-- A card's picture in pixels, by the cards on its page (2: the minimap, the map, the route panel; 4: the icon sizes).
+S.IMAGE_PX = { [2] = { 300, 180 }, [4] = { 216, 130 } }
+S.REF_PPU = 1440 / 768 -- (screen pixels per UI unit the pictures are made for: ns.PixelsPerUnit, 1440 high, scale 1)
+-- The picture's box on a card `w` wide with `n` on its page, in UI units (the drawing's too).
+function S.ArtSize(n, w)
+  local px = S.IMAGE_PX[n]
+  if px then return px[1] / S.REF_PPU, px[2] / S.REF_PPU end
+  local k = math.min((w - 16) / 100, 1.6)
+  return 100 * k, 60 * k
+end
+-- Whether the client has the picture `art` (a file added since the last login hasn't: GetTextureFileID nil; anything
+-- but a file's number: taken as not there, the drawing shown).
+S.imageKnown = {}
+function S.ImageKnown(art)
+  local k = S.imageKnown[art]
+  if k ~= nil then return k end
+  if not S.probe then
+    if not (UIParent and UIParent.CreateTexture) then return false end
+    S.probe = UIParent:CreateTexture(nil, "BACKGROUND")
+    S.probe:Hide()
+  end
+  S.probe:SetTexture(S.IMAGE_DIR .. art)
+  k = false
+  if S.probe.GetTextureFileID then
+    local ok, id = pcall(S.probe.GetTextureFileID, S.probe)
+    k = (ok and type(id) == "number") and true or false
+  end
+  S.imageKnown[art] = k
+  return k
+end
+-- Card art frame `a` (S.ArtSize big) showing picture `art` from its file, pixel for pixel at S.REF_PPU: the
+-- picture's pixels in the top left of its power-of-two canvas. False: no file (the drawing instead).
+function S.ShowImage(a, art, n)
+  local px = S.IMAGE_PX[n]
+  if not (px and art and S.ImageKnown(art)) then return false end
+  local t = a:CreateTexture(nil, "ARTWORK")
+  t:SetAllPoints()
+  t:SetTexture(S.IMAGE_DIR .. art)
+  local pw, ph = 1, 1
+  while pw < px[1] do pw = pw * 2 end
+  while ph < px[2] do ph = ph * 2 end
+  t:SetTexCoord(0, px[1] / pw, 0, px[2] / ph)
+  if t.SetSnapToPixelGrid then t:SetSnapToPixelGrid(true) end
+  a.image = t
+  return true
+end
 
 local SCREEN = { 0.16, 0.17, 0.2, 1 }
 local MAP = { 0.25, 0.42, 0.24, 1 }
@@ -133,12 +190,6 @@ S.ART = {
   panelOff = function(a)
     Box(a, 34, 18, 56, 38, FRAME) Box(a, 36, 20, 52, 34, MAP) Box(a, 6, 4, 40, 10, DARK)
     Box(a, 9, 8, 26, 2, WHITE)
-  end,
-  pad = function(a)
-    Box(a, 22, 8, 56, 44, MAP) Box(a, 48, 22, 4, 16, ROAD) Box(a, 42, 28, 16, 4, ROAD)
-  end,
-  mouse = function(a)
-    Box(a, 22, 8, 56, 44, MAP) Box(a, 46, 24, 6, 9, WHITE) Box(a, 48, 33, 2, 4, WHITE)
   end,
 }
 for n, px in ipairs({ 4, 5, 6, 8 }) do
@@ -274,18 +325,19 @@ function S.ShowPage(i)
       b:ClearAllPoints()
       b:SetPoint("TOPLEFT", f, "TOPLEFT", x0 + (ci - 1) * (w + gap), f.top - 50)
       b:SetSize(w, S.CARD_H)
-      -- the drawing: made again for the page (100 x 60, scaled to the card)
+      -- the picture: made again for the page (its file, else the drawing: 100 x 60 scaled to the box)
       if b.drawn ~= card then
         local old = b.art
         if old then old:Hide() end
         b.art = CreateFrame("Frame", nil, b)
-        b.art.k = math.min((w - 16) / 100, 1.6)
-        b.art:SetSize(100 * b.art.k, 60 * b.art.k)
+        local aw, ah = S.ArtSize(n, w)
+        b.art.k = aw / 100
+        b.art:SetSize(aw, ah)
         b.art:SetPoint("TOP", 0, -8)
         local bg = b.art:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints()
         bg:SetColorTexture(SCREEN[1], SCREEN[2], SCREEN[3], SCREEN[4])
-        if S.ART[card.art] then S.ART[card.art](b.art) end
+        if not S.ShowImage(b.art, card.art, n) and S.ART[card.art] then S.ART[card.art](b.art) end
         b.title:ClearAllPoints()
         b.title:SetPoint("TOPLEFT", b.art, "BOTTOMLEFT", -4, -6)
         b.title:SetPoint("TOPRIGHT", b.art, "BOTTOMRIGHT", 4, -6)
@@ -342,7 +394,6 @@ end
 function S.Value(key)
   local v = GPS()[key]
   if v == nil and ns.DEFAULTS and ns.DEFAULTS.gps then v = ns.DEFAULTS.gps[key] end
-  if key == "padControl" or key == "replaceMinimapRoute" then return v ~= false end
   if key == "iconSize" then return v or "medium" end
   if key == "replaceMinimapSize" then return v or "small" end
   return v == true
@@ -362,7 +413,7 @@ function S.ApplyAll()
   if ns.Pad and ns.Pad.Apply then pcall(ns.Pad.Apply) end
 end
 
--- Open it (Options' Run Setup Again, /agps setup, a first install). Not in combat (the minimap can't be moved then).
+-- Open it (Options' Run Setup Again, /agps setup, once by itself). Not in combat (the minimap can't be moved then).
 function S.Open()
   if S.open then
     S.window:Raise()
@@ -379,6 +430,19 @@ function S.Open()
   local st = GPS()
   S.before = {}
   for _, k in ipairs(S.KEYS) do S.before[k] = { v = st[k] } end
+  local db = DB()
+  if db and db.setup then
+    db.setup.shown = math.max(tonumber(db.setup.shown) or 0, S.VERSION) -- (not by itself again, a /reload or not)
+    db.setup.before = S.before -- (put back at the next login if it's never closed: S.RestoreSaved)
+  end
+  -- (the tutorial's offer showing: put away till the setup is closed, never two popups at once)
+  local T = ns.Tutorial
+  if T and T.prompt and T.prompt:IsShown() then
+    T.answered = true
+    T.prompt:Hide()
+    T.prompted = nil
+    T.afterSetup = true
+  end
   S.pages = S.Pages()
   S.open = true
   local f = S.Window()
@@ -405,13 +469,37 @@ function S.Close(keep)
   S.before = nil
   local db = DB()
   if db and db.setup then
-    db.setup.due = nil
+    db.setup.shown = math.max(tonumber(db.setup.shown) or 0, S.VERSION)
     db.setup.done = ns.VERSION or true
+    db.setup.before = nil
   end
   S.ApplyAll()
   if S.window and S.window:IsShown() then S.window:Hide() end
   S.PadApply()
   if keep then ns.Print(L["Setup done. Options > Help runs it again any time."]) end
+  -- (the tutorial's offer that waited for the setup: now, a moment after)
+  local T = ns.Tutorial
+  if T and T.afterSetup then
+    T.afterSetup = nil
+    if C_Timer and C_Timer.After then
+      C_Timer.After(S.PROMPT_GAP, function() if T.MaybePrompt then pcall(T.MaybePrompt) end end)
+    end
+  end
+  return true
+end
+-- At login (InitDB), before anything is applied: a setup left open by a /reload or a crash has its live preview
+-- saved over the player's settings; put back what they had.
+function S.RestoreSaved(db)
+  local su = db and db.setup
+  local before = su and su.before
+  if type(before) ~= "table" then return false end
+  su.before = nil
+  local st = db.settings and db.settings.gps
+  if type(st) ~= "table" then return false end
+  for _, k in ipairs(S.KEYS) do
+    local was = before[k]
+    if type(was) == "table" then st[k] = was.v end
+  end
   return true
 end
 function S.Go(dir)
@@ -424,10 +512,16 @@ function S.Go(dir)
 end
 function S.Shown() return (S.open and S.window and S.window:IsShown()) and true or false end
 
--- A first install: once, some seconds after the world is entered, out of combat (else when the fight ends).
+-- Once for everyone (the stamp under S.VERSION), some seconds after the world is entered, out of combat (else when
+-- the fight ends).
 function S.Due()
   local db = DB()
-  return (db and db.setup and db.setup.due) and true or false
+  local su = db and db.setup
+  return (su and (tonumber(su.shown) or 0) < S.VERSION) and true or false
+end
+-- The setup due or open: the tutorial's offer waits (T.MaybePrompt).
+function S.Holds()
+  return (S.open or S.Due()) and true or false
 end
 function S.MaybeShow()
   if not S.Due() or S.open then return false end
@@ -552,8 +646,7 @@ local function PadButton(key)
   padButtons[key] = b
   return b
 end
--- Bound while the setup shows with a controller in use (whatever the controller option says: picking "Mouse and
--- keyboard" with it mustn't take it away mid-setup), out of combat.
+-- Bound while the setup shows with a controller in use (whatever the controller option says), out of combat.
 function S.PadWanted()
   return S.Shown() and ns.Pad ~= nil and ns.Pad.Device() ~= nil and not InCombat()
 end

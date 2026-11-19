@@ -6,7 +6,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 ### New
 
-- A first-time setup on a new install: pick your minimap (with a live preview and its size), where the map opens, the route's directions and the icons' size from big cards. Works with a controller.
+- A one-time setup after this update: pick your minimap (with a live preview and its size), where the map opens, the route's directions and the icons' size from big cards. Works with a controller.
 - Run it again any time: Options > Help > Run Setup Again, or /agps setup.
 - On a new install, tips show where the route's directions go until your first route is done, instead of the tutorial popup.
 - Edit Road: change a road you drew or recorded into ground, a floor, a bridge, stairs or a lift, with its height and stairs on part of it.

@@ -728,9 +728,13 @@ local function InitDB()
   if type(db.tutorial) ~= "table" then db.tutorial = { fresh = fresh or nil } end
   if type(db.tutorial.seen) ~= "table" then db.tutorial.seen = {} end
   if db.tutorial.ask == nil then db.tutorial.ask = true end
-  -- (1.3.10, Setup.lua: the first-run setup and the first route's tips, a first install's only; a player updating
-  -- gets the tables without `due` and never sees either)
-  if type(db.setup) ~= "table" then db.setup = { due = fresh or nil } end
+  -- (1.3.10, Setup.lua: the setup, once for everyone (`setup.shown` under Setup's S.VERSION; `done` from a test
+  -- build counts as shown), its live preview put back if the game was left with it open; the first route's tips a
+  -- first install's only: a player updating gets the table without `due` and never sees them)
+  if type(db.setup) ~= "table" then db.setup = {} end
+  db.setup.due = nil
+  if db.setup.done and not db.setup.shown then db.setup.shown = 1 end
+  if ns.Setup and ns.Setup.RestoreSaved then pcall(ns.Setup.RestoreSaved, db) end
   if type(db.tips) ~= "table" then db.tips = { due = fresh or nil } end
   if type(db.tutorial.declined) ~= "number" then db.tutorial.declined = 0 end
   ns.UnpackSaved(db) -- (the points saved packed: lists again)
