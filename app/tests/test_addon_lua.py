@@ -7279,6 +7279,27 @@ def test_on_a_road_a_shortcut_to_another_road_must_save_a_fair_bit(env):
     assert (300, 0) in [tuple(round(v) for v in p) for p in pts]  # (without it: across to D)
 
 
+def test_a_road_in_a_quarter_the_entry_candidates_leave_out_is_tried_too(env):
+    # (issue #682: a road drawn to Tarren Mill's flight master split the roads by it; they were all the ENTRY_CANDIDATES,
+    # on the town's side, and the south road 204 yd off the other way wasn't tried) nine roads meet 50 yd north of the
+    # start, and the road to the stop starts 360 yd off to the south-east: taken, not the junction's long way round
+    lua, ns = env
+    load(lua, ns, "Router.lua")
+    spokes = ", ".join("{1,%d,100,0, 0,50, %d,150}" % (k + 4, (k - 4) * 20) for k in range(8))
+    nodes = "0,50, 0,3000, 0,-2000, " + ", ".join("%d,150" % ((k - 4) * 20) for k in range(8)) + ", 300,-200"
+    lua.eval("function(src) return assert(load('local _, ns = ...; ' .. src)) end")("""
+      ns.Roads = { [1] = { n = { %s },
+        e = { {1,2,2950,0, 0,50, 0,3000}, {2,3,5800,0, 0,3000, 1500,500, 0,-2000}, %s,
+              {12,3,1830,0, 300,-200, 0,-2000} } } }""" % (nodes, spokes))(None, ns)
+    R = ns.Router
+    R.Reset()
+    assert R.ENTRY_CANDIDATES < 9
+    r = R.Route(1, 0.0, 0.0, 0.0, -2000.0, lua.table(offroad=False))
+    pts, kinds = route_pts(r)
+    assert (300, -200) in [tuple(round(v) for v in p) for p in pts], pts
+    assert r.length < 2300
+
+
 def test_a_ride_to_zephras_isle_is_drawn_too(nav_env):
     # (reported: on a hop by Zephras Isle's zeppelins, only one ride had its line) a ride's line is its
     # boarding dock to its landing, both in the boarding continent's coordinates: the isle's weren't

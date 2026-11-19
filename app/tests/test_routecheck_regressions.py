@@ -164,6 +164,25 @@ def test_a_walk_up_a_tower_by_the_stop_leaves_the_walk_round_to_the_further_road
     assert blocked_run(ns, 0, pts, kinds, (-12113.5, -161.5), (-12414.2, 146.3)) < BLOCKED_RUN_YD
 
 
+# Tarren Mill (Hillsbrad, issue #682): Kooki3z's road to the flight master (PR #665, time 1795057104), along the road
+# there, split the roads by it; they were all the start's ENTRY_CANDIDATES, on the town's side, and the south road 204 yd
+# off, the way south-east, wasn't one: 732 yd north through the town and back down. (The whole addon, as route-quality
+# weighs it: H20 Ivar's Patch -> Chillwind Point, 411 s before the road, 460 s with it.)
+
+def test_a_road_to_the_flight_master_leaves_the_walk_south_east_to_the_south_road():
+    from azerothgps import gameharness
+
+    lua, ns = gameharness.start()
+    assert ns.RoadTracksIn[1795057104]  # (shipped)
+    lua.execute("AGPS_LEVEL = 20; UnitFactionGroup = function() return 'Horde' end")
+    ns.Router.Reset()
+    r = ns.Router.Route(0, -0.1, -859.9, 516.7, -1450.0, lua.table())
+    pts, kinds = route_pts(r)
+    assert math.hypot(pts[1][0] - 165.3, pts[1][1] - -979.5) < 5, pts  # (straight onto the south road)
+    assert max(y for _, y in pts) < -850, pts  # (not north through the town)
+    assert r.length < 1250
+
+
 def test_a_recorded_walks_top_isnt_joined_to_the_ground_road_by_its_foot(world):
     # (the same walk's top, 31 yd up the tower, ended 14 yd from its own way to the stairs' foot on the ground and was
     # joined onto it: a step from the ground onto the tower's top. WithTracks' LandHeightOK, R.LAND_CLIMB)
