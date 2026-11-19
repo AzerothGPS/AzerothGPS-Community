@@ -11028,7 +11028,9 @@ function G.ConfirmRoute()
   local stops = {}
   for _, d in ipairs(ns.Nav.stops) do stops[#stops + 1] = d end
   for _, d in ipairs(pending) do stops[#stops + 1] = d end
-  local _, asked = ns.Nav.SetStops(stops, S().fastestOrder)
+  -- (a route kept in its listed order, an import's: the new stops after it, Nav.keepOrder)
+  local keep = ns.Nav.keepOrder and #ns.Nav.stops > 0
+  local _, asked = ns.Nav.SetStops(stops, S().fastestOrder and not keep, nil, keep)
   if asked then -- (a zone too high: "route there anyway?" has them now)
     pending = {}
     elapsed = 1
@@ -16120,7 +16122,8 @@ function G.Init()
       local stops = {}
       for _, d in ipairs(ns.Nav.stops) do stops[#stops + 1] = d end
       for _, d in ipairs(pending) do stops[#stops + 1] = d end
-      ns.Nav.SetStops(stops, S().fastestOrder)
+      local keep = ns.Nav.keepOrder and #ns.Nav.stops > 0 -- (an import's listed order: the new stops after it)
+      ns.Nav.SetStops(stops, S().fastestOrder and not keep, nil, keep)
     end
     -- (option) with a route, a map looked around in reopens following the player too
     local reopenFollow = S().reopenFollow and ns.Nav.dest and (free or browse)

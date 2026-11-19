@@ -12,6 +12,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Resize the detached route panel by its corner; steps that don't fit show as "... 3 more steps", and long lines are cut short or wrap (Options > Map window).
 - Lock the detached route panel in place (its lock button, or Options > Map window).
 - The directions text has its own lock, apart from the arrow (Options > Directions, or right-click it).
+- Imported routes now visit their stops in the order listed, on by default; untick "Route in the listed order" in Import and Share (or Options > Routing) for the fastest order.
 
 ## 1.3.8
 

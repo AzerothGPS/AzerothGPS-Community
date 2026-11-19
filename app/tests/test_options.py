@@ -49,7 +49,8 @@ NEW = ["mapEditIdle", "toolShiftClick", "language", "layerCity", "showRoads", "s
        "replaceMinimapRoute",  # (asked 2026-11-17: the route off the minimap square)
        "navPanelWidth", "navPanelAlign", "navPanelDetached",  # (1.3.9: the route panel's width, side, own window)
        "navPanelHideButtons", "navPanelAlpha", "navPanelLocked", "navPanelWrap",  # (1.3.9: detached, its buttons hidden and its background's opacity)
-       "dirLocked"]  # (1.3.9: the directions text's own lock, apart from the arrow's)
+       "dirLocked",  # (1.3.9: the directions text's own lock, apart from the arrow's)
+       "importKeepOrder"]  # (1.3.9: imports routed in the order listed; the Import and Share window's box too)
 # Where each setting's control is: the page a player would look on.
 HOME = {
     "General": "shown keyBlockedInCombat showCoords distanceUnits language quietChat searchCommonNpcs",
@@ -69,7 +70,7 @@ HOME = {
     "Opacity": "alpha fadeMoving movingAlpha combatHideMap combatAlpha combatHideArrow arrowCombatAlpha "
                "clickThroughMoving clickThroughCombat",
     "Routing": "useFlights flightMapRing useHearthstone useTeleports avoidHighZones avoidHostile roadTolerance fastestOrder "
-               "cityKeepOrder questZoneOnly questAutoReroute questPickRoute navCloseClears acceptWay acceptMapPins acceptShared",
+               "cityKeepOrder importKeepOrder questZoneOnly questAutoReroute questPickRoute navCloseClears acceptWay acceptMapPins acceptShared",
     "Directions": "arrow arrowLocked arrowPx arrowBg dirShown dirLocked dirStopsOnly arrowSnap arrowSide dirTextScale dirBg "
                   "questing",
     "Performance": "hz rerouteSeconds stopsAhead autoPauseRouting autoPauseSeconds gentleBackground arrowHz",
@@ -172,7 +173,7 @@ DEPENDENTS = [
     ("lockSize", "locked", True), ("freeSize", "locked", True), ("freeSize", "lockSize", True),
     ("windowTint", "windowFrame", False), ("windowClose", "windowFrame", False), ("charm", "windowFrame", False),
     ("charmSwing", "windowFrame", False), ("charmSwing", "charm", "none"),
-    ("cityKeepOrder", "fastestOrder", False), ("layerQuestAreas", "layerQuests", False),
+    ("cityKeepOrder", "fastestOrder", False), ("importKeepOrder", "fastestOrder", False), ("layerQuestAreas", "layerQuests", False),
     ("layerQuestAreasMinimap", "layerQuests", False),
     ("seamExploredOnly", "style", "minimap"), ("seamTerrainYd", "style", "minimap"),
     ("seamContinentAt", "style", "zone"), ("seamWorldAt", "style", "nospoiler"),

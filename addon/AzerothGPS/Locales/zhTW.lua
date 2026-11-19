@@ -3,6 +3,11 @@ local _, ns = ...
 local L = ns.NewLocale("zhTW")
 if not L then return end
 
+L["Got It"] = "知道了"
+L["Imported stops are now routed in the order they're listed. For the fastest order instead, untick \"Route in the listed order\" in the Import and Share window (or Options > Routing). Your choice is remembered."] = "匯入的停靠點現在依列表順序導航。若要最快順序，請在匯入與分享視窗（或 選項 > 路線規劃）中取消勾選「依列表順序導航」。你的選擇會被記住。"
+L["Route in the listed order"] = "依列表順序導航"
+L["Imported routes in the listed order"] = "匯入的路線依列表順序"
+L["Stops you import (pasted in Import and Share, /way lines, or a route another player sends) are visited in the order they're listed, not the fastest order. Stops added to that route later go at the end."] = "匯入的停靠點（貼到匯入與分享中的、/way 行，或其他玩家傳來的路線）會依列表中的順序前往，而非最快順序。之後加入該路線的停靠點會排在最後。"
 L["stop %d"] = "第%d站"
 L["destination"] = "目的地"
 L["|cff9d9d9d... %d more stops|r"] = "|cff9d9d9d……還有%d站|r"

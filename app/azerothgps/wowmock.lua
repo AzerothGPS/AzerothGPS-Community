@@ -304,6 +304,8 @@ GetLocale = function() return "enUS" end
 GetBuildInfo = function() return "1.60.1", "70124", "Sep 1 2026", 16001 end
 GetRealmName = function() return "Realm" end
 UnitName = function() return "Tester" end
+UnitIsPlayer = function(unit) return unit == "player" end -- (the Import and Share window: your target, a player?)
+UnitIsUnit = function(a, b) return a == b end
 UnitGUID = function() return "Player-1-00000001" end
 UnitFactionGroup = function() return "Horde" end
 UnitRace = function() return "Undead", "Scourge" end

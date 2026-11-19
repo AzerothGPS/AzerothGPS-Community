@@ -219,9 +219,19 @@ function I.AddMapPin(pin)
   if ns.GPS and ns.GPS.RouteChanged then ns.GPS.RouteChanged() end
 end
 
--- Make them the route (or add them to it). Returns how many stops were set.
+-- Make them the route (or add them to it). Returns how many stops were set. Every list of stops brought in goes
+-- through here: the window's Import, /way lines (typed, or several pasted in chat) and a route another player sent.
+-- With "Route in the listed order" (gps.importKeepOrder; asked for 1.3.9) they go in the order listed, never the
+-- fastest (Nav.keepOrder: nor reordered on the way); added to a route already in its listed order, at its end too.
+function I.KeepsOrder(add)
+  local st = ns.settings and ns.settings.gps
+  local N = ns.Nav
+  return (st and st.importKeepOrder) and true or (add and N.keepOrder and #N.stops > 0) or false
+end
+
 function I.Apply(stops, add)
   local N = ns.Nav
+  local keep = I.KeepsOrder(add)
   local list = {}
   if add then
     for _, d in ipairs(N.stops) do list[#list + 1] = d end
@@ -232,7 +242,8 @@ function I.Apply(stops, add)
     d.icon = N.NextMarker(list)
     list[#list + 1] = d
   end
-  N.SetStops(list, ns.settings and ns.settings.gps.fastestOrder)
+  N.SetStops(list, ns.settings and ns.settings.gps.fastestOrder and not keep, nil, keep)
+  if keep and I.TellOrder then I.TellOrder() end
   return #list
 end
 
@@ -1299,6 +1310,17 @@ local function Build()
   asNodes:SetScript("OnClick", function(self) if self:GetChecked() then asNpcs:SetChecked(false) end end)
   asNpcs:SetScript("OnClick", function(self) if self:GetChecked() then asNodes:SetChecked(false) end end)
 
+  -- the stops in the order they're listed, not the fastest (asked for 1.3.9; remembered: gps.importKeepOrder, also in
+  -- Options > Routing)
+  local keep = Check(f, L["Route in the listed order"])
+  keep:SetPoint("BOTTOMLEFT", 10, 10)
+  keep:SetScript("OnClick", function(self)
+    if ns.settings then ns.settings.gps.importKeepOrder = self:GetChecked() and true or false end
+    if ns.db then ns.db.importOrderTold = true end -- (chosen: no need to be told)
+  end)
+  Tip(keep, L["Route in the listed order"], L["Stops you import (pasted in Import and Share, /way lines, or a route another player sends) are visited in the order they're listed, not the fastest order. Stops added to that route later go at the end."])
+  f.keep = keep
+
   local go = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
   go:SetSize(90, 22)
   go:SetPoint("BOTTOMRIGHT", -12, 10)
@@ -1312,6 +1334,7 @@ local function Build()
     status:SetText(msg)
     -- (only a route, all of it in: done; else what happened stays in view)
     local done = res.stops and #res.rejected == 0 and res.wanted <= res.fit and res.had == 0 and res.skipped == 0
+      and not I.orderTold -- (the one-time notice up: the window stays, its box glowing)
     for _, n in pairs(res.added) do done = done and n == 0 end
     if done then f:Hide() end
     if ns.GPS then
@@ -1341,7 +1364,7 @@ local function Build()
   local boxes = { mine, 6 }
   for _, k in ipairs(I.EXPORT_KINDS) do boxes[#boxes + 1] = f.kinds[k[1]]; boxes[#boxes + 1] = 8 end
   local need = 24 + math.max(Row(copy, 12, sendLabel, 10, who, 6, whisper, 4, group), Row(unpack(boxes)),
-    Row(add, 16, asNodes, 16, asNpcs))
+    Row(add, 16, asNodes, 16, asNpcs), Row(keep, 16, cancel, 6, go))
   f.needWidth = need
   if need > f:GetWidth() then
     f:SetWidth(math.ceil(need))
@@ -1352,6 +1375,7 @@ local function Build()
     status:SetText(L["|cff9d9d9dTip: Shift+click a player's name in chat to put it in \"Link to\".|r"])
     add:SetChecked(false)
     add:SetEnabled(#ns.Nav.stops > 0)
+    keep:SetChecked(ns.settings and ns.settings.gps.importKeepOrder and true or false)
     -- your target, if it's another player, is the default recipient
     if UnitIsPlayer("target") and not UnitIsUnit("target", "player") then
       local name, realm = UnitName("target")
@@ -1359,8 +1383,34 @@ local function Build()
     end
     edit:SetFocus()
   end)
+  f:HookScript("OnHide", function()
+    if ns.Tutorial and ns.Tutorial.StopPointing then ns.Tutorial.StopPointing(keep) end
+  end)
   f:Hide()
   return f
+end
+
+-- Told once for the account (`db.importOrderTold`; asked for 1.3.9 with the listed order on by default): the first
+-- import that keeps its listed order says so and where to change it, the stops already routed. A player who ticked or
+-- unticked the box (or the option) is never told. The box glows while it shows (the tutorial's glow), when the Import
+-- and Share window is open; an import from /way or a shared route doesn't open it. Returns the popup.
+function I.TellOrder()
+  local db = ns.db
+  local st = ns.settings and ns.settings.gps
+  if not db or db.importOrderTold or not (st and st.importKeepOrder) then return nil end
+  local Ask = ns.GPS and ns.GPS.Ask or ns.Ask
+  if not Ask then return nil end
+  db.importOrderTold = true
+  local box = win and win:IsShown() and win.keep or nil
+  local T = ns.Tutorial
+  if box and T and T.PointAt then T.PointAt(box, box.label) end
+  local function Done()
+    I.orderTold = nil
+    if box and T and T.StopPointing then T.StopPointing(box) end
+  end
+  I.orderTold = Ask("AzerothGPSImportOrder", L["Imported stops are now routed in the order they're listed. For the fastest order instead, untick \"Route in the listed order\" in the Import and Share window (or Options > Routing). Your choice is remembered."],
+    L["Got It"], nil, Done, Done, { single = true })
+  return I.orderTold
 end
 
 function I.Toggle()

@@ -117,6 +117,7 @@ ns.DEFAULTS = {
     stopsAhead = 3, -- stops routed and drawn on the map at a time (1 to Nav.PLAN_AHEAD); the next come in as they're reached
     avoidHostile = true, -- routes keep away from the other faction's guards (their towns)
     cityKeepOrder = true, -- ... except stops down in a city: in the order placed
+    importKeepOrder = true, -- stops imported (Import and Share, /way lists, shared routes) in the order listed (Nav.keepOrder)
     acceptWay = true, -- TomTom /way commands (typed or pasted in chat) add route stops
     acceptMapPins = true, -- a map pin link ("[Map Pin Location]") clicked in chat adds a stop there
     acceptShared = true, -- routes other players send (asked before use)
@@ -693,6 +694,15 @@ local function InitDB()
   if gps then gps.seamWorldYd = nil end -- (2026-11-14: the first world slider's, only the icons' stage; seamWorldAt)
   for _, c in pairs(db.chars or {}) do
     if type(c) == "table" and c.mapWindow == "atlas" then c.mapWindow = nil end
+  end
+  -- (importKeepOrder on by default, asked for 1.3.9 after a test build had it off: on once for every profile, then the
+  -- player's own choice; `importOrderOn`)
+  if not db.importOrderOn then
+    db.importOrderOn = true
+    if gps then gps.importKeepOrder = true end
+    for _, t in pairs(type(db.profiles) == "table" and db.profiles or {}) do
+      if type(t) == "table" and type(t.gps) == "table" then t.gps.importKeepOrder = true end
+    end
   end
   Merge(db.settings, ns.DEFAULTS)
   db.chars = db.chars or {}

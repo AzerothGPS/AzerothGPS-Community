@@ -199,6 +199,7 @@ A language with longer words wraps more notes, so a page near 480 may scroll a l
 | Routes | Road tolerance | `roadTolerance` |
 | Stops | Visit stops in the fastest order | `fastestOrder` |
 | Stops | > Except in cities [fastest order] | `cityKeepOrder` |
+| Stops | > Imported routes in the listed order [fastest order] | `importKeepOrder` |
 | Stops | Quest route: only this zone | `questZoneOnly` |
 | Stops | X on the route panel cancels the route | `navCloseClears` |
 | Waypoints and sharing | Accept TomTom /way commands | `acceptWay` |

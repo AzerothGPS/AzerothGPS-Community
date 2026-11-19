@@ -3,6 +3,11 @@ local _, ns = ...
 local L = ns.NewLocale("frFR")
 if not L then return end
 
+L["Got It"] = "Compris"
+L["Imported stops are now routed in the order they're listed. For the fastest order instead, untick \"Route in the listed order\" in the Import and Share window (or Options > Routing). Your choice is remembered."] = "Les étapes importées sont maintenant suivies dans l'ordre de la liste. Pour l'ordre le plus rapide, décochez \"Suivre l'ordre de la liste\" dans la fenêtre Importer et partager (ou Options > Itinéraires). Votre choix est mémorisé."
+L["Route in the listed order"] = "Suivre l'ordre de la liste"
+L["Imported routes in the listed order"] = "Itinéraires importés dans l'ordre de la liste"
+L["Stops you import (pasted in Import and Share, /way lines, or a route another player sends) are visited in the order they're listed, not the fastest order. Stops added to that route later go at the end."] = "Les étapes que vous importez (collées dans Importer et partager, lignes /way ou un itinéraire envoyé par un autre joueur) sont visitées dans l'ordre de la liste, pas dans l'ordre le plus rapide. Les étapes ajoutées ensuite à cet itinéraire vont à la fin."
 L["stop %d"] = "étape %d"
 L["destination"] = "destination"
 L["|cff9d9d9d... %d more stops|r"] = "|cff9d9d9d... %d étapes de plus|r"
