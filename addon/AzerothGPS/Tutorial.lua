@@ -1921,6 +1921,12 @@ function T.MaybePrompt()
       function() T.Start(resume.queue, resume.qi) end)
     return true
   end
+  -- (1.3.10: a first install gets the setup and the tips in the route panel instead of this popup, Setup.lua; the
+  -- tutorial is still in Options > Help and /agps tutorial)
+  if ns.Setup and ns.Setup.TipsOn() then
+    T.Offered()
+    return false
+  end
   local due, ids = T.PromptDue()
   if not due then return false end
   T.ShowPrompt(ids)

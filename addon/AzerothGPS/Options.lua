@@ -2980,6 +2980,11 @@ local function BuildWindow()
     return box
   end
   help.restH = Into(help.rest, -10, function()
+    -- (1.3.10: the first-run setup's cards again, Setup.lua)
+    header(L["First-time setup"])
+    note(L["The first-time setup: your minimap, where the map opens, the route's directions and the icons' size."])
+    O.setupButton = Button(page, L["Run Setup Again"], 170, function() if ns.Setup then ns.Setup.Open() end end)
+    place(O.setupButton, 28, 4)
     -- (the map's Search Places help, moved here from its button's tooltip: asked 2026-11-14, "too much text for a
     -- button hover"; not on General, which fits without scrolling)
     header(L["Search Places"])

@@ -727,6 +727,10 @@ local function InitDB()
   if type(db.tutorial) ~= "table" then db.tutorial = { fresh = fresh or nil } end
   if type(db.tutorial.seen) ~= "table" then db.tutorial.seen = {} end
   if db.tutorial.ask == nil then db.tutorial.ask = true end
+  -- (1.3.10, Setup.lua: the first-run setup and the first route's tips, a first install's only; a player updating
+  -- gets the tables without `due` and never sees either)
+  if type(db.setup) ~= "table" then db.setup = { due = fresh or nil } end
+  if type(db.tips) ~= "table" then db.tips = { due = fresh or nil } end
   if type(db.tutorial.declined) ~= "number" then db.tutorial.declined = 0 end
   ns.UnpackSaved(db) -- (the points saved packed: lists again)
   ns.db = db
@@ -1653,6 +1657,7 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
     -- (a walk being recorded ends at a loading screen; after a /reload, recording goes on)
     if ns.started and ns.Record and ns.Record.OnEnteringWorld then pcall(ns.Record.OnEnteringWorld, arg1, arg2) end
     if ns.started and ns.Tutorial and ns.Tutorial.OnEnteringWorld then pcall(ns.Tutorial.OnEnteringWorld, arg1, arg2) end
+    if ns.started and ns.Setup and ns.Setup.OnEnteringWorld then pcall(ns.Setup.OnEnteringWorld) end
   elseif event == "PLAYER_LOGOUT" then
     if ns.Nav and ns.Nav.SaveTrack then pcall(ns.Nav.SaveTrack) end
     if ns.Record and ns.Record.OnLogout then pcall(ns.Record.OnLogout) end
@@ -1689,6 +1694,7 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
     Start("options", ns.Options and ns.Options.Init)
     Start("seamless map", ns.Atlas and ns.Atlas.Init)
     Start("tutorial", ns.Tutorial and ns.Tutorial.Init)
+    Start("setup", ns.Setup and ns.Setup.Init)
     -- (how full the saved file is, a few seconds in: the counting off the login's own frame)
     Start("saved data", function() C_Timer.After(5, function() pcall(ns.SavedNotice) end) end)
     -- (a player from before 1.2.2, the arrow locked: asked once whether to unlock it, Arrow's A.OfferUnlock)

@@ -92,6 +92,7 @@ PadOptions.lua
 Config.lua
 Api.lua
 Tutorial.lua
+Setup.lua
 
 # The seamless map (issues #49, #57, #60, #61): its data and engine, run only when it's on (Atlas/Atlas.lua)
 Atlas\Data\BakedZones.lua
