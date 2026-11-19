@@ -27,6 +27,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Roads: new roads in Stonetalon Mountains.
 - Roads: a new road in Stranglethorn Vale.
 - Roads: new roads in Arathi Highlands and Loch Modan.
+- Roads: new road to Tarren Mill's flight master.
 - Extra large map icons (Options > Map icons > Icon size); stops, your arrow and minimap icons grow with it too.
 - While routing is paused, the Pause Routing button glows, and a glowing Resume button shows by the logo on the GPS minimap (Options > Map to turn it off). On a controller, Start pauses and resumes.
 - The mouse wheel zooms toward the spot under the cursor, on the map window and in the world map.
