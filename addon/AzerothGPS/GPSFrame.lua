@@ -778,7 +778,8 @@ local roadCoarse = {} -- [cont] = { zoom, k }: the spacing that fitted last
 -- Router's g.kind, else a stairs or lift road by its source), its corners joined (a square the line's width where it
 -- turns: no notch), and zoomed in to NODE_DOT_ZOOM the network's connection points as dots (G.JUNCTION_COLOR where three
 -- or more roads meet, G.ROAD_END_COLOR where one ends).
-G.KIND_COLORS = { bridge = { 0.1, 0.9, 1 }, floor = { 1, 0.55, 0.85 }, stairs = { 1, 0.9, 0.2 }, lift = { 0.75, 0.4, 1 } }
+G.KIND_COLORS = { bridge = { 0.1, 0.9, 1 }, floor = { 1, 0.55, 0.85 }, stairs = { 1, 0.9, 0.2 }, lift = { 0.75, 0.4, 1 },
+  ramp = { 1, 0.6, 0.15 } }
 G.JUNCTION_COLOR, G.ROAD_END_COLOR = { 1, 1, 1 }, { 0.6, 0.6, 0.6 }
 G.NODE_DOT_ZOOM = 150 -- (yards from the view's middle to its edge)
 G.JUNCTION_DOT, G.END_DOT = 6, 4 -- (UI units across)
@@ -13152,7 +13153,7 @@ end
 -- (Record.EditTrack: a new track that replaces the old one). The button again, or the road tools off, ends it.
 G.EDIT_KINDS = { "ground", "floor", "bridge", "stairs", "lift" } -- (Router.TRACK_KINDS)
 G.EDIT_KIND_NAMES = { ground = L["Ground"], floor = L["Floor"], bridge = L["Bridge"], stairs = L["Stairs"],
-  lift = L["Lift"] }
+  lift = L["Lift"], ramp = L["Ramp"] }
 function G.SetEditRoadMode(on)
   if on and not G.roadMode then G.SetRoadMode(true) end
   G.editRoadMode = (on and G.roadMode) and true or nil
@@ -13278,6 +13279,14 @@ function G.AskRoadEdit(level, sel)
       return b
     end
     f.pickFoot, f.pickTop = Pick(L["Pick Foot"], "foot", 14), Pick(L["Pick Top"], "top", 130)
+    -- (Set Heights: the stretch from the foot to the top picked, or the whole road; 1.3.10, issue #685)
+    local sh = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    sh:SetSize(110, 22)
+    sh:SetPoint("TOPLEFT", 246, f.top - 106)
+    sh:SetText(L["Set Heights..."])
+    sh:SetWidth(math.max(110, (sh:GetTextWidth() or 0) + 24))
+    sh:SetScript("OnClick", function() G.AskSetHeights() end)
+    f.setHeights = sh
     local note = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     note:SetPoint("TOPLEFT", 14, f.top - 136)
     note:SetPoint("RIGHT", -14, 0)
@@ -13299,6 +13308,7 @@ function G.AskRoadEdit(level, sel)
     cancel:SetScript("OnClick", function() f:Hide() end)
     f:HookScript("OnHide", function()
       if G.roadEdit then G.roadEdit.sel = nil end
+      if G.setHeightsWindow then G.setHeightsWindow:Hide() end -- (Set Heights goes with it)
       elapsed = 1
     end)
     G.roadEditWindow = f
@@ -13314,6 +13324,117 @@ function G.AskRoadEdit(level, sel)
   elapsed = 1
   return f
 end
+-- Set Heights (asked 2026-11-19 for 1.3.10, issue #685: "players can shape stairs and cliffs themselves"): the stretch
+-- of the road picked in Edit Road from its foot to its top (Pick Foot, Pick Top; neither: the whole road) gets a start
+-- and an end height, filled in from the road's own heights or the map's ground (Record.StretchBase) and typed over, the
+-- points between spread evenly by the yards along; it can be made Stairs or a Ramp at once (Heights Only: neither).
+-- Saved as Edit Road saves (Record.EditTrack): the rest of the road keeps its heights.
+G.STRETCH_KINDS = { "stairs", "ramp", "none" }
+G.STRETCH_KIND_NAMES = { stairs = L["Stairs"], ramp = L["Ramp"], none = L["Heights Only"] }
+-- The stretch picked: first, last point (the whole road with none picked).
+function G.HeightsStretch(re)
+  local n = #re.sel.t.pts / 2
+  local i, j = re.foot or 1, re.top or n
+  if re.foot and not re.top then i, j = re.foot, n end
+  if re.top and not re.foot then i, j = 1, re.top end
+  if j < i then i, j = j, i end
+  if i == j then i, j = math.max(1, i - 1), math.min(n, j + 1) end
+  return i, j
+end
+function G.AskSetHeights()
+  local re = G.roadEdit
+  if not (re and re.sel) then return nil end
+  local f = G.setHeightsWindow
+  if not f then
+    f = ns.Window("AzerothGPSSetHeights", 360, 200, L["Set Heights"])
+    local function Row(label, y)
+      local t = f:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+      t:SetPoint("TOPLEFT", 14, f.top - y)
+      t:SetText(label)
+      local box = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
+      box:SetSize(70, 20)
+      box:SetPoint("TOPLEFT", 90, f.top - y + 3)
+      box:SetAutoFocus(false)
+      box:SetMaxLetters(8)
+      box:SetScript("OnEscapePressed", function() f:Hide() end)
+      return box
+    end
+    f.startBox, f.endBox = Row(L["Start"], 12), Row(L["End"], 40)
+    f.kinds = {}
+    for k, kind in ipairs(G.STRETCH_KINDS) do
+      local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+      b:SetSize(104, 22)
+      b:SetPoint("TOPLEFT", 14 + (k - 1) * 108, f.top - 70)
+      b:SetText(G.STRETCH_KIND_NAMES[kind])
+      b.kind = kind
+      b:SetScript("OnClick", function()
+        f.kind = kind
+        for _, o in ipairs(f.kinds) do o:SetEnabled(o.kind ~= kind) end
+      end)
+      f.kinds[k] = b
+    end
+    local note = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    note:SetPoint("TOPLEFT", 14, f.top - 100)
+    note:SetPoint("RIGHT", -14, 0)
+    note:SetJustifyH("LEFT")
+    f.note = note
+    local save = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    save:SetSize(110, 22)
+    save:SetPoint("BOTTOMRIGHT", -12, 10)
+    save:SetText(L["Set Heights"])
+    save:SetWidth(math.max(110, (save:GetTextWidth() or 0) + 24))
+    save:SetScript("OnClick", function()
+      if G.SaveSetHeights() then f:Hide() end
+    end)
+    f.save = save
+    local cancel = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    cancel:SetSize(90, 22)
+    cancel:SetPoint("RIGHT", save, "LEFT", -6, 0)
+    cancel:SetText(L["Cancel"])
+    cancel:SetScript("OnClick", function() f:Hide() end)
+    G.setHeightsWindow = f
+  end
+  local i, j = G.HeightsStretch(re)
+  local base = ns.Record.StretchBase(re.sel.t, re.level)
+  local function fmt(h) return h and string.format("%.1f", h) or "" end
+  f.startBox:SetText(fmt(base[i]))
+  f.endBox:SetText(fmt(base[j]))
+  f.kind = re.kind == "stairs" and "stairs" or re.kind == "ramp" and "ramp" or "stairs"
+  for _, o in ipairs(f.kinds) do o:SetEnabled(o.kind ~= f.kind) end
+  f.note:SetText(L["The stretch from the foot to the top picked (none picked: the whole road). Start and end come from the road or the map's ground; type over them. The points between are spread evenly."])
+  f:Show()
+  return f
+end
+-- Set Heights' save: the stretch's heights on the road picked (Record.EditTrack with `stairs`, `base`, `skind`, `split`).
+-- Its number, or nil (and the window says why).
+function G.SaveSetHeights()
+  local f, re = G.setHeightsWindow, G.roadEdit
+  if not (f and re and re.sel) then return nil end
+  local z1, z2 = tonumber(f.startBox:GetText()), tonumber(f.endBox:GetText())
+  if not (z1 and z2) then
+    f.note:SetText(L["|cffff6060Give it a start and an end height.|r"])
+    return nil
+  end
+  local i, j = G.HeightsStretch(re)
+  local kind = re.kind
+  if kind == "stairs" or kind == "lift" then kind = "floor" end -- (the rest of it: a floor with its heights)
+  local base = ns.Record.StretchBase(re.sel.t, re.level)
+  local idx, why = ns.Record.EditTrack(re.sel, { kind = kind, stairs = { i, j, z1, z2 }, base = base,
+    skind = f.kind, split = f.kind ~= "none" })
+  if not idx then
+    f.note:SetText(L["|cffff6060Give it a start and an end height.|r"])
+    return nil, why
+  end
+  local dz = z2 - z1
+  ns.Print(Format(L["set the heights of that stretch (#%d): %s"], idx, dz >= 0
+    and Format(L["%s up"], ns.Nav.FormatDistance(math.abs(dz), true))
+    or Format(L["%s down"], ns.Nav.FormatDistance(math.abs(dz), true))))
+  G.roadEdit = nil
+  if G.roadEditWindow then G.roadEditWindow:Hide() end
+  elapsed = 1
+  return idx
+end
+
 -- Save Road: the road picked saved as edited (Record.EditTrack). Its number, or nil (and the window says why).
 function G.SaveRoadEdit()
   local f, re = G.roadEditWindow, G.roadEdit

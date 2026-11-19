@@ -59,7 +59,7 @@ def read_tracks(wtf_account_dir: Path) -> list[dict]:
     return tracks
 
 
-KINDS = ("ground", "floor", "bridge", "stairs", "lift")  # Router.TRACK_KINDS
+KINDS = ("ground", "floor", "bridge", "stairs", "lift", "ramp")  # Router.TRACK_KINDS
 
 
 def _num(v) -> bool:
@@ -79,22 +79,25 @@ def edit_of(t: dict, n: int) -> dict:
     raw = _lua_list(t.get("stairs"))
     if not t.get("recorded") and len(raw) == 2 and all(_num(v) for v in raw) and 1 <= int(raw[0]) < int(raw[1]) <= n:
         out["edit_stairs"] = (int(raw[0]), int(raw[1]))
+        if t.get("skind") == "ramp":  # (Set Heights' ramp: the stretch walked as a road, not stairs; 1.3.10, #685)
+            out["edit_ramp"] = True
     return out
 
 
 def edit_pieces(t: dict) -> list[dict]:
-    """An edited track's pieces (Router.TrackPieces): its stairs stretch a stairs piece of its own, the rest as the track
-    is; each {"coords", "zs", "stair", "kind"}. Without a stairs stretch (or heights for it): the track whole."""
+    """An edited track's pieces (Router.TrackPieces): its stairs stretch a stairs piece of its own (a ramp's, `edit_ramp`:
+    a ramp piece), the rest as the track is; each {"coords", "zs", "stair", "kind"}. Without a stairs stretch (or heights for it): the track whole."""
     coords, zs, st = t["coords"], t.get("zs"), t.get("edit_stairs")
     whole = [{"coords": coords, "zs": zs, "stair": bool(t.get("stair")), "kind": t.get("kind")}]
     if not st or not zs:
         return whole
     i, j = st
     out = []
+    ramp = bool(t.get("edit_ramp"))
     for a, b, stair in ((1, i, False), (i, j, True), (j, len(coords), False)):
         if b > a:
-            out.append({"coords": coords[a - 1:b], "zs": zs[a - 1:b], "stair": stair,
-                        "kind": "stairs" if stair else t.get("kind")})
+            out.append({"coords": coords[a - 1:b], "zs": zs[a - 1:b], "stair": stair and not ramp,
+                        "kind": ("ramp" if ramp else "stairs") if stair else t.get("kind")})
     return out
 
 

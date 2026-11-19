@@ -292,8 +292,9 @@ end
 
 -- The heights for an edit of `n` points `pts`: `kind` (ground: none unless `z` given; stairs: from `z1` at the first
 -- point to `z2` at the last; else `z` at every point, or the track's own `old` zs when no `z`), a stairs stretch
--- `stairs` = { i, j, z1, z2 } rising evenly by the yards along from i to j, the points before at z1, after at z2.
-function R.EditHeights(pts, kind, z, old, stairs, z1, z2)
+-- `stairs` = { i, j, z1, z2 } rising evenly by the yards along from i to j, the points before at z1, after at z2 (or
+-- `base`'s there, a height or false per point: Set Heights keeps the rest of the road's own).
+function R.EditHeights(pts, kind, z, old, stairs, z1, z2, base)
   local n = #pts / 2
   local Rt = ns.Router
   local function ramp(a, b, za, zb, out)
@@ -306,7 +307,7 @@ function R.EditHeights(pts, kind, z, old, stairs, z1, z2)
     local i, j, a, b = stairs[1], stairs[2], tonumber(stairs[3]), tonumber(stairs[4])
     if not (i and j and a and b and i >= 1 and j <= n and j > i) then return nil end
     local out = {}
-    for k = 1, n do out[k] = k < i and a or b end
+    for k = 1, n do out[k] = (type(base) == "table" and tonumber(base[k])) or (k < i and a or b) end
     ramp(i, j, a, b, out)
     return out
   end
@@ -332,8 +333,24 @@ function R.EditHeights(pts, kind, z, old, stairs, z1, z2)
   return nil
 end
 
+-- Set Heights (Edit Road, 1.3.10, issue #685): the heights the rest of road `t` keeps around a stretch, a height or
+-- false per point: its own (`zs`), else the ground's it was drawn on (`gz`), else the map's grid there (ns.Ground).
+function R.StretchBase(t, level)
+  local n = #t.pts / 2
+  local out = {}
+  local GD = ns.Ground
+  for k = 1, n do
+    local own = type(t.zs) == "table" and tonumber(t.zs[k])
+    local gz = type(t.gz) == "table" and tonumber(t.gz[k])
+    out[k] = own or gz or (GD and level and GD.PointHeight(level, t.pts[2 * k - 1], t.pts[2 * k])) or false
+  end
+  return out
+end
+
 -- Save an edit of the road picked (`sel`, R.TrackAt's): { kind, z (its height), z1, z2 (a stairs' or lift's foot and
--- top), stairs = { i, j, z1, z2 } (a stairs stretch) }. Its number in the drawn roads, or nil and why.
+-- top), stairs = { i, j, z1, z2 } (a stairs stretch), base (the rest's heights, R.StretchBase), skind ("ramp": the
+-- stretch a ramp, not stairs), split (false: the stretch's heights only, no piece of its own) }. Its number in the drawn
+-- roads, or nil and why.
 function R.EditTrack(sel, edit)
   local t = sel and sel.t
   if not (t and t.pts and #t.pts >= 4 and edit) then return nil, "nothing" end
@@ -342,7 +359,7 @@ function R.EditTrack(sel, edit)
   for _, k in ipairs(ns.Router and ns.Router.TRACK_KINDS or {}) do known = known or k == kind end
   if not known then return nil, "kind" end
   local function r1(v) return math.floor(v * 10 + 0.5) / 10 end
-  local zs = R.EditHeights(t.pts, kind, edit.z, t.zs, edit.stairs, edit.z1, edit.z2)
+  local zs = R.EditHeights(t.pts, kind, edit.z, t.zs, edit.stairs, edit.z1, edit.z2, edit.base)
   if not zs and kind ~= "ground" then return nil, "height" end
   if zs then for k = 1, #zs do zs[k] = r1(zs[k]) end end
   local pts = {}
@@ -351,7 +368,8 @@ function R.EditTrack(sel, edit)
     pts = pts, zs = zs, z = zs and zs[1] or nil, kind = kind, replaces = t.time,
     rpart = sel.shipped and t.part or nil, -- (a piece of a walk or an edit the data has: that piece; else all of it)
     stair = kind == "stairs" and zs ~= nil or nil,
-    stairs = edit.stairs and { edit.stairs[1], edit.stairs[2] } or nil }
+    stairs = edit.split ~= false and edit.stairs and { edit.stairs[1], edit.stairs[2] } or nil,
+    skind = edit.split ~= false and edit.stairs and edit.skind == "ramp" and "ramp" or nil }
   return R.Save(track)
 end
 

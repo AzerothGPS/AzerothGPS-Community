@@ -5575,9 +5575,41 @@ function N.FloorText(px, py, cont)
     .. Format(fl > 0 and L["Upstairs: %s"] or L["Downstairs: %s"], d.name or L["the stop"]) .. "|r"
 end
 
+-- On a road with its heights going up or down (stairs or a ramp set with Edit Road's Set Heights, a building's stairs:
+-- the route's own heights, never the player's, which the game doesn't give; 1.3.10, issue #685): how far up or down the
+-- climb the player is on goes, "12 yd up", from where they are on the route to where it levels off or turns back (within
+-- SLOPE_AHEAD_YD). Nil off one, or when it's less than SLOPE_MIN_YD.
+N.SLOPE_MIN_YD, N.SLOPE_AHEAD_YD, N.SLOPE_FLAT_Z = 2, 200, 0.05
+function N.SlopeHint(part)
+  local hs = part and (part.fz or part.zs)
+  local pts = part and part.pts
+  if not (hs and pts and hs[1] and hs[2]) then return nil end
+  local h0 = hs[1]
+  local sign = hs[2] > h0 + N.SLOPE_FLAT_Z and 1 or hs[2] < h0 - N.SLOPE_FLAT_Z and -1 or nil
+  if not sign then return nil end
+  local last, along = h0, 0
+  for k = 2, #pts / 2 do
+    local h = hs[k]
+    if not h or (h - last) * sign <= N.SLOPE_FLAT_Z then break end
+    along = along + math.sqrt((pts[2 * k - 1] - pts[2 * k - 3]) ^ 2 + (pts[2 * k] - pts[2 * k - 2]) ^ 2)
+    last = h
+    if along > N.SLOPE_AHEAD_YD then break end
+  end
+  local dz = math.abs(last - h0)
+  if dz < N.SLOPE_MIN_YD then return nil end
+  return sign > 0 and "up" or "down", dz
+end
+function N.SlopeText()
+  local r = N.route
+  local way, dz = N.SlopeHint(r and r.parts and r.parts[1])
+  if not way then return nil end
+  return (way == "down" and "|cff80c0ff" or "|cffffc080")
+    .. Format(way == "down" and L["%s down"] or L["%s up"], N.FormatDistance(dz, true)) .. "|r"
+end
+
 function N.HeightText(px, py, cont)
   local way, yd = N.HeightHint(px, py, cont)
-  if not way then return nil end
+  if not way then return N.SlopeText() end
   local color = way == "down" and "|cff80c0ff" or "|cffffc080"
   if not yd then return color .. (way == "down" and L["Below you (down a lift)"] or L["Above you (up a lift)"]) .. "|r" end
   return color .. Format(way == "down" and L["Below you, %s down"] or L["Above you, %s up"], N.FormatDistance(yd, true)) .. "|r"
