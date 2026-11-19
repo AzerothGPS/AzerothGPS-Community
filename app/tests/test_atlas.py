@@ -95,6 +95,9 @@ def test_no_blizzard_art_outside_the_atlas_folder():
         own = own or rel.parent == Path("Media/Icons") and p.name.rsplit("_", 1)[0] in _scaled_icon_bases()
         # (the controller's buttons and Options > Controller's diagram, 2026-11-16: drawn from numbers by padicons.py)
         own = own or rel.parent == Path("Media/Pad") and re.fullmatch(r"[A-Za-z0-9]+_\d+\.tga", p.name)
+        # (the map's round buttons drawn at each size, 1.3.9: MapMenu.tga, our own, resized, and discs drawn from
+        # numbers by coast.py; test_button_art.py checks they're what it makes)
+        own = own or rel.parent == Path("Media/Buttons") and re.fullmatch(r"(Frame|Disc)\d+\.tga", p.name)
         if not own:
             stray.append(str(rel))
     assert not stray, stray

@@ -287,6 +287,80 @@ def tga_rgba(px: np.ndarray) -> bytes:
     return head + bgra[::-1].tobytes()
 
 
+# The map's round buttons drawn sharp (asked 2026-11-18, for 1.3.9: "use right scaled images for that and all the menu
+# buttons"): GPSFrame's G.FitRoundButton sizes each button to whole screen pixels these are drawn at. The round frame
+# (Media/MapMenu.tga, our own 64 px art: the map menu button, the quick buttons' gray frame, the glows, the controller's
+# focus ring) at each of FRAME_SIZES (64: MapMenu.tga itself), and a disc (the icons' round mask, anti-aliased) at each
+# icon size drawn (RING_SIZES: iconscale.py's). Keep in step with GPSFrame's G.BUTTON_FRAME_SIZES.
+BUTTON_DIR = ADDON_DIR / "Media" / "Buttons"
+MAP_MENU_FILE = ADDON_DIR / "Media" / "MapMenu.tga"
+FRAME_SIZES = tuple(range(12, 49, 2)) + (52, 56, 60, 64, 72, 80, 96, 112, 128)
+DISC_SIZES = RING_SIZES
+
+
+def frame_file(n: int) -> Path:
+    return MAP_MENU_FILE if n == 64 else BUTTON_DIR / f"Frame{n}.tga"
+
+
+def disc_file(n: int) -> Path:
+    return BUTTON_DIR / f"Disc{n}.tga"
+
+
+def read_tga_rgba(path: Path) -> np.ndarray:
+    """An uncompressed 32-bit TGA's RGBA pixels (row 0 the top), as tga_rgba writes them."""
+    data = path.read_bytes()
+    idlen, w, h, bpp, desc = data[0], *struct.unpack("<HH", data[12:16]), data[16], data[17]
+    assert data[2] == 2 and bpp == 32, path
+    px = np.frombuffer(data[18 + idlen:18 + idlen + w * h * 4], np.uint8).reshape(h, w, 4)[..., [2, 1, 0, 3]]
+    return px if desc & 0x20 else px[::-1]
+
+
+def frame(n: int) -> np.ndarray:
+    """The round frame at `n` px: MapMenu.tga resized (Lanczos, colors weighted by their alpha so its clear edge doesn't
+    darken), (n, n, 4) uint8 RGBA."""
+    from PIL import Image
+
+    src = Image.fromarray(read_tga_rgba(MAP_MENU_FILE).copy(), "RGBA")
+    if n == src.width:
+        return np.asarray(src)
+    out = src.convert("RGBa").resize((n, n), Image.LANCZOS, reducing_gap=None).convert("RGBA")
+    return np.asarray(out)
+
+
+def disc(n: int) -> np.ndarray:
+    """A white disc filling `n` px, its edge anti-aliased by each pixel's coverage (sampled 4 x 4), clear outside: the
+    round buttons' icon mask drawn at the icon's size (the game's portrait mask shrunk to 16 px was jagged). Our own:
+    made from numbers alone. (n, n, 4) uint8 RGBA."""
+    ss = 4
+    c = (np.arange(n * ss) + 0.5) / ss - n / 2
+    inside = (np.hypot(c[:, None], c[None, :]) <= n / 2).astype(float)
+    a = inside.reshape(n, ss, n, ss).mean(axis=(1, 3))
+    rgba = np.full((n, n, 4), 255, np.uint8)
+    rgba[..., 3] = np.round(a * 255).astype(np.uint8)
+    return rgba
+
+
+def button_files() -> dict[Path, bytes]:
+    """{ path: bytes } of the buttons' art: each frame size but 64 (MapMenu.tga itself) and each disc."""
+    out = {frame_file(n): tga_rgba(frame(n)) for n in FRAME_SIZES if n != 64}
+    out.update({disc_file(n): tga_rgba(disc(n)) for n in DISC_SIZES})
+    return out
+
+
+def write_buttons(log=print) -> list[Path]:
+    """Media/Buttons/*.tga (button_files), the files no longer made removed."""
+    BUTTON_DIR.mkdir(parents=True, exist_ok=True)
+    files = button_files()
+    for p, data in files.items():
+        if not p.exists() or p.read_bytes() != data:
+            p.write_bytes(data)
+    for p in BUTTON_DIR.glob("*.tga"):
+        if p not in files:
+            p.unlink()
+    log(f"button art: {len(files)} files, {sum(len(d) for d in files.values()) / 1e3:.0f} KB in Media/Buttons")
+    return list(files)
+
+
 def write(log=print) -> None:
     data = tga(feather())
     if not FEATHER_FILE.exists() or FEATHER_FILE.read_bytes() != data:
@@ -299,6 +373,7 @@ def write(log=print) -> None:
     old = RING_DIR / "IconRing.tga"  # (the one size before)
     if old.exists():
         old.unlink()
+    write_buttons(log)
     masks = build(log)
     MEDIA.mkdir(parents=True, exist_ok=True)
     keep = set()

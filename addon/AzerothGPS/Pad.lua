@@ -1324,6 +1324,7 @@ function Pad.MenuButtons()
   for _, s in ipairs(slots) do out[#out + 1] = s[1].button end
   return out
 end
+Pad.RING_SHARE = 1.5 -- (the focus ring round a button, its size by the button's)
 local ring
 function Pad.SetFocus(b)
   local old = Pad.focus
@@ -1349,7 +1350,17 @@ function Pad.SetFocus(b)
   ring:SetParent(b)
   ring:ClearAllPoints()
   ring:SetPoint("CENTER", b, "CENTER")
-  ring:SetSize((b:GetWidth() or 26) * 1.5, (b:GetHeight() or 26) * 1.5)
+  -- (the round frame's art drawn at its size, pixel for pixel: GPSFrame's G.FitFrameArt; a round button's by its size in
+  -- whole pixels)
+  local a = b.agpsArt
+  local GPS = ns.GPS
+  local want = (a and a.F and a.F / a.ppu or b:GetWidth() or 26) * Pad.RING_SHARE
+  if GPS and GPS.FitFrameArt then
+    local u = GPS.FitFrameArt(ring.tex, b, want)
+    ring:SetSize(u, u)
+  else
+    ring:SetSize(want, want)
+  end
   ring:SetFrameLevel((b:GetFrameLevel() or 1) + 5)
   ring:Show()
   Pad.ring = ring

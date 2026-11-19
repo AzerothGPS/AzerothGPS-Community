@@ -17,6 +17,7 @@ ns.IconSizes = {
     ["atlas:classicon-shaman"] = "t64",
     ["atlas:classicon-warlock"] = "t64",
     ["atlas:classicon-warrior"] = "t64",
+    ["atlas:common-search-magnifyingglass"] = "t22",
     ["common/indicator-gray"] = "t28",
     ["common/indicator-yellow"] = "t28",
     ["gossipframe/activequesticon"] = "t14",

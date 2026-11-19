@@ -4602,12 +4602,15 @@ function G.ScaledIconFile(src, px, round)
 end
 G.scaledMissing = {}
 function G.ScaledIcon(owner, t, round)
+  local w = t.agpsSrc ~= nil and t.GetWidth and t:GetWidth() or 0
+  local px = w and w > 0 and w * ns.PixelsPerUnit(owner.GetEffectiveScale and owner:GetEffectiveScale() or 1) or nil
+  return G.ScaledIconAt(t, px, round)
+end
+-- the same for `px` screen pixels across (nil: the game's own)
+function G.ScaledIconAt(t, px, round)
   local src = t.agpsSrc
-  local w = src ~= nil and t.GetWidth and t:GetWidth() or 0
   local file, r
-  if w and w > 0 then
-    file, r = G.ScaledIconFile(src, w * ns.PixelsPerUnit(owner.GetEffectiveScale and owner:GetEffectiveScale() or 1), round)
-  end
+  if src ~= nil and px and px > 0 then file, r = G.ScaledIconFile(src, px, round) end
   if file and G.scaledMissing[file] then file = nil end
   if not file then
     if t.scaledFile then ns.SetIcon(t, src) end -- (back to the game's own: bigger than the largest drawn)
@@ -4637,6 +4640,163 @@ function G.RingTexture(t, owner)
     if d < bd then best, bd = n, d end
   end
   return G.ICON_RING .. best
+end
+-- The map's round buttons drawn sharp (asked 2026-11-18, for 1.3.9: "use right scaled images for that and all the menu
+-- buttons"; the client shrank the 64 px art by its LINEAR filter alone, blurred or jagged at 16 px, and nothing above
+-- LINEAR: it crashes WoW Forever). Each round button (the map menu button, Search, the quick buttons, their groups' and
+-- Quick Find's flyouts, the minimap square's Resume button) is sized to whole screen pixels that its art is drawn at:
+-- the round frame (Media\MapMenu, 64 px, our own) pre-drawn at each of BUTTON_FRAME_SIZES (Media\Buttons\Frame<n>.tga,
+-- coast.py's FRAME_SIZES; 64: MapMenu itself), its game icon at the size drawn nearest its share of that
+-- (G.ScaledIconFile: Media\Icons\, iconscale.py; 64: the game's own file) cut round by a disc drawn at that size
+-- (Media\Buttons\Disc<n>.tga, coast.disc), centered on whole pixels (all the sizes even). Its size in UI units follows
+-- (pixels / ns.PixelsPerUnit), so a button changes by under a pixel. The glows and the controller's focus ring the same
+-- (G.FitFrameArt). Fitted again when the scale changes (the UI's, the screen's, the world map's: G.FitRoundButtons).
+-- A file the client doesn't know yet (added since the last login: new files need a full relog) is left out, the old
+-- art instead (G.ArtFileKnown).
+G.BUTTON_ART = "Interface\\AddOns\\AzerothGPS\\Media\\Buttons\\"
+G.MAP_MENU_ART = "Interface\\AddOns\\AzerothGPS\\Media\\MapMenu"
+G.BUTTON_FRAME_SIZES = { 12, 14, 16, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 38, 40, 42, 44, 46, 48, 52, 56, 60, 64, 72,
+  80, 96, 112, 128 }
+G.BUTTON_ICON_INSET_MIN = 1 -- px at least between a button's icon and its frame's edge
+-- the size in `list` nearest `px` (the smaller on a tie)
+function G.NearestSize(list, px)
+  local best, bd = list[1], math.huge
+  for _, n in ipairs(list) do
+    local d = math.abs(n - px)
+    if d < bd then best, bd = n, d end
+  end
+  return best
+end
+function G.ButtonFrameFile(n)
+  return n == 64 and G.MAP_MENU_ART or G.BUTTON_ART .. "Frame" .. n
+end
+function G.ButtonDiscFile(n)
+  return G.BUTTON_ART .. "Disc" .. n
+end
+-- Frame px and icon px for a round button `units` across, its icon `share` of it, at `ppu` screen pixels a unit: the
+-- frame the size drawn nearest, the icon the icon size drawn (G.RING_SIZES) nearest its share, inside it.
+function G.ButtonPx(units, share, ppu)
+  local F = G.NearestSize(G.BUTTON_FRAME_SIZES, units * ppu)
+  if not share then return F, nil end
+  local want, I, d = F * share, nil, math.huge
+  for _, n in ipairs(G.RING_SIZES) do
+    local dn = math.abs(n - want)
+    if n <= F - 2 * G.BUTTON_ICON_INSET_MIN and dn < d then I, d = n, dn end
+  end
+  return F, I or G.RING_SIZES[1]
+end
+-- Whether the client knows `file` (a texture file of ours added since the last login doesn't: drawn as a green square)
+G.artKnown = {}
+function G.ArtFileKnown(file)
+  local k = G.artKnown[file]
+  if k ~= nil then return k end
+  if not G.artProbe then
+    if not (UIParent and UIParent.CreateTexture) then return true end
+    G.artProbe = UIParent:CreateTexture(nil, "BACKGROUND")
+    G.artProbe:Hide()
+  end
+  G.artProbe:SetTexture(file)
+  k = G.TextureLoaded(G.artProbe)
+  G.artKnown[file] = k
+  return k
+end
+function G.SnapTexture(t)
+  if t.SetSnapToPixelGrid then t:SetSnapToPixelGrid(true) end
+end
+-- Texture `t` showing the round frame's art about `units` across on `owner` (a glow, the controller's focus ring): the
+-- size drawn nearest, pixel for pixel. Returns its units.
+function G.FitFrameArt(t, owner, units)
+  local ppu = ns.PixelsPerUnit(owner.GetEffectiveScale and owner:GetEffectiveScale() or 1)
+  local n = G.NearestSize(G.BUTTON_FRAME_SIZES, units * ppu)
+  local file = G.ButtonFrameFile(n)
+  if not G.ArtFileKnown(file) then file = G.MAP_MENU_ART end
+  t:SetTexture(file)
+  G.SnapTexture(t)
+  t.agpsArtPx = n
+  return n / ppu
+end
+-- A round button's art: `b.agpsArt` = { units, share (the icon's; nil: no icon), frames = { textures of the frame },
+-- icon, mask }. G.roundButtons: all of them, fitted again together.
+G.roundButtons = {}
+function G.RoundArt(b, units, share, frames, icon, mask)
+  b.agpsArt = { units = units, share = share, frames = frames, icon = icon, mask = mask }
+  G.roundButtons[#G.roundButtons + 1] = b
+  G.FitRoundButton(b)
+  return b
+end
+-- `b` sized to its art's whole pixels at its scale now (`units`: a new size in units, the Resume button's)
+function G.FitRoundButton(b, units)
+  local a = b.agpsArt
+  if not a then return false end
+  if units then a.units = units end
+  local ppu = ns.PixelsPerUnit(b.GetEffectiveScale and b:GetEffectiveScale() or 1)
+  local F, I = G.ButtonPx(a.units, a.share, ppu)
+  a.ppu, a.F, a.I = ppu, F, I
+  local file = G.ButtonFrameFile(F)
+  if not G.ArtFileKnown(file) then file = G.MAP_MENU_ART end
+  b:SetSize(F / ppu, F / ppu)
+  for _, t in ipairs(a.frames) do
+    t:SetTexture(file)
+    G.SnapTexture(t)
+  end
+  if a.icon and I then
+    local u = I / ppu
+    a.icon:ClearAllPoints()
+    a.icon:SetPoint("CENTER")
+    a.icon:SetSize(u, u)
+    a.icon.agpsArtPx = I
+    if a.mask then
+      local disc = G.ButtonDiscFile(I)
+      a.mask:SetTexture(G.ArtFileKnown(disc) and disc or G.ROUND_MASK, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+      a.mask:ClearAllPoints()
+      a.mask:SetAllPoints(a.icon)
+      G.SnapTexture(a.mask)
+    end
+    G.ScaledIconAt(a.icon, I, false)
+    G.SnapTexture(a.icon)
+  end
+  if b.glow then
+    local u = G.FitFrameArt(b.glow, b, F / ppu * G.GLOW_SHARE)
+    b.glow:SetSize(u, u)
+  end
+  return true
+end
+-- a round button's icon set to `icon` (ns.SetIcon), drawn at the button's icon size
+function G.SetButtonIcon(t, icon, fallback)
+  ns.SetIcon(t, icon, fallback or "Interface\\Icons\\INV_Misc_QuestionMark")
+  if t.agpsArtPx then G.ScaledIconAt(t, t.agpsArtPx, false) end
+end
+-- every round button fitted again (the scale changed: the UI's, the screen's, the world map's)
+function G.FitRoundButtons()
+  for _, b in ipairs(G.roundButtons) do G.FitRoundButton(b) end
+  if G.useBtn and G.useBtn:IsShown() then G.FitUseButton(G.useBtn) end
+end
+-- ... when the map's pixels per unit changed since last fitted (looked at with the quick buttons' watch)
+function G.FitRoundButtonsIfScaled(owner)
+  local ppu = ns.PixelsPerUnit(owner and owner.GetEffectiveScale and owner:GetEffectiveScale() or 1)
+  if G.buttonsPpu == ppu then return false end
+  G.buttonsPpu = ppu
+  G.FitRoundButtons()
+  return true
+end
+G.GLOW_SHARE = 1.45 -- a glow round a button, its size by the button's
+-- the icon's share of its round button (as before: 16 of a quick button's 26 units, 14 of Search's 26, 14 of the
+-- Resume button's 22)
+G.QUICK_ICON_SHARE = 16 / 26
+G.SEARCH_ICON_SHARE = 14 / 26
+G.RESUME_ICON_SHARE = 14 / 22
+G.USE_BUTTON_UNITS = 24
+-- The route panel's use button (a hearthstone's, a teleport's): its icon drawn at its size too, the button on the icon
+-- size drawn nearest (not in combat: a secure button)
+function G.FitUseButton(b)
+  if not b or not ns.PixelsPerUnit or (InCombatLockdown and InCombatLockdown()) then return false end
+  local ppu = ns.PixelsPerUnit(b.GetEffectiveScale and b:GetEffectiveScale() or 1)
+  local px = G.NearestSize(G.RING_SIZES, G.USE_BUTTON_UNITS * ppu)
+  b:SetSize(px / ppu, px / ppu)
+  b.icon.agpsArtPx = px
+  G.ScaledIconAt(b.icon, px, false)
+  G.SnapTexture(b.icon)
+  return true
 end
 G.ROUND_RING_GOLD = { 1, 0.8, 0.3 }
 G.ROUND_CROP = 0.07
@@ -7160,22 +7320,23 @@ function G.MakeMinimapResume()
   r:SetSize(22, 22)
   local bg = r:CreateTexture(nil, "BACKGROUND")
   bg:SetAllPoints()
-  bg:SetTexture("Interface\\AddOns\\AzerothGPS\\Media\\MapMenu") -- (the quick buttons' round frame)
+  bg:SetTexture(G.MAP_MENU_ART) -- (the quick buttons' round frame)
   bg:SetVertexColor(0.35, 0.35, 0.35)
   local icon = r:CreateTexture(nil, "ARTWORK")
-  icon:SetPoint("TOPLEFT", 4, -4)
-  icon:SetPoint("BOTTOMRIGHT", -4, 4)
+  icon:SetPoint("CENTER")
   ns.SetIcon(icon, G.PAUSE_ICON, "Interface\\Icons\\INV_Misc_QuestionMark")
   local mask = r:CreateMaskTexture()
   mask:SetAllPoints(icon)
-  mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+  mask:SetTexture(G.ROUND_MASK, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
   icon:AddMaskTexture(mask)
   local hl = r:CreateTexture(nil, "HIGHLIGHT")
   hl:SetAllPoints()
-  hl:SetTexture("Interface\\AddOns\\AzerothGPS\\Media\\MapMenu")
+  hl:SetTexture(G.MAP_MENU_ART)
   hl:SetBlendMode("ADD")
   hl:SetAlpha(0.3)
   r.icon = icon
+  -- (drawn at whole pixels, its art pre-drawn at its size: G.RoundArt; sized by the logo's in PlaceMinimapResume)
+  G.RoundArt(r, 22, G.RESUME_ICON_SHARE, { bg, hl }, icon, mask)
   r:RegisterForClicks("LeftButtonUp")
   r:SetScript("OnClick", function(self)
     GameTooltip_Hide()
@@ -7218,14 +7379,16 @@ function G.PlaceMinimapResume(on)
   r:SetFrameLevel((b:GetFrameLevel() or 1) + 1)
   local size = b.logoSize or G.MinimapLogoUnits()
   local side = math.max(G.MINIMAP_RESUME_MIN, math.floor(size * G.MINIMAP_RESUME_SHARE + 0.5))
-  r:SetSize(side, side)
+  G.FitRoundButton(r, side) -- (on whole pixels its art is drawn at: its size by the logo's, snapped)
+  side = r.agpsArt.F / r.agpsArt.ppu
   r:ClearAllPoints()
   -- (the logo's middle is MINIMAP_LOGO_IN of its width in from the square's left: its right edge half a width further)
   r:SetPoint("BOTTOMLEFT", on, "BOTTOMLEFT", size * (G.MINIMAP_LOGO_IN + 0.5) + G.MINIMAP_RESUME_GAP,
     G.MINIMAP_RESUME_GAP * 2)
   if not r.glow and G.MakeGlow then r.glow = G.MakeGlow(r) end
   if r.glow then
-    r.glow:SetSize(side * 1.45, side * 1.45)
+    local u = G.FitFrameArt(r.glow, r, side * G.GLOW_SHARE)
+    r.glow:SetSize(u, u)
     r.glow:Show()
   end
   r:Show()
@@ -13303,7 +13466,8 @@ function G.SetUseButton(b, t, place)
       return
     end
     b.wait, b.waitAt = nil, nil -- (its attributes: G.UseWait, below)
-    b.icon:SetTexture(G.UseTexture(t))
+    if ns.SetIcon then ns.SetIcon(b.icon, G.UseTexture(t)) else b.icon:SetTexture(G.UseTexture(t)) end
+    G.FitUseButton(b) -- (its icon drawn at its size)
     b.what, b.to = t[8], t[10]
     b:ClearAllPoints()
     place(b)
@@ -14854,12 +15018,13 @@ function G.Init()
   mapButton:SetPoint("BOTTOMLEFT", 3, 3)
   local mbIcon = mapButton:CreateTexture(nil, "ARTWORK")
   mbIcon:SetAllPoints()
-  mbIcon:SetTexture("Interface\\AddOns\\AzerothGPS\\Media\\MapMenu")
+  mbIcon:SetTexture(G.MAP_MENU_ART)
   local mbGlow = mapButton:CreateTexture(nil, "HIGHLIGHT")
   mbGlow:SetAllPoints()
-  mbGlow:SetTexture("Interface\\AddOns\\AzerothGPS\\Media\\MapMenu")
+  mbGlow:SetTexture(G.MAP_MENU_ART)
   mbGlow:SetBlendMode("ADD")
   mbGlow:SetAlpha(0.35)
+  G.RoundArt(mapButton, MAP_BUTTON, nil, { mbIcon, mbGlow }) -- (drawn at whole pixels: G.RoundArt)
 
   -- The drawer's open/closed state: an invisible frame shown while it's open (its OnUpdate
   -- closes it after MENU_IDLE seconds untouched; a click on the map closes it too). What's
@@ -14925,17 +15090,17 @@ function G.Init()
   search:SetPoint("BOTTOM", mapButton, "TOP", 0, 4)
   local sbg = search:CreateTexture(nil, "BACKGROUND")
   sbg:SetAllPoints()
-  sbg:SetTexture("Interface\\AddOns\\AzerothGPS\\Media\\MapMenu") -- the same round frame
+  sbg:SetTexture(G.MAP_MENU_ART) -- the same round frame
   sbg:SetVertexColor(0.35, 0.35, 0.35)
   local sicon = search:CreateTexture(nil, "ARTWORK")
-  sicon:SetPoint("TOPLEFT", 6, -6)
-  sicon:SetPoint("BOTTOMRIGHT", -6, 6)
+  sicon:SetPoint("CENTER")
   ns.SetIcon(sicon, "atlas:common-search-magnifyingglass", "Interface\\Icons\\INV_Misc_Spyglass_03")
   local shl = search:CreateTexture(nil, "HIGHLIGHT")
   shl:SetAllPoints()
-  shl:SetTexture("Interface\\AddOns\\AzerothGPS\\Media\\MapMenu")
+  shl:SetTexture(G.MAP_MENU_ART)
   shl:SetBlendMode("ADD")
   shl:SetAlpha(0.3)
+  G.RoundArt(search, 26, G.SEARCH_ICON_SHARE, { sbg, shl }, sicon) -- (drawn at whole pixels: G.RoundArt)
 
   local panel = CreateFrame("Frame", nil, search, "BackdropTemplate")
   panel:SetFrameStrata("DIALOG")
@@ -15105,27 +15270,28 @@ function G.Init()
 
   -- A small round button like the map button: an icon in the same frame. Returns it and
   -- its icon texture.
+  -- (drawn at whole pixels, its art pre-drawn at its size: G.RoundArt; its icon QUICK_ICON_SHARE of it, 16 of 26)
   local function RoundButton(size, iconPath)
     local b = CreateFrame("Button", nil, top)
     b:SetSize(size, size)
     local bg = b:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()
-    bg:SetTexture("Interface\\AddOns\\AzerothGPS\\Media\\MapMenu") -- the same round frame
+    bg:SetTexture(G.MAP_MENU_ART) -- the same round frame
     bg:SetVertexColor(0.35, 0.35, 0.35)
     local icon = b:CreateTexture(nil, "ARTWORK")
-    icon:SetPoint("TOPLEFT", 5, -5)
-    icon:SetPoint("BOTTOMRIGHT", -5, 5)
+    icon:SetPoint("CENTER")
     ns.SetIcon(icon, iconPath, "Interface\\Icons\\INV_Misc_QuestionMark")
     local mask = b:CreateMaskTexture()
     mask:SetAllPoints(icon)
-    mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+    mask:SetTexture(G.ROUND_MASK, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
     icon:AddMaskTexture(mask)
     local hl = b:CreateTexture(nil, "HIGHLIGHT")
     hl:SetAllPoints()
-    hl:SetTexture("Interface\\AddOns\\AzerothGPS\\Media\\MapMenu")
+    hl:SetTexture(G.MAP_MENU_ART)
     hl:SetBlendMode("ADD")
     hl:SetAlpha(0.3)
     b:SetScript("OnLeave", GameTooltip_Hide)
+    G.RoundArt(b, size, G.QUICK_ICON_SHARE, { bg, hl }, icon, mask)
     return b, icon
   end
 
@@ -15626,7 +15792,7 @@ function G.Init()
         QUICK[#QUICK + 1], SLOTS[#SLOTS + 1], byId[id] = t, t, t
       end
       t.label, t.tip, t.icon = Sx.Name(r), Sx.Desc(r), Sx.Icon(r)
-      ns.SetIcon(t.iconTex, t.icon, "Interface\\Icons\\INV_Misc_QuestionMark")
+      G.SetButtonIcon(t.iconTex, t.icon)
     end
     if G.LayoutQuick then G.LayoutQuick() end
     if G.RefreshQuick then G.RefreshQuick() end
@@ -15752,7 +15918,7 @@ function G.Init()
     function G.QuickFindButton(e)
       local b = G.quickFindButtons[e.kind] or Make(e)
       b.view = e
-      ns.SetIcon(b.qfIcon, G.QuickFindIcon(e), "Interface\\Icons\\INV_Misc_QuestionMark")
+      G.SetButtonIcon(b.qfIcon, G.QuickFindIcon(e))
       return b
     end
     for _, e in ipairs(G.QUICK_FIND) do Make(e) end
@@ -15813,6 +15979,7 @@ function G.Init()
         and G.MinimapResumeOn()) then
       G.RefreshMinimapResume()
     end
+    G.FitRoundButtonsIfScaled(mapButton) -- (the scale changed: the UI's, the screen's, the world map's; G.RoundArt)
     local sig, shown = {}, {}
     for _, t in ipairs(QUICK) do
       if t.isOn then sig[#sig + 1] = G.QuickOn(t) and "1" or "0" end
@@ -15848,7 +16015,7 @@ function G.Init()
           any = true
         end
       end
-      ns.SetIcon(grp.iconTex, icon, "Interface\\Icons\\INV_Misc_QuestionMark")
+      G.SetButtonIcon(grp.iconTex, icon)
       grp.iconTex:SetDesaturated(not any)
       grp.iconTex:SetAlpha(any and 1 or 0.6)
     end
@@ -15863,8 +16030,10 @@ function G.Init()
   function G.MakeGlow(button)
     local g = button:CreateTexture(nil, "OVERLAY")
     g:SetPoint("CENTER")
-    g:SetSize(button:GetWidth() * 1.45, button:GetHeight() * 1.45)
-    g:SetTexture("Interface\\AddOns\\AzerothGPS\\Media\\MapMenu")
+    -- (the round frame's art drawn at its size, G.FitFrameArt: a round button's by its size in whole pixels)
+    local a = button.agpsArt
+    local u = G.FitFrameArt(g, button, (a and a.F and a.F / a.ppu or button:GetWidth()) * G.GLOW_SHARE)
+    g:SetSize(u, u)
     g:SetBlendMode("ADD")
     local c = G.EDIT_GLOW_COLOR
     g:SetVertexColor(c[1], c[2], c[3])
@@ -15953,6 +16122,8 @@ function G.Init()
 
   -- Place the buttons: the bar, and the column (the drawer) while the menu is open.
   function G.LayoutQuick()
+    G.buttonsPpu = nil -- (the round buttons on whole pixels at the scale now: G.FitRoundButtonsIfScaled)
+    G.FitRoundButtonsIfScaled(mapButton)
     local capUp, capRight = G.QuickCapacity()
     local lists = { barUp = {}, barRight = {}, menuUp = {}, menuRight = {} }
     for _, t in ipairs(QUICK) do t.button:Hide() end

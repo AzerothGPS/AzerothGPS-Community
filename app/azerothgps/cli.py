@@ -430,9 +430,11 @@ def cmd_coast(args) -> int:
     if args.render:
         X, Y, R = args.render
         print(C.render(args.cont, X, Y, R, DATA / "debug" / "coast" / f"coast_{args.cont}_{X:.0f}_{Y:.0f}.png"))
+    if args.buttons:
+        C.write_buttons()
     if args.write:
         C.write()
-    elif not args.render:
+    elif not (args.render or args.buttons):
         C.build()
     return 0
 
@@ -1096,6 +1098,8 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--render", nargs=3, type=float, metavar=("X", "Y", "R"),
                     help="a picture of the masks R yards around world X, Y (data/debug/coast/)")
     sp.add_argument("--cont", type=int, default=0, help="the continent for --render")
+    sp.add_argument("--buttons", action="store_true",
+                    help="write only the map buttons' art drawn at each size (Media/Buttons/*.tga)")
     sp.set_defaults(fn=cmd_coast)
 
     sp = sub.add_parser("isle-mask", help="the seamless map's isles' land masks (Atlas/Media/Textures/MapIsle/)")

@@ -6,11 +6,13 @@ coast.RING_SIZES from its full-size art, and GPSFrame's G.ScaledIcon picks the n
 
 What's drawn (`sources`):
 - the Interface\\Icons the addon's Lua names (Layers' city places and layers, Pins' NPC icons and its fallback list,
-  the quick buttons'), and the herbs' and veins' item icons (Layers.NODE_ITEMS, by the client's Item table);
+  the map's round buttons': GPSFrame's G.FitRoundButton), and the herbs' and veins' item icons (Layers.NODE_ITEMS,
+  by the client's Item table);
   opaque: JPG (WoW Forever loads it as it is, any size), each also cut round (`r`: its border cropped by
   GPSFrame's G.ROUND_CROP, for the round icons' mask);
 - a few other textures the map draws as icons (the quest marks, the NPC dots): TGA, their alpha kept;
-- the classes' icons (atlas classicon-<class>, the party's): TGA cut from their atlas.
+- the classes' icons (atlas classicon-<class>, the party's) and the Search button's magnifier (ATLASES): TGA cut from
+  their atlas.
 Written to Media/Icons/, and Data/IconSizes.lua: { sizes, files = { [key] = "j" | "t" }, ids = { [file id] = key } };
 a key is the texture's lowercased path under Interface\\ ("icons/inv_misc_book_09"), or "atlas:<name>".
 """
@@ -31,6 +33,9 @@ MEDIA_PATH = "Interface\\AddOns\\AzerothGPS\\Media\\Icons\\"
 EXTRA = ("gossipframe/activequesticon", "gossipframe/availablequesticon", "raidframe/readycheck-waiting",
          "common/indicator-gray", "common/indicator-yellow")
 CLASSES = ("warrior", "paladin", "hunter", "rogue", "priest", "shaman", "mage", "warlock", "druid")
+# atlas art drawn as icons: the classes' (the party's), and the map's Search button's magnifier (1.3.9: the map's round
+# buttons drawn sharp, GPSFrame's G.FitRoundButton)
+ATLASES = tuple(f"classicon-{c}" for c in CLASSES) + ("common-search-magnifyingglass",)
 _BS = chr(92)
 ICON_RE = re.compile("Interface" + _BS * 4 + "Icons" + _BS * 4 + "([A-Za-z0-9_]+)")
 FALLBACK_RE = re.compile(r"P\.FALLBACK_ICONS = \{(.*?)\}", re.S)
@@ -60,7 +65,30 @@ def node_items(addon_dir: Path) -> set[int]:
 
 
 def _blp(cd, fid: int) -> Image.Image:
-    return Image.open(io.BytesIO(cd.casc.read(fid))).convert("RGBA")
+    data = cd.casc.read(fid)
+    try:
+        return Image.open(io.BytesIO(data)).convert("RGBA")
+    except Exception:
+        img = _blp_raw(data)
+        if img is None:
+            raise
+        return img
+
+
+def _blp_raw(data: bytes) -> Image.Image | None:
+    """A BLP2 of uncompressed BGRA pixels (its encoding 3, which Pillow doesn't read: the Search button's magnifier's
+    atlas), its first mip; None for any other."""
+    import struct
+
+    if data[:4] != b"BLP2" or data[8] != 3:
+        return None
+    w, h = struct.unpack_from("<II", data, 12)
+    off = struct.unpack_from("<I", data, 20)[0]
+    px = data[off:off + w * h * 4]
+    if len(px) < w * h * 4:
+        return None
+    b, g, r, a = Image.frombytes("RGBA", (w, h), px).split()
+    return Image.merge("RGBA", (r, g, b, a))
 
 
 def sources(cd, addon_dir: Path) -> list[dict]:
@@ -94,8 +122,8 @@ def sources(cd, addon_dir: Path) -> list[dict]:
     members = {str(r.get("CommittedName") or "").lower(): r for r in cd.table("UiTextureAtlasMember")}
     atlases = {r["ID"]: r for r in cd.table("UiTextureAtlas")}
     sheets = {}
-    for c in CLASSES:
-        m = members.get(f"classicon-{c}")
+    for name in ATLASES:
+        m = members.get(name)
         if not m:
             continue
         a = atlases[m["UiTextureAtlasID"]]
@@ -103,7 +131,7 @@ def sources(cd, addon_dir: Path) -> list[dict]:
         sx, sy = sheet.width / a["AtlasWidth"], sheet.height / a["AtlasHeight"]
         box = (round(m["CommittedLeft"] * sx), round(m["CommittedTop"] * sy), round(m["CommittedRight"] * sx),
                round(m["CommittedBottom"] * sy))
-        add(f"atlas:classicon-{c}", None, sheet.crop(box), False, False)
+        add(f"atlas:{name}", None, sheet.crop(box), False, False)
     return out
 
 

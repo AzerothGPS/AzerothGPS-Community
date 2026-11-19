@@ -11336,7 +11336,7 @@ def test_a_glowing_resume_button_shows_on_the_minimap_square_while_paused(minima
             assert not r._shown, why
         N.SetPaused(True, "auto")
         # (the Pause Routing button's icon; just right of the logo, clear of it, inside the square's bottom)
-        assert "Spell_Nature_TimeStop" in str(r.icon._tex)
+        assert "spell_nature_timestop" in str(r.icon._tex).lower()  # (drawn at its size: Media\Icons, G.RoundArt)
         b = G.mmButton
         size = b.logoSize
         p = r._pts.BOTTOMLEFT
