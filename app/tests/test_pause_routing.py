@@ -26,6 +26,9 @@ def fresh(game):
     st = ns.settings.gps
     N = ns.Nav
     N.Clear()
+    N.SetPaused(False)
+    N.ResetStutter()
+    N.STUTTER_WATCH = False
     st.autoPauseRouting, st.autoPauseSeconds, st.autoPauseDeclined = False, 120, None
     N.autoPauseOffered = None
     N.ResetCompute()
@@ -501,3 +504,127 @@ def test_a_no_is_forgotten_when_the_options_are_reset(game):
     _route(lua, ns)
     _busy(lua)
     assert _not_following(lua, ns)
+
+
+# -- stutter from routing (asked 2026-11-18) -------------------------------------------------------------------------
+# (Kooki3z's 1.3.8 perf capture, 17 minutes on a three-stop trip across continents: "route calculation", in the frame,
+# 42 times, every one a slow frame, 350 ms on average and 571 at worst; "terrain search" slices over 16 ms 52 times.
+# Nothing noticed: the auto-pause is about a route not followed, off by default, and skips a route still searched;
+# ComputeHigh averages a minute's work for it. Now the routing work in a frame is watched: three slow route frames in
+# a minute cut routing back to the first stop, three more pause it and say so; a quiet minute and a half: full again.)
+TRIP = "{ { x = 2560, y = 330, cont = 0 }, { x = 1800, y = 1000, cont = 0 }, { x = 2800, y = -400, cont = 0 } }"
+
+
+def _slow(lua, ns, ms=40.0, secs=10.0):
+    """A frame `secs` after the last with `ms` of routing work in it (N.RouteWork, as N.Route and the pump report)."""
+    ns.Nav.STUTTER_WATCH = True
+    lua.execute(f"AGPS_T = (AGPS_T or 1000) + {secs}")
+    ns.Nav.RouteWork(ms)
+
+
+def _trip(lua, ns):
+    ns.Nav.STUTTER_WATCH = False  # (worked out at once here, as the tests do: not watched)
+    _at(lua, *BRILL)
+    ns.Nav.SetStops(lua.eval(TRIP), False, "red")
+    _tick(lua, ns, 4)
+    r = ns.Nav.route
+    assert r and r.stretches[2] and r.stretches[3], "no trip"
+    return r
+
+
+def test_one_slow_frame_now_and_then_cuts_nothing_back(game):
+    lua, ns = game
+    N = ns.Nav
+    _trip(lua, ns)
+    for _ in range(6):  # (one a minute and more apart: a hitch now and then, not a stutter)
+        _slow(lua, ns, 200.0, 61.0)
+        assert not N.degraded and not N.paused
+    _slow(lua, ns, 10.0)  # (and work under STUTTER_MS: not a slow frame at all)
+    _slow(lua, ns, 10.0)
+    _slow(lua, ns, 10.0)
+    assert not N.degraded
+
+
+def test_routing_work_in_one_frame_adds_up(game):
+    lua, ns = game
+    N = ns.Nav
+    _trip(lua, ns)
+    N.STUTTER_WATCH = True
+    for _ in range(3):  # (each frame's work in pieces under STUTTER_MS: N.Route, the pump's slice)
+        lua.execute("AGPS_T = AGPS_T + 5")
+        for _ in range(3):
+            N.RouteWork(10.0)
+    assert N.degraded
+
+
+def test_stutter_cuts_routing_back_to_the_first_stop_then_pauses_and_says_why(game):
+    lua, ns = game
+    N = ns.Nav
+    said = lua.eval("{}")
+    old_print = ns.Print
+    ns.Print = lua.eval("function(t) return function(msg) t[#t + 1] = msg end end")(said)
+    try:
+        r = _trip(lua, ns)
+        later2, later3 = r.stretches[2], r.stretches[3]
+        for _ in range(3):  # (the capture's rate: a slow route frame every 10 s)
+            _slow(lua, ns)
+        assert N.degraded and not N.paused
+        # cut back: a search between stops finishing redoes nothing after the first stop; the way to it still is
+        N.SearchDone(True)
+        N.STUTTER_WATCH = False  # (the tests' routes, worked out at once: not counted)
+        _tick(lua, ns, 3, 3.0)
+        r = N.route
+        same = lua.eval("rawequal")
+        assert r and same(r.stretches[2], later2) and same(r.stretches[3], later3)
+        assert r.legs and r.legs[1].x1 is not None
+        # still stuttering after the grace: paused, said in chat and in the directions
+        for _ in range(3):
+            _slow(lua, ns)
+        assert N.paused == "perf" and not N.degraded
+        msgs = [str(said[i]) for i in range(1, len(said) + 1)]
+        assert any("making your game stutter" in m and "/agps pause" in m for m in msgs), msgs
+        assert "making your game stutter" in _status(lua, ns)
+        assert len(N.stops) == 3  # (the stops kept)
+        N.TogglePaused()  # (resumed by the player: full routing, the watch started over)
+        assert not N.paused and not N.degraded
+    finally:
+        ns.Print = old_print
+
+
+def test_quiet_frames_bring_full_routing_back(game):
+    lua, ns = game
+    N = ns.Nav
+    r = _trip(lua, ns)
+    for _ in range(3):
+        _slow(lua, ns)
+    assert N.degraded
+    later2 = r.stretches[2]
+    for _ in range(8):  # (quiet for a while, not long enough: still cut back)
+        _slow(lua, ns, 1.0)
+    assert N.degraded
+    for _ in range(4):  # (past STUTTER_RECOVER without a slow frame: full routing again, quietly)
+        _slow(lua, ns, 1.0)
+    assert not N.degraded and not N.paused
+    N.STUTTER_WATCH = False
+    _tick(lua, ns, 6)
+    assert not lua.eval("rawequal")(N.route.stretches[2], later2)  # (the stretches after the first stop worked out again)
+    # (and a single slow frame after it doesn't cut it back again)
+    _slow(lua, ns)
+    assert not N.degraded
+
+
+def test_a_slow_reroute_in_the_frame_is_seen_by_the_watch(game):
+    # (N.Route timed itself: three in a minute, each over STUTTER_MS by the clock, cut it back)
+    lua, ns = game
+    N = ns.Nav
+    _trip(lua, ns)
+    N.STUTTER_WATCH = True
+    lua.execute("AGPS_DPS = debugprofilestop; local t = 0; debugprofilestop = function() t = t + 20 return t end")
+    try:
+        for k in range(3):
+            lua.execute("AGPS_T = AGPS_T + 10")
+            N.Route(BRILL[0] + k, BRILL[1], 0)
+            N.Route(BRILL[0] + k, BRILL[1], 0)  # (40 ms in the frame by this clock)
+        assert N.degraded
+    finally:
+        lua.execute("debugprofilestop = AGPS_DPS")

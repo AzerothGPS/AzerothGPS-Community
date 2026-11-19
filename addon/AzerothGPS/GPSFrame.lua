@@ -13887,7 +13887,11 @@ function G.PumpSearches()
   -- reroute off the route, first in the queue till it lands (Nav.Rerouting))
   local budget = G.PumpBudget(frameMs, (ns.Router.Warming and ns.Router.Warming()) or (ns.Nav.Fresh and ns.Nav.Fresh())
     or (ns.Nav.Rerouting and ns.Nav.Rerouting()))
-  local done, fixed = ns.Router.Pump(debugprofilestop() + budget, debugprofilestop)
+  local warm = ns.Router.Warming and ns.Router.Warming()
+  local p0 = debugprofilestop()
+  local done, fixed = ns.Router.Pump(p0 + budget, debugprofilestop)
+  -- (the slice for the stutter watch, Nav.RouteWork: route work in this frame; not the road data built after login)
+  if not warm and ns.Nav.RouteWork then ns.Nav.RouteWork(debugprofilestop() - p0) end
   if done then ns.Nav.SearchDone(fixed) end
   ns.PerfEnd("terrain search", t0)
   return done

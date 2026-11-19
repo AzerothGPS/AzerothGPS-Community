@@ -1857,3 +1857,5 @@ L["Lets you drag and resize this panel again."] = "Vous permet de nouveau de dé
 L["Locked. To unlock it: Options > Map window > Lock the panel."] = "Verrouillé. Pour le déverrouiller : Options > Fenêtre de la carte > Verrouiller le panneau."
 L["Wrap the text"] = "Renvoyer le texte à la ligne"
 L["While the panel is detached, a line too long for it goes on to the next line instead of being cut short with \"...\". Steps that don't fit still show as \"... N more steps\"."] = "Tant que le panneau est détaché, une ligne trop longue continue à la ligne suivante au lieu d'être coupée par \"...\". Les étapes qui ne tiennent pas s'affichent toujours comme \"... N étapes de plus\"."
+L["|cffffd100Routing paused: it was making your game stutter|r"] = "|cffffd100Itinéraire en pause : il faisait saccader votre jeu|r"
+L["Routing paused: it was making your game stutter. Resume it with the Pause Routing button or /agps pause."] = "Itinéraire en pause : il faisait saccader votre jeu. Reprenez-le avec le bouton Pause itinéraire ou /agps pause."

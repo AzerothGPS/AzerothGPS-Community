@@ -152,6 +152,7 @@ local function Changed()
   N.route, N.arrivedAt = nil, nil
   version = version + 1
   N.freshAt = GetTime and GetTime() or nil
+  N.ResetStutter() -- (another trip: routed in full again; its later stretches are new)
   Save()
 end
 -- A route just asked for (the stops changed FRESH_SECONDS ago or less): its background searches get the warm-up's
@@ -2804,7 +2805,7 @@ local function AssignTeleports(cont, px, py, d, walk)
   local names = {}
   for _, row in ipairs(tps) do names[#names + 1] = row[8] end
   local sig = table.concat(names, "|")
-  if later.tpSig ~= sig then
+  if later.tpSig ~= sig and not (N.degraded and later.gains) then -- (cut back to the first stop: kept)
     later.tpSig, later.gains = sig, {}
     for i = 2, sig ~= "" and N.PlannedStops() or 1 do
       local a = N.stops[i - 1]
@@ -3074,9 +3075,12 @@ local function Compute(px, py, cont, d, offroad)
   if t1 then ns.PerfEnd("route calculation: next stop", t1) end
   if not first then return nil end
   if ns.Router.Breathe then ns.Router.Breathe(1, 1) end
-  local t2 = ns.PerfStart and ns.PerfStart()
-  FillLater(walk, offroad, N.LATER_PER_CALL)
-  if t2 then ns.PerfEnd("route calculation: later stops", t2) end
+  -- (routing cut back to the first stop, N.degraded: the stretches after it kept as they are)
+  if not N.degraded then
+    local t2 = ns.PerfStart and ns.PerfStart()
+    FillLater(walk, offroad, N.LATER_PER_CALL)
+    if t2 then ns.PerfEnd("route calculation: later stops", t2) end
+  end
   return Assemble(first, px, py, cont, walk, offroad)
 end
 
@@ -3259,7 +3263,7 @@ function N.Route(px, py, cont)
   -- stretches between stops still to work out: one more, same route from the player. In the game, in the
   -- background (they don't depend on the player; a far pair of stops was 40 to 85 ms in the frame, the
   -- overnight sweeps' replay); in the tests, in the frame as before.
-  if r and not r.flying and r.firstStretch and r.version == version and r.offroad == offroad
+  if r and not r.flying and r.firstStretch and r.version == version and r.offroad == offroad and not N.degraded
       and later.key == version .. ":" .. tostring(offroad) and LaterMissing() then
     if ns.Router.WARM and not ns.Router.SYNC_WALKS then
       ns.Router.Background("later:" .. version .. ":" .. tostring(offroad), function()
@@ -3370,6 +3374,15 @@ function N.Route(px, py, cont)
   if t0 then ns.PerfEnd("route calculation", t0) end
   return Apply(new, old, px, py, cont, offroad, now)
 end
+-- (the routing work done in the frame, outside the background's jobs: the stutter watch's, N.RouteWork)
+local RouteNow = N.Route
+function N.Route(px, py, cont)
+  if coroutine.running() or not debugprofilestop then return RouteNow(px, py, cont) end
+  local t0 = debugprofilestop()
+  local r = RouteNow(px, py, cont)
+  N.RouteWork(debugprofilestop() - t0)
+  return r
+end
 
 -- Once a route is worked out (settled, or 3 s on): walking through a zone too high for the
 -- player asks first (GPSFrame's ConfirmRedRoute); no clears the route.
@@ -3475,7 +3488,7 @@ end
 -- Background terrain searches finished (GPSFrame pumps them): `fixed` when one was for a
 -- leg between fixed points (the stops), else they were from the player's position.
 function N.SearchDone(fixed)
-  if fixed then
+  if fixed and not N.degraded then -- (cut back to the first stop: the stretches after it not redone, N.degraded)
     N.Invalidate(true)
   else
     searchDirty = true -- see SEARCH_RECALC_SECONDS
@@ -3710,6 +3723,10 @@ local reorderAt, reorderX, reorderY = 0, nil, nil
 function N.MaybeReorder(px, py, cont)
   local due = N.reorderDue
   N.reorderDue = nil
+  if N.degraded then -- (cut back to the first stop: the order kept, looked at again once recovered)
+    N.reorderDue = due
+    return false
+  end
   if N.loop or N.keepOrder or #N.stops < 2 or not (ns.settings and ns.settings.gps.fastestOrder) or N.KeepCityOrder() then
     return false
   end
@@ -4792,6 +4809,7 @@ function N.SetPaused(on, why)
   if on and not N.dest then return false end
   N.paused = on and (why or "manual") or nil
   N.pauseWatch = nil
+  N.ResetStutter()
   if was ~= N.paused then
     N.route, kept = nil, nil
     if not N.paused then N.Invalidate(true, true) end
@@ -4810,6 +4828,7 @@ function N.TogglePaused()
 end
 function N.PausedText()
   local head = N.paused == "auto" and L["|cffffd100Routing paused: you're not following the route|r"]
+    or N.paused == "perf" and L["|cffffd100Routing paused: it was making your game stutter|r"]
     or L["|cffffd100Routing is paused|r"]
   return head .. "\n" .. L["|cff9d9d9dResume Routing in the map menu, or /agps pause|r"]
 end
@@ -4863,6 +4882,56 @@ function N.OfferAutoPause()
     end)
   return true
 end
+-- Stutter from routing (asked 2026-11-18, Kooki3z: lag spikes going off course on a long route, and nothing noticed
+-- them; the auto-pause above is about a route not followed, off by default, and skips a route still searched, and
+-- ComputeHigh averages a minute's work, never a frame's). The routing work in one frame, outside the background's jobs
+-- (N.Route's, the pump's slice: N.RouteWork), over STUTTER_MS is a slow route frame. STUTTER_HITS of them within
+-- STUTTER_WINDOW seconds: routing cut back to the first stop (N.degraded: the way there worked out as always, the
+-- stretches after it kept as they are, no `later:` jobs, no reorder, a finished search between stops not redoing
+-- them). STUTTER_HITS more within the window, past STUTTER_GRACE seconds of that (the jobs already queued finish):
+-- routing paused ("perf"), said in chat and in the directions; resumed by the player. Cut back and no slow route frame
+-- for STUTTER_RECOVER seconds: full routing again, quietly (longer than the window: no flapping).
+N.STUTTER_MS, N.STUTTER_HITS, N.STUTTER_WINDOW, N.STUTTER_GRACE, N.STUTTER_RECOVER = 25, 3, 60, 5, 90
+N.degraded = nil -- (GetTime() when routing was cut back to the first stop)
+local stutter = { hits = {} }
+function N.ResetStutter()
+  stutter = { hits = {} }
+  N.degraded = nil
+end
+-- (watched as in the game, the route work in the background; the tests' and the route checks' work at once isn't,
+-- but with STUTTER_WATCH set)
+N.STUTTER_WATCH = false
+function N.RouteWork(ms)
+  local R = ns.Router
+  if N.paused or not ms or not ((R.WARM and not R.SYNC_WALKS) or N.STUTTER_WATCH) then return end
+  local now = GetTime()
+  local s = stutter
+  if N.degraded and now - math.max(N.degraded, s.lastSlow or 0) >= N.STUTTER_RECOVER then
+    N.ResetStutter()
+    N.Invalidate(true) -- (the stretches after the first stop worked out again, in the background)
+    s = stutter
+  end
+  if s.frame ~= now then s.frame, s.ms, s.counted = now, 0, false end
+  s.ms = s.ms + ms
+  if s.counted or s.ms < N.STUTTER_MS then return end
+  s.counted = true
+  if N.degraded and now - N.degraded < N.STUTTER_GRACE then return end
+  s.lastSlow = now
+  local hits = s.hits
+  hits[#hits + 1] = now
+  while hits[1] and now - hits[1] > N.STUTTER_WINDOW do table.remove(hits, 1) end
+  if #hits < N.STUTTER_HITS then return end
+  s.hits = {}
+  if not N.degraded then
+    N.degraded = now
+    return
+  end
+  N.SetPaused(true, "perf")
+  if ns.Print then
+    ns.Print(L["Routing paused: it was making your game stutter. Resume it with the Pause Routing button or /agps pause."])
+  end
+end
+
 function N.WatchFollowing(r, cont)
   if N.paused then N.pauseWatch = nil return end
   local auto = N.AutoPauseOn()
