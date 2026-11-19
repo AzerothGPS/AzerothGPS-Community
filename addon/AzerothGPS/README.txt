@@ -20,7 +20,8 @@ Getting started
 - The + button (bottom-right of the map) imports TomTom /way lines (/way works in chat too),
   copies your route as /way lines, or sends it to a player or your group in game.
 - The direction arrow shows the next turn, the stop, distance and ETA.
-- Unlock the map or the arrow (options: Lock map position / Lock arrow position) to move them.
+- Unlock the map, the arrow or the directions text (options: Lock map position / Lock arrow position /
+  Lock directions text position) to move them.
 - The magnifier (bottom-left) searches places: pick one to add it as a stop.
 - The round map button (bottom-left): map type, layers (quests, herbs, ore), and
   "Draw a farming area" to loop through the herb or ore nodes you circle.

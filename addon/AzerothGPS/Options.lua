@@ -2404,7 +2404,7 @@ local function BuildWindow()
   check(L["Show direction arrow"], L["Two small panels (TomTom style): an arrow along the route, and beside it the directions: the next turn (\"Turn left 120 yd, toward Razor Hill\"), the stop's distance and ETA, and the stops after it when made taller."],
     function() return GPS().arrow end, function(v) GPS().arrow = v end)
   Key("arrowLocked")
-  check(L["Lock arrow position"], L["Locks the arrow and the directions in place. Unlocked: drag them to move them and the directions' corner to resize them (taller lists the later stops). With no route they show a placeholder while unlocked, so you can place them. Locked, clicks pass through them to the game world."],
+  check(L["Lock arrow position"], L["Locks the arrow in place. Unlocked: drag it to move it. Snapped to the directions text, it still moves with the text while the text is unlocked. With no route it shows a placeholder while unlocked, so you can place it. Locked, clicks pass through it to the game world."],
     function() return GPS().arrowLocked end, function(v) GPS().arrowLocked = v end, ArrowOn, INDENT)
   Key("arrowPx")
   slider(L["Arrow size"], ns.Arrow.ARROW_PX_MIN, ns.Arrow.ARROW_PX_MAX, 2, L["%d px"],
@@ -2421,6 +2421,10 @@ local function BuildWindow()
   check(L["Show the directions text"], L["The panel beside the arrow with the next turn, the stop's distance and ETA and the stops after it. Off: the arrow alone, without the text."],
     function() return GPS().dirShown ~= false end, function(v) GPS().dirShown = v end,
     function() return ArrowOn() and not ArrowHidden() end)
+  -- (asked 2026-11-18: "a separate lock option for the directions text than the arrow")
+  Key("dirLocked")
+  check(L["Lock directions text position"], L["Locks the directions text in place, apart from the arrow. Unlocked: drag it to move it and its bottom-right corner to resize it (taller lists the later stops). With no route it shows a placeholder while unlocked, so you can place it. Locked, clicks pass through it to the game world."],
+    function() return GPS().dirLocked == true end, function(v) GPS().dirLocked = v end, DirOn, INDENT)
   Key("dirStopsOnly")
   check(L["List the stops only"], L["The directions list the route's stops, each with its distance and ETA, without the turns (\"Continue straight, then turn left in 280 yd\")."],
     function() return GPS().dirStopsOnly == true end, function(v) GPS().dirStopsOnly = v end, DirOn, INDENT)
@@ -2451,7 +2455,7 @@ local function BuildWindow()
   header(L["How it works"])
   note(L["The arrow points along the route: |cff73ff73green|r straight ahead, |cffffffffwhite|r for a turn coming up, |cffff7359red|r when the route is behind you. On a flight it shows where you land and when."])
   note(L["The directions' lines: the next turn and its distance, the road or place you're heading toward, the stop with its distance and ETA, then the turn after that. With List the stops only, just the stops."])
-  note(L["To move them, untick Lock arrow position, then drag them; drag the directions' bottom-right corner to resize them. Made taller, they list the later stops too. Unlocked with no route, they show a placeholder so you can place them."])
+  note(L["Each has its own lock: untick Lock arrow position or Lock directions text position, then drag that one; drag the directions' bottom-right corner to resize them. Made taller, they list the later stops too. Unlocked with no route, they show a placeholder so you can place them."])
   note(L["Drag the arrow off the directions to move it on its own; drop it against any side of them and it snaps there. Dragging the directions takes a snapped arrow along."])
   note(L["Only the text: pick Hide under Arrow side. Only the arrow: untick Show the directions text."])
   note(L["In a quest's area the arrow shows a ! and the directions the quest's objectives. A small Sprint icon pulsing in the directions' top-right corner means you picked up or finished a quest after making your quest route: click it (or the quest route button on the map) to make the route again with it or its turn-in."])

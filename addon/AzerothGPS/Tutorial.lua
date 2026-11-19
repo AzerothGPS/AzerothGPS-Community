@@ -521,7 +521,7 @@ end
 -- The arrow and the directions panel on, unlocked, with a route to show.
 function T.ArrowOn()
   local st = S()
-  st.arrow, st.arrowLocked, st.dirShown = true, false, true
+  st.arrow, st.arrowLocked, st.dirLocked, st.dirShown = true, false, false, true
   if st.arrowSide == "hide" then st.arrowSide = "left" end -- (the arrow hidden: shown for its steps, put back after)
   T.EnsureRoute(1)
   if ns.Arrow and ns.Arrow.Apply then ns.Arrow.Apply() end
@@ -914,7 +914,7 @@ function T.BuildSections()
     -- 2026-11-10)
     { id = "arrow", version = "1.2.0", title = L["The direction arrow"], corner = true, steps = {
       { title = L["The arrow and the directions"],
-        text = L["The arrow points the way and the panel beside it lists the turns. Both can be dragged until you lock them."],
+        text = L["The arrow points the way and the panel beside it lists the turns. Each can be dragged until you lock it."],
         enter = function() T.ArrowOn() end, target = function() return ns.Arrow.frame end },
       { title = L["Move it"], text = L["Drag the directions panel: the arrow comes with it."],
         enter = function(run)
@@ -931,7 +931,7 @@ function T.BuildSections()
         end,
         target = function() return ns.Arrow.frame end, done = function() return S().arrowSnap == false end },
       { title = L["Size and lock"],
-        text = L["After the tutorial, right-click the arrow or the panel to lock them in place. The arrow's size, the text size and the lock are in Options > Directions."],
+        text = L["After the tutorial, right-click the arrow or the panel to lock that one in place: each has its own lock. The arrow's size, the text size and both locks are in Options > Directions."],
         enter = function() T.ArrowOn() end },
     } },
     { id = "window", version = "1.2.0", title = L["The map window"], full = true, steps = {

@@ -42,6 +42,9 @@ ns.DEFAULTS = {
     -- the direction arrow and the directions; unlocked (the default since 1.2.2, asked 2026-11-11: a player found
     -- them "locked to the center screen" outside the tutorial): drag to move, corner to resize, right-click to lock
     arrowLocked = false,
+    -- the directions text's own lock (1.3.9, asked 2026-11-18: "a separate lock option for the directions text than the
+    -- arrow"); `arrowLocked` is the arrow's alone since. Saved before: the old shared lock's value (ns.SplitDirLock)
+    dirLocked = false,
     point = { "BOTTOM", "UIParent", "BOTTOM", 495, 191 },
     hz = 20, -- redraws per second (at most; skipped when nothing changed; Options > Performance)
     -- performance (Options > Performance; its "Use Low-End Settings" sets these lighter)
@@ -598,6 +601,12 @@ local function Merge(t, defaults)
   end
 end
 
+-- (1.3.9: the arrow and the directions text one lock before, `arrowLocked`; the text's own, `dirLocked`, starts as it
+-- was, once: for db.settings at load and each profile when it's used)
+function ns.SplitDirLock(gps)
+  if type(gps) == "table" and gps.dirLocked == nil then gps.dirLocked = gps.arrowLocked == true end
+end
+
 local function InitDB()
   local fresh = AzerothGPSDB == nil -- (no saved data before this session: a first install, for the tutorial's welcome)
   AzerothGPSDB = AzerothGPSDB or {}
@@ -610,6 +619,7 @@ local function InitDB()
     gps.combatHideMap, gps.combatHideArrow, gps.combatHide = gps.combatHide, gps.combatHide, nil
     if gps.combatAlpha == 1 then gps.combatAlpha = nil end
   end
+  ns.SplitDirLock(gps)
   if gps and gps.frameAlways ~= nil then gps.frameAlways = nil end -- replaced by windowFrame
   if gps and gps.roundLogo ~= nil then gps.roundLogo = nil end -- (the round portrait option: removed, 2026-10-01)
   -- (Share drawn roads and walls, Share faster trips: removed, 2026-10-01; drawn roads are kept anyway,
@@ -741,6 +751,7 @@ function ns.UseProfile(name)
     t.gps.wallTools = nil
   end
   if t and type(t.gps) == "table" then t.gps.seamWorldYd = nil end -- (the first world slider's: InitDB's)
+  if t then ns.SplitDirLock(t.gps) end
   if t then Merge(t, ns.DEFAULTS) end -- (options added since it was last used)
   ns.settings = t or db.settings
   ns.CharDB().profile = t and name or nil
@@ -765,6 +776,7 @@ function ns.CopyProfile(from)
   if type(src) ~= "table" or src == cur then return false end
   for k in pairs(cur) do cur[k] = nil end
   for k, v in pairs(src) do cur[k] = type(v) == "table" and CopyTable(v) or v end
+  ns.SplitDirLock(cur.gps)
   Merge(cur, ns.DEFAULTS)
   return true
 end

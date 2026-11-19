@@ -48,7 +48,8 @@ NEW = ["mapEditIdle", "toolShiftClick", "language", "layerCity", "showRoads", "s
        "showCoords",  # (asked 2026-11-17: hide the map's X, Y line)
        "replaceMinimapRoute",  # (asked 2026-11-17: the route off the minimap square)
        "navPanelWidth", "navPanelAlign", "navPanelDetached",  # (1.3.9: the route panel's width, side, own window)
-       "navPanelHideButtons", "navPanelAlpha", "navPanelLocked"]  # (1.3.9: detached, its buttons hidden and its background's opacity)
+       "navPanelHideButtons", "navPanelAlpha", "navPanelLocked",  # (1.3.9: detached, its buttons hidden and its background's opacity)
+       "dirLocked"]  # (1.3.9: the directions text's own lock, apart from the arrow's)
 # Where each setting's control is: the page a player would look on.
 HOME = {
     "General": "shown keyBlockedInCombat showCoords distanceUnits language quietChat searchCommonNpcs",
@@ -69,7 +70,7 @@ HOME = {
                "clickThroughMoving clickThroughCombat",
     "Routing": "useFlights flightMapRing useHearthstone useTeleports avoidHighZones avoidHostile roadTolerance fastestOrder "
                "cityKeepOrder questZoneOnly questAutoReroute questPickRoute navCloseClears acceptWay acceptMapPins acceptShared",
-    "Directions": "arrow arrowLocked arrowPx arrowBg dirShown dirStopsOnly arrowSnap arrowSide dirTextScale dirBg "
+    "Directions": "arrow arrowLocked arrowPx arrowBg dirShown dirLocked dirStopsOnly arrowSnap arrowSide dirTextScale dirBg "
                   "questing",
     "Performance": "hz rerouteSeconds stopsAhead autoPauseRouting autoPauseSeconds gentleBackground arrowHz",
     "Tools": "devTools mapEditIdle recordHint showRoads showWalls toolShiftClick pinning",
@@ -178,7 +179,8 @@ DEPENDENTS = [
     ("seamTerrainBlend", "style", "minimap"), ("seamContinentBlend", "style", "zone"), ("seamWorldBlend", "style", "minimap"),
     ("interiorZoomYd", "style", "zone"), ("interiorHoldSec", "style", "zone"),
     ("arrowLocked", "arrow", False), ("arrowPx", "arrow", False), ("arrowBg", "arrow", False),
-    ("dirShown", "arrow", False), ("dirStopsOnly", "dirShown", False), ("dirStopsOnly", "arrow", False),
+    ("dirShown", "arrow", False), ("dirStopsOnly", "dirShown", False),
+    ("dirLocked", "dirShown", False), ("dirLocked", "arrow", False), ("dirStopsOnly", "arrow", False),
     ("arrowSnap", "dirShown", False), ("dirTextScale", "dirShown", False), ("dirBg", "dirShown", False),
     ("arrowSide", "dirShown", False),
     # (asked 2026-11-17: Arrow side's Hide; the arrow's own options gray, and the text can't be hidden too)
@@ -245,10 +247,11 @@ def test_dependent_options_sit_indented_under_their_parent(game):
                           ("interiorHoldSec", "rotate"),
                           ("layerQuestAreas", "layerQuests"), ("replaceMinimapCollapseOnMove", "replaceMinimap"),
                           ("freeSize", "lockSize"), ("charmSwing", "windowFrame"), ("cityKeepOrder", "fastestOrder"),
-                          ("arrowLocked", "arrow"), ("dirStopsOnly", "dirShown")):
+                          ("arrowLocked", "arrow"), ("dirLocked", "dirShown"), ("dirStopsOnly", "dirShown")):
         assert x(child) == x(parent) + 20, child
     for child, parent in (("layerQuestAreas", "layerQuests"), ("replaceMinimapCollapseOnMove", "replaceMinimap"),
-                          ("cityKeepOrder", "fastestOrder"), ("arrowLocked", "arrow"), ("dirStopsOnly", "dirShown")):
+                          ("cityKeepOrder", "fastestOrder"), ("arrowLocked", "arrow"), ("dirLocked", "dirShown"),
+                          ("dirStopsOnly", "dirShown")):
         assert y(child) < y(parent), child  # (below it)
 
 

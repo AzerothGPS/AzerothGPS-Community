@@ -117,7 +117,7 @@ The option is really turned on for this section.
 The arrow and the directions panel are turned on and unlocked, with an example stop if there's no route.
 
 1. **The arrow and the directions** (shown)
-   The arrow points the way and the panel beside it lists the turns. Both can be dragged until you lock them.
+   The arrow points the way and the panel beside it lists the turns. Each can be dragged until you lock it.
 2. **Move it** (the player does it)
    Drag the directions panel: the arrow comes with it.
    Noticed by: the panels' saved places changed.
@@ -125,7 +125,7 @@ The arrow and the directions panel are turned on and unlocked, with an example s
    Drag the arrow off the panel to place it on its own. Drop it on a side of the panel to snap it back.
    Noticed by: the arrow is no longer snapped to the panel.
 4. **Size and lock** (shown)
-   After the tutorial, right-click the arrow or the panel to lock them in place. The arrow's size, the text size and the lock are in Options > Directions.
+   After the tutorial, right-click the arrow or the panel to lock that one in place: each has its own lock. The arrow's size, the text size and both locks are in Options > Directions.
 
 ### 5. Herbs and ore (`gather`, added in 1.2.0)
 

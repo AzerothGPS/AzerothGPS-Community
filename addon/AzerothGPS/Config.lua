@@ -25,7 +25,7 @@ local HELP = {
   L["/agps instances on|off   (dungeon and raid entrances on the map)"],
   L["/agps caves on|off       (cave and mine entrances on the map)"],
   L["/agps herbs on|off | ore on|off | nodes on|off  (herbs, ore, or both on the map)"],
-  L["/agps lock | unlock [map|arrow]  (both, or just one; unlocked they can be moved)"],
+  L["/agps lock | unlock [map|arrow|directions]  (all, or just one; unlocked they can be moved)"],
   L["/agps reset              (restore default position and settings)"],
   L["/agps roads on|off       (show the extracted road network)"],
   L["/agps dev                 (the Map Editing button on the map)"],
@@ -134,10 +134,12 @@ Command = function(msg)
     end
     return
   elseif a == "lock" or a == "unlock" then
-    -- both, or just "map" / "arrow"
+    -- all three, or just "map" / "arrow" / "directions" (the directions text: its own lock since 1.3.9)
     local lock = a == "lock"
-    if b ~= "arrow" then gps.locked = lock end
-    if b ~= "map" then gps.arrowLocked = lock end
+    local all = b ~= "map" and b ~= "arrow" and b ~= "directions" and b ~= "text"
+    if all or b == "map" then gps.locked = lock end
+    if all or b == "arrow" then gps.arrowLocked = lock end
+    if all or b == "directions" or b == "text" then gps.dirLocked = lock end
   elseif a == "minimap" then
     ns.settings.minimap.hide = not OnOff(b, not ns.settings.minimap.hide)
   elseif a == "tutorial" then -- (the tutorial: all of it, one section by its id, or out of it)
