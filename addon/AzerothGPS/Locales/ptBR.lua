@@ -314,6 +314,7 @@ L["Some of the stops are in %s: too high for your level %d.\n\nRoute there anywa
 L["Some of the stops are in %s: too high for your level.\n\nRoute there anyway?"] = "Algumas paradas ficam em %s: alto demais para seu nível.\n\nTraçar a rota mesmo assim?"
 L["The only way there walks through %s: too high for your level %d.\n\nKeep this route?"] = "O único caminho até lá passa por %s: alto demais para seu nível %d.\n\nManter esta rota?"
 L["The only way there walks through %s: too high for your level.\n\nKeep this route?"] = "O único caminho até lá passa por %s: alto demais para seu nível.\n\nManter esta rota?"
+L["Trip kept: it goes round zones too high for you where it can, and won't ask again this trip."] = "Viagem mantida: ela contorna as zonas altas demais para você quando possível e não perguntará de novo nesta viagem."
 L["Dungeon route: the game doesn't give your position in here, so it isn't started (/agps bosses starts it anyway)."] = "Rota da masmorra: o jogo não informa sua posição aqui dentro, então ela não foi iniciada (/agps bosses a inicia mesmo assim)."
 L["Dungeon route on: entering a dungeon or raid starts its boss route."] = "Rota da masmorra ativada: entrar numa masmorra ou raide inicia a rota de chefes dela."
 L["Dungeon route off: routes are yours again (the Boss Route button still makes one)."] = "Rota da masmorra desativada: as rotas voltam a ser suas (o botão Rota de Chefes ainda cria uma)."

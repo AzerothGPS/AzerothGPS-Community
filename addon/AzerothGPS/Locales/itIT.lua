@@ -314,6 +314,7 @@ L["Some of the stops are in %s: too high for your level %d.\n\nRoute there anywa
 L["Some of the stops are in %s: too high for your level.\n\nRoute there anyway?"] = "Alcune tappe si trovano in %s: troppo alto per il tuo livello.\n\nTracciare comunque il percorso?"
 L["The only way there walks through %s: too high for your level %d.\n\nKeep this route?"] = "L'unica strada passa per %s: troppo alto per il tuo livello %d.\n\nTenere questo percorso?"
 L["The only way there walks through %s: too high for your level.\n\nKeep this route?"] = "L'unica strada passa per %s: troppo alto per il tuo livello.\n\nTenere questo percorso?"
+L["Trip kept: it goes round zones too high for you where it can, and won't ask again this trip."] = "Viaggio mantenuto: aggira le zone troppo alte per te dove può e non lo chiederà più in questo viaggio."
 L["Dungeon route: the game doesn't give your position in here, so it isn't started (/agps bosses starts it anyway)."] = "Percorso spedizione: qui il gioco non fornisce la tua posizione, quindi non viene avviato (/agps bosses lo avvia comunque)."
 L["Dungeon route on: entering a dungeon or raid starts its boss route."] = "Percorso spedizione attivo: entrando in una spedizione o incursione parte il percorso dei suoi boss."
 L["Dungeon route off: routes are yours again (the Boss Route button still makes one)."] = "Percorso spedizione disattivato: i percorsi tornano a te (il pulsante Percorso boss ne crea comunque uno)."

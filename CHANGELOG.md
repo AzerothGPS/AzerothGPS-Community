@@ -25,6 +25,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Messages with one button (like "Got It") no longer show a "No" button when they pop up over the map.
 - If routing still makes your game stutter, it works out only the way to your next stop until things are smooth again, and pauses with a message if that isn't enough (resume with Pause Routing or /agps pause); turn this off in Options > Performance.
 - Routing no longer pauses for stutter while the game is in the background, or again right after you resume it.
+- A trip of several stops asks about zones too high for you, enemy territory and group quests once, not again at each stop, after rerouting or after a /reload.
 - Road tools: a recorded walk or drawn road that isn't in the road data yet no longer says it's on the ground; it shows flat until it's added, which works out its heights and stairs.
 - Routes from inside Undercity now pick the best flight (Tarren Mill toward Hillsbrad and Arathi, not The Sepulcher and a long walk back).
 

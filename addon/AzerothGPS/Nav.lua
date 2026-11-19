@@ -134,6 +134,10 @@ local function Save()
   local risk = {}
   for k, v in pairs(N.riskOk or {}) do risk[k] = v end
   cdb.riskOk = (#list > 0 and next(risk)) and risk or nil
+  -- (the group quests kept or left out: not asked again after a /reload while the trip is on, GPS.groupChoice)
+  local group = {}
+  for id, v in pairs(ns.GPS and ns.GPS.groupChoice or {}) do group[id] = v end
+  cdb.groupChoice = (#list > 0 and next(group)) and group or nil
   local skip = {}
   for node in pairs(N.skipLearn or {}) do skip[#skip + 1] = node end
   cdb.skipLearn = (#list > 0 and #skip > 0) and skip or nil
@@ -243,8 +247,13 @@ end
 -- A route to stops in a zone too high for the player: asked first (GPSFrame's popup), and
 -- `again` (setting them, confirmed) run on yes. True while asking.
 local function AskRed(list, again)
-  local zones = N.RedStops(list)
-  if not zones or not (ns.GPS and ns.GPS.ConfirmRedZone) then return false end
+  -- (the trip's zones too high already said yes to, or all of them: not asked again, N.redOk)
+  if N.redOk.all then return false end
+  local zones = {}
+  for _, z in ipairs(N.RedStops(list) or {}) do
+    if not N.redOk[z.z] then zones[#zones + 1] = z end
+  end
+  if not zones[1] or not (ns.GPS and ns.GPS.ConfirmRedZone) then return false end
   return ns.GPS.ConfirmRedZone(zones, list, function()
     for _, z in ipairs(zones) do N.redOk[z.z] = true end -- (asked: not again for passing through)
     -- (nor about the other zones too high the route walks through on its way: one popup a trip, asked 2026-11-14:
@@ -258,11 +267,15 @@ end
 -- their faction): asked once per zone per route, like a stop in one. Rides (boats, flights)
 -- over one don't count, nor the zones the route starts and ends in.
 N.RED_ROUTE_YD = 60 -- walked this far in one: asked
-N.redOk = {} -- zones the player said yes to, for this route
+-- Asked once a trip (asked 2026-11-18, a trip of many stops asking at each one: "they should only be asked once in a
+-- multi stop route"): Yes to "Keep this route?" is `all`, every zone too high on the rest of the trip's legs, and No in
+-- a trip of several stops is `no`, the trip kept (the planner goes round them wherever there's a way, as always) and
+-- not asked again. Saved with the stops (a /reload); a new trip (N.SameTrip) starts with none.
+N.redOk = {} -- zones the player said yes to, for this route (and `all`, `no`)
 function N.RedOnRoute(r, px, py, cont)
   local R = ns.Router
   local red = R and R.RedZones and R.RedZones()
-  if not (red and r and r.parts) or N.redOk.all then return nil end
+  if not (red and r and r.parts) or N.redOk.all or N.redOk.no then return nil end
   local exempt = { [R.ZoneAt(Geo.Base(cont), px, py)] = true }
   for _, d in ipairs(N.stops) do exempt[R.ZoneAt(Geo.Base(d.cont), d.x, d.y)] = true end
   local yards = {}
@@ -412,7 +425,7 @@ function N.CheckHostileRoute()
   if not (r and d) or d.corpse or r.pending or (N.Checking and N.Checking()) then return end
   local R = ns.Router
   -- (avoiding them, unless the player said to risk it: N.riskOk)
-  local avoiding = R and R.HostileSide and R.HostileSide() ~= nil and not (d and N.riskOk[N.RiskKey(d)])
+  local avoiding = R and R.HostileSide and R.HostileSide() ~= nil and not (d and N.RiskAnswer(d))
   local key = version .. ":" .. tostring(N.Faction and N.Faction()) .. ":" .. tostring(avoiding)
   if hostileChecked == key then return end
   hostileChecked, hostileNames = key, nil
@@ -440,7 +453,7 @@ function N.HostileNote()
   local R = ns.Router
   local d = N.dest
   local key = version .. ":" .. tostring(N.Faction and N.Faction()) .. ":"
-    .. tostring(R and R.HostileSide and R.HostileSide() ~= nil and not (d and N.riskOk[N.RiskKey(d)]))
+    .. tostring(R and R.HostileSide and R.HostileSide() ~= nil and not (d and N.RiskAnswer(d)))
   if hostileChecked ~= key then return nil end
   -- (the route said it of can have been worked out again since, the stops the same: a route after a /reload that
   -- went through Southshore, then the hearthstone's round it, still said "Through enemy territory: Southshore", asked
@@ -460,6 +473,29 @@ function N.HostileNote()
   return Format(L["|cffff4040Through enemy territory: %s|r"], hostileNames)
 end
 
+-- Whether `stops` set as the route go on with the trip on now (its answers kept: N.redOk, the trip's "risk it?"): the
+-- same stops again (a quest route's update, a reorder), or several stops with one of the trip's among them (stops
+-- added to it, an import added to it, the quest route made again). Not a new single stop, nor a list of others (a new
+-- import), nor anything after the route was cleared.
+function N.SameTrip(stops)
+  if #N.stops == 0 or #(stops or {}) == 0 then return false end
+  local same = #stops == #N.stops
+  for i, d in ipairs(stops) do
+    local o = N.stops[i]
+    same = same and o and d.x and N.RiskKey(d) == N.RiskKey(o)
+  end
+  if same then return true end
+  if #stops < 2 then return false end
+  local have = {}
+  for _, o in ipairs(N.stops) do have[N.RiskKey(o)] = true end
+  for _, d in ipairs(stops) do
+    if d.x and have[N.RiskKey(d)] then return true end
+  end
+  return false
+end
+-- Counts trips (a new one set, the route cleared): a question about one, answered after another was set, does nothing.
+N.trip = 0
+
 function N.SetStops(stops, fastest, force, keep)
   if Locked(force) then return false end
   if force ~= "red" then
@@ -470,12 +506,10 @@ function N.SetStops(stops, fastest, force, keep)
       local k = d and d.x and N.RiskKey(d)
       if k and N.riskOk and N.riskOk[k] ~= nil then keep[k] = N.riskOk[k] end
     end
-    -- (the same stops again: the zones too high said yes to stay as well, a "no" to the risk took the safe way's)
-    local same = #(stops or {}) == #N.stops and #N.stops > 0
-    for i, d in ipairs(stops or {}) do
-      local o = N.stops[i]
-      same = same and o and d.x and N.RiskKey(d) == N.RiskKey(o)
-    end
+    -- (the same trip: the zones too high said yes to stay as well, and its "risk it?" answer, asked once a trip)
+    local same = N.SameTrip(stops)
+    if same and N.riskOk then keep.trip = N.riskOk.trip end
+    if not same then N.trip = N.trip + 1 end
     local red = same and N.redOk or {}
     N.redOk, N.skipLearn, N.noWalk, N.walkKept, N.riskOk, N.riskQuestion, N.riskAsking = red, {}, {}, {}, keep, nil, nil
     N.ClearSkippedRides()
@@ -663,6 +697,7 @@ function N.Clear()
   N.paused, N.pauseWatch = nil, nil
   N.questDropped = {}
   N.redOk, N.skipLearn, N.noWalk, N.walkKept, N.riskOk, N.riskQuestion, N.riskAsking = {}, {}, {}, {}, {}, nil, nil
+  N.trip = N.trip + 1
   N.ClearSkippedRides()
   Changed()
   N.PauseShown() -- (no route: no Resume button, and the Pause button's glow gone; cleared while paused, it stayed lit
@@ -695,6 +730,12 @@ function N.Restore()
   for _, z in ipairs(#N.stops > 0 and cdb.redOk or {}) do N.redOk[z] = true end
   N.riskOk = {}
   for k, v in pairs(#N.stops > 0 and type(cdb.riskOk) == "table" and cdb.riskOk or {}) do N.riskOk[k] = v end
+  local G = ns.GPS
+  if G and G.groupChoice then
+    for id, v in pairs(#N.stops > 0 and type(cdb.groupChoice) == "table" and cdb.groupChoice or {}) do
+      if G.groupChoice[id] == nil and (v == "keep" or v == "leave") then G.groupChoice[id] = v end
+    end
+  end
   N.skipLearn = {}
   for _, node in ipairs(#N.stops > 0 and cdb.skipLearn or {}) do N.skipLearn[node] = true end
   N.skipRides = {}
@@ -1854,6 +1895,7 @@ end
 -- answers forgotten (they're remembered per square), and the zones too high on the way chosen not asked about again.
 function N.AnswerRisk(q, yes)
   N.riskOk[q.key] = yes and true or false
+  N.riskOk.trip = yes and true or false -- (and the rest of the trip's stops: asked once a trip)
   if N.SaveStops then N.SaveStops() end -- (kept over a /reload while the route is on)
   if N.riskQuestion == q then N.riskQuestion = nil end
   for _, z in ipairs((yes and q.riskyRed or q.safeRed) or {}) do N.redOk[z.z] = true end
@@ -2038,6 +2080,13 @@ N.riskOk = {}
 function N.RiskKey(d)
   return string.format("%s:%.0f:%.0f", tostring(d.cont), d.x, d.y)
 end
+-- The answer for stop `d`: its own, else the trip's (`trip`: the first answer, for every later stop of the trip; asked
+-- 2026-11-18, "they should only be asked once in a multi stop route"). nil: not asked yet.
+function N.RiskAnswer(d)
+  local a = d and N.riskOk[N.RiskKey(d)]
+  if a == nil then a = N.riskOk.trip end
+  return a
+end
 -- The walks of a plan as a route's parts (N.HostileOnRoute's, N.RedOnRoute's).
 local function PlanParts(plan, routes)
   local parts = {}
@@ -2160,7 +2209,7 @@ local function CompareRide(cont, sx, sy, d, walk, tps, opts, sz)
   local ridesSafe = secs < math.huge and guard + N.HOSTILE_RIDE_YD <= walkGuard
   local walkSafe = walkSecs < math.huge and walkGuard + N.HOSTILE_RIDE_YD <= guard
   if (ridesSafe or walkSafe) and won ~= ridesSafe then
-    local ans = N.riskOk[N.RiskKey(d)]
+    local ans = N.RiskAnswer(d)
     if ans == nil then
       won = ridesSafe
       local risky = ridesSafe and { parts = { { cont = cont, pts = lr.pts, kinds = lr.kinds } } } or PlanParts(legs, routes)
@@ -2231,7 +2280,7 @@ local function RideInstead(cont, sx, sy, d, walk, tps, opts, sz)
       ridePending["ride:" .. key] = nil
       if not res then return end
       -- (the safe way round the other faction's guards much slower: asked, N.CheckRedRoute)
-      if res.risk and res.final and N.riskOk[res.risk.key] == nil then
+      if res.risk and res.final and N.RiskAnswer(d) == nil then
         res.risk.stopKey = stopKey
         res.risk.plan = Kept({ won = true, legs = res.legs }) -- (the plan with the ride: kept for a "no" or a "yes")
         N.riskQuestion = res.risk
@@ -3419,6 +3468,7 @@ end
 -- player asks first (GPSFrame's ConfirmRedRoute); no clears the route.
 local redChecked, redSeenAt = nil, nil
 local redAsking -- (RedKey() while asked)
+local redYes, redTrip -- (the question's yes, while it's up; the trip it's about, N.trip)
 -- The route the check is about: the stops, and the rides left out of it (a ride removed is a route of its
 -- own, checked again: the tram removed, the walk round through Loch Modan asked nothing, 2026-10-01).
 local function RedKey()
@@ -3454,6 +3504,12 @@ function N.CheckRedRoute(px, py, cont, now)
     return
   end
   if N.riskAsking or redChecked == key then return end
+  -- (the question still up, unanswered, from before a stop was reached or the route worked out again: the same trip's
+  -- question, left up and not asked again; asked 2026-11-18, it came up again at every stop of a trip)
+  if redAsking and redTrip == N.trip and N.RedAskUp() then
+    redAsking, redChecked = key, key
+    return
+  end
   -- (the ride check still running: it may change the route, asked about once it's done; N.Tick asks again)
   if N.RideChecking and N.RideChecking() then return end
   if redSeenAt == nil or redSeenAt[1] ~= key then redSeenAt = { key, now } end
@@ -3462,16 +3518,36 @@ function N.CheckRedRoute(px, py, cont, now)
   local zones = N.RedOnRoute(r, px, py, cont)
   if not (zones and ns.GPS and ns.GPS.ConfirmRedRoute) then return end
   redAsking = key
-  local asked = ns.GPS.ConfirmRedRoute(zones, function()
-    redAsking = nil
+  local trip = N.trip
+  redTrip = trip
+  -- Yes: kept, and no zone too high is asked about again on this trip (`all`). No: the route cleared when it's the only
+  -- stop; a trip of several is kept and not asked again (`no`; the planner still goes round those zones where it can)
+  redYes = function()
+    redAsking, redYes = nil, nil
+    if trip ~= N.trip then return end -- (another trip set meanwhile: not its answer)
     for _, z in ipairs(zones) do N.redOk[z.z] = true end
+    N.redOk.all = true
     N.SaveStops()
     if ns.GPS.Redraw then ns.GPS.Redraw() end
-  end, function()
-    redAsking = nil
+  end
+  local asked = ns.GPS.ConfirmRedRoute(zones, redYes, function()
+    redAsking, redYes = nil, nil
+    if trip ~= N.trip then return end
+    if #N.stops > 1 then
+      N.redOk.no = true
+      N.SaveStops()
+      ns.Print(L["Trip kept: it goes round zones too high for you where it can, and won't ask again this trip."])
+      if ns.GPS.Redraw then ns.GPS.Redraw() end
+      return
+    end
     N.Clear()
   end)
-  if not asked then redAsking = nil end
+  if not asked then redAsking, redYes = nil, nil end
+end
+-- Whether the "Keep this route?" question is still up on screen, unanswered (GPS.confirmBox: the yes / no box).
+function N.RedAskUp()
+  local box = redYes and ns.GPS and ns.GPS.confirmBox
+  return (box and box.IsShown and box:IsShown() and box.onYes == redYes) and true or false
 end
 
 -- No route, with rides the player removed from it (N.SkipRide): "Route not possible without" them, put

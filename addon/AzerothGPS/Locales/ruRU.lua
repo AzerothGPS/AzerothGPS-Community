@@ -314,6 +314,7 @@ L["Some of the stops are in %s: too high for your level %d.\n\nRoute there anywa
 L["Some of the stops are in %s: too high for your level.\n\nRoute there anyway?"] = "Некоторые остановки находятся в зоне %s: слишком высокий уровень для вас.\n\nВсе равно проложить маршрут?"
 L["The only way there walks through %s: too high for your level %d.\n\nKeep this route?"] = "Единственный путь туда проходит через %s: слишком высокий уровень для вашего (%d).\n\nОставить этот маршрут?"
 L["The only way there walks through %s: too high for your level.\n\nKeep this route?"] = "Единственный путь туда проходит через %s: слишком высокий уровень для вас.\n\nОставить этот маршрут?"
+L["Trip kept: it goes round zones too high for you where it can, and won't ask again this trip."] = "Маршрут сохранен: он обходит слишком высокие для вас зоны, где это возможно, и больше не спросит в этой поездке."
 L["Dungeon route: the game doesn't give your position in here, so it isn't started (/agps bosses starts it anyway)."] = "Маршрут подземелья: здесь игра не сообщает ваше положение, поэтому он не запущен (/agps bosses все равно запустит его)."
 L["Dungeon route on: entering a dungeon or raid starts its boss route."] = "Маршрут подземелья включен: при входе в подземелье или рейд запускается маршрут по боссам."
 L["Dungeon route off: routes are yours again (the Boss Route button still makes one)."] = "Маршрут подземелья выключен: маршруты снова ваши (кнопка «Боссы» по-прежнему его строит)."

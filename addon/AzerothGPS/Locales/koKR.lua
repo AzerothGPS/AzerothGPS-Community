@@ -314,6 +314,7 @@ L["Some of the stops are in %s: too high for your level %d.\n\nRoute there anywa
 L["Some of the stops are in %s: too high for your level.\n\nRoute there anyway?"] = "일부 경유지가 %s에 있습니다. 현재 레벨에는 너무 높은 지역입니다.\n\n그래도 경로를 안내할까요?"
 L["The only way there walks through %s: too high for your level %d.\n\nKeep this route?"] = "그곳으로 가는 유일한 길이 %s 지역을 지납니다. 현재 레벨 %d에는 너무 높은 지역입니다.\n\n이 경로를 유지할까요?"
 L["The only way there walks through %s: too high for your level.\n\nKeep this route?"] = "그곳으로 가는 유일한 길이 %s 지역을 지납니다. 현재 레벨에는 너무 높은 지역입니다.\n\n이 경로를 유지할까요?"
+L["Trip kept: it goes round zones too high for you where it can, and won't ask again this trip."] = "여행을 유지합니다: 가능한 곳에서는 레벨이 너무 높은 지역을 돌아가며, 이번 여행에서는 다시 묻지 않습니다."
 L["Dungeon route: the game doesn't give your position in here, so it isn't started (/agps bosses starts it anyway)."] = "던전 경로: 이곳에서는 게임이 현재 위치를 알려 주지 않아 시작하지 않았습니다 (/agps bosses로 그래도 시작할 수 있습니다)."
 L["Dungeon route on: entering a dungeon or raid starts its boss route."] = "던전 경로 켜짐: 던전이나 공격대에 들어가면 우두머리 경로가 시작됩니다."
 L["Dungeon route off: routes are yours again (the Boss Route button still makes one)."] = "던전 경로 꺼짐: 경로를 다시 직접 정합니다 (우두머리 경로 버튼으로는 계속 만들 수 있습니다)."
