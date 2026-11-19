@@ -1044,7 +1044,7 @@ def test_party_members_show_their_class_icon(game):
         st = ns.settings.gps
         was = st.iconSize
         try:
-            for size, k in (("small", 1), ("medium", 1.25), ("large", 1.5)):
+            for size, k in (("small", 1), ("medium", 1.25), ("large", 1.5), ("xlarge", 2)):
                 st.iconSize = size
                 lua.execute("AGPS_T = AGPS_T + 1")
                 G.Update()

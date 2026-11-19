@@ -1963,6 +1963,7 @@ local function BuildWindow()
     { value = "small", text = L["Small"] },
     { value = "medium", text = L["Medium"] },
     { value = "large", text = L["Large"] },
+    { value = "xlarge", text = L["Extra large"] }, -- (asked 2026-11-18 for 1.3.9: twice Small, G.ICON_SIZES)
   }, function() return GPS().iconSize or "medium" end, function(v) GPS().iconSize = v end)
   Key("roundIcons")
   check(L["Round icons"], L["The map's and minimap's icons are round, in a gold ring, or a class trainer's in its class's color. Off: square, as the game's."],

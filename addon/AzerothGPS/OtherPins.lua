@@ -739,6 +739,11 @@ end
 -- (MapIconTooltip.ShowOnTooltip with an owner and icons) lists the icons given wherever they are: the hovered one and
 -- Questie's others drawn at its spot (its NPC's quests), owned by the copy. False when that isn't there.
 OP.QUESTIE_NEAR_PX = 10
+-- Icon size's growth of the copies (GPSFrame's G.IconGrow: 1 up to Medium)
+function OP.Grow()
+  local G = ns.GPS
+  return G and G.IconGrow and G.IconGrow() or 1
+end
 function OP.QuestieTooltip(b)
   local o = b.orig
   local ix = OP.index
@@ -750,11 +755,12 @@ function OP.QuestieTooltip(b)
   local okM, M = pcall(QL.ImportModule, QL, "MapIconTooltip")
   if not okM or type(M) ~= "table" or type(M.ShowOnTooltip) ~= "function" then return false end
   local list, listed = { o }, { [o] = true }
+  local near = OP.QUESTIE_NEAR_PX * OP.Grow() -- (the copies grow with Icon size: so does "at its spot")
   for i = 1, OP.used do
     local c = OP.copies[i]
     local co = c and c.orig
     if co and not listed[co] and ix.libOf[co] == rec and c.dx and b.dx
-      and math.abs(c.dx - b.dx) <= OP.QUESTIE_NEAR_PX and math.abs(c.dy - b.dy) <= OP.QUESTIE_NEAR_PX then
+      and math.abs(c.dx - b.dx) <= near and math.abs(c.dy - b.dy) <= near then
       listed[co] = true
       list[#list + 1] = co
     end
@@ -923,7 +929,7 @@ local function Place(layer, icon, dx, dy, zoom, wx, wy, cont, title, dup)
   t:SetBlendMode(look.blend == "ADD" and "ADD" or "BLEND")
   t:SetDrawLayer(look.layer, look.sub)
   local long = math.max(look.w, look.h)
-  local size = OP.Size(long, zoom)
+  local size = OP.Size(long, zoom) * OP.Grow() -- (Icon size: Large and Extra large grow them, as the map's own)
   local f = size / long -- (the copy's units per the original's)
   b:SetSize(look.w * f, look.h * f)
   -- the icon's other textures (Questie's glow under it, a ring, a badge): pooled per copy, in their own layers
