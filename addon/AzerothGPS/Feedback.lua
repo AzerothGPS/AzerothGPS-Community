@@ -84,7 +84,7 @@ local function Tick()
     -- a new leg: remember what the addon predicted for it
     local _, walk, mount, mounted = N.Speeds()
     local speed = mounted and mount or walk
-    trip = { dest = d, t0 = GetTime(), cont = cont, estimate = r.walkYards / speed + (r.rideSeconds or 0),
+    trip = { dest = d, t0 = GetTime(), cont = cont, estimate = N.TripSecs(r.walkYards, r.swimYards, r.rideSeconds, speed),
       mounted = mounted, pts = { Round(px), Round(py) } }
     return
   end

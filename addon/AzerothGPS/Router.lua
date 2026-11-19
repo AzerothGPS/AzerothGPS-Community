@@ -4951,7 +4951,8 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
   end
   -- (a walk's long swim, with zones too high about: R.SWIM_DETOUR_YD) `path` its points, else the straight line
   local function SwimDetour(path, x1, y1, x2, y2)
-    if not (red and Pass and Pass.SWIM_COST and Pass.SWIM_COST > 1) then return 0 end
+    local swimCost = Pass and Pass.SwimCost and Pass.SwimCost() or (Pass and Pass.SWIM_COST)
+    if not (red and swimCost and swimCost > 1) then return 0 end
     -- (only a swim round one: the walk's ends straight through a zone too high. An isle's swim, the Echo Isles',
     -- Theramore's, crosses none and is priced as before)
     local straight = DangerLine(x1, y1, x2, y2)
@@ -4966,7 +4967,7 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
     local wet = 0
     local function add(a, b, c, d)
       local sc = SegCost(cont, a, b, c, d)
-      if sc then wet = wet + math.max(0, sc - Dist(a, b, c, d)) / (Pass.SWIM_COST - 1) end
+      if sc then wet = wet + math.max(0, sc - Dist(a, b, c, d)) / (swimCost - 1) end
     end
     if path then
       for i = 1, #path - 2, 2 do add(path[i], path[i + 1], path[i + 2], path[i + 3]) end
@@ -4974,7 +4975,7 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
       add(x1, y1, x2, y2)
     end
     if wet < R.SWIM_DETOUR_YD then return 0 end
-    return wet * (R.LEVEL_FACTOR - Pass.SWIM_COST)
+    return wet * math.max(0, R.LEVEL_FACTOR - swimCost) -- (swimming left out: dearer than a zone too high already)
   end
   -- (the guards' towns the route starts or ends in: not paid for, R.HostileTownsNear; a stop at Dun Garok)
   local exempt = R.HostileTownsNear(cont, HostileSide(), sx, sy, tx, ty)

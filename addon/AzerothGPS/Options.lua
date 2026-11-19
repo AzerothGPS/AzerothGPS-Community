@@ -2307,6 +2307,12 @@ local function BuildWindow()
       GPS().avoidHostile = v
       ns.Nav.OptionsChanged()
     end)
+  Key("allowSwim")
+  check(L["Allow swimming"], L["Routes may swim across rivers, lakes and the sea near the shore when that's faster, timed at swimming speed. Swims show as a wavy line; right-click one to go round by land on that trip. Off: routes go round by land wherever there's a way (an island is still swum to)."],
+    function() return GPS().allowSwim ~= false end, function(v)
+      GPS().allowSwim = v
+      ns.Nav.OptionsChanged()
+    end)
   -- (asked 2026-11-04: how much the roads are kept; Router.RoadFactor)
   Key("roadTolerance")
   slider(L["Road tolerance"], ns.Router.ROAD_TOLERANCE_MIN, ns.Router.ROAD_TOLERANCE_MAX, 1,

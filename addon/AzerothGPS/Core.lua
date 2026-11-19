@@ -119,6 +119,7 @@ ns.DEFAULTS = {
     stutterPause = true, -- routing cut back, then paused, when it makes the game stutter (Nav.RouteWork)
     stopsAhead = 3, -- stops routed and drawn on the map at a time (1 to Nav.PLAN_AHEAD); the next come in as they're reached
     avoidHostile = true, -- routes keep away from the other faction's guards (their towns)
+    allowSwim = true, -- routes may swim (Passability.avoidSwim off: Nav.SyncSwim); off, they go round by land
     cityKeepOrder = true, -- ... except stops down in a city: in the order placed
     importKeepOrder = true, -- stops imported (Import and Share, /way lists, shared routes) in the order listed (Nav.keepOrder)
     acceptWay = true, -- TomTom /way commands (typed or pasted in chat) add route stops
