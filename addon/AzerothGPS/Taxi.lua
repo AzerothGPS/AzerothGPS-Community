@@ -36,20 +36,29 @@ function T.NamesKey(nodes)
   return table.concat(parts, ";")
 end
 
+-- True when a read from `source` says which flight masters are known: the flight map open at a flight master
+-- ("taximap") or a flight path discovered ("discovered"), and never on a flight (UnitOnTaxi). Any other read (a
+-- login's, a /reload's) keeps what was saved (issue #652: Kargath looked known flying to Tarren Mill).
+function T.SaysKnown(source)
+  if source ~= "taximap" and source ~= "discovered" then return false end
+  return not (UnitOnTaxi and UnitOnTaxi("player"))
+end
+
 local function StoreNodes(mapID, nodes, source)
   if not nodes then return 0 end
   local cdb = ns.CharDB()
   -- (a node read with no state, the continents' maps away from a flight master: the game doesn't say whether it's
   -- known, so what was saved for it stays. The login read wrote every flight master unknown, and one marked known at
   -- "New flight path discovered!" was lost at the next login, reported 2026-11-13)
+  local says = T.SaysKnown(source)
   local before = {}
   for _, n in ipairs(cdb.taxiNodes[mapID] and cdb.taxiNodes[mapID].nodes or {}) do
     if n.nodeID and n.known then before[n.nodeID] = true end
   end
   local out = {}
   for _, n in ipairs(nodes) do
-    local known = KnownState(n.state)
-    if n.state == nil and n.nodeID and before[n.nodeID] then known = true end
+    local known = says and KnownState(n.state) or false
+    if (n.state == nil or not says) and n.nodeID and before[n.nodeID] then known = true end
     out[#out + 1] = {
       nodeID = n.nodeID,
       name = n.name,
@@ -115,6 +124,7 @@ end
 T.DISCOVER_AFTER = 0.5 -- s after the message: the game's list has it by then
 T.DISCOVER_NEAR = 0.004 -- of the continent's map (some 150 yd)
 function T.MarkNearest()
+  if not T.SaysKnown("discovered") then return nil end -- (on a flight: no flight master stood at)
   local cdb = ns.CharDB()
   for _, mapID in ipairs(T.MAPS) do
     local ok, pos = pcall(function() return C_Map.GetPlayerMapPosition(mapID, "player") end)
@@ -140,6 +150,7 @@ function T.MarkNearest()
 end
 
 function T.OnDiscovered()
+  if not T.SaysKnown("discovered") then return end
   if not T.Refresh("discovered") then T.MarkNearest() end
 end
 

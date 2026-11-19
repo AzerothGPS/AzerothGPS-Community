@@ -30,6 +30,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - A trip of several stops asks about zones too high for you, enemy territory and group quests once, not again at each stop, after rerouting or after a /reload.
 - Road tools: a recorded walk or drawn road that isn't in the road data yet no longer says it's on the ground; it shows flat until it's added, which works out its heights and stairs.
 - Routes from inside Undercity now pick the best flight (Tarren Mill toward Hillsbrad and Arathi, not The Sepulcher and a long walk back).
+- A flight path you haven't learned no longer looks learned on the map while you fly, and only a flight master marks one learned.
 
 ## 1.3.8
 

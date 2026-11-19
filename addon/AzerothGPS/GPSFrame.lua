@@ -4409,6 +4409,7 @@ function G.RideIcon(p)
     if not tex and t.spell and ns.SpellIcon then tex = ns.SpellIcon(t.spell) end
     return tex or "Interface\\Icons\\INV_Misc_Rune_01"
   end
+  if p.learn then return TAXI_ICON.unlearned end -- (a flight master to learn first: Nav.RidePins)
   return RIDE_ICON[p.kind] or DOCK_ICON[p.kind] or TAXI_ICON.known
 end
 
