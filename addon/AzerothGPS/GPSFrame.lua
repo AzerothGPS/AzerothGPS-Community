@@ -1602,6 +1602,38 @@ function G.LayoutPois(cx, cy, cont, rot, zoom, half, show, faction)
   return out
 end
 
+-- Zoomed out on the seamless map's art past a continent's worth (view.seamFar): the other continents' icons too, as
+-- LayoutPois gives the view's own (`show`: its kinds), each placed through Azeroth's map (Geo.ToContinent) and kept
+-- on its own continent (`level`: a double-click's stop there). Added to `pois`; the view's own continent left out.
+function G.OtherContPois(pois, cont, cx, cy, rot, half, zoom, show, faction)
+  local W = Geo.WorldMap()
+  local frames = W and ns.Maps[W] and ns.Maps[W].worldFrames
+  local base = Geo.Base(cont)
+  if not (frames and frames[base]) then return pois end
+  local s = half / zoom
+  for oc, wf in pairs(frames) do
+    if oc ~= base and ns.Pois and ns.Pois[oc] then
+      local ox, oy = Geo.ToContinent(base, cx, cy, oc)
+      -- (its yards a little bigger or smaller than this one's: the zoom in them, by the frames' widths)
+      local k = ((wf[4] - wf[2]) / (wf[7] - wf[5])) / ((frames[base][4] - frames[base][2]) / (frames[base][7] - frames[base][5]))
+      if ox then
+        for _, p in ipairs(G.LayoutPois(ox, oy, oc, rot, zoom * k * 1.1, half, show, faction)) do
+          local x, y = Geo.ToContinent(oc, p[5], p[6], base)
+          if x then
+            local dx, dy = Geo.ScreenOffset(cx, cy, x, y)
+            dx, dy = Geo.Rotate(dx * s, dy * s, rot)
+            if math.abs(dx) <= half and math.abs(dy) <= half then
+              p[2], p[3], p.level = dx, dy, p.level or oc
+              pois[#pois + 1] = p
+            end
+          end
+        end
+      end
+    end
+  end
+  return pois
+end
+
 -- World point under a screen offset (dxUI, dyUI) from the center of a view centered on
 -- world (cx, cy) with rotation rot and scale s.
 function G.ScreenToWorld(cx, cy, dxUI, dyUI, rot, s)
@@ -1805,7 +1837,7 @@ G.SEAM_SHARP_NOTCHES = -8 -- terrain alone this many notches out past it (negati
 G.SEAM_ART_NOTCHES = 3 -- the art in under the tiles
 G.SEAM_TILES_NOTCHES = 3 -- the tiles out over the art
 G.SEAM_WORLD_NOTCHES = 0 -- the art's zones alone this many notches before the world stage's icons
-G.SEAM_WORLD_MARGIN = 0.85 -- the whole world in view with this room round it (under 1: its far edges just off the map)
+G.SEAM_WORLD_MARGIN = 1 -- Azeroth's whole map in view with this room round it (1: it fits the window; under 1: its edges off it)
 G.NO_QUADS = {} -- (the art alone: no tiles laid, the same empty list each redraw)
 
 -- the stages' yards (at the reference size) from the notches above
@@ -1839,7 +1871,6 @@ function G.SetSeamKnob(name, value)
       if type(value) ~= "number" or value ~= value then return false end
       G[name] = math.min(k[3], math.max(k[2], value))
       G.SeamStages()
-      G.worldZoom = nil -- (its margin)
       if G.Redraw then G.Redraw() end
       return true
     end
@@ -1992,18 +2023,69 @@ function G.Seamless()
     and not (G.Held and G.Held()) or false
 end
 
--- the zoom with the whole world in view: half the world map's width in yards (its continents' frames on it, the
--- widest), and a margin
-function G.WorldZoom()
-  if G.worldZoom then return G.worldZoom end
-  local best = 0
-  for _, m in pairs(ns.Maps or {}) do
-    for _, wf in pairs(m.worldFrames or {}) do
-      if wf[7] > wf[5] then best = math.max(best, (wf[4] - wf[2]) / (wf[7] - wf[5]) / 2) end
-    end
+-- The world view (asked 2026-11-18: "zooming out eventually shows both continents, panning at max zoom out wouldn't
+-- be necessary"): the furthest zoom fits Azeroth's whole map (947, laid out as the game's world map lays out Kalimdor
+-- and the Eastern Kingdoms) in the window, SEAM_WORLD_MARGIN round it, its middle the view's (G.WorldView); out there
+-- the view can't be dragged, and a view looked at elsewhere never goes past the map's edges (G.ClampToWorld).
+-- Each continent has yards of its own: the world view is reckoned in the view's continent (its frame on the map),
+-- else the player's, else any with one.
+function G.WorldCont(cont)
+  local W = Geo.WorldMap()
+  local frames = W and ns.Maps[W] and ns.Maps[W].worldFrames
+  if not frames then return nil end
+  local v = G.shownView
+  local _, _, pc = Geo.PlayerWorld()
+  for _, c in ipairs({ cont or false, v and v.cont or false, pc or false }) do
+    if c and frames[Geo.Base(c)] then return Geo.Base(c) end
   end
-  G.worldZoom = best > 0 and best * G.SEAM_WORLD_MARGIN or MAX_ZOOM
-  return G.worldZoom
+  return frames[0] and 0 or next(frames)
+end
+-- Azeroth's map in `cont`'s yards ({ minX, minY, maxX, maxY }; nil for a continent with no frame on it)
+function G.WorldBounds(cont)
+  return cont and Geo.WorldArtBounds(Geo.Base(cont)) or nil
+end
+-- the zoom with the whole world in view: Azeroth's map fitting the window (`w` x `h`, the map's size if not given),
+-- reckoned in `cont`'s yards (G.WorldCont)
+function G.WorldZoom(cont, w, h)
+  local b = G.WorldBounds(G.WorldCont(cont))
+  if not w then -- (the map's canvas, as the redraw has it; before it's laid out, the map's size)
+    local c = G.Canvas and G.Canvas()
+    w, h = c and c:GetWidth(), c and c:GetHeight()
+    if not (w and h and w > 0 and h > 0) then w, h = G.MapSize() end
+  end
+  if not (b and w and h and w > 0 and h > 0) then
+    local best = 0 -- (no continent with a frame: the widest one's yards, as before)
+    for _, m in pairs(ns.Maps or {}) do
+      for _, wf in pairs(m.worldFrames or {}) do
+        if wf[7] > wf[5] then best = math.max(best, (wf[4] - wf[2]) / (wf[7] - wf[5]) / 2) end
+      end
+    end
+    return best > 0 and best * G.SEAM_WORLD_MARGIN or MAX_ZOOM
+  end
+  local half = math.max(w, h) / 2 -- (zoom is yards to the long side's edge: s = half / zoom)
+  -- (east-west is the y axis, north-south the x: the map's width w / s yards, its height h / s)
+  return math.max((b[4] - b[2]) * half / w, (b[3] - b[1]) * half / h) * G.SEAM_WORLD_MARGIN
+end
+-- whether `zoom` is the world view's (the furthest, within a hair)
+function G.AtWorldZoom(zoom, cont)
+  if not G.Seamless() then return false end
+  zoom = zoom or math.min(ns.settings.gps.zoom, G.MaxZoom())
+  return zoom >= G.WorldZoom(cont) * 0.999
+end
+-- A view's middle (cx, cy in `cont`'s yards, north up, `s` UI units a yard, the map `w` x `h`) kept on Azeroth's map:
+-- each way the view is smaller than the map, no edge of the view past the map's; each way it's bigger, the map kept
+-- whole inside it (so the wheel at the cursor keeps its spot as long as it can). Returns the middle (unchanged with no
+-- frame).
+function G.ClampToWorld(cx, cy, cont, s, w, h)
+  local b = G.WorldBounds(cont)
+  if not (b and s and s > 0) then return cx, cy end
+  local hx, hy = h / 2 / s, w / 2 / s -- (yards from the middle to the edge: north-south, east-west)
+  local function keep(c, lo, hi, r)
+    local a, z = lo + r, hi - r
+    if a > z then a, z = z, a end
+    return math.max(a, math.min(z, c))
+  end
+  return keep(cx, b[1], b[3], hx), keep(cy, b[2], b[4], hy)
 end
 
 function G.MinimapMaxZoom() return G.MINIMAP_MAX_ZOOM * G.ZoomScale() end
@@ -2960,6 +3042,7 @@ local function AddSeg(ax, ay, bx, by, c, w, a, keep, dotted)
   end
   sg[1], sg[2], sg[3], sg[4], sg[5], sg[6], sg[7], sg[8], sg[9] = ax, ay, bx, by, c, w, a, keep or false, dotted or false
 end
+function G.DrawnSegs() return segPool, segN end -- (the tests: the last redraw's lines)
 
 -- Drawing by other addons (the public API, Api.lua). G.overlays[name] = fn(ctx) runs on every
 -- redraw; ctx draws in world yards of the continent in view (ctx.cont) and its lines join the
@@ -8213,6 +8296,21 @@ function G.Update()
   if st.rotate and not free and not browse and not mmZoom then
     cx, cy = G.ScreenToWorld(px, py, 0, G.HEADING_UP_LOW * halfH, rot, s)
   end
+  -- (the world view, G.WorldZoom: out at the furthest, Azeroth's whole map in the window, its middle the view's,
+  -- following or not; a view looked at elsewhere on the art kept on the map, never past its edges, so there's
+  -- nothing to pan out there. Asked 2026-11-18)
+  view.world = nil
+  if not browse and not mmZoom and not hidden and rot == 0 and G.Seamless() then
+    local wc = Geo.Base(ViewCont(cont))
+    local cw, ch = canvas:GetWidth(), canvas:GetHeight()
+    local wb = G.WorldBounds(wc)
+    if wb and zoom >= math.min(G.WorldZoom(wc, cw, ch), G.MaxZoom()) * 0.999 then
+      cx, cy = (wb[1] + wb[3]) / 2, (wb[2] + wb[4]) / 2
+      view.world = true
+    elseif wb and free and not free.instance and (G.SeamBlend(zoom) or 0) > 0 then
+      cx, cy = G.ClampToWorld(cx, cy, wc, s, cw, ch) -- (only as drawn: free keeps its spot, zoomed back in to it)
+    end
+  end
   view.x, view.y, view.rot, view.s = cx, cy, rot, s
   G.markView = { x = cx, y = cy, rot = rot, s = s, half = half } -- (the marks are placed round this: G.GlidePan)
   G.markLayer:ClearAllPoints()
@@ -9052,6 +9150,10 @@ function G.Update()
         { st.poiTaxi and k.taxi, st.poiPoi and k.poi, not view.seamFar and st.poiLabels }, fac)
       AddMarks(pois)
       if st.poiLabels ~= false and not view.seamFar then G.CityLabelPois(pois, viewCont, cx, cy, rot, s, half, zoom) end
+      -- (out on the art past a continent's worth: the other continent's in view too, the world view's both)
+      if view.seamFar and not browse then
+        G.OtherContPois(pois, viewCont, cx, cy, rot, half, zoom, { st.poiTaxi and k.taxi, st.poiPoi and k.poi }, fac)
+      end
     end
     -- a continent's map: its capitals, to click for the city
     if bm and bm.type == 2 then
@@ -9074,8 +9176,12 @@ function G.Update()
         if DOCK_ICON[t[8]] and ns.Nav.TransportUsable(t) then -- (only the player's faction's)
           for side = 1, 2 do
             local c, x, y = t[side == 1 and 1 or 4], t[side == 1 and 2 or 5], t[side == 1 and 3 or 6]
-            if c == base then
-              local dx, dy = Geo.ScreenOffset(cx, cy, x, y)
+            -- (out on the art past a continent's worth: the other continent's docks too, placed through Azeroth's
+            -- map; the dock itself kept in its own yards, a double-click's stop there)
+            local vx, vy = x, y
+            if c ~= base and view.seamFar and not browse then vx, vy = Geo.ToContinent(c, x, y, base) end
+            if c == base or (vx and c ~= base and view.seamFar and not browse) then
+              local dx, dy = Geo.ScreenOffset(cx, cy, vx, vy)
               dx, dy = Geo.Rotate(dx * s, dy * s, rot)
               if math.abs(dx) <= half and math.abs(dy) <= half then
                 local to = ns.RideEndName(t, side == 1 and 2 or 1)
@@ -9937,6 +10043,7 @@ function G.PadClickedJustNow()
 end
 function G.PadPan(dxUI, dyUI)
   if not view.cont or (dxUI == 0 and dyUI == 0) then return end
+  if view.world and G.AtWorldZoom() then return end -- (the world view: nothing to pan)
   lastActivity = GetTime()
   local x, y = G.PanCenter(view.x, view.y, -dxUI, -dyUI, view.rot, view.s)
   tour = nil
@@ -9992,6 +10099,41 @@ function G.WheelZoom(f)
     z = math.min(z, math.max(G.MaxZoom(), math.min(browseZoom, G.MinimapMaxZoom() - 1)))
   end
   browseZoom = z
+  elapsed = 1
+  return z
+end
+
+-- The mouse wheel at the cursor (asked 2026-11-18: "support zoom where the mouse is"): zoomed by `f` as G.WheelZoom
+-- does, the spot under the cursor (`dxUI`, `dyUI` UI units right of and up from the map's middle) kept under it, as
+-- map apps do. A view that followed the player lets go of them, as a drag does ("Back to your position" brings it
+-- back); the cursor within CURSOR_ZOOM_STILL_PX of the middle zooms in place and keeps following. The controller,
+-- keys and buttons zoom about the middle (G.WheelZoom); the map as the minimap square, always on the player, too.
+-- A zoom that went to another map (out of a dungeon's map to its way in, back in to it) or out to the world view
+-- (its middle Azeroth's map's) keeps that one's middle. Every map style (the code is the map's own), the GPS window
+-- and the game's world map alike. Returns the zoom.
+G.CURSOR_ZOOM_STILL_PX = 6
+function G.WheelAt(f, dxUI, dyUI)
+  local s0, x0, y0, rot0, c0 = view.s, view.x, view.y, view.rot, view.cont
+  local free0, browse0 = free, browse
+  local z = G.WheelZoom(f)
+  if not (dxUI and dyUI and s0 and s0 > 0 and c0 and canvas) or G.MinimapMode() then return z end
+  if dxUI * dxUI + dyUI * dyUI <= G.CURSOR_ZOOM_STILL_PX ^ 2 then return z end
+  if free ~= free0 or browse ~= browse0 then return z end
+  local half = math.max(canvas:GetWidth(), canvas:GetHeight()) / 2
+  local before = half / s0
+  local after = browseZoom or math.min(S().zoom, G.MaxZoom())
+  if math.abs(after - before) <= before * 1e-6 then return z end
+  if G.AtWorldZoom(after) and not browse then return z end -- (the world view: its own middle)
+  local wx, wy = G.ScreenToWorld(x0, y0, dxUI, dyUI, rot0, s0)
+  local k = after / before
+  local x, y = wx + (x0 - wx) * k, wy + (y0 - wy) * k
+  if free then
+    free.x, free.y = x, y
+  else
+    free = { x = x, y = y, rot = rot0, cross = true, cont = c0, pan = true } -- (as a drag from following makes)
+  end
+  tour = nil
+  if recenter then recenter:Show() end
   elapsed = 1
   return z
 end
@@ -12792,7 +12934,22 @@ function G.AddPending(dxUI, dyUI)
     local x, y = G.ScreenToWorld(view.x, view.y, dxUI, dyUI, view.rot, view.s)
     return G.MarkYouHere(hiddenShown, x, y)
   end
-  G.AddStopAt(G.ScreenToWorld(view.x, view.y, dxUI, dyUI, view.rot, view.s))
+  local x, y = G.ScreenToWorld(view.x, view.y, dxUI, dyUI, view.rot, view.s)
+  -- (on the seamless map's art, zoomed out over the other continent or an isle: a stop there, in its own yards)
+  local oc, ox, oy = G.SeamSpotElsewhere(view.cont, x, y)
+  if oc then return G.AddStopAt(ox, oy, nil, oc) end
+  G.AddStopAt(x, y)
+end
+-- A spot (x, y in `cont`'s yards) on the seamless map's art over another continent or an isle: that one and its yards
+-- there; else nil (the same continent, the sea, no art).
+function G.SeamSpotElsewhere(cont, x, y)
+  local A = ns.Atlas
+  if not (cont and not browse and G.Seamless() and A and A.ToAtlas and A.FromAtlas) then return nil end
+  local u, v = A.ToAtlas(cont, x, y)
+  if not u then return nil end
+  local c, ox, oy = A.FromAtlas(u, v)
+  if c and c ~= Geo.Base(cont) then return c, ox, oy end
+  return nil
 end
 
 -- Right-click on a stop's marker: a small "Remove?" button next to it.
@@ -14448,7 +14605,13 @@ function G.Init()
     end
     tour = nil
     lastActivity = GetTime()
-    G.WheelZoom(delta > 0 and 1 / G.ZOOM_STEP or G.ZOOM_STEP)
+    -- (at the cursor: the spot under it stays put, G.WheelAt)
+    local mx, my = GetCursorPosition()
+    local sc = canvas:GetEffectiveScale()
+    local ccx, ccy = canvas:GetCenter()
+    local dx, dy
+    if mx and sc and sc > 0 and ccx then dx, dy = mx / sc - ccx, my / sc - ccy end
+    G.WheelAt(delta > 0 and 1 / G.ZOOM_STEP or G.ZOOM_STEP, dx, dy)
   end)
   frame:SetBackdrop({
     bgFile = "Interface\\Buttons\\WHITE8X8",
@@ -16397,8 +16560,13 @@ function G.Init()
       local mx, my = GetCursorPosition()
       local sc = frame:GetEffectiveScale()
       local dx, dy = (mx - drag.cx) / sc, (my - drag.cy) / sc
+      local panned = false
       if drag.moved or dx * dx + dy * dy > 9 then -- ignore clicks and tiny jitters
         drag.moved = true
+        -- (the world view: Azeroth's whole map in the window, nothing to pan; following stays as it was)
+        panned = not (view.world and G.AtWorldZoom())
+      end
+      if panned then
         local x, y = G.PanCenter(drag.x, drag.y, dx, dy, drag.rot, drag.s)
         -- (a drag from the land keeps showing the land, G.LandView: only one from the city's map keeps the city's)
         free = { x = x, y = y, rot = drag.rot, cross = true, cont = view.cont, interior = free and free.interior, pan = true,

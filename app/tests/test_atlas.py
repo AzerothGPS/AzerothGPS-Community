@@ -574,7 +574,7 @@ def test_the_zoom_to_blend_function_by_the_wheels_notches():
     G = ns.GPS
     # (shipped as tuned in testing, issue #90: a notch of 1.16, counted from 1,000 yd, 8 notches in from it)
     assert (G.ZOOM_STEP, G.SEAM_TERRAIN_ZOOM, G.SEAM_SHARP_NOTCHES, G.SEAM_ART_NOTCHES, G.SEAM_TILES_NOTCHES,
-            G.SEAM_WORLD_NOTCHES, G.SEAM_WORLD_MARGIN, G.INTERIOR_FEATHER_YD) == (1.16, 1000, -8, 3, 3, 0, 0.85, 60)
+            G.SEAM_WORLD_NOTCHES, G.SEAM_WORLD_MARGIN, G.INTERIOR_FEATHER_YD) == (1.16, 1000, -8, 3, 3, 0, 1, 60)
     # the terrain alone, sharp and opaque, from the closest zoom out to SEAM_SHARP_NOTCHES from SEAM_TERRAIN_ZOOM (no
     # art at all: issue #60)
     sharp = notch(G, G.SEAM_SHARP_NOTCHES)
@@ -600,9 +600,12 @@ def test_the_zoom_to_blend_function_by_the_wheels_notches():
     # new 100%")
     assert (a0, a1, t1) == pytest.approx((305.0, 476.1, 743.2), abs=0.1)
     assert G.SEAM_ICONS_FEW == pytest.approx(t1 * G.ZOOM_STEP ** G.SEAM_WORLD_NOTCHES) == pytest.approx(t1)
-    # the wheel's limits: the tiles laid out to their fade's end, the whole world (0.85 of it across) the furthest
+    # the wheel's limits: the tiles laid out to their fade's end, Azeroth's whole map fitting the (square) map the
+    # furthest (2026-11-18; before, 0.85 of the widest continent's yards across: its far edges off the map)
     assert G.TilesMaxZoom(True) == pytest.approx(t1 * G.ZoomScale())
-    assert G.WorldZoom() == pytest.approx(19073.4, abs=1) and G.MaxZoom() == pytest.approx(G.WorldZoom())
+    b = G.WorldBounds(0)
+    assert G.WorldZoom(0) == pytest.approx((b[4] - b[2]) / 2) == pytest.approx(22344.3, abs=1)
+    assert G.MaxZoom() == pytest.approx(G.WorldZoom())
     last = (0, 1)
     for z in range(100, 6000, 5):
         a, t = G.ArtBlend(z)
@@ -751,7 +754,13 @@ def test_right_click_zooms_out_a_few_notches_in_place_up_to_the_world():
         G.TerrainZoomOut()
         G.Update()
         zooms.append(zoom())
-        assert (G.shownView.x, G.shownView.y) == pytest.approx(spot, abs=1)  # (no recenter)
+        # (no recenter: the same spot, only kept off the far side of Azeroth's map's edge, G.ClampToWorld; 2026-11-18)
+        v = G.shownView
+        want = G.ClampToWorld(spot[0], spot[1], 0, v.s, 400, 400)
+        if v.world:  # (the world view at last: Azeroth's map's middle)
+            wb = G.WorldBounds(0)
+            want = ((wb[1] + wb[3]) / 2, (wb[2] + wb[4]) / 2)
+        assert (v.x, v.y) == pytest.approx(want, abs=1)
         assert G.BrowseState()[0] is None  # (no world map browsed)
         n += 1
     for a, b in zip(zooms, zooms[1:-1]):
@@ -760,7 +769,8 @@ def test_right_click_zooms_out_a_few_notches_in_place_up_to_the_world():
     G.TerrainZoomOut()  # (at the world: it stays, never back to the player)
     G.Update()
     assert zoom() == pytest.approx(G.MaxZoom())
-    assert (G.shownView.x, G.shownView.y) == pytest.approx(spot, abs=1)
+    b = G.WorldBounds(0)  # (the world view: Azeroth's map's middle)
+    assert G.shownView.world and (G.shownView.x, G.shownView.y) == pytest.approx(((b[1] + b[3]) / 2, (b[2] + b[4]) / 2))
 
 
 def test_right_click_while_a_game_holds_the_map_keeps_the_old_rule():
@@ -829,7 +839,10 @@ def test_a_view_dragged_over_the_other_continent_takes_its_yards():
     G.LookAt(0, x, y)
     G.Update()
     view = G.shownView
-    assert view.cont == 1 and (view.x, view.y) == pytest.approx((1676.0, -4315.0), abs=1)
+    # (its spot in Kalimdor's yards; drawn kept on Azeroth's map, this far out: G.ClampToWorld, 2026-11-18)
+    free = G.BrowseState()[1]
+    assert view.cont == 1 and (free.x, free.y) == pytest.approx((1676.0, -4315.0), abs=1)
+    assert (view.x, view.y) == pytest.approx(G.ClampToWorld(1676.0, -4315.0, 1, view.s, 400, 400), abs=1)
 
 
 # Teldrassil (Dolanaar), Rut'theran Village, Zephras Isle (an isle on a map of its own, 2991): each looked at from the
@@ -1045,12 +1058,12 @@ def test_the_seamless_knobs_turn_the_transition_live_and_reset():
     # shipped as tuned in testing (issue #90): the report's values and stages
     assert {k.name: k.default for k in K.List().values()} == {
         "SEAM_TERRAIN_ZOOM": 1000, "SEAM_SHARP_NOTCHES": -8, "SEAM_ART_NOTCHES": 3, "SEAM_TILES_NOTCHES": 3,
-        "SEAM_WORLD_NOTCHES": 0, "ZOOM_STEP": 1.16, "SEAM_WORLD_MARGIN": 0.85, "INTERIOR_FEATHER_YD": 60, "INTERIOR_TERRAIN_FEATHER_YD": 6,
+        "SEAM_WORLD_NOTCHES": 0, "ZOOM_STEP": 1.16, "SEAM_WORLD_MARGIN": 1, "INTERIOR_FEATHER_YD": 60, "INTERIOR_TERRAIN_FEATHER_YD": 6,
         "minimapFrom": 40, "minimapDeep": 1, "soften": True, "closeUpFrom": 8}
     shipped = K.Stages()
     assert tuple(shipped.artIn.values()) == pytest.approx((305.0, 476.1), abs=0.1)
     assert tuple(shipped.tilesOut.values()) == pytest.approx((476.1, 743.2), abs=0.1)
-    assert shipped.iconsFew == pytest.approx(743.2, abs=0.1) and shipped.worldZoom == pytest.approx(19073.4, abs=1)
+    assert shipped.iconsFew == pytest.approx(743.2, abs=0.1) and shipped.worldZoom == pytest.approx(22344.3, abs=1)
     assert G.ArtBlend(300) == (0, 1) and G.ArtBlend(800) == (1, 0)
     # the transition pushed out four notches: the art in from 552 yd
     assert K.Set("SEAM_SHARP_NOTCHES", -4)
@@ -1059,7 +1072,7 @@ def test_the_seamless_knobs_turn_the_transition_live_and_reset():
     assert K.Set("SEAM_TERRAIN_ZOOM", 1) and K.Get("SEAM_TERRAIN_ZOOM") == 100  # (kept in its range)
     assert not K.Set("NOT_A_KNOB", 1) and not K.Set("ZOOM_STEP", "fast") and K.Get("ZOOM_STEP") == 1.16
     world = K.Stages().worldZoom
-    assert K.Set("SEAM_WORLD_MARGIN", 2.1) and K.Stages().worldZoom == pytest.approx(world * 2.1 / 0.85)
+    assert K.Set("SEAM_WORLD_MARGIN", 2.1) and K.Stages().worldZoom == pytest.approx(world * 2.1)
     # the close-up's knobs: the engine's own (E.KNOBS), read at its next view
     assert K.Set("minimapFrom", 99) and K.Get("minimapFrom") == 60
     assert K.Set("soften", False) and K.Get("soften") is False and not K.Set("soften", 1)
