@@ -6783,6 +6783,171 @@ def test_a_zeppelin_ride_is_followed_like_a_flight(env):
     assert T.CurrentRide(6000 + t.ride1 + T.RIDE_GRACE + 1) is None
 
 
+def _durotar_zeppelin(lua, ns):
+    lua.execute("GetRealmName = function() return 'Test' end")
+    lua.execute("CreateFrame = function() return { RegisterEvent = function() end, SetScript = function() end } end")
+    if ns.db is None:
+        ns.db = lua.eval("{}")
+    load(lua, ns, "Data/Transports.lua", "Taxi.lua")
+    T = ns.Taxi
+    i = next(k for k in range(1, len(ns.Transports) + 1)
+             if ns.Transports[k][9] == "Jaggedswine Farm, Durotar" and ns.Transports[k][10] == "Brill, Tirisfal Glades")
+    return T, i, ns.Transports[i]
+
+
+class _Rider:
+    # the half-second checks: the player's spot (Kalimdor) and speed as GetUnitSpeed gives it
+    def __init__(self, T, server):
+        self.T, self.now, self.server = T, 0.0, server
+
+    def tick(self, x, y, speed=0.0, cont=1):
+        self.now += 0.5
+        self.server += 0.5
+        self.T.TransportTick(self.now, int(self.server), x, y, cont, speed)
+
+
+def test_jumping_off_a_zeppelin_ends_the_ride(env):
+    # (Kooki3z, 1.3.9: "I jumped from the zeppelin and no routing is stuck at this", the directions on "Riding the
+    # zeppelin to Jaggedswine Farm, Durotar, arrives in 0s" standing in Orgrimmar's Valley of Strength) carried over
+    # Orgrimmar from Brill, then off it: falling, landing, walking about the valley; the ride ends, the dock not reached
+    lua, ns = env
+    T, i, t = _durotar_zeppelin(lua, ns)
+    T.StartRide(i, 2, 5000)  # (left Brill)
+    p = _Rider(T, 5040)
+    x, y = 1400.0, -4300.0  # (over Orgrimmar, Kalimdor's map after the loading screen)
+    for _ in range(10):  # (standing on the deck, carried south-east at 30 yd/s)
+        x, y = x + 12, y - 9
+        p.tick(x, y)
+    assert T.Riding() and T.CurrentRide(int(p.server)).to == "Jaggedswine Farm, Durotar"
+    # off the side: falling (the run speed, drifting a little), then landed in the Valley of Strength
+    for _ in range(4):
+        x, y = x + 1, y
+        p.tick(x, y, 7.0)
+    x, y = 1630.0, -4420.0
+    for _ in range(T.OFF_CHECKS - 2):
+        p.tick(x, y)  # (standing, looking round)
+    assert T.CurrentRide(int(p.server)) is not None  # (not on the first moments: 10 s on the ground mid-ride)
+    for _ in range(3):  # (walking off west at run speed: as far as their own steps take them)
+        x -= 3.5
+        p.tick(x, y, 7.0)
+    assert T.CurrentRide(int(p.server)) is None and not T.Riding()
+    assert int(p.server) - 5000 < t.ride2  # (well before its timetable's arrival)
+    log = list(ns.db.rideLog.values())
+    assert "off " in log[-1] and "on the way" in log[-1]
+    # nothing taken from it: no arrival, no departure from where they landed
+    assert not any("arrived" in line or "departed" in line for line in log)
+
+
+def test_walking_on_the_deck_keeps_the_ride_and_it_still_arrives(env):
+    # walking about the deck all the way (along it, against it, across it, standing now and then) is never off it; the
+    # arrival at Jaggedswine Farm still ends it as before
+    lua, ns = env
+    T, i, t = _durotar_zeppelin(lua, ns)
+    T.StartRide(i, 2, 5000)
+    p = _Rider(T, 5010)
+    dock = (t[2], t[3])
+    x, y = dock[0] - 2600, dock[1]
+    vx = 30 * 0.5  # (the zeppelin: 15 yd a check, east to the dock)
+    walks = [(3.5, 0), (-3.5, 0), (0, 3.5), (0, -3.5), (0, 0), (2.5, 2.5)]
+    for k in range(120):  # (a minute walking about the deck)
+        wx, wy = walks[(k // 7) % len(walks)]
+        x, y = x + vx + wx, y + wy
+        p.tick(x, y, 0.0 if (wx, wy) == (0, 0) else 7.0)
+        assert T.CurrentRide(int(p.server)) is not None, k
+    for k in range(20):  # (running into the rail: 7 yd/s, carried at the zeppelin's speed)
+        x += vx
+        p.tick(x, y, 7.0)
+        assert T.CurrentRide(int(p.server)) is not None, k
+    assert dock[0] - x > T.ARRIVE_YD
+    # coming in: slowing, then berthed by the tower, standing aboard
+    while dock[0] - x > 20:
+        x += 5
+        p.tick(x, y)
+    assert T.CurrentRide(int(p.server)) is not None
+    p.tick(x, y)
+    p.tick(x, y)
+    assert T.CurrentRide(int(p.server)) is None
+    assert "arrived" in list(ns.db.rideLog.values())[-1]
+
+
+def test_arrives_in_0s_standing_on_land_ends_the_ride(env):
+    # (the "arrives in 0s" left showing) its timetable's arrival past and the player standing still on land, away from
+    # the dock: over in OFF_LATE_CHECKS, not RIDE_GRACE later; mid-ride the same few checks standing don't end it
+    lua, ns = env
+    T, i, t = _durotar_zeppelin(lua, ns)
+    T.StartRide(i, 2, 5000)
+    p = _Rider(T, 5030)
+    for _ in range(T.OFF_LATE_CHECKS + 2):  # (mid-ride: a stall on the way is not enough)
+        p.tick(1630.0, -4420.0)
+    assert T.CurrentRide(int(p.server)) is not None
+    T.StartRide(i, 2, 5000)
+    p.server = 5000 + t.ride2 + 1  # (the same clock: no gap between the checks)
+    assert T.CurrentRide(int(p.server)).left < 0
+    for _ in range(T.OFF_LATE_CHECKS - 1):
+        p.tick(1630.0, -4420.0)
+    assert T.CurrentRide(int(p.server)) is not None
+    p.tick(1630.0, -4420.0)
+    assert T.CurrentRide(int(p.server)) is None
+    assert int(p.server) < 5000 + t.ride2 + T.RIDE_GRACE
+    assert "past its arrival" in list(ns.db.rideLog.values())[-1]
+    # a loading screen (no spot) and a long hitch count neither way
+    T.StartRide(i, 2, 5000)
+    p.server = 5000 + t.ride2 + 1  # (the same clock: no gap between the checks)
+    for _ in range(T.OFF_LATE_CHECKS + 2):
+        p.tick(1630.0, -4420.0)
+        T.TransportTick(p.now, int(p.server), None, None, None, 0.0)
+    assert T.CurrentRide(int(p.server)) is not None
+    assert T.OwnStep(0.0, 0.0, T.OFF_MAX_GAP + 1) is None and T.OwnStep(0.0, None, 0.5) is None
+
+
+def test_jumping_off_over_orgrimmar_routes_on_from_where_they_land(nav_env):
+    # (Kooki3z's report) on the zeppelin to Durotar the route is the ride, then on from its dock; off it in the Valley of
+    # Strength, the ride ends and the route is worked out again from there to the stop, the ride's step gone
+    lua, ns = nav_env
+    load(lua, ns, "Turns.lua")
+    lua.execute("AGPS_SERVER = 5040 GetServerTime = function() return AGPS_SERVER end")
+    T, i, t = _durotar_zeppelin(lua, ns)
+    N = ns.Nav
+    N.SetDestination(-440.0, -4700.0, 1, "near Razor Hill")
+    T.StartRide(i, 2, 5000)
+    r = N.Route(1500.0, -4380.0, 1)
+    assert r.flying and r.flying.to == "Jaggedswine Farm, Durotar"
+    assert "Riding the zeppelin to Jaggedswine Farm, Durotar" in N.Status(1500.0, -4380.0, 1)
+    p = _Rider(T, 5040)
+    x, y = 1630.0, -4420.0
+    for _ in range(T.OFF_CHECKS + 1):  # (landed and standing)
+        p.tick(x, y)
+    lua.execute(f"AGPS_SERVER = {int(p.server)}")
+    assert T.CurrentRide() is None
+    r = N.Route(x, y, 1)
+    assert r and not r.flying
+    assert (r.pts[1] - x) ** 2 + (r.pts[2] - y) ** 2 < 60 ** 2  # (from where they are)
+    assert "Riding the zeppelin" not in N.Status(x, y, 1)
+    assert "Riding the zeppelin" not in (N.StepsText(3) or "")
+
+
+def test_a_reload_on_a_zeppelin_keeps_following_it(env):
+    # (a /reload aboard: the ride's departure isn't kept, so Taxi.Riding holds the route while carried) nothing new
+    # ends it while carried, standing or walking on the deck; off it, Riding is over at once as before
+    lua, ns = env
+    T, i, t = _durotar_zeppelin(lua, ns)
+    T.StartRide(i, 2, 5000)
+    T, i, t = _durotar_zeppelin(lua, ns)  # (reloaded: Taxi.lua loaded afresh)
+    assert T.CurrentRide(5050) is None
+    p = _Rider(T, 5050)
+    x, y = 1400.0, -4300.0
+    for k in range(60):
+        x, y = x + 12, y - 9
+        p.tick(x + (3.5 if k % 10 < 5 else 0), y, 7.0 if k % 10 < 5 else 0.0)
+    for _ in range(4):
+        x, y = x + 12, y - 9
+        p.tick(x, y)
+    assert T.Riding()
+    p.tick(x, y)
+    p.tick(x, y)
+    assert not T.Riding() and T.CurrentRide(int(p.server)) is None
+
+
 def test_the_route_on_a_zeppelin_counts_down_to_its_dock(nav_env):
     # (asked 2026-10-02) on the zeppelin: "Riding the zeppelin to Brill, arrives in ..." in the panel, the steps
     # and the arrow's line, the ride's line to the dock, then the walk on from there; across continents too

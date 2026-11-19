@@ -518,12 +518,35 @@ function T.Riding() return rideStreak >= 2 end
 -- the timetable on by the wait there.
 T.RIDE_GRACE = 90
 T.ARRIVED_CHECKS = 2
+-- Off it on the way (Kooki3z, 1.3.9: jumped off the zeppelin over Orgrimmar, and the directions stayed on "Riding the
+-- zeppelin to Jaggedswine Farm, arrives in 0s"): the player moving as their own steps take them, not as a ride carries
+-- them. Each check the yards moved are set against the player's own speed (GetUnitSpeed, which on a ride is their speed
+-- on its deck: 0 standing on it while it carries them on): standing still and not carried, or walking and moved as far
+-- as that walk goes (OFF_SLACK_YD and OFF_SLACK of it either way), is a step on the ground; anything else (carried
+-- standing still, or walking on a deck it carries along) takes OFF_MISS off the count. OFF_CHECKS in all (10 s at
+-- the half-second checks) ends the ride; past its timetable's arrival ("arrives in 0s"), OFF_LATE_CHECKS. A loading
+-- screen, a hitch longer than OFF_MAX_GAP, or no speed to read counts neither way.
+T.OFF_CHECKS = 20
+T.OFF_LATE_CHECKS = 6
+T.OFF_MISS = 4
+T.OFF_SLACK_YD = 1
+T.OFF_SLACK = 0.2
+T.OFF_MAX_GAP = 3 -- seconds between checks
 local ride, stillAtDock = nil, 0
+local offCount = 0
 
 function T.StartRide(i, side, at)
   local t = ns.Transports and ns.Transports[i]
   if not (t and (t[8] == "zeppelin" or t[8] == "boat") and t.ride1 and t.ride2) then return end
-  ride, stillAtDock = { i = i, side = side, at = at, carriedAt = at }, 0
+  ride, stillAtDock, offCount = { i = i, side = side, at = at, carriedAt = at }, 0, 0
+end
+
+-- One check on the ride: a step on the ground (true), carried (false), or nothing to tell (nil).
+function T.OwnStep(moved, speed, dt)
+  if speed == nil or not dt or dt <= 0 or dt > T.OFF_MAX_GAP then return nil end
+  if speed <= 0.1 then return moved < T.CARRY_YD end
+  local expect = speed * dt
+  return math.abs(moved - expect) <= T.OFF_SLACK_YD + T.OFF_SLACK * expect
 end
 
 -- The ride now: { kind, from, to (dock names), dock = { cont, x, y } (where it lands), left (seconds) }, or nil.
@@ -604,7 +627,23 @@ function T.TransportTick(now, serverNow, px, py, cont, speed)
   else
     stillAtDock = 0
   end
-  last = { x = px, y = py, cont = cont }
+  -- (off it on the way, jumped or fallen: moving as the player's own steps take them; T.OFF_CHECKS)
+  if ride and last and last.cont == cont and last.now then
+    local own = T.OwnStep(moved, speed, now - last.now)
+    if own == true then
+      offCount = offCount + 1
+    elseif own == false then
+      offCount = math.max(0, offCount - T.OFF_MISS)
+    end
+    local secs = T.RideTime(ride.i, ride.side)
+    local late = secs and serverNow - ride.at >= secs
+    if offCount >= (late and T.OFF_LATE_CHECKS or T.OFF_CHECKS) then
+      T.LogRide(string.format("off %s side %d after %.0f s, not at its dock (%s)", RowKey(t), ride.side,
+        serverNow - ride.at, late and "past its arrival" or "on the way"))
+      ride, offCount = nil, 0
+    end
+  end
+  last = { x = px, y = py, cont = cont, now = now }
 end
 
 -- The next arrival at and departure from dock `side` of transport i: seconds from `serverNow`
