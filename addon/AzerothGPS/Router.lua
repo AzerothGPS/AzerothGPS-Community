@@ -77,6 +77,7 @@ R.NearLightEnd = NearLightEnd
 R.CITY_BLOCKED_PENALTY = 200 -- the same in a city (its grid's walls are real walls)
 R.ENTRY_CANDIDATES = 8 -- road edges tried for getting on and off the road network
 R.ENTRY_SLACK = 400 -- yards: candidates up to this much farther than the nearest road
+R.ENTRY_QUARTERS = true -- ... and the nearest in each quarter round the spot none of those is in (RouteOne)
 -- (asked 2026-11-14) A route ENTRY_SIDES_DETOUR times the straight line or longer: worked out again with, at the stop,
 -- the nearest road within ENTRY_SLACK in each quarter round it too (R.EntrySidesAgain), and taken when shorter
 R.ENTRY_SIDES = true
@@ -5295,22 +5296,46 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
   -- ENTRY_SLACK in each quarter round it that none of those is in, over open ground straight to it: asked 2026-11-14,
   -- a stop by the river between Duskwood and Elwynn, Elwynn's road pieces were all eight, so Duskwood's road 200 yd
   -- further never got tried and the route went round by Westfall, twice as far)
-  local function candidates(list, x, y)
+  -- (and past the ENTRY_CANDIDATES, at either end, the nearest road in each quarter round the spot that none of them is
+  -- in, within ENTRY_SLACK and over open ground straight to it (`qx`, `qy`). Issue #682: a road drawn to Tarren Mill's
+  -- flight master along the old one split the roads by it; the eight were all those roads, to the town's side, and the
+  -- south road 204 yd off, the way south-east, wasn't one: 732 yd north through the town and back down for 388 yd)
+  local function candidates(list, x, y, qx, qy)
     local out, side = {}, {}
-    local function sideOf(c)
-      if not (x and c.px) then return nil end
-      return (c.px >= x and 0 or 1) + (c.py >= y and 0 or 2) -- (its quarter round the spot)
+    local function sideOf(c, ax, ay)
+      ax, ay = ax or x, ay or y
+      if not (ax and c.px) then return nil end
+      return (c.px >= ax and 0 or 1) + (c.py >= ay and 0 or 2) -- (its quarter round the spot)
     end
+    local last = #list -- (the last one looked at)
     for i, c in ipairs(list) do
-      if i > R.ENTRY_CANDIDATES or c.dist > list[1].dist + R.ENTRY_SLACK then break end
+      if i > R.ENTRY_CANDIDATES or c.dist > list[1].dist + R.ENTRY_SLACK then last = i - 1 break end
       out[#out + 1] = c
       local k = sideOf(c)
       if k then side[k] = true end
     end
+    -- (not where ENTRY_SIDES below looks at the stop's quarters: a route worked out again for them)
+    local sides = R.ENTRY_SIDES and x and list[1] and list[1].dist >= R.ENTRY_SIDES_YD
+    -- (on the open land only: not in a capital, a city's or a building's floors, whose roads near are its own floors')
+    if R.ENTRY_QUARTERS and qx and not sides and last < #list and last >= R.ENTRY_CANDIDATES and not layered
+        and not cityPenalty and not R.CapitalAt(cont, qx, qy) and not (ns.Nav and ns.Nav.InBuilding
+        and ns.Nav.InBuilding(cont, qx, qy)) then
+      local quarter = {}
+      for _, c in ipairs(out) do quarter[sideOf(c, qx, qy)] = true end
+      for i = last + 1, #list do
+        local c = list[i]
+        if c.dist > list[1].dist + R.ENTRY_SLACK then break end
+        local k = sideOf(c, qx, qy)
+        if not quarter[k] and not (g.cave and g.cave[c.edge]) and not (g.indoor and g.indoor[c.edge]) then
+          quarter[k] = true -- (the nearest only: blocked, none from that quarter)
+          if not Pass or SegCost(cont, c.px, c.py, qx, qy) then out[#out + 1] = c end
+        end
+      end
+    end
     if x then entrySidesLeft = false end
-    if R.ENTRY_SIDES and x and #list > #out and list[1].dist >= R.ENTRY_SIDES_YD then
+    if sides and #list > last then
       local again = opts and opts.entrySides
-      for i = #out + 1, #list do
+      for i = last + 1, #list do
         local c = list[i]
         if c.dist > list[1].dist + R.ENTRY_SLACK then break end
         local k = sideOf(c)
@@ -5387,7 +5412,7 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
       return true
     end
   end
-  local tc = candidates(ts, tx, ty)
+  local tc = candidates(ts, tx, ty, tx, ty)
   local goalSlot = walkSlots()
   for _, c in ipairs(tc) do addGoal(c, goalSlot(c)) end
   if walkAll then
@@ -5420,7 +5445,7 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
       end
     end
   end
-  local sc = candidates(ss)
+  local sc = candidates(ss, nil, nil, sx, sy)
   local startSlot = walkSlots()
   for _, c in ipairs(sc) do addStart(c, startSlot(c)) end
   if walkAll then

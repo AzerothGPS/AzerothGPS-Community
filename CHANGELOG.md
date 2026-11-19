@@ -13,6 +13,10 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Roads: new roads and walls in Arathi Highlands.
 - Roads: the way up Grom'gol's zeppelin tower in Stranglethorn Vale.
 
+### Fixed
+
+- Walks from Tarren Mill's flight master head south-east again, not round by the town.
+
 ## 1.3.9
 
 ### New
