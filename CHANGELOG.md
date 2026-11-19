@@ -21,6 +21,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Going off course on a long route no longer causes a hitch.
 - Messages with one button (like "Got It") no longer show a "No" button when they pop up over the map.
 - If routing still makes your game stutter, it works out only the way to your next stop until things are smooth again, and pauses with a message if that isn't enough (resume with Pause Routing or /agps pause).
+- Road tools: a recorded walk or drawn road that isn't in the road data yet no longer says it's on the ground; it shows flat until it's added, which works out its heights and stairs.
 
 ## 1.3.8
 

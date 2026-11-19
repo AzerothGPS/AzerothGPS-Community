@@ -6169,6 +6169,16 @@ def test_drawn_roads_carry_heights_and_the_stairs_tool_makes_stairs(game):
         assert R.StairAt(0, 2248.4, 247.3, 2256.4, 247.3) is not None
         info = G.RoadHoverInfo(0, 2252.4, 247.3, 2)
         assert str(info.title) == "Stairs"
+        # a drawn road with no heights, not in the data yet: none yet, not "on the ground" (a walk recorded up
+        # Grom'gol's tower looked flat, 2026-11-18: its floors and stairs come with the import)
+        G.roadMode = True
+        G.FinishRoad(lua.table(pts=lua.table(2600.0, 700.0, 2615.0, 700.0, 2630.0, 700.0), cont=0), False, False)
+        G.roadMode = None
+        ns.Record.Apply()
+        c = R.NearestEdges(0, 2615.0, 700.0)[1]
+        assert R.DebugGraph(0).e[c.edge][4] == R.SOURCE_RECORDED
+        info = G.RoadHoverInfo(0, 2615.0, 700.0, 3)
+        assert str(info.title) == "Drawn road" and str(info.lines[1]).startswith("No height yet")
         # bad lines: heights not matching the points, stairs with none
         bad = M.Parse("R add 0 1790000001 zs=1.0 1.0,1.0 2.0,2.0\nR stair 0 1790000002 1.0,1.0 2.0,2.0")
         assert [str(r.why) for r in bad.rejected.values()] == ["its heights don't match its points", "stairs need their heights"]

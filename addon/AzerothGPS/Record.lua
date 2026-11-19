@@ -678,6 +678,8 @@ function R.StopRecording()
   else
     ns.Print((r.saved or 0) == 1 and L["recording stopped: 1 walk saved as a drawn road (Undo takes the last back)"]
       or L["recording stopped: %d walks saved as drawn roads (Undo takes the last back)"]:format(r.saved or 0))
+    -- (the game gives no height: a walk up stairs looks flat until it's imported, 2026-11-18)
+    if (r.saved or 0) > 0 then ns.Print(L["Recorded walks show flat until they're added to the road data, which works out their heights and stairs."]) end
     R.lastSaved = r.saved
   end
   R.RefreshWindow()
