@@ -195,7 +195,8 @@ R.TRACK_WALK_JOIN = 0.1
 -- heights (`zs`) and a stairs stretch on part of it (`stairs` = { first point, last point }). An edit is a new track that
 -- `replaces` the one edited (its time, `rpart` a recorded walk's piece): routes leave the old one out at once, and the
 -- road watcher takes the new one in its place.
-R.TRACK_KINDS = { "ground", "floor", "bridge", "stairs", "lift" }
+-- (and a ramp: a slope with its heights, set with Edit Road's Set Heights, 1.3.10 issue #685; walked as a road)
+R.TRACK_KINDS = { "ground", "floor", "bridge", "stairs", "lift", "ramp" }
 -- (a bridge's or a floor's roads over the land: never joined to the roads under them but at their own ends, and no gap
 -- link onto them from below)
 R.RAISED_KINDS = { bridge = true, floor = true }
@@ -208,8 +209,9 @@ R.TRACK_DROP_MAX = 14
 R.TRACK_DROP_REACH = 6
 R.TRACK_DROP_STEP = 4
 
--- A track's pieces: its stairs stretch (`stairs` = { i, j }, its points) a stairs piece of its own, the rest as the
--- track is; each a copy with `part` (0, 1, ..) when split. A track with no stairs stretch: itself.
+-- A track's pieces: its stairs stretch (`stairs` = { i, j }, its points) a stairs piece of its own (a ramp's, `skind` =
+-- "ramp": a ramp piece, walked as a road), the rest as the track is; each a copy with `part` (0, 1, ..) when split. A
+-- track with no stairs stretch: itself.
 function R.TrackPieces(t)
   local st = type(t.stairs) == "table" and not t.recorded and t.stairs
   local n = t.pts and #t.pts / 2 or 0
@@ -225,8 +227,10 @@ function R.TrackPieces(t)
       p.pts[#p.pts + 1], p.pts[#p.pts + 2] = t.pts[2 * k - 1], t.pts[2 * k]
       p.zs[#p.zs + 1] = t.zs[k]
     end
-    p.stair = stair or nil
-    if stair then p.kind = "stairs" end
+    local ramp = stair and t.skind == "ramp"
+    p.stair = (stair and not ramp) or nil
+    if stair then p.kind = ramp and "ramp" or "stairs" end
+    p.skind = nil
     p.z = p.zs[1]
     p.part = #out
     out[#out + 1] = p

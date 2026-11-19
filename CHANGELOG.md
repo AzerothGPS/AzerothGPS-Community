@@ -12,6 +12,8 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Routes can jump off a bridge onto a road below when the fall is safe.
 - With the road or wall tools on, the pointer shows the ground's height from the map's data.
 - New drawn roads start with the ground's height at each point.
+- Edit Road: Set Heights gives a stretch of a road a start and an end height, as stairs or a ramp.
+- Walking up or down a road with heights says how far it goes, "12 yd up".
 - Roads: new roads and walls in Arathi Highlands.
 - Roads: the way up Grom'gol's zeppelin tower in Stranglethorn Vale.
 
