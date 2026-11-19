@@ -449,9 +449,9 @@ local function Update(dt)
   if textWait <= 0 then
     textWait = TEXT_EVERY
     local active = px and UpdateText(px, py, cont)
-    -- no route: hidden and click-through (kept shown so this keeps checking), except while unlocked (to place and
-    -- size them)
-    local placing = not active and not S().arrowLocked
+    -- no route: hidden and click-through (kept shown so this keeps checking), except while either is unlocked (to
+    -- place and size them)
+    local placing = not active and not (S().arrowLocked and S().dirLocked)
     if placing then
       line1:SetText(L["|cff9d9d9dNo route|r"])
       line2:SetText(L["Set one on the map: double-click a spot, or pan and Confirm Route."])
@@ -468,14 +468,15 @@ local function Update(dt)
     -- click-through (options): in combat, and/or while moving
     local st = S()
     local moving = ns.GPS and ns.GPS.PlayerMoving and ns.GPS.PlayerMoving()
-    -- locked: always click-through (nothing to click on it then; unlocked it's dragged)
-    local through = st.arrowLocked or (st.clickThroughCombat and ns.inCombat) or (st.clickThroughMoving and moving)
+    -- locked: always click-through (nothing to click on it then; unlocked it's dragged). Each by its own lock (asked
+    -- 2026-11-18: the directions text locked apart from the arrow)
+    local through = (st.clickThroughCombat and ns.inCombat) or (st.clickThroughMoving and moving)
     for _, f in ipairs({ frame, dir }) do
       local on = f == dir and show or f == frame and arrowShow
       f:SetAlpha(on and Alpha() or 0)
-      f:EnableMouse(on and not through)
+      f:EnableMouse(on and not through and not A.Locked(f))
     end
-    grip:SetShown(show and not st.arrowLocked)
+    grip:SetShown(show and not st.dirLocked)
     if not active then return end
   end
   if not px or not path or Hidden() then return end
@@ -601,11 +602,11 @@ function A.Apply()
   local size = st.dirSize or { 296, 97 }
   dir:SetSize(size[1], math.max(size[2], minH))
   frame:SetMovable(not st.arrowLocked)
-  dir:SetMovable(not st.arrowLocked)
+  dir:SetMovable(not st.dirLocked)
   -- (each its own background, asked 2026-10-30: the directions' is the arrow's until it's set)
   frame:SetBackdropColor(0, 0, 0, st.arrowBg or 0.55)
   dir:SetBackdropColor(0, 0, 0, st.dirBg or st.arrowBg or 0.55)
-  dir:SetResizable(not st.arrowLocked)
+  dir:SetResizable(not st.dirLocked)
   Layout()
   local k = TextScale()
   for _, fs in ipairs({ line1, line2, line3, line4, dist }) do ScaleText(fs, k) end
@@ -613,7 +614,7 @@ function A.Apply()
     ScaleText(row, k)
     PlaceRow(i)
   end
-  grip:SetShown(not st.arrowLocked)
+  grip:SetShown(not st.dirLocked)
   -- (none in a battleground or an arena: asked 2026-11-10, GPSFrame.lua's ns.InBattleground)
   local on = st.arrow and not (ns.inCombat and st.combatHideArrow) and not (ns.InBattleground and ns.InBattleground())
   frame:SetShown(on)
@@ -625,7 +626,15 @@ end
 -- A right-click on the arrow or the directions, unlocked (asked 2026-11-11: "support right clicking either one with a
 -- popup next to the mouse to confirm locking its position, then after locking it another popup telling them where in
 -- options to unlock it in the future"): "Lock ... here?" by the mouse, then where the lock is. Not in the tutorial,
--- which unlocks them for its own steps and puts the player's setting back after.
+-- which unlocks them for its own steps and puts the player's setting back after. Each has its own lock since 1.3.9
+-- (asked 2026-11-18, "a separate lock option for the directions text than the arrow"): `arrowLocked` the arrow's,
+-- `dirLocked` the directions text's (Core.lua's InitDB: the old shared lock's value at first).
+-- The panel's lock: the directions' `dirLocked`, the arrow's `arrowLocked`.
+function A.Locked(f)
+  local st = S()
+  if f ~= nil and f == dir then return st.dirLocked == true end
+  return st.arrowLocked == true
+end
 local function ByMouse(f)
   local x, y = 0, 0
   if GetCursorPosition then x, y = GetCursorPosition() end
@@ -633,18 +642,24 @@ local function ByMouse(f)
   if not s or s <= 0 then s = 1 end
   f:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", (x or 0) / s + 12, (y or 0) / s + 12)
 end
-function A.Lock()
-  S().arrowLocked = true
+-- `f`: the panel (A.dir: the directions text; anything else: the arrow).
+function A.Lock(f)
+  local isDir = f ~= nil and f == dir
+  if isDir then S().dirLocked = true else S().arrowLocked = true end
   A.Apply()
   RefreshOptions()
   if ns.Ask then
-    A.lockTold = ns.Ask("AzerothGPSArrowLock", L["Locked. To unlock them later: Options > Directions > Lock arrow position."], OKAY or "OK", nil, nil, nil,
+    local text = isDir and L["Locked. To unlock it later: Options > Directions > Lock directions text position."]
+      or L["Locked. To unlock it later: Options > Directions > Lock arrow position."]
+    A.lockTold = ns.Ask("AzerothGPSArrowLock", text, OKAY or "OK", nil, nil, nil,
       { place = ByMouse, single = true, strata = "DIALOG" })
   end
 end
-function A.AskLock()
-  if S().arrowLocked or (ns.Tutorial and ns.Tutorial.run) or not ns.Ask then return nil end
-  A.lockAsk = ns.Ask("AzerothGPSArrowLock", L["Lock the arrow and the directions in place here?"], nil, nil, A.Lock, nil, { place = ByMouse, strata = "DIALOG" })
+function A.AskLock(f)
+  if A.Locked(f) or (ns.Tutorial and ns.Tutorial.run) or not ns.Ask then return nil end
+  local isDir = f ~= nil and f == dir
+  local text = isDir and L["Lock the directions text in place here?"] or L["Lock the arrow in place here?"]
+  A.lockAsk = ns.Ask("AzerothGPSArrowLock", text, nil, nil, function() A.Lock(f) end, nil, { place = ByMouse, strata = "DIALOG" })
   return A.lockAsk
 end
 
@@ -659,18 +674,18 @@ function A.OfferUnlock()
   local db = ns.db
   if not db or db.arrowUnlockOffered or not ns.Ask then return nil end
   local st = S()
-  if not st.arrowLocked then
+  if not st.arrowLocked and not st.dirLocked then
     db.arrowUnlockOffered = true
     return nil
   end
   if not st.arrow or (ns.Tutorial and ns.Tutorial.run) or ns.inCombat then return nil end
   db.arrowUnlockOffered = true
-  st.arrowLocked = false
+  st.arrowLocked, st.dirLocked = false, false -- (both: the lock was one when this was asked)
   A.Apply()
   RefreshOptions()
-  A.unlockAsk = ns.Ask("AzerothGPSArrowUnlock", L["Directions and the arrow are now unlocked by default. You can move them now if you wish.\n\nTo lock them again: right-click either one, or Options > Directions > Lock arrow position."], L["Leave Unlocked"], L["Lock"], nil, function(clicked)
+  A.unlockAsk = ns.Ask("AzerothGPSArrowUnlock", L["Directions and the arrow are now unlocked by default. You can move them now if you wish.\n\nTo lock them again: right-click either one, or Options > Directions > Lock arrow position and Lock directions text position."], L["Leave Unlocked"], L["Lock"], nil, function(clicked)
     if not clicked then return end -- (Escape, the close button: left unlocked)
-    S().arrowLocked = true
+    S().arrowLocked, S().dirLocked = true, true
     A.Apply()
     RefreshOptions()
   end, { strata = "DIALOG" })
@@ -687,7 +702,7 @@ local function Panel(name)
   f:RegisterForDrag("LeftButton")
   f:SetScript("OnDragStart", function(self)
     local st = S()
-    if st.arrowLocked then return end
+    if A.Locked(self) then return end -- (each by its own lock; the directions dragged carry a snapped arrow, locked or not)
     if self == frame and Snapped() then
       local left, top = frame:GetLeft(), frame:GetTop()
       st.arrowSnap = false
@@ -713,7 +728,7 @@ local function Panel(name)
     end
   end)
   f:SetScript("OnMouseUp", function(_, button)
-    if button == "RightButton" and not A.moving then A.AskLock() end
+    if button == "RightButton" and not A.moving then A.AskLock(f) end
   end)
   f:SetBackdrop({ bgFile = "Interface\\Buttons\\WHITE8X8" })
   f:SetBackdropColor(0, 0, 0, 0.55)
@@ -761,7 +776,7 @@ function A.Init()
   grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
   grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
   grip:SetScript("OnMouseDown", function()
-    if S().arrowLocked then return end
+    if S().dirLocked then return end
     A.sizing = true
     dir:StartSizing("BOTTOMRIGHT")
   end)

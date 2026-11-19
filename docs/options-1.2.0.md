@@ -219,6 +219,7 @@ RestedXP Route and Zygor Route are quick buttons.
 | Direction arrow | Arrow size [arrow] | `arrowPx` |
 | Direction arrow | Arrow background [arrow] | `arrowBg` |
 | Directions panel | Show the directions [arrow] | `dirShown` |
+| Directions panel | > Lock directions text position [directions] (1.3.9) | `dirLocked` |
 | Directions panel | > List the stops only [directions] | `dirStopsOnly` |
 | Directions panel | > Snap the arrow to the directions [directions] | `arrowSnap` |
 | Directions panel | > > Arrow side [snapped] | `arrowSide` |

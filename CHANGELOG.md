@@ -11,6 +11,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - The detached route panel can hide its buttons and show only the route's text, and its background can be see-through (Options > Map window).
 - Resize the detached route panel by its corner; steps that don't fit show as "... 3 more steps".
 - Lock the detached route panel in place (its lock button, or Options > Map window).
+- The directions text has its own lock, apart from the arrow (Options > Directions, or right-click it).
 
 ## 1.3.8
 

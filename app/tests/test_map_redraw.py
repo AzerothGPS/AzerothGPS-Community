@@ -1958,7 +1958,7 @@ def test_the_arrow_isnt_set_again_while_nothing_changes(game):
         G.Update()
 
 
-_ARROW_KEYS = ("arrowSnap", "arrowSide", "dirShown", "dirStopsOnly", "arrowPx", "dirTextScale", "arrowLocked", "dirPoint",
+_ARROW_KEYS = ("arrowSnap", "arrowSide", "dirShown", "dirStopsOnly", "arrowPx", "dirTextScale", "arrowLocked", "dirLocked", "dirPoint",
                "dirSize", "arrowFreePoint", "arrowPoint", "arrowSize", "arrowBg", "dirBg")
 
 
@@ -1966,7 +1966,7 @@ def _arrow_settings(st):
     # (the arrow's settings as they were, for the test's end; the defaults meanwhile)
     saved = {k: st[k] for k in _ARROW_KEYS}
     st.arrowSnap, st.arrowSide, st.dirShown, st.dirStopsOnly = True, "left", True, False
-    st.arrowPx, st.dirTextScale, st.arrowLocked = 58, 1, True
+    st.arrowPx, st.dirTextScale, st.arrowLocked, st.dirLocked = 58, 1, True, True
     return saved
 
 
@@ -2001,7 +2001,7 @@ def test_the_arrow_and_the_directions_are_two_panels_snapped_on_a_side(game):
             assert (af._w if side in ("left", "right") else af._h) == 74  # (the arrow's 58 and its margins)
             assert tuple(dirf._clamp.values()) == clamp, side
         # the directions dragged while snapped: they move, carrying the arrow
-        st.arrowLocked, st.arrowSide = False, "left"
+        st.arrowLocked, st.dirLocked, st.arrowSide = False, False, "left"
         A.Apply()
         lua.execute("AGPS_MOVED = nil AzerothGPSDirections.StartMoving = function(s) AGPS_MOVED = s end")
         dirf._scripts.OnDragStart(dirf)
@@ -2039,7 +2039,7 @@ def test_the_arrow_drags_off_the_directions_and_snaps_back_against_a_side(game):
                     f"{name}.GetTop = function() return {top} end {name}.GetBottom = function() return {bottom} end")
     saved = _arrow_settings(st)
     try:
-        st.arrowLocked = False
+        st.arrowLocked = st.dirLocked = False
         A.Apply()
         assert A.Snapped()
         place("AzerothGPSDirections", 300, 600, 500, 400)
@@ -2179,7 +2179,7 @@ def test_resizing_the_directions_isnt_set_back_while_dragging(game):
     af, dirf = lua.globals().AzerothGPSArrow, lua.globals().AzerothGPSDirections
     saved = _arrow_settings(st)
     try:
-        st.arrowLocked = False
+        st.arrowLocked = st.dirLocked = False
         st.dirSize = lua.eval("{ 296, 97 }")
         A.Apply()
         N.SetStops(lua.eval("{ { x = 2600.0, y = 293.0, cont = 0, name = 's' } }"), False, "red")
@@ -11227,7 +11227,7 @@ def test_arrow_side_hide_hides_the_arrow_and_keeps_the_directions(game):
     saved = _arrow_settings(st)
     real = N.UseNow
     try:
-        st.arrowLocked = False
+        st.arrowLocked = st.dirLocked = False
         _arrow_route(lua, ns, 1200)
         A.Apply()
         af._scripts.OnUpdate(af, 1)
