@@ -191,12 +191,20 @@ end
 
 -- Imported nodes in one go ({ { level, x, y, name, kind }, ... }; unconfirmed until gathered): as L.AddNode, but the
 -- nodes near each looked up by a grid of NODE_MERGE_YD (an import of thousands: not each against every node known).
--- Returns how many were added, how many were known already.
-function Lay.AddNodes(list)
+-- Returns how many were added, how many were known already. `state`: a table kept between calls for an import done in
+-- slices (L.GM2Pump): the grids built once, built again for a level whose list changed meanwhile (a node gathered).
+function Lay.AddNodes(list, state)
   local db = DB()
   if not db then return 0, 0 end
   local C = Lay.NODE_MERGE_YD
-  local grids = {}
+  local grids = state and state.grids or {}
+  local lens = state and state.lens or {}
+  if state then state.grids, state.lens = grids, lens end
+  -- (a level's list changed since the last call, a node gathered or removed meanwhile: its grid built again. Looked at
+  -- once a call, never per node: this call's own nodes go into the grid as they're added)
+  for cont in pairs(grids) do
+    if lens[cont] ~= #(db[cont] or {}) then grids[cont] = nil end
+  end
   local function cell(x, y) return math.floor(x / C) * 65536 + math.floor(y / C) end
   local function grid(cont)
     local g = grids[cont]
@@ -240,6 +248,7 @@ function Lay.AddNodes(list)
       end
     end
   end
+  for cont in pairs(grids) do lens[cont] = #(db[cont] or {}) end
   return added, had
 end
 
@@ -2907,6 +2916,384 @@ function Lay.ShowNodeFinder()
   f.Refresh()
   f.box:SetFocus()
   return f
+end
+
+---------------------------------------------------------------------------
+-- Import From GatherMate2 (1.3.10, asked 2026-11-19: "a way for players to import GatherMate2 data for herbs/mines";
+-- once per startup check for new data and make the button glow, glowing too if never imported). Read only: nothing in
+-- GatherMate2 is called. Its saved variables GatherMate2HerbDB / GatherMate2MineDB are { [uiMapID] = { [coord] =
+-- nodeID } }, coord = floor(x * 10000 + 0.5) * 1000000 + floor(y * 10000 + 0.5) * 100 (its GatherMate:EncodeLoc /
+-- DecodeLoc); the zones a storage addon of its holds are in GatherMate2.gmdbs[type].__gm2_storage_map. The nodes go
+-- into the player's own herbs and ore (L.AddNodes: unconfirmed until gathered, the same node within NODE_MERGE_YD
+-- known once), never into the shipped data.
+---------------------------------------------------------------------------
+
+-- GatherMate2's node IDs for the herbs and veins there are (its Constants.lua node_ids, by their English names as
+-- KNOWN_NODES has them). Its variants (Poor Copper Vein, Stunted Silverleaf) share their node's ID.
+Lay.GM2_NODES = {
+  [201] = "Copper Vein", [202] = "Tin Vein", [203] = "Iron Deposit", [204] = "Silver Vein", [205] = "Gold Vein",
+  [206] = "Mithril Deposit", [207] = "Ooze Covered Mithril Deposit", [208] = "Truesilver Deposit",
+  [209] = "Ooze Covered Silver Vein", [210] = "Ooze Covered Gold Vein", [211] = "Ooze Covered Truesilver Deposit",
+  [212] = "Ooze Covered Rich Thorium Vein", [213] = "Ooze Covered Thorium Vein", [214] = "Small Thorium Vein",
+  [215] = "Rich Thorium Vein", [216] = "Hakkari Thorium Vein", [217] = "Dark Iron Deposit",
+  [218] = "Lesser Bloodstone Deposit", [219] = "Incendicite Mineral Vein", [220] = "Indurium Mineral Vein",
+  [225] = "Large Obsidian Chunk", [226] = "Small Obsidian Chunk",
+  [401] = "Peacebloom", [402] = "Silverleaf", [403] = "Earthroot", [404] = "Mageroyal", [405] = "Briarthorn",
+  [407] = "Stranglekelp", [408] = "Bruiseweed", [409] = "Wild Steelbloom", [410] = "Grave Moss", [411] = "Kingsblood",
+  [412] = "Liferoot", [413] = "Fadeleaf", [414] = "Goldthorn", [415] = "Khadgar's Whisker", [416] = "Wintersbite",
+  [417] = "Firebloom", [418] = "Purple Lotus", [420] = "Arthas' Tears", [421] = "Sungrass", [422] = "Blindweed",
+  [423] = "Ghost Mushroom", [424] = "Gromsblood", [425] = "Golden Sansam", [426] = "Dreamfoil",
+  [427] = "Mountain Silversage", [428] = "Plaguebloom", [429] = "Icecap", [431] = "Black Lotus",
+}
+Lay.GM2_DBS = { { kind = "herb", global = "GatherMate2HerbDB", type = "Herb Gathering" },
+  { kind = "ore", global = "GatherMate2MineDB", type = "Mining" } }
+Lay.GM2_CHECK_WAIT = 8 -- seconds after login the check starts (off the login's own busy frames)
+Lay.GM2_SLICE_MS = 3 -- the check's and the import's work per frame
+Lay.GM2_BATCH = 100 -- nodes read between looks at the clock
+
+-- GatherMate2_Data (asked 2026-11-19: "the 1 button should handle both data, either from player collected or from the
+-- additional data addon"): its WoW Forever node set (Wowhead's, its forever\ files: every herb and vein, by the same
+-- uiMapIDs and coords as GatherMate2's own) in GatherMateData2HerbDB / GatherMateData2MineDB. Load on demand: loaded by
+-- the import's click (nothing else in it runs: no merge into GatherMate2), never at login; the startup check reads
+-- only its version, so a new version glows too.
+Lay.GM2_DATA_ADDON = "GatherMate2_Data"
+Lay.GM2_DATA_DBS = { { kind = "herb", global = "GatherMateData2HerbDB" }, { kind = "ore", global = "GatherMateData2MineDB" } }
+
+local function AddOnLoaded(name)
+  local fn = (C_AddOns and C_AddOns.IsAddOnLoaded) or IsAddOnLoaded
+  if not fn then return false end
+  local ok, on = pcall(fn, name)
+  return (ok and on) and true or false
+end
+
+-- GatherMate2 loaded (the button shows only then).
+function Lay.GM2Loaded() return AddOnLoaded("GatherMate2") end
+
+-- GatherMate2_Data installed and enabled (loaded already, or loadable on demand).
+function Lay.GM2DataInstalled()
+  if AddOnLoaded(Lay.GM2_DATA_ADDON) then return true end
+  local info = (C_AddOns and C_AddOns.GetAddOnInfo) or GetAddOnInfo
+  if not info then return false end
+  local ok, name, _, _, loadable, reason = pcall(info, Lay.GM2_DATA_ADDON)
+  if not ok or not name then return false end
+  return (loadable == true or reason == "DEMAND_LOADED") and true or false
+end
+
+-- Its version ("v42.0"), or nil without it: part of the startup check's signature.
+function Lay.GM2DataVersion()
+  if not Lay.GM2DataInstalled() then return nil end
+  local meta = (C_AddOns and C_AddOns.GetAddOnMetadata) or GetAddOnMetadata
+  local ok, v = false, nil
+  if meta then ok, v = pcall(meta, Lay.GM2_DATA_ADDON, "Version") end
+  return (ok and v and tostring(v)) or "?"
+end
+
+-- Load it for the import (a click: its files read once, a short pause the first time). True when its tables are there.
+function Lay.GM2LoadData()
+  if not Lay.GM2DataInstalled() then return false end
+  if not AddOnLoaded(Lay.GM2_DATA_ADDON) then
+    local load = (C_AddOns and C_AddOns.LoadAddOn) or LoadAddOn
+    if load then pcall(load, Lay.GM2_DATA_ADDON) end
+  end
+  return type(rawget(_G, Lay.GM2_DATA_DBS[1].global)) == "table" or type(rawget(_G, Lay.GM2_DATA_DBS[2].global)) == "table"
+end
+
+-- GatherMate2's herb and mine tables: { { kind, t, data }, ... } (its main ones, any its storage addons hold, and with
+-- `withData` GatherMate2_Data's, loaded, `data` true).
+function Lay.GM2Stores(withData)
+  local out, seen = {}, {}
+  local function add(kind, t, data)
+    if type(t) == "table" and not seen[t] then
+      seen[t] = true
+      out[#out + 1] = { kind = kind, t = t, data = data or nil }
+    end
+  end
+  local gm = rawget(_G, "GatherMate2")
+  for _, d in ipairs(Lay.GM2_DBS) do
+    add(d.kind, rawget(_G, d.global))
+    pcall(function()
+      local dbs = type(gm) == "table" and rawget(gm, "gmdbs")
+      local meta = type(dbs) == "table" and rawget(dbs, d.type)
+      local map = type(meta) == "table" and rawget(meta, "__gm2_storage_map")
+      if type(map) == "table" then for _, t in pairs(map) do add(d.kind, t) end end
+    end)
+  end
+  -- (after the player's own: what they gathered goes in first)
+  if withData then
+    for _, d in ipairs(Lay.GM2_DATA_DBS) do add(d.kind, rawget(_G, d.global), true) end
+  end
+  return out
+end
+
+-- Every zone of every table: { { store, zone }, ... }.
+local function GM2Zones(withData)
+  local zones = {}
+  for _, store in ipairs(Lay.GM2Stores(withData)) do
+    for zone, list in pairs(store.t) do
+      if type(list) == "table" then zones[#zones + 1] = { store = store, zone = zone } end
+    end
+  end
+  return zones
+end
+
+-- A walk over every node of GatherMate2's, in slices: job.zones and where it is (zi, key). `job.each(kind, zone,
+-- coord, id, store)` per node. Stops at `deadline` (looked at every GM2_BATCH nodes). Returns true when done.
+local function GM2Walk(job, deadline, now)
+  local n = 0
+  while job.zi <= #job.zones do
+    local z = job.zones[job.zi]
+    local list = z.store.t[z.zone]
+    if type(list) ~= "table" then list = {} end
+    local k = job.key
+    if k ~= nil and list[k] == nil then
+      -- (the node it stopped at gone since, GatherMate2 removing it: the rest of that zone left, never an error)
+      job.zi, job.key = job.zi + 1, nil
+    else
+      local v
+      while true do
+        k, v = next(list, k)
+        if k == nil then break end
+        job.each(z.store.kind, z.zone, k, v, z.store)
+        n = n + 1
+        if n >= Lay.GM2_BATCH then
+          n = 0
+          if job.flush then job.flush(job) end -- (the import's: its nodes in before the clock's looked at)
+          if now() >= deadline then
+            job.key = k
+            return false
+          end
+        end
+      end
+      job.zi, job.key = job.zi + 1, nil
+    end
+  end
+  return true
+end
+
+-- The signature's running checksum of one node.
+local function GM2Sum(sum, zone, coord, id)
+  if type(coord) ~= "number" or type(id) ~= "number" then return sum end
+  return (sum + (coord % 1000003) * 31 + (tonumber(zone) or 0) * 7 + id) % 2147483647
+end
+
+-- Lay.gm2: the check's and the import's state, in memory: { phase = "check" / "import" / nil, job, sig, herbs, mines
+-- (what GatherMate2 itself has, once checked), dataVer (GatherMate2_Data's version, nil without it), progress (0..1),
+-- result (the last import's line) }. Saved: ns.db.gm2 = { sig (the signature when last imported), herbs, mines, at }.
+-- The signature: GatherMate2's own nodes (counts, checksum) and GatherMate2_Data's version, never its nodes (they're
+-- read only by the import, loaded then), so it's the same whether that's loaded or not.
+Lay.gm2 = Lay.gm2 or {}
+
+local function Refresh()
+  if ns.GPS and ns.GPS.RefreshQuick then pcall(ns.GPS.RefreshQuick) end
+end
+
+-- Start the signature check (how many of each and a checksum of every node), done by L.GM2Pump in slices.
+function Lay.GM2StartCheck()
+  local g = Lay.gm2
+  if g.phase or not Lay.GM2Loaded() then return false end
+  local job = { zones = GM2Zones(false), zi = 1, herbs = 0, mines = 0, sum = 0, dataVer = Lay.GM2DataVersion() }
+  job.each = function(kind, zone, coord, id)
+    if kind == "herb" then job.herbs = job.herbs + 1 else job.mines = job.mines + 1 end
+    job.sum = GM2Sum(job.sum, zone, coord, id)
+  end
+  g.phase, g.job = "check", job
+  Lay.GM2Drive()
+  return true
+end
+
+-- What the check found: GatherMate2 has herbs or mines (or GatherMate2_Data is installed), and the player never
+-- imported them or they changed since (a new GatherMate2_Data version too).
+function Lay.GM2HasNew()
+  local g = Lay.gm2
+  if not g.sig or ((g.herbs or 0) + (g.mines or 0) == 0 and not g.dataVer) then return false end
+  local saved = ns.db and ns.db.gm2
+  return not saved or saved.sig ~= g.sig
+end
+
+-- The button glows: GatherMate2 loaded, the check done and something new, not importing now.
+function Lay.GM2Glow()
+  return (Lay.GM2Loaded() and Lay.gm2.phase ~= "import" and Lay.GM2HasNew()) and true or false
+end
+
+-- Import every GatherMate2 herb and mine into the player's own (L.AddNodes), in slices with the progress on the
+-- button. The signature is taken on the way (the import reads every node anyway) and saved at the end.
+function Lay.GM2Import()
+  local g = Lay.gm2
+  if g.phase == "import" or not Lay.GM2Loaded() then return false end
+  local dataVer = Lay.GM2DataVersion()
+  if dataVer then Lay.GM2LoadData() end -- (GatherMate2_Data's every herb and vein, with the player's own)
+  local zones = GM2Zones(true)
+  local total = 0
+  for _, z in ipairs(zones) do
+    for _ in pairs(z.store.t[z.zone]) do total = total + 1 end -- (counting only: cheap, no garbage)
+  end
+  local job = { zones = zones, zi = 1, herbs = 0, mines = 0, sum = 0, total = total, seen = 0, dataVer = dataVer,
+    batch = { herb = {}, ore = {} }, state = {}, added = { herb = 0, ore = 0 }, had = 0, skipped = 0 }
+  job.each = function(kind, zone, coord, id, store)
+    job.seen = job.seen + 1
+    if not (store and store.data) then -- (the signature: GatherMate2's own, as the startup check takes it)
+      if kind == "herb" then job.herbs = job.herbs + 1 else job.mines = job.mines + 1 end
+      job.sum = GM2Sum(job.sum, zone, coord, id)
+    end
+    local name = type(id) == "number" and Lay.GM2_NODES[id]
+    local x, y, cont
+    if name and nodeKind[name] == kind and type(coord) == "number" then
+      x, y, cont = Lay.MapToWorld(tonumber(zone), math.floor(coord / 1000000) / 10000,
+        math.floor(coord % 1000000 / 100) / 10000)
+    end
+    if x and cont then
+      local b = job.batch[kind]
+      b[#b + 1] = { level = cont, x = x, y = y, name = name, kind = kind }
+    else
+      job.skipped = job.skipped + 1 -- (a node of a later expansion's, a map this client hasn't got)
+    end
+  end
+  g.phase, g.job, g.progress, g.result = "import", job, 0, nil
+  Lay.GM2Drive()
+  Refresh()
+  return true
+end
+
+-- The import's nodes read this slice into the player's own.
+local function GM2Flush(job)
+  for kind, list in pairs(job.batch) do
+    if #list > 0 then
+      local added, had = Lay.AddNodes(list, job.state)
+      job.added[kind] = job.added[kind] + added
+      job.had = job.had + had
+      job.batch[kind] = {}
+    end
+  end
+end
+
+-- A count as the game writes them (BreakUpLargeNumbers: 1,234 in English, 1.234 in German), else with commas.
+function Lay.GM2Thousands(n)
+  n = math.floor(n or 0)
+  local fn = rawget(_G, "BreakUpLargeNumbers")
+  if fn then
+    local ok, s = pcall(fn, n)
+    if ok and type(s) == "string" then return s end
+  end
+  local out, b = tostring(n), 1
+  while b > 0 do out, b = out:gsub("^(%d+)(%d%d%d)", "%1,%2") end
+  return out
+end
+
+-- The import's line: "Imported 1,234 herbs and 567 mines, 89 already known."
+function Lay.GM2ResultText(job)
+  if job.added.herb + job.added.ore + job.had == 0 then return L["GatherMate2 has no herbs or mines to import."] end
+  local T = Lay.GM2Thousands
+  return Format(L["Imported %s herbs and %s mines, %s already known."], T(job.added.herb), T(job.added.ore), T(job.had))
+end
+
+-- One slice of the check or the import, until `deadline` (ms on `now()`'s clock; debugprofilestop's by default).
+-- Returns true while there's more.
+function Lay.GM2Pump(deadline, now)
+  local g = Lay.gm2
+  local job = g.job
+  if not g.phase or not job then return false end
+  now = now or debugprofilestop
+  deadline = deadline or (now() + Lay.GM2_SLICE_MS)
+  if g.phase == "import" then job.flush = GM2Flush end
+  local done = GM2Walk(job, deadline, now)
+  if g.phase == "import" then
+    GM2Flush(job)
+    g.progress = job.total > 0 and math.min(1, job.seen / job.total) or 1
+    if not done and ns.GPS and ns.GPS.SetQuickProgress then pcall(ns.GPS.SetQuickProgress, "gm2Import", g.progress) end
+  end
+  if not done then return true end
+  g.sig = job.herbs .. ":" .. job.mines .. ":" .. job.sum .. (job.dataVer and ("|" .. job.dataVer) or "")
+  g.herbs, g.mines, g.dataVer = job.herbs, job.mines, job.dataVer
+  if g.phase == "import" then
+    if ns.db then ns.db.gm2 = { sig = g.sig, herbs = job.herbs, mines = job.mines, at = time and time() or 0 } end
+    g.result = Lay.GM2ResultText(job)
+    if job.added.herb + job.added.ore > 0 then
+      Lay.version = Lay.version + 1
+      if ns.MarkUnsaved then ns.MarkUnsaved("gm2:" .. tostring(time and time() or 0), "add") end
+    end
+    if ns.Print then ns.Print(g.result) end
+    if ns.GPS and ns.GPS.SetQuickProgress then pcall(ns.GPS.SetQuickProgress, "gm2Import", nil) end
+  end
+  g.phase, g.job = nil, nil
+  Refresh()
+  return false
+end
+
+-- The frame that pumps it: GM2_SLICE_MS a frame while there's work, hidden otherwise.
+function Lay.GM2Drive()
+  if not CreateFrame then return end
+  local f = Lay.gm2Frame
+  if not f then
+    f = CreateFrame("Frame")
+    Lay.gm2Frame = f
+    f:SetScript("OnUpdate", function(self)
+      local ok, more = pcall(Lay.GM2Pump)
+      if not ok then
+        Lay.gm2.phase, Lay.gm2.job = nil, nil
+        if ns.GPS and ns.GPS.SetQuickProgress then pcall(ns.GPS.SetQuickProgress, "gm2Import", nil) end
+      end
+      if not (ok and more) then self:Hide() end
+    end)
+  end
+  f:Show()
+end
+
+-- Once per startup (PLAYER_LOGIN, Core.lua): the check, GM2_CHECK_WAIT seconds in. Nothing without GatherMate2.
+function Lay.GM2OnLogin()
+  if not Lay.GM2Loaded() then return end
+  if C_Timer and C_Timer.After then C_Timer.After(Lay.GM2_CHECK_WAIT, function() pcall(Lay.GM2StartCheck) end) end
+end
+
+-- The unconfirmed herbs and ore (imported, from GatherMate2 or a list, not gathered here since): how many.
+function Lay.UnconfirmedCount()
+  local n = 0
+  for _, list in pairs(DB() or {}) do
+    for _, node in ipairs(list) do if node[6] then n = n + 1 end end
+  end
+  return n
+end
+
+-- Remove every unconfirmed herb and vein (asked 2026-11-19: "a way to remove this data from an import ... wipe
+-- unverified nodes from the local data. Require confirmation": Options > Map icons' button, asked first,
+-- O.AskRemoveUnconfirmed). Only by the player's click: never by itself (keep data forever). Those gathered stay.
+-- GatherMate2's import is undone with them, so its button glows again. Returns how many, or nil while importing.
+function Lay.RemoveUnconfirmed()
+  if Lay.gm2.phase == "import" then return nil end
+  local db = DB()
+  if not db then return 0 end
+  local removed = 0
+  for _, list in pairs(db) do
+    local j = 0
+    for i = 1, #list do
+      local node = list[i]
+      list[i] = nil
+      if node[6] then
+        removed = removed + 1
+      else
+        j = j + 1
+        list[j] = node
+      end
+    end
+  end
+  if ns.db then ns.db.gm2 = nil end
+  Lay.gm2.result = nil
+  if removed > 0 then
+    Lay.version = Lay.version + 1
+    if ns.MarkUnsaved then ns.MarkUnsaved("unconfirmed:" .. tostring(time and time() or 0), "remove") end
+  end
+  Refresh()
+  return removed
+end
+
+-- The quick button's tooltip line: importing, the last import's line, or what the check found.
+function Lay.GM2Status()
+  local g = Lay.gm2
+  if g.phase == "import" then
+    return Format(L["Importing from GatherMate2: %d%%"], math.floor((g.progress or 0) * 100 + 0.5))
+  end
+  if g.result then return g.result end
+  if Lay.GM2HasNew() then return L["GatherMate2 has herbs or mines you haven't imported."] end
+  return nil
 end
 
 -- For /agps debug layers.

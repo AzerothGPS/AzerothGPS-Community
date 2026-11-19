@@ -27,6 +27,8 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Swims on a route show as a wavy line on the map and the minimap; hover one to see why, right-click it to go round by land for that trip.
 - Trip times count swimming at swimming speed, or as land with water walking, levitation or Aquatic Form.
 - New option, Routing > Allow swimming: off, routes go round by land wherever there's a way.
+- With GatherMate2 installed, Import From GatherMate2 in the map menu's herbs and ore group adds its herbs and mines to yours, and every one GatherMate2_Data lists when that's installed; it glows when there's new data to import.
+- Options > Map icons: Remove Unconfirmed Herbs and Ore takes out imported ones you haven't gathered, after asking.
 
 ### Fixed
 

@@ -2015,6 +2015,22 @@ local function BuildWindow()
   Key("layerOre")
   check(L["Ore"], L["Mining nodes you've gathered, hovered on the game minimap, right-clicked (without Mining) or imported. Saved for all your characters. A farming area (map menu) uses the kinds shown."],
     function() return GPS().layerOre ~= false end, function(v) GPS().layerOre = v end)
+  -- (asked 2026-11-19: undo an import, GatherMate2's or a list's; asked first, O.AskRemoveUnconfirmed)
+  do
+    local tip = L["Removes the herbs and ore you imported (from GatherMate2 or a list) and haven't gathered yet. The ones you gathered stay. You're asked first."]
+    AddText(group, tip)
+    local rm = Button(page, L["Remove Unconfirmed Herbs and Ore"], 240, function() O.AskRemoveUnconfirmed() end)
+    rm:SetScript("OnEnter", function(self)
+      GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+      GameTooltip:SetText(L["Remove Unconfirmed Herbs and Ore"], 1, 1, 1)
+      GameTooltip:AddLine(tip, nil, nil, nil, true)
+      GameTooltip:Show()
+    end)
+    rm:SetScript("OnLeave", GameTooltip_Hide)
+    place(rm, 30, 4)
+    O.removeUnconfirmedButton = rm -- (the tests)
+    controls[#controls + 1] = function() rm:SetEnabled(ns.Layers.UnconfirmedCount() > 0) end
+  end
   Key("showCustomPins")
   check(L["Pins"], L["Your pins (Shift + left-click on the map: Options > Tools) and the ones shared with everyone. Double-click one for a stop there; right-click to remove it."],
     function() return GPS().showCustomPins ~= false end, function(v) GPS().showCustomPins = v end)
@@ -2601,7 +2617,9 @@ local function BuildWindow()
         GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
         GameTooltip:SetText(t.label, 1, 1, 1)
         local names = {}
-        for _, m in ipairs(t.members) do names[#names + 1] = m.label end
+        for _, m in ipairs(t.members) do
+          if not m.when or m.when() then names[#names + 1] = m.label end -- (Import From GatherMate2: with it only)
+        end
         GameTooltip:AddLine(string.format(L["A group: %s."], table.concat(names, L[", "])), nil, nil, nil, true)
         GameTooltip:Show()
       end)
@@ -3545,6 +3563,22 @@ function O.AskReset()
   O.resetAsk = ns.Ask("AzerothGPSResetConfirm", L["Reset all options to their defaults?"], nil, nil,
     O.ResetToDefaults, nil, { strata = "FULLSCREEN_DIALOG" })
   return O.resetAsk
+end
+
+-- "Remove 1,234 unconfirmed herbs and ore?" first (Options > Map icons' button): a click alone removes nothing.
+function O.AskRemoveUnconfirmed()
+  local Lay = ns.Layers
+  local n = Lay.UnconfirmedCount()
+  local function Done(removed)
+    if removed and ns.Print then ns.Print(Format(L["Removed %s unconfirmed herbs and ore."], Lay.GM2Thousands(removed))) end
+    if O.Refresh then O.Refresh() end
+  end
+  if n == 0 then return nil end
+  if not ns.Ask then return Done(Lay.RemoveUnconfirmed()) end
+  O.removeAsk = ns.Ask("AzerothGPSRemoveUnconfirmed",
+    Format(L["Remove %s unconfirmed herbs and ore? These are the ones imported that you haven't gathered yet; the ones you gathered stay. This can't be undone."], Lay.GM2Thousands(n)),
+    nil, nil, function() Done(Lay.RemoveUnconfirmed()) end, nil, { strata = "FULLSCREEN_DIALOG" })
+  return O.removeAsk
 end
 
 function O.CurrentPage() return currentPage end -- (the page showing, by its place in the list)
