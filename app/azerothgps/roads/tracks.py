@@ -53,8 +53,92 @@ def read_tracks(wtf_account_dir: Path) -> list[dict]:
                 **floor_of(t),
                 **heights,
                 **recorded_of(t, len(pts) // 2),
+                **edit_of(t, len(pts) // 2),
             })
     return tracks
+
+
+KINDS = ("ground", "floor", "bridge", "stairs", "lift")  # Router.TRACK_KINDS
+
+
+def _num(v) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def edit_of(t: dict, n: int) -> dict:
+    """A road edited afterwards with the road tools' Edit Road (1.3.10, issue #640): {"kind": one of KINDS,
+    "replaces": the time of the track it replaces, "rpart": that track's piece (None: all of it), "edit_stairs": (first,
+    last) point of its stairs stretch}: what of it is well formed. {} for none."""
+    out = {}
+    if t.get("kind") in KINDS:
+        out["kind"] = t["kind"]
+    if _num(t.get("replaces")):
+        out["replaces"] = int(t["replaces"])
+        out["rpart"] = int(t["rpart"]) if _num(t.get("rpart")) else None
+    raw = _lua_list(t.get("stairs"))
+    if not t.get("recorded") and len(raw) == 2 and all(_num(v) for v in raw) and 1 <= int(raw[0]) < int(raw[1]) <= n:
+        out["edit_stairs"] = (int(raw[0]), int(raw[1]))
+    return out
+
+
+def edit_pieces(t: dict) -> list[dict]:
+    """An edited track's pieces (Router.TrackPieces): its stairs stretch a stairs piece of its own, the rest as the track
+    is; each {"coords", "zs", "stair", "kind"}. Without a stairs stretch (or heights for it): the track whole."""
+    coords, zs, st = t["coords"], t.get("zs"), t.get("edit_stairs")
+    whole = [{"coords": coords, "zs": zs, "stair": bool(t.get("stair")), "kind": t.get("kind")}]
+    if not st or not zs:
+        return whole
+    i, j = st
+    out = []
+    for a, b, stair in ((1, i, False), (i, j, True), (j, len(coords), False)):
+        if b > a:
+            out.append({"coords": coords[a - 1:b], "zs": zs[a - 1:b], "stair": stair,
+                        "kind": "stairs" if stair else t.get("kind")})
+    return out
+
+
+def apply_replaced(doc: dict) -> set[int]:
+    """Take out of an overrides document the drawn roads an edit in it replaced (its features' `replaces`, `rpart`: a
+    piece, by its `part`; none: all of them). The times left with no feature at all: to list as dropped (the addon
+    forgets its copy, and the watcher never takes it in again)."""
+    gone: dict[int, set | None] = {}
+    for f in doc["features"]:
+        p = f.get("properties", {})
+        if p.get("source") == "recorded" and p.get("replaces") is not None:
+            r, part = int(p["replaces"]), p.get("rpart")
+            if part is None:
+                gone[r] = None
+            elif r not in gone or gone[r] is not None:
+                gone.setdefault(r, set()).add(int(part))
+    if not gone:
+        return set()
+
+    def replaced(p):
+        if p.get("source") != "recorded" or p.get("time") not in gone:
+            return False
+        parts = gone[p["time"]]
+        return parts is None or int(p.get("part") or 0) in parts
+
+    taken = {f["properties"]["time"] for f in doc["features"] if replaced(f.get("properties", {}))}
+    doc["features"] = [f for f in doc["features"] if not replaced(f.get("properties", {}))]
+    left = {f["properties"].get("time") for f in doc["features"] if f.get("properties", {}).get("source") == "recorded"}
+    # (only those it had: a recorded walk not in yet comes in later, cut then)
+    return {int(t) for t in taken if t not in left}
+
+
+def add_dropped(overrides_dir: Path, times) -> None:
+    """List `times` in overrides/dropped_tracks.json (dropped_times)."""
+    times = {int(t) for t in times}
+    if not times:
+        return
+    f = Path(overrides_dir) / "dropped_tracks.json"
+    doc = json.loads(f.read_text(encoding="utf-8")) if f.exists() else {}
+    have = set(doc.get("times", []))
+    if times <= have:
+        return
+    doc["times"] = sorted(have | times)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(doc, indent=1), encoding="utf-8")
 
 
 def _lua_list(v) -> list:
@@ -117,9 +201,11 @@ def floor_tracks(overrides_dir: Path) -> dict[int, list[dict]]:
             coords = feat["geometry"]["coordinates"]
             out.setdefault(cont, []).append({"op": props.get("op", "add"), "time": int(props.get("time", 0)),
                                              "pts": [v for p in coords for v in p[:2]], "zs": props["zs"],
-                                             "stair": bool(props.get("stair")), "area": bool(props.get("area"))})
+                                             "stair": bool(props.get("stair")), "area": bool(props.get("area")),
+                                             "part": int(props.get("part") or 0),
+                                             "kind": props.get("kind") if props.get("kind") in KINDS else None})
     for lst in out.values():
-        lst.sort(key=lambda t: t["time"])
+        lst.sort(key=lambda t: (t["time"], t["part"]))
     return out
 
 
@@ -325,6 +411,20 @@ def import_tracks(wtf_account_dir: Path, overrides_dir: Path, per_continent: dic
                                        **({"stair": True} if pc.get("stair") and pc.get("zs") else {})},
                         "geometry": {"type": "LineString", "coordinates": pc["coords"]},
                     })
+            elif t["op"] == "add" and (t.get("kind") or t.get("replaces") is not None or t.get("edit_stairs")):
+                # (an edit, Edit Road: as its pieces, each with its kind; the one it replaced taken out below)
+                seen.add(t["time"])
+                ed = {k: t[k] for k in ("replaces", "rpart") if k in t}
+                for k, pc in enumerate(edit_pieces(t)):
+                    doc["features"].append({
+                        "type": "Feature",
+                        "properties": {"op": "add", "source": "recorded", "zone": t["zone"], "time": t["time"],
+                                       "trim": True, "edit": True, **({"part": k} if k else {}),
+                                       **({"kind": pc["kind"]} if pc.get("kind") else {}),
+                                       **({"zs": pc["zs"]} if pc.get("zs") else {}),
+                                       **({"stair": True} if pc.get("stair") and pc.get("zs") else {}), **ed},
+                        "geometry": {"type": "LineString", "coordinates": pc["coords"]},
+                    })
             else:
                 seen.add(t["time"])
                 doc["features"].append({
@@ -339,6 +439,8 @@ def import_tracks(wtf_account_dir: Path, overrides_dir: Path, per_continent: dic
             added += 1
             new += 1
         if new:
+            # (the roads the edits replaced: out, and listed dropped where nothing of them is left)
+            add_dropped(overrides_dir, apply_replaced(doc))
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(json.dumps(doc, indent=1), encoding="utf-8")
     return added

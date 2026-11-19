@@ -1413,6 +1413,7 @@ N.TRACK_LEFT_YD = 16 -- (asked 2026-11-15: in a capital, no road of the floor fo
 -- 2026-11-15, "this is a constant issue")
 N.TRACK_JOINED_YD = 12
 local track -- { level, z, at, look, x, y }
+local raisedTrack -- (N.TrackRaisedZ's: { level, z, at, edge })
 local trackLook = { at = -math.huge } -- (a building's: when it was last looked for, the player not in one)
 -- (asked 2026-10-06, Brill's inn: the same in the buildings with insides, Data/Indoors.lua (ns.Indoors), on the
 -- continent: entered by a door, on its ground floor, followed up its stairs. Looked for only near one of them, by a
@@ -1469,6 +1470,8 @@ function N.FollowedZ(level)
   if track and track.z and now >= track.at and now - track.at < N.TRACK_STALE and (not level or track.level == level) then
     return track.z
   end
+  local rt = raisedTrack -- (on a bridge over the land: N.TrackRaisedZ)
+  if rt and now >= rt.at and now - rt.at < N.TRACK_STALE and (not level or rt.level == level) then return rt.z end
   return nil
 end
 -- The height of the NPC's spot at (x, y) on `level` (asked 2026-11-14: every NPC in the capitals and the caves, "any
@@ -1850,6 +1853,47 @@ function N.TrackCityZ(level, px, py)
 end
 function N.ResetCityTrack() track, trackLook.at = nil, -math.huge end -- (the tests; a level left and come back to)
 function N.SetTrackForTests(level, x, y, z) track = { level = level, z = z, at = GetTime(), look = GetTime(), x = x, y = y } end
+
+-- The floor followed onto a raised road out on the land (a bridge or a floor over the land, edited so with the road
+-- tools' Edit Road; asked 2026-11-18 for 1.3.10): the game gives no height, so it's taken only by walking onto the
+-- road at one of its ends, where it meets the land (within RAISED_END_YD of an end, RAISED_ON_YD of the road), and
+-- followed while the player stays on it (within RAISED_LEFT_YD of a raised road at about that height, TRACK_STEP);
+-- off it, the ground again (nil). Under a bridge, never: the route starts on the roads under it (Router.OffRaised).
+-- (In a capital, a building, a layered cave: N.TrackCityZ follows the floors there.)
+N.RAISED_ON_YD, N.RAISED_END_YD, N.RAISED_LEFT_YD = 4, 8, 5
+function N.TrackRaisedZ(level, px, py)
+  local R = ns.Router
+  if not (px and R and R.RaisedNear) or (UnitOnTaxi and UnitOnTaxi("player")) then
+    raisedTrack = nil
+    return nil
+  end
+  local now = GetTime()
+  local near = R.RaisedNear(level, px, py, math.max(N.RAISED_ON_YD, N.RAISED_LEFT_YD))
+  if not (near and near[1]) then
+    raisedTrack = nil
+    return nil
+  end
+  local rt = raisedTrack
+  if rt and rt.level == level and now >= rt.at and now - rt.at < N.TRACK_STALE then
+    for _, h in ipairs(near) do
+      if h.z and h.d <= N.RAISED_LEFT_YD and math.abs(h.z - rt.z) <= N.TRACK_STEP then
+        rt.z, rt.at, rt.edge = h.z, now, h.edge
+        return rt.z
+      end
+    end
+    raisedTrack = nil -- (off it: the ground again)
+    return nil
+  end
+  raisedTrack = nil
+  for _, h in ipairs(near) do
+    if h.z and h.d <= N.RAISED_ON_YD and h.endD <= N.RAISED_END_YD then
+      raisedTrack = { level = level, z = h.z, at = now, edge = h.edge }
+      return h.z
+    end
+  end
+  return nil
+end
+function N.ResetRaisedTrack() raisedTrack = nil end -- (the tests)
 -- The player's floor known at (px, py) on `level`: the game height `z` of an NPC whose window just opened (they stand
 -- by it; its shipped spawn's, Layers.OnNpcWindow). Down in a city's level or in a capital, followed from there: the
 -- road near at about that height, else `z` itself. Whether it was taken.
@@ -3180,7 +3224,8 @@ local function Compute(px, py, cont, d, offroad)
   if ns.Router.Breathe then ns.Router.Breathe(1, 1) end -- (in a background job: a pause between the parts)
   local t1 = ns.PerfStart and ns.PerfStart()
   local first = Stretch(cont, px, py, d, walk, { offroad = offroad, transient = true, fixed = { offroad = offroad },
-    teleports = tps, indoors = N.Indoors(), swimming = N.Swimming(), z = N.PlayerZ() or N.TrackCityZ(cont, px, py) })
+    teleports = tps, indoors = N.Indoors(), swimming = N.Swimming(),
+    z = N.PlayerZ() or N.TrackCityZ(cont, px, py) or N.TrackRaisedZ(cont, px, py) })
   if t1 then ns.PerfEnd("route calculation: next stop", t1) end
   if not first then return nil end
   if ns.Router.Breathe then ns.Router.Breathe(1, 1) end
@@ -5164,6 +5209,7 @@ end
 function N.Status(px, py, cont)
   cont = N.PlayerLevel(cont)
   N.TrackCityZ(cont, px, py) -- (down in a city with floors: the player's floor followed as they move)
+  N.TrackRaisedZ(cont, px, py) -- (and onto a bridge drawn over the land, from its end)
   N.RoomWatch(px, py, cont) -- (a room reached through a teleporter: the player put there by it)
   N.DeathCheck()
   if not N.dest then

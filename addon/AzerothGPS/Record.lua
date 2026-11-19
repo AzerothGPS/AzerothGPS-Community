@@ -205,6 +205,155 @@ function R.List()
   end
 end
 
+-- Editing a road afterwards (asked 2026-11-18 for 1.3.10, issue #640: "Couldn't be provide tooling to change the drawn
+-- data line by specifying the information afterwards? ... pick the floor level that would be on"). The road tools' Edit
+-- Road picks a drawn or recorded road (R.TrackAt) and sets what it is: its floor or height, its kind (Router.TRACK_KINDS:
+-- ground, floor, bridge, stairs, lift) and a stairs stretch on part of it. Saved as a new track (R.EditTrack) with the
+-- same points and its `zs`, `kind`, `stairs`, that `replaces` the one edited (its time; `rpart`, a piece of a recorded
+-- walk or an edit the data has): routes leave the old one out at once (Router.ExpandTracks), Undo takes the edit back,
+-- and the road watcher ships it in the old one's place.
+R.EDIT_PICK_YD = 12 -- yards: a click this near a road picks it
+
+-- The roads that can be edited on `cont`: the player's own (drawn, recorded, those the data has from them: the archive)
+-- and the data's with their heights (ns.FloorTracks), less those an edit replaced. Each { t, shipped, archived }.
+function R.Editable(cont)
+  local Rt = ns.Router
+  local all, out = {}, {}
+  local shipped = ns.RoadTracksIn or {}
+  local function add(t, how)
+    if t and t.continent == cont and (t.op == nil or t.op == "add") then all[#all + 1] = { t = t, how = how } end
+  end
+  for _, t in ipairs(Tracks()) do
+    if not shipped[t.time or -1] then add(t, "own") end
+  end
+  for _, a in ipairs(R.Archive()) do
+    if a.continent == cont and (a.op == nil or a.op == "add") and type(a.pk) == "string" and ns.UnpackNumbers then
+      add({ op = "add", continent = a.continent, time = a.time, zone = a.zone, recorded = a.recorded,
+        pts = ns.UnpackNumbers(a.pk), zs = type(a.zk) == "string" and ns.UnpackNumbers(a.zk) or nil, stair = a.stair,
+        kind = a.kind }, "archived")
+    end
+  end
+  for _, t in ipairs(ns.FloorTracks and ns.FloorTracks[cont] or {}) do
+    if t.op == nil or t.op == "add" then
+      local c = {}
+      for k, v in pairs(t) do c[k] = v end
+      c.continent = cont
+      add(c, "shipped")
+    end
+  end
+  local list = {}
+  for _, a in ipairs(all) do list[#list + 1] = a.t end
+  local gone = Rt and Rt.ReplacedSet and Rt.ReplacedSet(list) or {}
+  local shippedTimes = {}
+  for _, a in ipairs(all) do if a.how == "shipped" then shippedTimes[a.t.time or -1] = true end end
+  for _, a in ipairs(all) do
+    local t = a.t
+    -- (an archived one the data ships with its heights: the data's copy, its pieces, not this one)
+    local dup = a.how == "archived" and shippedTimes[t.time or -1]
+    if not dup and not (Rt and Rt.Replaced and Rt.Replaced(gone, t)) and t.pts and #t.pts >= 4 then
+      out[#out + 1] = { t = t, shipped = a.how == "shipped", archived = a.how == "archived" }
+    end
+  end
+  return out
+end
+
+-- The editable road nearest (x, y) on `cont` within `reach` (EDIT_PICK_YD): { t, shipped, archived, d, i (its point
+-- nearest), part }, or nil.
+function R.TrackAt(cont, x, y, reach)
+  reach = reach or R.EDIT_PICK_YD
+  local best
+  for _, c in ipairs(R.Editable(cont)) do
+    local p = c.t.pts
+    for k = 1, #p - 3, 2 do
+      local ax, ay, bx, by = p[k], p[k + 1], p[k + 2], p[k + 3]
+      local vx, vy = bx - ax, by - ay
+      local L2 = vx * vx + vy * vy
+      local f = L2 > 0 and math.max(0, math.min(1, ((x - ax) * vx + (y - ay) * vy) / L2)) or 0
+      local d = math.sqrt((ax + vx * f - x) ^ 2 + (ay + vy * f - y) ^ 2)
+      if d <= reach and (not best or d < best.d) then
+        best = { t = c.t, shipped = c.shipped, archived = c.archived, d = d, i = f < 0.5 and (k + 1) / 2 or (k + 3) / 2,
+          part = c.t.part }
+      end
+    end
+  end
+  return best
+end
+
+-- The point of track `t` nearest (x, y): its number (1 ..).
+function R.NearestPoint(t, x, y)
+  local best, bi = math.huge, 1
+  for k = 1, #t.pts - 1, 2 do
+    local d = (t.pts[k] - x) ^ 2 + (t.pts[k + 1] - y) ^ 2
+    if d < best then best, bi = d, (k + 1) / 2 end
+  end
+  return bi
+end
+
+-- The heights for an edit of `n` points `pts`: `kind` (ground: none unless `z` given; stairs: from `z1` at the first
+-- point to `z2` at the last; else `z` at every point, or the track's own `old` zs when no `z`), a stairs stretch
+-- `stairs` = { i, j, z1, z2 } rising evenly by the yards along from i to j, the points before at z1, after at z2.
+function R.EditHeights(pts, kind, z, old, stairs, z1, z2)
+  local n = #pts / 2
+  local Rt = ns.Router
+  local function ramp(a, b, za, zb, out)
+    local sub = {}
+    for k = a, b do sub[#sub + 1], sub[#sub + 2] = pts[2 * k - 1], pts[2 * k] end
+    local hs = Rt.RampHeights(sub, za, zb)
+    for k = a, b do out[k] = hs[k - a + 1] end
+  end
+  if stairs then
+    local i, j, a, b = stairs[1], stairs[2], tonumber(stairs[3]), tonumber(stairs[4])
+    if not (i and j and a and b and i >= 1 and j <= n and j > i) then return nil end
+    local out = {}
+    for k = 1, n do out[k] = k < i and a or b end
+    ramp(i, j, a, b, out)
+    return out
+  end
+  if kind == "stairs" or kind == "lift" then
+    z1, z2 = tonumber(z1), tonumber(z2)
+    if not (z1 and z2) then return nil end
+    local out = {}
+    ramp(1, n, z1, z2, out)
+    return out
+  end
+  z = tonumber(z)
+  if z then
+    local out = {}
+    for k = 1, n do out[k] = z end
+    return out
+  end
+  if kind == "ground" then return nil end
+  if type(old) == "table" and #old == n then
+    local out = {}
+    for k = 1, n do out[k] = old[k] end
+    return out
+  end
+  return nil
+end
+
+-- Save an edit of the road picked (`sel`, R.TrackAt's): { kind, z (its height), z1, z2 (a stairs' or lift's foot and
+-- top), stairs = { i, j, z1, z2 } (a stairs stretch) }. Its number in the drawn roads, or nil and why.
+function R.EditTrack(sel, edit)
+  local t = sel and sel.t
+  if not (t and t.pts and #t.pts >= 4 and edit) then return nil, "nothing" end
+  local kind = edit.kind
+  local known = false
+  for _, k in ipairs(ns.Router and ns.Router.TRACK_KINDS or {}) do known = known or k == kind end
+  if not known then return nil, "kind" end
+  local function r1(v) return math.floor(v * 10 + 0.5) / 10 end
+  local zs = R.EditHeights(t.pts, kind, edit.z, t.zs, edit.stairs, edit.z1, edit.z2)
+  if not zs and kind ~= "ground" then return nil, "height" end
+  if zs then for k = 1, #zs do zs[k] = r1(zs[k]) end end
+  local pts = {}
+  for k = 1, #t.pts do pts[k] = t.pts[k] end
+  local track = { op = "add", drawn = true, edit = true, continent = t.continent, zone = t.zone or "?", time = time(),
+    pts = pts, zs = zs, z = zs and zs[1] or nil, kind = kind, replaces = t.time,
+    rpart = sel.shipped and t.part or nil, -- (a piece of a walk or an edit the data has: that piece; else all of it)
+    stair = kind == "stairs" and zs ~= nil or nil,
+    stairs = edit.stairs and { edit.stairs[1], edit.stairs[2] } or nil }
+  return R.Save(track)
+end
+
 -- Restoring the map's own data (asked 2026-11-14: "a magic eraser ... that can be used to restore original road and
 -- wall data", a zone's, a continent's): the player's own edits of one kind (the road tools': drawn roads, erased roads,
 -- stairs, recorded walks; the wall tools': walls and wall erasers) taken out where they lie, so the data's roads and

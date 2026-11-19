@@ -78,6 +78,7 @@ def roads_lua(data_dir: Path, continents=None) -> str:
             pts = ",".join(f"{v:g}" for v in t["pts"])
             zs = ",".join(f"{v:g}" for v in t["zs"])
             extra = (", stair = true" if t["stair"] else "") + (", area = true" if t["area"] else "")
+            extra += (f", part = {t['part']}" if t.get("part") else "") + (f', kind = "{t["kind"]}"' if t.get("kind") else "")
             out.append(f'    {{ op = "{t["op"]}", time = {t["time"]}, pts = {{{pts}}}, zs = {{{zs}}}{extra} }},')
         out.append("  },")
     out.append("}")
