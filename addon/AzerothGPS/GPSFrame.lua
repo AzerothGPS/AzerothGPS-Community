@@ -3024,15 +3024,16 @@ end
 function G.ApplyArrowLook()
   if not arrow then return end
   local l = G.LatestLook(G.arrowLooks) or G.ARROW_DEFAULT
-  if arrow.agpsLook == l then return end
-  arrow.agpsLook = l
+  local grow = G.IconGrow() -- (Icon size: Large and Extra large grow it)
+  if arrow.agpsLook == l and arrow.agpsGrow == grow then return end
+  arrow.agpsLook, arrow.agpsGrow = l, grow
   if arrow.agpsTex ~= l.texture then
     arrow:SetTexture(l.texture)
     arrow.agpsTex = l.texture
   end
   local c = l.coords
   arrow:SetTexCoord(c and c[1] or 0, c and c[2] or 1, c and c[3] or 0, c and c[4] or 1)
-  arrow:SetSize(l.width, l.height)
+  arrow:SetSize(l.width * grow, l.height * grow)
   local col = l.color
   arrow:SetVertexColor(col and col[1] or 1, col and col[2] or 1, col and col[3] or 1)
   arrow:SetRotation(arrow.agpsRot or 0) -- (turned after its texture coordinates, as the redraw does)
@@ -3312,7 +3313,8 @@ function ctx.Icon(x, y, texture, size, alpha)
     overlayIcons[overlayIconsUsed] = t
   end
   ns.SetIcon(t, texture, "Interface\\Icons\\INV_Misc_QuestionMark")
-  t:SetSize(size or 16, size or 16)
+  local u = (size or 16) * G.IconGrow() -- (Icon size: Large and Extra large grow it, as the map's own)
+  t:SetSize(u, u)
   t:SetAlpha(alpha or 1)
   t:ClearAllPoints()
   t:SetPoint("CENTER", G.markLayer, "CENTER", sx, sy) -- (placed each redraw round the view: the marks' anchor)
@@ -3865,10 +3867,22 @@ G.ICON_PX = 16
 -- The map's icons' size (asked 2026-11-14: "increase the size of icons outside of buildings by 25%", then "render
 -- them in multiple sizes, current is small, make a medium, and large. put this under the map icon options";
 -- `iconSize`, Options > Map icons): each icon's size times this (G.PoiSize in DrawPois), not an inside map's NPCs.
-G.ICON_SIZES = { small = 1, medium = 1.25, large = 1.5 }
+-- Extra large (asked 2026-11-18 for 1.3.9: "add option for Extra Large map icons, make sure you consider scaling for all
+-- map icons like flight paths etc"): twice small, so the map's sizes land on art drawn at that size (iconscale.py's
+-- and coast.py's RING_SIZES have 26, 36 and 44 for it: 13, 18 and 22 doubled).
+G.ICON_SIZES = { small = 1, medium = 1.25, large = 1.5, xlarge = 2 }
 function G.PoiScale()
   local st = ns.settings and ns.settings.gps
   return G.ICON_SIZES[st and st.iconSize or "medium"] or G.ICON_SIZES.medium
+end
+-- The icons that kept one size before Extra large (the stops' markers, the player's arrow, the "you" pin, the
+-- minimap's icons, other addons' icons): grown with Icon size from Medium up, as they are at Medium and below.
+function G.IconGrow()
+  return math.max(1, G.PoiScale() / G.ICON_SIZES.medium)
+end
+-- `px` screen pixels grown by G.IconGrow, on a whole pixel (a game icon's art is drawn at whole sizes: G.ScaledIcon).
+function G.GrownPx(px)
+  return math.floor(px * G.IconGrow() + 0.5)
 end
 G.poiScaleNow = 1
 function G.PoiSize(b, w, h)
@@ -4352,16 +4366,19 @@ local function DrawStopPins(toScreen, viewCont)
       b:EnableMouse(true)
     end
     b:ClearAllPoints()
+    -- (Icon size: Large and Extra large grow the markers, G.IconGrow; the stairs badge with them)
+    local grow = G.IconGrow()
+    b.floorBadge:SetSize(12 * grow, 12 * grow)
     if d.learnNode or d.ride then -- (where the map's icon is, its size: that icon, right-clickable)
-      b:SetSize(16, 16)
+      b:SetSize(16 * grow, 16 * grow)
       b:SetPoint("CENTER", G.markLayer, "CENTER", sx, sy)
-    elseif G.IsGameIcon(ns.Nav.StopIcon(d)) then -- (a city place's or pin's icon: G.ICON_PX)
-      local u = G.PxUnits(G.markLayer, G.ICON_PX)
+    elseif G.IsGameIcon(ns.Nav.StopIcon(d)) then -- (a city place's or pin's icon: G.ICON_PX, grown on whole pixels)
+      local u = G.PxUnits(G.markLayer, G.GrownPx(G.ICON_PX))
       b:SetSize(u, u)
-      b:SetPoint("BOTTOM", G.markLayer, "CENTER", G.SnapPoint(G.markLayer, sx, sy - 4))
+      b:SetPoint("BOTTOM", G.markLayer, "CENTER", G.SnapPoint(G.markLayer, sx, sy - 4 * grow))
     else
-      b:SetSize(18, 18)
-      b:SetPoint("BOTTOM", G.markLayer, "CENTER", sx, sy - 4)
+      b:SetSize(18 * grow, 18 * grow)
+      b:SetPoint("BOTTOM", G.markLayer, "CENTER", sx, sy - 4 * grow)
     end
     -- (round with its ring as the icon it was made from, with Round icons on: asked 2026-11-16, "with double clicking
     -- and routing to a rounded icon, it 'selects' and shows a square icon instead"; a ride's or detour's art as it is)
@@ -4456,7 +4473,7 @@ end
 G.ICON_RING = "Interface\\AddOns\\AzerothGPS\\Media\\IconRing"
 -- the ring drawn at each size, pixel for pixel (coast.py's RING_SIZES; one 64 px ring shrunk to 16 px broke up, a
 -- screenshot 2026-11-14): the nearest to the icon's size on the screen
-G.RING_SIZES = { 10, 12, 14, 16, 18, 20, 22, 24, 28, 32, 40, 48, 64 }
+G.RING_SIZES = { 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 32, 36, 40, 44, 48, 64 }
 -- a party member's ring (asked 2026-11-14: "do the scaling change for the party icons as well"): the round icons'
 -- ring drawn at its size (G.RingTexture), tinted the class's color; texture `t` on frame `owner`, sized already
 function G.PartyRing(t, owner, r, g, b)
@@ -4838,6 +4855,8 @@ function G.UpdateMinimapRoute(force)
     if square then dist = math.max(math.abs(sx), math.abs(sy)) end
     if dist > edge then sx, sy = sx * edge / dist, sy * edge / dist end
     mm.stop:SetTexture(N.StopIcon(d))
+    local ss = G.MinimapIconSize(14)
+    mm.stop:SetSize(ss, ss)
     mm.stop:ClearAllPoints()
     mm.stop:SetPoint("CENTER", f, "CENTER", sx, sy)
     mm.stop:Show()
@@ -4860,6 +4879,10 @@ end
 ---------------------------------------------------------------------------
 mm.icons, mm.partyIcons, mm.iconDraws, mm.iconsUsed = {}, {}, 0, 0
 G.MINIMAP_ICON_SIZE = 12 -- (a mark's own size is the map's, scaled by this over 16)
+-- an icon's size on the minimap: `size` grown with Icon size (G.IconGrow)
+function G.MinimapIconSize(size)
+  return size * G.IconGrow()
+end
 -- What the map would show near (px, py) on `cont` within `reach` yards, by its show settings: { { x, y, icon,
 -- fallback, size, r, g, b, a, name = (its hover name, G.MinimapTipText), city = (a city place) }, ... } in `cont`
 -- coordinates (party members apart: G.MinimapParty).
@@ -4869,7 +4892,8 @@ function G.MinimapIconList(px, py, cont, reach)
   local function near(x, y) return x and math.abs(x - px) <= reach and math.abs(y - py) <= reach end
   local function add(x, y, icon, fallback, size, r, g, b, a, name, city)
     if near(x, y) then
-      out[#out + 1] = { x, y, icon, fallback, size, r or 1, g or 1, b or 1, a or 1, name = name, city = city }
+      out[#out + 1] = { x, y, icon, fallback, G.MinimapIconSize(size), r or 1, g or 1, b or 1, a or 1, name = name,
+        city = city }
     end
   end
   local yours, shared = L["Your pin"], L["Shared pin"] -- (L: the layers' below)
@@ -4967,7 +4991,7 @@ function G.UpdateMinimapIcons(force)
       or now - g.at >= G.ICON_FULL_REFRESH then
     local list = G.MinimapIconList(px, py, cont, yards)
     local keys = {}
-    for i, e in ipairs(list) do keys[i] = string.format("%.1f,%.1f,%s,%.2f", e[1], e[2], tostring(e[3]), e[9]) end
+    for i, e in ipairs(list) do keys[i] = string.format("%.1f,%.1f,%s,%.2f,%.1f", e[1], e[2], tostring(e[3]), e[9], e[5]) end
     local key = table.concat(keys, ";")
     if not g or g.key ~= key then changed = true end
     mm.gather = { shows = shows, yards = yards, x = px, y = py, at = now, key = key }
@@ -5018,7 +5042,7 @@ function G.UpdateMinimapIcons(force)
   end
   for i = n + 1, #mm.icons do G.HideIcon(mm.icons[i]) end
   local np = 0
-  local size = G.MINIMAP_ICON_SIZE + 2
+  local size = G.MinimapIconSize(G.MINIMAP_ICON_SIZE + 2)
   for _, m in ipairs(party) do
     local sx, sy = G.MinimapPoint(px, py, m[1], m[2], yards, width, facing)
     if G.OnMinimap(sx, sy, size, rad, square) then
@@ -5026,11 +5050,11 @@ function G.UpdateMinimapIcons(force)
       local b = mm.partyIcons[np]
       if not b then -- (as the map's: the class's icon in a ring of its color, cut round)
         b = { edge = f:CreateTexture(nil, "OVERLAY"), dot = f:CreateTexture(nil, "ARTWORK") }
-        b.edge:SetSize(size, size)
         b.dot:SetAllPoints(b.edge)
         G.MakeRound(f, b.dot)
         mm.partyIcons[np] = b
       end
+      b.edge:SetSize(size, size) -- (each time: Icon size may have changed)
       local c = RAID_CLASS_COLORS and m[3] and RAID_CLASS_COLORS[m[3]]
       local r, gr, bl = c and c.r or G.PARTY_COLOR[1], c and c.g or G.PARTY_COLOR[2], c and c.b or G.PARTY_COLOR[3]
       if not G.ClassIcon(b.dot, m[3]) then b.dot:SetColorTexture(r, gr, bl, 1) end
@@ -5180,10 +5204,10 @@ function G.MinimapTipAt()
   local function over(t, size)
     return t.tipX and math.abs(cx - t.tipX) <= size / 2 and math.abs(cy - t.tipY) <= size / 2
   end
-  if mm.stop and mm.stop:IsShown() and over(mm.stop, 14) then return mm.stop.tipName end
+  if mm.stop and mm.stop:IsShown() and over(mm.stop, G.MinimapIconSize(14)) then return mm.stop.tipName end
   for i = #mm.partyIcons, 1, -1 do
     local b = mm.partyIcons[i]
-    if b.edge:IsShown() and over(b, G.MINIMAP_ICON_SIZE + 2) then return b.tipName end
+    if b.edge:IsShown() and over(b, G.MinimapIconSize(G.MINIMAP_ICON_SIZE + 2)) then return b.tipName end
   end
   for i = #mm.icons, 1, -1 do
     local t = mm.icons[i]
@@ -7284,7 +7308,8 @@ function G.DrawYouHere(cx, cy, rot, s, viewCont)
   local icon = G.ClassIcon(youPin.dot, class)
   if not icon then youPin.dot:SetColorTexture(r, g, b, 1) end
   local ring = icon and G.PxUnits(G.markLayer, 2) or 1.5
-  local u = icon and G.PxUnits(G.markLayer, G.ICON_PX) + 2 * ring or 16
+  -- (Icon size: Large and Extra large grow it, G.IconGrow; a class icon on whole pixels)
+  local u = icon and G.PxUnits(G.markLayer, G.GrownPx(G.ICON_PX)) + 2 * ring or 16 * G.IconGrow()
   youPin:SetSize(u, u)
   youPin.dot:ClearAllPoints()
   youPin.dot:SetPoint("TOPLEFT", ring, -ring)
@@ -9503,6 +9528,7 @@ end
 
 function G.ApplySettings()
   G.ApplySeamPlayer() -- (the OpenMap stages the player set, Options > Map)
+  G.ApplyArrowLook() -- (Icon size: the player's arrow grows with it)
   if not frame then return end
   local st = S()
   G.ApplyMinimapReplace() -- (the map as the game's minimap, or back: out of combat only)

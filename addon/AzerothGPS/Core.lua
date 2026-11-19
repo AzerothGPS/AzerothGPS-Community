@@ -60,7 +60,7 @@ ns.DEFAULTS = {
     zoom = 524.288, -- yards from center to edge
     interiors = true, -- switch to building interior maps indoors (cities, inns, caves)
     roundIcons = true, -- the map's game icons round with a ring (GPSFrame's G.RoundIcon)
-    iconSize = "medium", -- the map's icons: small (as before 2026-11-14), medium (+25%), large (+50%): G.ICON_SIZES
+    iconSize = "medium", -- the map's icons: small (as before 2026-11-14), medium (+25%), large (+50%), xlarge (x2, 1.3.9): G.ICON_SIZES
     interiorZoomYd = 150, -- zoomed in this close (yards to the map's edge) over a building or cave: its inside map
                           -- (GPSFrame's G.InteriorZoomYd, G.INTERIOR_ZOOM_YD; 0: only inside)
     interiorHoldSec = 30, -- a left click holds the hovered building's inside map this long (G.InteriorHoldSec)

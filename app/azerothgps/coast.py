@@ -236,7 +236,7 @@ def feather() -> np.ndarray:
 RING_DIR = ADDON_DIR / "Media"
 # Drawn at each size it's shown at, pixel for pixel (asked 2026-11-14 with a screenshot: "these icon borders seem poorly
 # downscaled"; one 64 px ring shrunk to 16 px broke up): GPSFrame's G.RING_SIZES picks the nearest.
-RING_SIZES = (10, 12, 14, 16, 18, 20, 22, 24, 28, 32, 40, 48, 64)
+RING_SIZES = (10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 32, 36, 40, 44, 48, 64)
 RING_EDGE_PX = 0.8  # the black edge outside
 RING_GOLD_SHARE = 0.11  # the gold band, a share of the radius ...
 RING_GOLD_MIN_PX = 1.4  # ... at least this many pixels
