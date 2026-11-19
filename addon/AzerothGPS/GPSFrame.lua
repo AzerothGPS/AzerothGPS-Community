@@ -12962,7 +12962,7 @@ end
 -- wall tools on, the road under the pointer (within ROAD_HOVER_PX on the screen) and its height there, in a tooltip:
 -- a level's with heights (Undercity's, a dungeon's roads: their own), a building's or a capital's floor (their roads'
 -- `nz`), a stairs road's height there with its foot and top. The land's roads have none in the game's data: "on the
--- ground". Heights are the game's (world z).
+-- ground"; a drawn road not in the data yet (SOURCE_RECORDED) none yet. Heights are the game's (world z).
 G.ROAD_HOVER_PX = 8
 -- What the road nearest (x, y) on `level` within `reach` yards is (on the floor near `z` where the level has heights):
 -- { title, lines }, or nil (none near, or the roads not built yet: never built in a frame for this).
@@ -12981,7 +12981,10 @@ function G.RoadHoverInfo(level, x, y, reach, z)
   local src = e[4]
   local title = src == R.SOURCE_LIFT and L["Lift"] or src == R.SOURCE_RECORDED and L["Drawn road"] or L["Road"]
   local lines = {}
-  if not here then
+  if not here and src == R.SOURCE_RECORDED then -- (drawn or recorded, not in the data yet: the game gives no height;
+    -- the import works out a recorded walk's floors and stairs, 2026-11-18: a walk up Grom'gol's tower looked flat)
+    lines[1] = L["No height yet: its floors and stairs are worked out when it's added to the road data"]
+  elseif not here then
     lines[1] = L["On the ground (the game's data has no height for it)"]
   elseif za and zb and math.abs(za - zb) >= R.STAIR_MIN_Z then
     if src ~= R.SOURCE_LIFT then title = L["Stairs"] end

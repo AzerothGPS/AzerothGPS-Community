@@ -16,6 +16,7 @@ def game():
 
     lua, ns = start()
     lua.execute("""
+      AGPS_NS_PRINT = AGPS_NS.Print
       AGPS_INDOORS, AGPS_ZONE, AGPS_COMBAT = false, "Brill", false
       IsIndoors = function() return AGPS_INDOORS end
       GetMinimapZoneText = function() return AGPS_ZONE end
@@ -81,7 +82,13 @@ def test_a_walk_is_saved_with_its_corner_and_what_the_game_said(rec):
     w.walk(12, 0)
     lua.execute("AGPS_INDOORS, AGPS_ZONE = true, 'Gallows\\' End Tavern'")
     w.walk(0, 12)
-    R.StopRecording()
+    said, ns.Print = [], lambda *m: said.append(str(m[0]))
+    try:
+        R.StopRecording()
+    finally:
+        ns.Print = lua.eval("AGPS_NS_PRINT")
+    # (the game gives no height: said that the walk shows flat until the road data has it, 2026-11-18)
+    assert said[-1].startswith("Recorded walks show flat until"), said
     (t,) = tracks(lua, ns)
     assert t.recorded and t.op == "add" and t.continent == 0
     pts = points(t)

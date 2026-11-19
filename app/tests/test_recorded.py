@@ -412,3 +412,42 @@ def test_a_walk_through_a_portal_gets_its_floors_either_side_on_their_own(monkey
     assert out and all({tuple(q) for q in pc["coords"]} <= ups or {tuple(q) for q in pc["coords"]} <= rooms
                        for pc in out)
     assert any(pc["coords"][0] == list(room[0]) for pc in out)
+
+
+# Up Grom'gol's zeppelin tower (Stranglethorn Vale, recorded in game 2026-11-18): from the road outside to its foot,
+# round the spiral stairs (Stairs Start / End at points 37 and 71, from 1) and onto the landing up top.
+GROMGOL = ("-12396.1 177 -12395.3 179.4 -12394.6 182.3 -12394.1 185.2 -12393.7 187.2 -12393.4 190.1 -12393.3 192.1 "
+           "-12393.5 195.1 -12393.8 197.1 -12394.5 200 -12395 202 -12395.6 204 -12396.4 205.9 -12397.3 207.8 "
+           "-12398.3 209.6 -12399.5 211.3 -12400.7 212.9 -12402.7 215.1 -12404.1 216.4 -12404.2 217.4 -12406.7 219.1 "
+           "-12408.2 220.3 -12409.4 221.8 -12412.1 222.8 -12413.4 224.4 -12415.2 225.4 -12417 226.4 -12419 227 "
+           "-12422 227.2 -12424.9 226.6 -12425.8 226.1 -12426.5 223.2 -12427.1 220.3 -12427.3 218.3 -12427.4 216.2 "
+           "-12427.3 214.2 -12427.3 214 -12427.1 212 -12426.9 210 -12427.1 207.9 -12427.8 205.1 -12429.4 203.9 "
+           "-12430.5 203.7 -12433.1 205.2 -12434.2 206.9 -12434.4 208.9 -12433 211.4 -12431 211.9 -12428.4 210.8 "
+           "-12427.1 208.3 -12427.8 206.3 -12430 204.3 -12431 204.1 -12433.5 205.5 -12434.1 207.3 -12432.8 209.9 "
+           "-12431.1 211 -12428.3 211.4 -12426.1 209.7 -12426 207.7 -12426.9 205.9 -12429.2 204.1 -12431.2 203.9 "
+           "-12433.7 205.3 -12434.5 206.1 -12434.9 209.1 -12433.6 211.7 -12432 212.9 -12430 213.1 -12428.1 212.2 "
+           "-12426.8 210.3 -12424.4 209.9 -12422.4 209.5 -12420.4 209 -12418.4 208.6 -12415.5 208")
+
+
+def test_gromgols_tower_climbs_with_its_stairs_marks_and_not_from_the_line_alone(client):
+    # (2026-11-18: "the path is flat and doesn't show where I started/stopped stairs". The game gives no height, so the
+    # walk is flat in game until it's imported; the import puts its climb on the tower's stairs from Record's marks. A
+    # road drawn the same way, with no marks, can't be told from a walk round the tower's ground floor: the floors are
+    # stacked over the same spot, so its heights are left to Record's Stairs marks)
+    cd, ground, placements = client
+    v = [float(x) for x in GROMGOL.split()]
+    pts = list(zip(v[::2], v[1::2]))
+    assert len(pts) == 76
+    cands = R.candidates(cd, 0, pts, ground, placements)
+    stairs = [(36, 70)]
+    zs, kinds, ambiguous = R.assign(cands, "0" * len(pts), stairs)
+    assert ambiguous == [] and kinds[0] == "ground" and kinds[-1] == "model"
+    out = R.pieces(pts, zs, kinds, stairs)
+    assert out[0]["zs"] is None  # (the road outside: the land's flat build)
+    (flight,) = [p for p in out if p["stair"]]
+    foot, top = flight["zs"][0], flight["zs"][-1]
+    assert top - foot >= 25 and all(b >= a - 0.05 for a, b in zip(flight["zs"], flight["zs"][1:]))
+    assert abs(out[-1]["zs"][-1] - top) <= 1.0  # (the landing up top)
+    # (no marks: the tower's ground floor all the way round, and the climb a doubt the watcher logs)
+    zs, _kinds, ambiguous = R.assign(cands, None, [])
+    assert max(zs) - foot < 2 and ambiguous
