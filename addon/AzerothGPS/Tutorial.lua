@@ -1371,6 +1371,26 @@ function T.Glow()
   return f
 end
 
+-- The same glow on a control outside the tutorial (Import.lua's one-time notice: the "Route in the listed order" box),
+-- round `target` to `to` (its label; `target` alone when nil). Not while the tutorial runs (its glow is its own).
+function T.PointAt(target, to)
+  if T.run or not target then return nil end
+  local glow = T.Glow()
+  glow:ClearAllPoints()
+  glow:SetPoint("TOPLEFT", target, "TOPLEFT", -5, 5)
+  glow:SetPoint("BOTTOMRIGHT", to or target, "BOTTOMRIGHT", 5, -5)
+  glow.fill:SetShown(true)
+  glow:Show()
+  T.pointed = target
+  return glow
+end
+-- That glow off (only `target`'s, when given).
+function T.StopPointing(target)
+  if not T.pointed or (target and T.pointed ~= target) then return end
+  T.pointed = nil
+  if not T.run then T.Glow():Hide() end
+end
+
 -- The glow on the step's target now (looked at again every poll: a menu opened shows the button itself).
 function T.UpdateTarget()
   local run = T.run

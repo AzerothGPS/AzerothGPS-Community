@@ -2312,11 +2312,19 @@ local function BuildWindow()
   check(L["Visit stops in the fastest order"], L["Routes with several stops visit them in the fastest order instead of the order you placed them. (Double-click the map to place stops.)"],
     function() return GPS().fastestOrder end, function(v)
       GPS().fastestOrder = v
-      if v and #ns.Nav.stops > 1 and not ns.Nav.KeepCityOrder() then ns.Nav.OrderStops() end
+      if v and #ns.Nav.stops > 1 and not ns.Nav.keepOrder and not ns.Nav.KeepCityOrder() then ns.Nav.OrderStops() end
     end)
   Key("cityKeepOrder")
   check(L["Except in cities"], L["Stops down in a city (Undercity) are visited in the order you placed them among themselves: how you want to go around a city is up to you. Stops outside the city still go in the fastest order. (A quest route is always put in the fastest order.)"],
     function() return GPS().cityKeepOrder ~= false end, function(v) GPS().cityKeepOrder = v end,
+    function() return GPS().fastestOrder and true or false end, INDENT)
+  -- (asked for 1.3.9: also the Import and Share window's box, Import.lua)
+  Key("importKeepOrder")
+  check(L["Imported routes in the listed order"], L["Stops you import (pasted in Import and Share, /way lines, or a route another player sends) are visited in the order they're listed, not the fastest order. Stops added to that route later go at the end."],
+    function() return GPS().importKeepOrder and true or false end, function(v)
+      GPS().importKeepOrder = v
+      if ns.db then ns.db.importOrderTold = true end -- (chosen: Import.TellOrder not needed)
+    end,
     function() return GPS().fastestOrder and true or false end, INDENT)
   Key("questZoneOnly")
   check(L["Quest route: only this zone"], L["The Quest Route button takes only the quests whose objective or turn-in is in the zone you're in (a city counts as its zone). Off: every quest in your log, anywhere."],

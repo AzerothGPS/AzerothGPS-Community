@@ -49,6 +49,18 @@ N.PLAN_AHEAD = 8 -- stops routed and drawn ahead at most (option stopsAhead, def
 N.MAX_LOOP_STOPS = 60 -- a farming loop (nodes circled on the map)
 N.LOOP_AHEAD = 4 -- a loop routes this many stops ahead (it goes round and round)
 N.loop = false -- the stops are a loop: reaching one moves it to the end
+-- The stops go in the order listed, never reordered (an import with "Route in the listed order", gps.importKeepOrder:
+-- the fastest order, its reorders on the way and a quest area's stop brought forward all left out; a stop added later
+-- goes at the end). Saved with the stops.
+N.keepOrder = false
+-- (each stop of such a trip carries it too, `listed`: saved with it, so the order holds whatever reaches the stops)
+function N.ListedOrder()
+  if N.keepOrder then return true end
+  for _, d in ipairs(N.stops) do
+    if d.listed then return true end
+  end
+  return false
+end
 N.ICON = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_%d"
 -- Marker for the k-th stop placed (raid icon numbers): square, star, triangle, diamond,
 -- moon, circle. Cross and skull aren't used: after the six, the markers start over.
@@ -98,7 +110,8 @@ local function Copy(d)
     polestar = d.polestar, -- (a Polestar step's: its key, Polestar.lua)
     questify = d.questify, -- (a Questify step's: its key, Questify.lua)
     apr = d.apr, -- (an Azeroth Pilot Reloaded step's: its key, AzerothPilot.lua)
-    questie = d.questie } -- (Questie's "Set TomTom Target", Import.QuestieTarget)
+    questie = d.questie, -- (Questie's "Set TomTom Target", Import.QuestieTarget)
+    listed = d.listed } -- (a trip in its listed order's, N.keepOrder)
 end
 
 -- The stops are saved per character, so /reload and relogging keep the route.
@@ -109,6 +122,7 @@ local function Save()
   for i, d in ipairs(N.stops) do list[i] = Copy(d) end
   cdb.stops = #list > 0 and list or nil
   cdb.loop = (N.loop and #list > 1) or nil
+  cdb.keepOrder = (N.keepOrder and #list > 0) or nil
   cdb.paused = (#list > 0 and N.paused) or nil -- (routing paused: kept over a /reload, N.SetPaused)
   cdb.dest = nil -- older single-destination save
   -- (the zones too high the player said yes to for this route: not asked again after a /reload)
@@ -445,7 +459,7 @@ function N.HostileNote()
   return Format(L["|cffff4040Through enemy territory: %s|r"], hostileNames)
 end
 
-function N.SetStops(stops, fastest, force)
+function N.SetStops(stops, fastest, force, keep)
   if Locked(force) then return false end
   if force ~= "red" then
     -- (the "risk it?" answers kept for the stops still in it: the same route set again, a quest route's update, a
@@ -466,7 +480,7 @@ function N.SetStops(stops, fastest, force)
     N.ClearSkippedRides()
   end -- (a new route: its zones asked about again, its detours and rides back)
   -- ("red": asked and confirmed; true: the dungeon route, its own)
-  if not force and AskRed(stops, function() N.SetStops(stops, fastest, "red") end) then return false, true end
+  if not force and AskRed(stops, function() N.SetStops(stops, fastest, "red", keep) end) then return false, true end
   -- (a new route, "red" too (asked and confirmed): routed again, not paused; the same stops set again keep it)
   if N.paused then
     local same = #(stops or {}) == #N.stops
@@ -483,15 +497,16 @@ function N.SetStops(stops, fastest, force)
     if d.questRoute then quest = true break end
   end
   if not quest then N.questDropped = {} end
-  N.stops, N.loop = {}, false
+  N.stops, N.loop, N.keepOrder = {}, false, keep and true or false
   for i, d in ipairs(stops) do
     if i > N.MAX_STOPS then break end
     local c = Copy(d)
     c.icon = c.icon or N.MarkerFor(i)
+    c.listed = N.keepOrder or nil
     N.stops[#N.stops + 1] = c
   end
   Changed()
-  if fastest and #N.stops > 1 and not N.KeepCityOrder() then N.OrderStops() end
+  if fastest and not N.keepOrder and #N.stops > 1 and not N.KeepCityOrder() then N.OrderStops() end
   return true
 end
 
@@ -500,11 +515,14 @@ function N.AddStop(d, fastest, force)
   if Locked(force) then return false end
   if not force and AskRed({ d }, function() N.AddStop(d, fastest, "red") end) then return false, true end
   if #N.stops >= (N.loop and N.MAX_LOOP_STOPS or N.MAX_STOPS) then return false end
+  if #N.stops == 0 then N.keepOrder = false end -- (a new route: the last one's listed order is over)
   local c = Copy(d)
   c.icon = c.icon or N.NextMarker(N.stops)
+  c.listed = N.keepOrder or nil
   N.stops[#N.stops + 1] = c
   Changed()
-  if fastest and not N.loop and #N.stops > 1 and not N.KeepCityOrder() then N.OrderStops() end
+  -- (a route kept in its listed order: the new stop stays at the end)
+  if fastest and not N.loop and not N.keepOrder and #N.stops > 1 and not N.KeepCityOrder() then N.OrderStops() end
   return true
 end
 
@@ -570,7 +588,7 @@ function N.SetLoop(nodes, px, py)
     c.icon = N.MarkerFor(k)
     N.stops[k] = c
   end
-  N.loop = #N.stops > 1
+  N.loop, N.keepOrder = #N.stops > 1, false
   Changed()
 end
 
@@ -637,7 +655,7 @@ end
 function N.Version() return version end
 
 function N.Clear()
-  N.stops, N.loop = {}, false
+  N.stops, N.loop, N.keepOrder = {}, false, false
   N.paused, N.pauseWatch = nil, nil
   N.questDropped = {}
   N.redOk, N.skipLearn, N.noWalk, N.walkKept, N.riskOk, N.riskQuestion, N.riskAsking = {}, {}, {}, {}, {}, nil, nil
@@ -654,6 +672,8 @@ function N.Restore()
     if d.x and d.y and d.cont then N.stops[#N.stops + 1] = Copy(d) end
   end
   N.loop = cdb.loop and #N.stops > 1 or false
+  N.keepOrder = cdb.keepOrder and #N.stops > 0 or false
+  N.keepOrder = N.ListedOrder() -- (or its stops say so)
   N.paused = (#N.stops > 0 and (cdb.paused == "auto" or cdb.paused == "manual")) and cdb.paused or nil
   N.pauseWatch = nil
   N.redOk = {}
@@ -829,7 +849,9 @@ function N.OptionsChanged()
   if ns.Teleports and ns.Teleports.Changed then ns.Teleports.Changed() end
   N.Invalidate(true, true)
   local st = ns.settings and ns.settings.gps
-  if st and st.fastestOrder and #N.stops > 1 and not N.loop and not N.KeepCityOrder() then N.OrderStops() end
+  if st and st.fastestOrder and #N.stops > 1 and not N.loop and not N.keepOrder and not N.KeepCityOrder() then
+    N.OrderStops()
+  end
   if ns.GPS and ns.GPS.Redraw then ns.GPS.Redraw() end
 end
 
@@ -3453,6 +3475,7 @@ N.PART_GAIN_SECONDS = 5 -- ... another part only when it saves at least this muc
 function N.OrderStops(px, py, cont, onlyIfFaster)
   local n = #N.stops
   if n < 2 then return false end
+  if N.ListedOrder() then return false end -- (a trip in its listed order: never, whoever asks)
   if N.stops[1].corpse then return false end -- your body stays first (corpse run)
   if not px then px, py, cont = Geo.PlayerWorld() end
   cont = N.PlayerLevel(cont)
@@ -3658,7 +3681,9 @@ local reorderAt, reorderX, reorderY = 0, nil, nil
 function N.MaybeReorder(px, py, cont)
   local due = N.reorderDue
   N.reorderDue = nil
-  if N.loop or #N.stops < 2 or not (ns.settings and ns.settings.gps.fastestOrder) or N.KeepCityOrder() then return false end
+  if N.loop or N.keepOrder or #N.stops < 2 or not (ns.settings and ns.settings.gps.fastestOrder) or N.KeepCityOrder() then
+    return false
+  end
   if ns.Taxi and ns.Taxi.Current and ns.Taxi.Current() then
     N.reorderDue = due -- (after the flight)
     return false
@@ -4474,7 +4499,7 @@ function N.QuestCheck(px, py, cont)
   for _, id in ipairs(L.AreaContains and at or {}) do
     if L.AreaContains(id, d.cont, d.x, d.y) then destHere = true end
   end
-  if at[1] and #N.stops > 1 and L.AreaContains and not destHere then
+  if at[1] and #N.stops > 1 and L.AreaContains and not destHere and not N.keepOrder then -- (not a listed order's)
     for i = 2, #N.stops do
       local s = N.stops[i]
       local hit = false

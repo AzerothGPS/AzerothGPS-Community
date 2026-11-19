@@ -3,6 +3,11 @@ local _, ns = ...
 local L = ns.NewLocale("koKR")
 if not L then return end
 
+L["Got It"] = "확인"
+L["Imported stops are now routed in the order they're listed. For the fastest order instead, untick \"Route in the listed order\" in the Import and Share window (or Options > Routing). Your choice is remembered."] = "가져온 경유지는 이제 목록에 적힌 순서대로 안내됩니다. 가장 빠른 순서를 원하면 가져오기 및 공유 창(또는 설정 > 경로 탐색)에서 \"목록 순서대로 경로 안내\"를 해제하세요. 선택은 기억됩니다."
+L["Route in the listed order"] = "목록 순서대로 경로 안내"
+L["Imported routes in the listed order"] = "가져온 경로는 목록 순서대로"
+L["Stops you import (pasted in Import and Share, /way lines, or a route another player sends) are visited in the order they're listed, not the fastest order. Stops added to that route later go at the end."] = "가져온 경유지(가져오기 및 공유에 붙여넣은 것, /way 줄, 다른 플레이어가 보낸 경로)는 가장 빠른 순서가 아니라 목록에 적힌 순서대로 방문합니다. 나중에 그 경로에 추가한 경유지는 맨 끝에 붙습니다."
 L["stop %d"] = "경유지 %d"
 L["destination"] = "목적지"
 L["|cff9d9d9d... %d more stops|r"] = "|cff9d9d9d... 경유지 %d곳 더|r"
