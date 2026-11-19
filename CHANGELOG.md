@@ -2,6 +2,15 @@
 
 Each version's section is its release notes (GitHub and CurseForge).
 
+## 1.3.10 (in progress)
+
+### New
+
+- Edit Road: change a road you drew or recorded into ground, a floor, a bridge, stairs or a lift, with its height and stairs on part of it.
+- With the road tools on, roads show their kind in color, with smooth corners and their connection points.
+- A road under a bridge stays apart from it: routes from under the bridge go round to its end.
+- Routes can jump off a bridge onto a road below when the fall is safe.
+
 ## 1.3.9
 
 ### New

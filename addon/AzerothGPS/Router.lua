@@ -189,6 +189,93 @@ R.RAMP_END_YD = 12
 -- Darnassus's spiral's stairs start 0.5 yd off the piece before's end, and joined there the route from partway down
 -- climbed back to its top first
 R.TRACK_WALK_JOIN = 0.1
+-- A drawn or recorded road's kind, set afterwards with the road tools' Edit Road (asked 2026-11-18 for 1.3.10: "pick the
+-- floor level that would be on", a bridge in Thunder Bluff and a road under it): saved as the track's `kind`, with its
+-- heights (`zs`) and a stairs stretch on part of it (`stairs` = { first point, last point }). An edit is a new track that
+-- `replaces` the one edited (its time, `rpart` a recorded walk's piece): routes leave the old one out at once, and the
+-- road watcher takes the new one in its place.
+R.TRACK_KINDS = { "ground", "floor", "bridge", "stairs", "lift" }
+-- (a bridge's or a floor's roads over the land: never joined to the roads under them but at their own ends, and no gap
+-- link onto them from below)
+R.RAISED_KINDS = { bridge = true, floor = true }
+-- Jumping down off a raised road onto a road under it with a known height (a road on a floor, or one edited with its
+-- height; never the land's, whose height the addon doesn't know): a one-way drop (as a cave's ledges, `drops`) where
+-- the fall is more than LAYER_Z and at most TRACK_DROP_MAX (Nav.FALL_FREE: no fall damage), within TRACK_DROP_REACH
+-- yards of the road over it, one per road under it, looked for every TRACK_DROP_STEP yards along. At route time the
+-- player's health still decides (RouteOne's maxDrop).
+R.TRACK_DROP_MAX = 14
+R.TRACK_DROP_REACH = 6
+R.TRACK_DROP_STEP = 4
+
+-- A track's pieces: its stairs stretch (`stairs` = { i, j }, its points) a stairs piece of its own, the rest as the
+-- track is; each a copy with `part` (0, 1, ..) when split. A track with no stairs stretch: itself.
+function R.TrackPieces(t)
+  local st = type(t.stairs) == "table" and not t.recorded and t.stairs
+  local n = t.pts and #t.pts / 2 or 0
+  local i, j = st and tonumber(st[1]), st and tonumber(st[2])
+  if not (i and j and i >= 1 and j <= n and j > i and type(t.zs) == "table" and #t.zs == n) then return { t } end
+  local out = {}
+  local function piece(a, b, stair)
+    if b <= a then return end
+    local p = {}
+    for k, v in pairs(t) do p[k] = v end
+    p.pts, p.zs, p.stairs = {}, {}, nil
+    for k = a, b do
+      p.pts[#p.pts + 1], p.pts[#p.pts + 2] = t.pts[2 * k - 1], t.pts[2 * k]
+      p.zs[#p.zs + 1] = t.zs[k]
+    end
+    p.stair = stair or nil
+    if stair then p.kind = "stairs" end
+    p.z = p.zs[1]
+    p.part = #out
+    out[#out + 1] = p
+  end
+  piece(1, i, false)
+  piece(i, j, true)
+  piece(j, n, false)
+  return out
+end
+
+-- Whether track `t` (a piece: its `part`, nil the whole) is one an edit in `gone` replaced: gone[time] = true (all of
+-- it) or { [part] = true }.
+function R.Replaced(gone, t)
+  local g = t.time and gone[t.time]
+  if g == true then return true end
+  return g ~= nil and g[t.part or 0] == true
+end
+-- The tracks an edit replaced, from all of them: [time] = true (the whole track: `rpart` nil) or { [part] = true }.
+function R.ReplacedSet(tracks)
+  local gone = {}
+  for _, t in ipairs(tracks or {}) do
+    local r = tonumber(t.replaces)
+    if r then
+      if t.rpart == nil then gone[r] = true
+      elseif gone[r] ~= true then
+        gone[r] = gone[r] or {}
+        gone[r][tonumber(t.rpart) or 0] = true
+      end
+    end
+  end
+  return gone
+end
+-- The tracks to put on (Router.WithTracks): those an edit replaced left out (`replaces`: the time of the one edited;
+-- `rpart`: one piece of it, a recorded walk's or a split edit's, by its `part`; none: all of it), each edit with a
+-- stairs stretch as its pieces.
+function R.ExpandTracks(tracks)
+  local gone = R.ReplacedSet(tracks)
+  local any = next(gone) ~= nil
+  local out = {}
+  for _, t in ipairs(tracks or {}) do
+    if not (any and R.Replaced(gone, t)) then
+      if t.stairs and not t.recorded then
+        for _, p in ipairs(R.TrackPieces(t)) do out[#out + 1] = p end
+      else
+        out[#out + 1] = t
+      end
+    end
+  end
+  return out
+end
 
 local function PolyLength(pts)
   local len = 0
@@ -523,6 +610,12 @@ function R.WithTracks(roads, tracks, cont)
   local n, e = {}, {}
   for i = 1, #roads.n do n[i] = roads.n[i] end
   for i = 1, #roads.e do e[i] = roads.e[i] end
+  -- (the edits: the tracks they replaced left out, a stairs stretch its own piece)
+  tracks = R.ExpandTracks(tracks)
+  -- (each road's kind, edited (R.TRACK_KINDS): the map draws it; a raised one's (R.RAISED_KINDS) roads, the nodes
+  -- along it (not its two ends: those are where it meets the land), and the tracks for their drops)
+  local kindOf, raised, raisedNode, raisedEnd, raisedTracks = {}, {}, {}, {}, {}
+  local curAdd = false -- (a road being drawn on, not an erasure)
   local zs -- (a level with heights: each node's, copied below when there's anything to do)
   -- (on a continent, its buildings' and capitals' roads' floors, `roads.nz`: copied the same way, a drawn road's new
   -- nodes with the heights it was drawn at: asked 2026-10-06, the road tools' heights)
@@ -545,6 +638,7 @@ function R.WithTracks(roads, tracks, cont)
     if caveOf and caveOf[from] then caveOf[to] = true end
     if dropOf and dropOf[from] then dropOf[to] = dropOf[from] end
     walkOf[to] = walkOf[from]
+    kindOf[to], raised[to] = kindOf[from], raised[from]
   end
   local city = ns.CityLevels and ns.CityLevels[cont]
   local snap = city and R.TRACK_SNAP_CITY or R.TRACK_SNAP
@@ -681,6 +775,11 @@ function R.WithTracks(roads, tracks, cont)
   end
   -- (`r`: the edit's reach there, when more than FLOOR_STACK_YD: every road it can touch counts)
   local function onFloor(ed, x, y, along, r)
+    -- (a road with no floor drawn on: a raised one (a bridge, a floor over the land) only at its own ends, never where
+    -- it passes over on the map)
+    if not fl and curAdd and raised[ed] then
+      return (along < 3 and raisedEnd[ed[1]] == true) or (along > ed[3] - 3 and raisedEnd[ed[2]] == true)
+    end
     if not fl then return true end
     if zs then
       local fz = trackZ(x, y)
@@ -952,6 +1051,7 @@ function R.WithTracks(roads, tracks, cont)
     -- (walls aren't roads: Passability has them)
     if wanted(t) then
       curWalk = t.op ~= "remove" and t.time or nil
+      curAdd = t.op ~= "remove"
       local tzs = type(t.zs) == "table" and #t.zs == #pts / 2 and t.zs or nil -- (its heights per point: checked)
       if not tzs and t.z == nil and nzs and t.op ~= "remove" and not t.stair then
         -- (only one in a capital or a building with its inside, by its middle: out on the land a road with no heights
@@ -1048,11 +1148,29 @@ function R.WithTracks(roads, tracks, cont)
             q = q + 1
           end
         end
+        -- (an edited road with its heights (`kind`): a node at each of its own points too, so the heights between its
+        -- ends are kept (a bridge rising from the land and level over a road under it: one road end to end was at the
+        -- land's height all the way, its ends', and joined that road)
+        local ownSplit -- (those: the next piece goes on from the node the one before ended at)
+        if t.kind and tzs then
+          local set = {}
+          ownSplit = {}
+          for _, sq in ipairs(splits) do set[sq] = true end
+          for qq = 2, M - 1 do
+            if own[qq] and not set[qq] then set[qq], ownSplit[qq] = true, true end
+          end
+          splits = {}
+          for sq in pairs(set) do splits[#splits + 1] = sq end
+          table.sort(splits)
+        end
         splits[#splits + 1] = M
         -- the pieces between them, each joined at both ends
         local mine = {} -- (this track's roads)
+        local isRaised = R.RAISED_KINDS[t.kind or ""] and fl and fl.zs and true or false
+        if isRaised then raisedTracks[#raisedTracks + 1] = { t = t, mine = mine } end
         local joined = {}
         local s0 = 1
+        local lastNb, lastX, lastY -- (the node the piece before ended at)
         for _, s1 in ipairs(splits) do
           if s1 > s0 then
             local line = { dx[s0], dy[s0] }
@@ -1065,7 +1183,9 @@ function R.WithTracks(roads, tracks, cont)
             line[#line + 1], line[#line + 2] = dx[s1], dy[s1]
             if fl then fl.landOK, fl.at = s0 == 1, dz[s0] end
             local na, ax, ay
-            if s0 == 1 and innerEnd(t, line[1], line[2]) then
+            if ownSplit and ownSplit[s0] and lastNb then
+              na, ax, ay = lastNb, lastX, lastY
+            elseif s0 == 1 and innerEnd(t, line[1], line[2]) then
               na, ax, ay = attach(line[1], line[2], R.TRACK_WALK_JOIN, ownWalk(line[1], line[2]))
             else
               na, ax, ay = attach(line[1], line[2], s0 == 1 and snap or crossYd + 1)
@@ -1083,11 +1203,20 @@ function R.WithTracks(roads, tracks, cont)
             else nb = newNode(line[#line - 1], line[#line], heightAt(line[#line - 1], line[#line]),
               floorAt(line[#line - 1], line[#line])) end
             if fl then fl.landOK, fl.at = nil, nil end
+            lastNb, lastX, lastY = nb, line[#line - 1], line[#line]
             if na ~= nb then
               -- (a stair drawn with the stairs tool: a stairs road, source 6, as the data's: "Take the stairs up", their icon)
               -- (a shipped one: as the data's drawn roads, source 2)
-              local ed = MakeEdge(na, nb, line, t.stair and R.SOURCE_STAIR or t.shipped and 2 or R.SOURCE_RECORDED)
+              -- (a lift edited so: a lift road, source 5, its length the ride: "Take the lift up", as Thunder Bluff's)
+              local ed = MakeEdge(na, nb, line, t.stair and R.SOURCE_STAIR or t.kind == "lift" and tzs and R.SOURCE_LIFT
+                or t.shipped and 2 or R.SOURCE_RECORDED)
               markCave(ed, line)
+              if t.kind then kindOf[ed] = t.kind end
+              if isRaised then
+                raised[ed] = t
+                if s0 == 1 then raisedEnd[na] = true else raisedNode[na] = true end
+                if s1 == M then raisedEnd[nb] = true else raisedNode[nb] = true end
+              end
               local mk = math.floor(#line / 4) * 2 + 1
               if nzs and fl and fl.zs and ns.Nav and ns.Nav.InBuilding and ns.Nav.InBuilding(cont, line[mk], line[mk + 1]) then
                 inside[ed] = true
@@ -1126,6 +1255,69 @@ function R.WithTracks(roads, tracks, cont)
       end
     end
   end
+  -- safe jumps off the raised roads (R.TRACK_DROP_MAX): one way down onto a road under one with a known height
+  if #raisedTracks > 0 and dropOf and (nzs or zs) then
+    curAdd, fl = false, nil
+    local hz = nzs or zs
+    local reach = R.TRACK_DROP_REACH
+    local pick = {} -- [track] = { [lower road] = best spot }
+    local tops, lows = {}, {}
+    for _, ed in ipairs(e) do
+      local t = raised[ed]
+      if t then
+        tops[ed] = true
+        local m = math.max(2, math.floor(ed[3] / R.TRACK_DROP_STEP))
+        for k = 1, m - 1 do
+          local al = ed[3] * k / m
+          -- (the spot `al` yards along)
+          local x, y, acc = ed[5], ed[6], 0
+          for i = 5, #ed - 3, 2 do
+            local L = math.sqrt((ed[i + 2] - ed[i]) ^ 2 + (ed[i + 3] - ed[i + 1]) ^ 2)
+            if acc + L >= al then
+              local f = L > 0 and (al - acc) / L or 0
+              x, y = ed[i] + (ed[i + 2] - ed[i]) * f, ed[i + 1] + (ed[i + 3] - ed[i + 1]) * f
+              break
+            end
+            acc = acc + L
+          end
+          local top = HeightOn(hz, ed, al)
+          for _, o in ipairs(top and near(x - reach, x + reach, y - reach, y + reach) or {}) do
+            if o ~= ed and raised[o] ~= t and o[4] ~= 3 and o[4] ~= R.SOURCE_SWIM and hz[o[1]] and hz[o[2]]
+                and o[1] ~= ed[1] and o[1] ~= ed[2] and o[2] ~= ed[1] and o[2] ~= ed[2] then
+              local d2, oal, qx, qy = Closest(o, x, y)
+              local low = d2 and d2 <= reach * reach and HeightOn(hz, o, oal)
+              local dz = low and top - low
+              if dz and dz > R.LAYER_Z and dz <= R.TRACK_DROP_MAX then
+                pick[t] = pick[t] or {}
+                local b = pick[t][o]
+                if not b or d2 < b.d2 then pick[t][o] = { d2 = d2, x = x, y = y, qx = qx, qy = qy, dz = dz } end
+              end
+            end
+          end
+        end
+      end
+    end
+    for _, rt in ipairs(raisedTracks) do
+      local list = {}
+      for o, b in pairs(pick[rt.t] or {}) do
+        lows[o] = true
+        list[#list + 1] = b
+      end
+      table.sort(list, function(a, b) return a.d2 < b.d2 or (a.d2 == b.d2 and (a.x < b.x or (a.x == b.x and a.y < b.y))) end)
+      for _, b in ipairs(list) do
+        tick(20)
+        local na, ax, ay = attach(b.x, b.y, 0.5, tops)
+        local nb, bx, by = attach(b.qx, b.qy, 0.5, lows)
+        if na and nb and na ~= nb then
+          raisedNode[na] = raisedEnd[na] == nil or nil
+          local ed = MakeEdge(na, nb, { ax, ay, bx, by }, 3)
+          dropOf[ed] = b.dz
+          e[#e + 1] = ed
+          put(ed, #e)
+        end
+      end
+    end
+  end
   -- dead-end stubs the cuts left (a road cut short beside a drawn one) go
   -- (only the cut nodes' degrees, and a new list only when a stub goes: a table over every node of the continent, made
   -- three times, was most of a 12 ms stretch of the background build with the collector's work, issue #657)
@@ -1157,7 +1349,12 @@ function R.WithTracks(roads, tracks, cont)
       e = kept
     end
   end
-  return n, e, zs or roads.z, nzs or roads.nz, inside
+  local info
+  if next(kindOf) or next(raisedNode) then
+    info = { kind = kindOf, raised = {}, raisedNode = raisedNode, raisedEnd = raisedEnd }
+    for ed in pairs(raised) do info.raised[ed] = true end
+  end
+  return n, e, zs or roads.z, nzs or roads.nz, inside, info
 end
 
 -- The extracted road network comes in pieces (roads the extraction lost, gates, towns).
@@ -1983,6 +2180,7 @@ function BuildGraph(cont)
   P1("router: build roads: overlays and caves", pt)
   pt = P0()
   local tracks = ns.db and ns.db.tracks
+  local trackInfo -- (the edited roads' kinds and the raised ones: R.WithTracks)
   -- (and the roads the data has with their heights, drawn in game and shipped as they were (ns.FloorTracks, 1.1.6's
   -- road tools): put on first, as the player's own are, on their floors)
   local floorTracks = ns.FloorTracks and ns.FloorTracks[cont]
@@ -1999,8 +2197,8 @@ function BuildGraph(cont)
   if tracks and #tracks > 0 then
     -- (the player's recorded and drawn roads, on the roads as merged)
     local nz2, inside
-    nodes, edges, zs, nz2, inside = R.WithTracks({ n = nodes, e = edges, z = roads.z, nz = not roads.z and nodeZ or nil,
-      cave = caveOf, drop = dropOf }, tracks, cont)
+    nodes, edges, zs, nz2, inside, trackInfo = R.WithTracks({ n = nodes, e = edges, z = roads.z,
+      nz = not roads.z and nodeZ or nil, cave = caveOf, drop = dropOf }, tracks, cont)
     if nz2 then nodeZ = nz2 end -- (a copy with the drawn roads' floors: the merged one is kept as it was)
     for ed in pairs(inside or {}) do indoorOf[ed] = true end
   end
@@ -2110,10 +2308,14 @@ function BuildGraph(cont)
     edges = kept
   end
   local drops, caveEdges, indoorEdges = {}, {}, {}
+  local kinds, raisedEdges = {}, {} -- (the edited roads' kinds, R.TRACK_KINDS, and the raised ones: by edge number)
+  local tk, tr = trackInfo and trackInfo.kind, trackInfo and trackInfo.raised
   for ei, ed in ipairs(edges) do
     Breathe(ei, 500)
     drops[ei] = dropOf[ed]
     caveEdges[ei] = caveOf[ed]
+    if tk and tk[ed] then kinds[ei] = tk[ed] end
+    if tr and tr[ed] then raisedEdges[ei] = true end
     -- (a building's own roads, both ends on its floors: not a door's join onto the land's road)
     if indoorOf[ed] and nodeZ[ed[1]] and nodeZ[ed[2]] then indoorEdges[ei] = true end
   end
@@ -2182,8 +2384,15 @@ function BuildGraph(cont)
   P1("router: build roads: costs", pt)
   pt = P0()
   local nzB = not zs and next(nodeZ) and nodeZ or nil
-  local bridges = Bridges(nodes, adj, grid and grid.slack and 0 or nil, nearOverlay, noBridge, zs, nzB)
-  if not (grid and grid.slack) then R.DeadEndLinks(nodes, adj, bridges, noBridge, nearOverlay, zs, edges, nzB) end -- (#411)
+  -- (a raised road's nodes along it, a bridge's: no gap link onto them from the roads under them, only its ends)
+  local skipB = noBridge
+  if trackInfo and next(trackInfo.raisedNode) then
+    skipB = {}
+    for k, v in pairs(noBridge) do skipB[k] = v end
+    for nd in pairs(trackInfo.raisedNode) do skipB[nd] = skipB[nd] or true end
+  end
+  local bridges = Bridges(nodes, adj, grid and grid.slack and 0 or nil, nearOverlay, skipB, zs, nzB)
+  if not (grid and grid.slack) then R.DeadEndLinks(nodes, adj, bridges, skipB, nearOverlay, zs, edges, nzB) end -- (#411)
   for ei in pairs(drops) do
     local e = edges[ei]
     if e then adj[e[1]][#adj[e[1]] + 1] = { e[2], e[3], ei, true } end
@@ -2212,7 +2421,9 @@ function BuildGraph(cont)
     ratio = ratio, towns = edgeTowns, light = edgeLight, cave = caveEdges, caveNode = noBridge, z = zs, nz = next(nodeZ) and nodeZ or nil,
     zoneId = hasZones and zoneId or nil, zoneYd = hasZones and zoneYd or nil,
     zonesOver = next(zonesOver) and zonesOver or nil,
-    indoor = next(indoorEdges) and indoorEdges or nil }
+    indoor = next(indoorEdges) and indoorEdges or nil,
+    kind = next(kinds) and kinds or nil, raised = next(raisedEdges) and raisedEdges or nil,
+    raisedEnd = next(raisedEdges) and trackInfo and trackInfo.raisedEnd or nil }
   -- (an underground city's floors over floors: the roads' heights near a spot, for the road and wall
   -- tools' floor (GPSFrame.OtherFloor, FloorText); not a dungeon's, where they can't be used)
   local lvl = ns.CityLevels and ns.CityLevels[cont]
@@ -3455,6 +3666,66 @@ function R.InLayeredCave(cont, x, y)
 end
 -- A spot with its floors by height: in a building with its inside, or down in a cave with floors over floors (with
 -- a height `z`, by it: on the ground over the cave, not).
+-- The start's road candidates (NearestEdges') without those on a raised road (g.raised: a bridge's, a floor's over the
+-- land), when a road not raised is within RAISED_UNDER_YD more than the nearest: the player on the ground, no floor
+-- followed (Nav.TrackRaisedZ follows one onto a bridge from its end). Else the list as it was. `nearer`: only when the
+-- road not raised is as near as the raised one (a stop with no height: on a bridge when nearest it).
+R.RAISED_UNDER_YD = 40
+function R.OffRaised(g, list, nearer)
+  if not (g and g.raised and list and list[1]) then return list end
+  local near, out = math.huge, {}
+  for _, c in ipairs(list) do near = math.min(near, c.dist or math.huge) end
+  if nearer then
+    local ground = math.huge
+    for _, c in ipairs(list) do
+      if not g.raised[c.edge] then ground = math.min(ground, c.dist or math.huge) end
+    end
+    if ground > near then return list end
+  end
+  local any = false
+  for _, c in ipairs(list) do
+    if g.raised[c.edge] then any = true
+    elseif (c.dist or math.huge) <= near + R.RAISED_UNDER_YD then out[#out + 1] = c end
+  end
+  return (any and out[1]) and out or list
+end
+
+-- Whether (x, y) at height z is on a raised road of graph `g` (within RAISED_ON_YD, its floor within SAME_FLOOR_Z).
+R.RAISED_ON_YD = 8
+function R.OnRaised(g, cont, x, y, z)
+  if not (g and g.raised and z) then return false end
+  for _, h in ipairs(R.RaisedNear(cont, x, y, R.RAISED_ON_YD) or {}) do
+    if h.z and math.abs(h.z - z) <= R.SAME_FLOOR_Z then return true end
+  end
+  return false
+end
+
+-- The raised roads (g.raised) near (x, y) of `cont`, within `r`: { { edge, z (its floor there), d (yards off it), endD
+-- (yards from the nearer of its ends that meet the land, g.raisedEnd; math.huge with none) }, ... }, nearest first; nil
+-- with none on the graph.
+function R.RaisedNear(cont, x, y, r)
+  -- (the graph as built: never built for this, nor warmed up; asked every status tick by Nav.TrackRaisedZ)
+  local g = graphs[cont]
+  if not (g and g.raised and g.nz) then return nil end
+  local out = {}
+  for ei in pairs(g.raised) do
+    local e = g.e[ei]
+    local d2, along = Closest(e, x, y)
+    if d2 and d2 <= r * r then
+      local endD = math.huge
+      for k, nd in ipairs({ e[1], e[2] }) do
+        if g.raisedEnd and g.raisedEnd[nd] then
+          local nx, ny = e[k == 1 and 5 or #e - 1], e[k == 1 and 6 or #e]
+          endD = math.min(endD, math.sqrt((nx - x) ^ 2 + (ny - y) ^ 2))
+        end
+      end
+      out[#out + 1] = { edge = ei, z = HeightOn(g.nz, e, along), d = math.sqrt(d2), endD = endD }
+    end
+  end
+  table.sort(out, function(a, b) return a.d < b.d or (a.d == b.d and a.edge < b.edge) end)
+  return out
+end
+
 function R.OnFloors(cont, x, y, z)
   if ns.Nav and ns.Nav.InBuilding and ns.Nav.InBuilding(cont, x, y) then return true end
   return R.InLayeredCave(cont, x, y) and (z == nil or R.CaveDown(cont, x, y, nil, z)) or false
@@ -3856,6 +4127,7 @@ local function Build(g, pieces)
   -- (on a continent, a building's or a capital's roads' floors, g.nz: each point's, `fz` (not `zs`: not a level with
   -- heights), so following the route knows its floors: Nav's Follow, 2026-10-06, Brill's inn)
   local fz = g and not g.z and g.nz and {} or nil
+  local raisedPts = {} -- (the points on a raised road, a bridge: R.Smooth cuts no corner onto or off one)
   local function add(x, y, kind, z, f)
     local n = #flat
     if n >= 2 and math.abs(flat[n - 1] - x) < 0.01 and math.abs(flat[n] - y) < 0.01 then
@@ -3906,6 +4178,7 @@ local function Build(g, pieces)
       if g.e[p.edge][4] == R.SOURCE_SWIM then swum = swum + math.abs(p.to - p.from) end
       for _, q in ipairs(EdgePoints(g.e[p.edge], p.from, p.to)) do
         add(q[1], q[2], kind, zs and R.EdgeZ(g, p.edge, q[3]), fz and R.EdgeFloor(g, p.edge, q[3]))
+        if g.raised and g.raised[p.edge] then raisedPts[#flat / 2] = true end
       end
     else
       if p.gap then blocked = blocked + Dist(p[2], p[3], p[4], p[5]) end
@@ -3925,7 +4198,7 @@ local function Build(g, pieces)
   end
   if fz and not fz[1] then fz = nil end -- (none of its roads has a floor: the land's)
   return { pts = flat, kinds = kinds, length = length, road = road, zs = zs, fz = fz,
-    blocked = blocked > 0 and blocked or nil, swum = swum > 0 and swum or nil }
+    blocked = blocked > 0 and blocked or nil, swum = swum > 0 and swum or nil, raisedPts = next(raisedPts) and raisedPts or nil }
 end
 -- The floor at `along` yards on road `ei` (its ends' g.nz, as R.RoadFloor), or nil.
 function R.EdgeFloor(g, ei, along)
@@ -4036,6 +4309,8 @@ function R.Smooth(cont, r)
         along = along + Dist(ax, ay, bx, by)
         if along > R.SMOOTH_SPAN then break end
         local f = fz and fz[j + 1]
+        -- (onto or off a raised road, a bridge: by its end, no corner cut up to it from the ground)
+        if r.raisedPts and (r.raisedPts[j + 1] or false) ~= (r.raisedPts[i] or false) then break end
         if f and flo then
           flo, fhi = math.min(flo, f), math.max(fhi, f)
           if fhi - flo > R.SMOOTH_FLOOR_Z then break end
@@ -4750,8 +5025,9 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
   -- the floor to its First Aid trainer, the 1.1.5 test pass)
   local offFloor = false
   if not layered and g and g.nz then -- (and a cave's floors over floors: its ramps, not a line through the rock)
-    local inT = tz and R.OnFloors(cont, tx, ty, tz)
-    local inS = sz and R.OnFloors(cont, sx, sy, sz)
+    -- (and on a raised road, a bridge over the land: no straight walk up onto it, or down off it but by its drops)
+    local inT = tz and (R.OnFloors(cont, tx, ty, tz) or R.OnRaised(g, cont, tx, ty, tz))
+    local inS = sz and (R.OnFloors(cont, sx, sy, sz) or R.OnRaised(g, cont, sx, sy, sz))
     offFloor = (inT or inS) and not (sz and tz and math.abs(sz - tz) <= R.SAME_FLOOR_Z) and true or false
     if offFloor then direct = nil end
   end
@@ -4829,6 +5105,12 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
   -- (and the player's own floor in a building, followed along its roads: Nav.TrackCityZ; asked 2026-10-06, Brill's
   -- inn: from upstairs the route started on the ground floor's road under them)
   if not layered and g.nz and opts and opts.z then ss = R.OnFloor(g, ss, opts.z, sx, sy) end
+  -- (and no floor followed, on the ground, under a raised road (a bridge, a floor over the land, edited so): onto the
+  -- roads under it, not up onto it overhead; it's reached by its ends, the route going round to one. Asked 2026-11-18
+  -- for 1.3.10: "pathing would know if an area is accessible based on player position")
+  if not layered and g.raised and not (opts and opts.z) then ss = R.OffRaised(g, ss) end
+  -- (and a stop with no height by a road under one, nearer it than the raised road: not off the side of the bridge)
+  if not layered and g.raised and not (opts and opts.tz) then ts = R.OffRaised(g, ts, true) end
   -- a city: roads on the same floor as the start or the stop (the nearest may be on a
   -- walk right above or below)
   local H = not layered and grid and grid.slack and ns.Nav and ns.Nav.CityHeight
