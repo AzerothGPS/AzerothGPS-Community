@@ -129,10 +129,14 @@ function GD.At(cont, x, y, water)
   return a * (1 - u) * (1 - v) + b * u * (1 - v) + c * (1 - u) * v + d * u * v
 end
 
--- The ground's height for a drawn road's point at (x, y) of `level`: the grid's, rounded to a tenth; false in a
--- building or a cave (the import works those out) or where the grid has none.
+-- The ground's height for a drawn road's point at (x, y) of `level`: the grid's, rounded to a tenth; in a building
+-- being edited on its inside map, its floor's (G.BuildingFloorZ); false in another building or a cave (the import works
+-- those out) or where the grid has none.
 function GD.PointHeight(level, x, y)
   local N, G = ns.Nav, ns.GPS
+  -- (in a building whose inside map is being edited, 1.3.10: its floor's height there, Data/InteriorFloors.lua)
+  local fz = G and G.BuildingFloorZ and G.BuildingFloorZ(x, y)
+  if fz then return math.floor(fz * 10 + 0.5) / 10 end
   if N and N.InBuilding and N.InBuilding(level, x, y) then return false end
   if G and G.CaveAt and G.CaveAt(level, x, y) then return false end
   local h = GD.At(level, x, y)

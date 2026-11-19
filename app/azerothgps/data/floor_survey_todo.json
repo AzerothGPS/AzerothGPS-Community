@@ -1,0 +1,1007 @@
+{
+ "todo": [
+  {
+   "id": "106869:0",
+   "map": 1,
+   "wmo": 106869,
+   "room": 0,
+   "name": "",
+   "x": -2214.3,
+   "y": -3779.0,
+   "z": 132.4,
+   "go": ".go xyz -2214.3 -3779.0 132.4 1",
+   "need": "the floor Cannoneer Smythe stands on (NPC 3454; the model has no floor at that height)",
+   "known": [
+    0.1,
+    5.0,
+    8.0,
+    13.8,
+    19.4,
+    24.1,
+    29.5
+   ],
+   "place": [
+    -2214.91,
+    -3772.88,
+    95.72,
+    1.78
+   ],
+   "expect": 130.9,
+   "band": [
+    95.7,
+    130.0
+   ],
+   "ground": 92.0
+  },
+  {
+   "id": "107120:0",
+   "map": 1,
+   "wmo": 107120,
+   "room": 0,
+   "name": "",
+   "x": -2678.4,
+   "y": -5037.0,
+   "z": 23.3,
+   "go": ".go xyz -2678.4 -5037.0 23.3 1",
+   "need": "the floor Minion of Weavil stands on (NPC 15591; the model has no floor at that height)",
+   "known": [
+    -15.4,
+    -8.9
+   ],
+   "place": [
+    -2671.18,
+    -5040.49,
+    24.79,
+    0.03
+   ],
+   "expect": 21.8,
+   "band": [
+    8.6,
+    21.7
+   ],
+   "ground": null
+  },
+  {
+   "id": "107133:0",
+   "map": 1,
+   "wmo": 107133,
+   "room": 0,
+   "name": "",
+   "x": -1679.2,
+   "y": -4334.6,
+   "z": 4.3,
+   "go": ".go xyz -1679.2 -4334.6 4.3 1",
+   "need": "the floor Affray Spectator stands on (NPC 6249; the model has no floor at that height)",
+   "known": [
+    -14.6
+   ],
+   "place": [
+    -1679.02,
+    -4329.67,
+    5.87,
+    1.57
+   ],
+   "expect": 2.8,
+   "band": [
+    -8.9,
+    2.5
+   ],
+   "ground": null
+  },
+  {
+   "id": "108013:0",
+   "map": 1,
+   "wmo": 108013,
+   "room": 0,
+   "name": "",
+   "x": -3482.9,
+   "y": -4101.6,
+   "z": 53.8,
+   "go": ".go xyz -3482.9 -4101.6 53.8 1",
+   "need": "the floor Sentry Point Guard stands on (NPC 5085; the model has no floor at that height)",
+   "known": [
+    0.1,
+    5.0,
+    8.0,
+    13.8,
+    19.4,
+    24.1,
+    29.5
+   ],
+   "place": [
+    -3475.33,
+    -4107.51,
+    17.05,
+    5.38
+   ],
+   "expect": 52.3,
+   "band": [
+    17.1,
+    51.3
+   ],
+   "ground": 10.9
+  },
+  {
+   "id": "109381:17",
+   "map": 1,
+   "wmo": 109381,
+   "room": 17,
+   "name": "Ambershard Cavern",
+   "x": -1507.2,
+   "y": 2713.3,
+   "z": 90.2,
+   "go": ".go xyz -1507.2 2713.3 90.2 1",
+   "need": "the floor Ambershard Destroyer stands on (NPC 11782; the model has no floor at that height)",
+   "known": [
+    -41.4,
+    -37.0,
+    -33.2,
+    -28.5
+   ],
+   "place": [
+    -1424.38,
+    2891.38,
+    132.93,
+    0.1
+   ],
+   "expect": 88.7,
+   "band": [
+    87.0,
+    111.4
+   ],
+   "ground": 123.6
+  },
+  {
+   "id": "109381:29",
+   "map": 1,
+   "wmo": 109381,
+   "room": 29,
+   "name": "Ambershard Cavern",
+   "x": -1484.0,
+   "y": 2818.2,
+   "z": 90.9,
+   "go": ".go xyz -1484.0 2818.2 90.9 1",
+   "need": "the floor Ambereye Basilisk stands on (NPC 11785; the model has no floor at that height)",
+   "known": [
+    -38.1,
+    -35.8,
+    -29.3,
+    -24.8
+   ],
+   "place": [
+    -1424.38,
+    2891.38,
+    132.93,
+    0.1
+   ],
+   "expect": 89.4,
+   "band": [
+    85.9,
+    111.5
+   ],
+   "ground": 122.7
+  },
+  {
+   "id": "110616:3",
+   "map": 0,
+   "wmo": 110616,
+   "room": 3,
+   "name": "",
+   "x": -10406.3,
+   "y": 422.9,
+   "z": 49.1,
+   "go": ".go xyz -10406.3 422.9 49.1 0",
+   "need": "the floor Skeletal Raider stands on (NPC 1110; the model has no floor at that height)",
+   "known": [
+    -8.8
+   ],
+   "place": [
+    -10413.65,
+    405.49,
+    47.18,
+    1.33
+   ],
+   "expect": 47.6,
+   "band": [
+    28.8,
+    47.8
+   ],
+   "ground": null
+  },
+  {
+   "id": "110819:8",
+   "map": 0,
+   "wmo": 110819,
+   "room": 8,
+   "name": "",
+   "x": -10487.3,
+   "y": -3258.8,
+   "z": 22.6,
+   "go": ".go xyz -10487.3 -3258.8 22.6 0",
+   "need": "the floor Innkeeper Karakul stands on (NPC 6930; the model has no floor at that height)",
+   "known": [
+    -69.2,
+    -65.6,
+    -62.5,
+    -59.2,
+    -54.7,
+    -51.8
+   ],
+   "place": [
+    -10881.32,
+    -3188.57,
+    64.09,
+    3.21
+   ],
+   "expect": 21.1,
+   "band": [
+    -10.1,
+    20.5
+   ],
+   "ground": null
+  },
+  {
+   "id": "110833:0",
+   "map": 0,
+   "wmo": 110833,
+   "room": 0,
+   "name": "",
+   "x": -6806.2,
+   "y": -1340.2,
+   "z": 168.9,
+   "go": ".go xyz -6806.2 -1340.2 168.9 0",
+   "need": "the floor Lava Crab stands on (NPC 9700; the model has no floor at that height)",
+   "known": [
+    -51.1,
+    -47.8,
+    -14.7,
+    -11.4,
+    -8.0,
+    -4.3,
+    -0.9,
+    3.9,
+    8.1,
+    11.1,
+    14.6
+   ],
+   "place": [
+    -6890.42,
+    -1243.36,
+    191.91,
+    3.3
+   ],
+   "expect": 167.4,
+   "band": [
+    134.7,
+    233.2
+   ],
+   "ground": 174.0
+  },
+  {
+   "id": "110833:1",
+   "map": 0,
+   "wmo": 110833,
+   "room": 1,
+   "name": "",
+   "x": -6665.3,
+   "y": -1359.4,
+   "z": 147.7,
+   "go": ".go xyz -6665.3 -1359.4 147.7 0",
+   "need": "the floor Heavy War Golem stands on (NPC 5854; the model has no floor at that height)",
+   "known": [
+    -31.6,
+    -23.9,
+    -8.6,
+    -3.2,
+    1.9,
+    5.1,
+    14.1,
+    17.4,
+    20.0,
+    23.1
+   ],
+   "place": [
+    -6890.42,
+    -1243.36,
+    191.91,
+    3.3
+   ],
+   "expect": 146.2,
+   "band": [
+    132.0,
+    235.6
+   ],
+   "ground": 247.0
+  },
+  {
+   "id": "110933:8",
+   "map": 1,
+   "wmo": 110933,
+   "room": 8,
+   "name": "",
+   "x": -8075.9,
+   "y": -2474.1,
+   "z": -21.3,
+   "go": ".go xyz -8075.9 -2474.1 -21.3 1",
+   "need": "the floor Centipaar Wasp stands on (NPC 5455; the model has no floor at that height)",
+   "known": [
+    -45.8,
+    -43.2,
+    -38.8,
+    -35.9,
+    -32.2,
+    -27.1,
+    -24.1,
+    -20.4
+   ],
+   "place": [
+    -8076.14,
+    -2500.88,
+    -11.35,
+    4.33
+   ],
+   "expect": -22.8,
+   "band": [
+    -57.9,
+    -20.0
+   ],
+   "ground": null
+  },
+  {
+   "id": "111052:6",
+   "map": 1,
+   "wmo": 111052,
+   "room": 6,
+   "name": "",
+   "x": 6726.3,
+   "y": -5276.1,
+   "z": 779.7,
+   "go": ".go xyz 6726.3 -5276.1 779.7 1",
+   "need": "the floor Winterfall Ursa stands on (NPC 7438; the model has no floor at that height)",
+   "known": [
+    -28.8,
+    -24.2,
+    -18.5,
+    -14.3,
+    -11.4,
+    -7.8,
+    -3.7,
+    0.3
+   ],
+   "place": [
+    6572.77,
+    -5124.98,
+    774.81,
+    1.7
+   ],
+   "expect": 778.2,
+   "band": [
+    743.8,
+    787.4
+   ],
+   "ground": null
+  },
+  {
+   "id": "111424:2",
+   "map": 0,
+   "wmo": 111424,
+   "room": 2,
+   "name": "",
+   "x": -14927.3,
+   "y": 101.5,
+   "z": 14.5,
+   "go": ".go xyz -14927.3 101.5 14.5 0",
+   "need": "the floor Bloodsail Deckhand stands on (NPC 4505; the model has no floor at that height)",
+   "known": [
+    -0.2
+   ],
+   "place": [
+    -14920.99,
+    83.99,
+    7.76,
+    1.64
+   ],
+   "expect": 13.0,
+   "band": [
+    6.4,
+    12.8
+   ],
+   "ground": -26.1
+  },
+  {
+   "id": "111424:3",
+   "map": 0,
+   "wmo": 111424,
+   "room": 3,
+   "name": "",
+   "x": -2070.5,
+   "y": -1997.3,
+   "z": 14.9,
+   "go": ".go xyz -2070.5 -1997.3 14.9 0",
+   "need": "the floor Blackwater Deckhand stands on (NPC 2636; the model has no floor at that height)",
+   "known": [
+    -0.2
+   ],
+   "place": [
+    -2068.66,
+    -2007.09,
+    7.94,
+    4.99
+   ],
+   "expect": 13.4,
+   "band": [
+    7.6,
+    12.9
+   ],
+   "ground": -26.8
+  },
+  {
+   "id": "111424:4",
+   "map": 0,
+   "wmo": 111424,
+   "room": 4,
+   "name": "",
+   "x": -14974.2,
+   "y": 261.4,
+   "z": 14.6,
+   "go": ".go xyz -14974.2 261.4 14.6 0",
+   "need": "the floor Bloodsail Elder Magus stands on (NPC 1653; the model has no floor at that height)",
+   "known": [
+    -7.5,
+    -3.5,
+    -0.2
+   ],
+   "place": [
+    -14985.99,
+    266.7,
+    7.75,
+    3.14
+   ],
+   "expect": 13.1,
+   "band": [
+    -0.2,
+    12.2
+   ],
+   "ground": -24.1
+  },
+  {
+   "id": "111424:7",
+   "map": 0,
+   "wmo": 111424,
+   "room": 7,
+   "name": "",
+   "x": -14917.3,
+   "y": 74.9,
+   "z": 14.6,
+   "go": ".go xyz -14917.3 74.9 14.6 0",
+   "need": "the floor Bloodsail Elder Magus stands on (NPC 1653; the model has no floor at that height)",
+   "known": [
+    -0.2
+   ],
+   "place": [
+    -14920.99,
+    83.99,
+    7.76,
+    1.64
+   ],
+   "expect": 13.1,
+   "band": [
+    7.5,
+    12.8
+   ],
+   "ground": -27.5
+  },
+  {
+   "id": "111424:8",
+   "map": 0,
+   "wmo": 111424,
+   "room": 8,
+   "name": "",
+   "x": -14951.3,
+   "y": 343.6,
+   "z": 14.3,
+   "go": ".go xyz -14951.3 343.6 14.3 0",
+   "need": "the floor Bloodsail Sea Dog stands on (NPC 1565; the model has no floor at that height)",
+   "known": [
+    -0.2
+   ],
+   "place": [
+    -14964.32,
+    346.23,
+    7.78,
+    0.27
+   ],
+   "expect": 12.8,
+   "band": [
+    6.4,
+    12.8
+   ],
+   "ground": -22.9
+  },
+  {
+   "id": "111471:0",
+   "map": 0,
+   "wmo": 111471,
+   "room": 0,
+   "name": "",
+   "x": 1261.2,
+   "y": -2558.3,
+   "z": 119.8,
+   "go": ".go xyz 1261.2 -2558.3 119.8 0",
+   "need": "the floor Elder Moonstrike stands on (NPC 15594; the model has no floor at that height)",
+   "known": [
+    14.2
+   ],
+   "place": [
+    1247.87,
+    -2589.41,
+    96.03,
+    3.62
+   ],
+   "expect": 118.3,
+   "band": [
+    110.1,
+    117.4
+   ],
+   "ground": null
+  },
+  {
+   "id": "111596:29",
+   "map": 1,
+   "wmo": 111596,
+   "room": 29,
+   "name": "",
+   "x": 7025.4,
+   "y": -2129.2,
+   "z": 606.5,
+   "go": ".go xyz 7025.4 -2129.2 606.5 1",
+   "need": "the floor Timbermaw Woodbender stands on (NPC 11553; the model has no floor at that height)",
+   "known": [
+    -38.4,
+    -35.3,
+    -30.4,
+    -26.7,
+    -23.6,
+    -15.7
+   ],
+   "place": [
+    6848.43,
+    -2120.66,
+    625.35,
+    3.14
+   ],
+   "expect": 605.0,
+   "band": [
+    586.2,
+    626.5
+   ],
+   "ground": 660.9
+  },
+  {
+   "id": "113192:0",
+   "map": 1,
+   "wmo": 113192,
+   "room": 0,
+   "name": "",
+   "x": 268.1,
+   "y": -4710.9,
+   "z": 19.1,
+   "go": ".go xyz 268.1 -4710.9 19.1 1",
+   "need": "the floor Kaplak stands on (NPC 3170; the model has no floor at that height)",
+   "known": [
+    -4.1
+   ],
+   "place": [
+    270.3,
+    -4706.22,
+    15.71,
+    5.69
+   ],
+   "expect": 17.6,
+   "band": [
+    11.4,
+    17.5
+   ],
+   "ground": 11.7
+  },
+  {
+   "id": "113195:0",
+   "map": 1,
+   "wmo": 113195,
+   "room": 0,
+   "name": "",
+   "x": -777.5,
+   "y": -4940.6,
+   "z": 39.8,
+   "go": ".go xyz -777.5 -4940.6 39.8 1",
+   "need": "the floor Sen'jin Watcher stands on (NPC 3297; the model has no floor at that height)",
+   "known": [
+    -1.1,
+    4.5
+   ],
+   "place": [
+    -789.38,
+    -4941.72,
+    23.4,
+    1.21
+   ],
+   "expect": 38.3,
+   "band": [
+    22.2,
+    41.0
+   ],
+   "ground": 20.2
+  },
+  {
+   "id": "113856:1",
+   "map": 1,
+   "wmo": 113856,
+   "room": 1,
+   "name": "",
+   "x": 6175.8,
+   "y": -4378.1,
+   "z": 667.7,
+   "go": ".go xyz 6175.8 -4378.1 667.7 1",
+   "need": "the floor Cobalt Whelp stands on (NPC 10659; the model has no floor at that height)",
+   "known": [
+    -25.5,
+    -21.6,
+    -18.2
+   ],
+   "place": [
+    6172.73,
+    -4389.26,
+    679.01,
+    2.64
+   ],
+   "expect": 666.2,
+   "band": [
+    648.3,
+    726.3
+   ],
+   "ground": null
+  },
+  {
+   "id": "7952254:18",
+   "map": 0,
+   "wmo": 7952254,
+   "room": 18,
+   "name": "The Salty Sailor Tavern",
+   "x": -14448.6,
+   "y": 506.1,
+   "z": 27.9,
+   "go": ".go xyz -14448.6 506.1 27.9 0",
+   "need": "the floor Gringer stands on (NPC 2858; the model has no floor at that height)",
+   "known": [
+    -22.2
+   ],
+   "place": [
+    -14258.29,
+    330.26,
+    44.0,
+    0.75
+   ],
+   "expect": 26.4,
+   "band": [
+    21.6,
+    26.3
+   ],
+   "ground": -7.7
+  },
+  {
+   "id": "7962574:280",
+   "map": 0,
+   "wmo": 7962574,
+   "room": 280,
+   "name": "",
+   "x": -9001.0,
+   "y": 852.8,
+   "z": 107.1,
+   "go": ".go xyz -9001.0 852.8 107.1 0",
+   "need": "the floor Squirrel stands on (NPC 1412; the model has no floor at that height)",
+   "known": [
+    9.7,
+    48.0,
+    71.8,
+    74.7,
+    77.8,
+    80.5,
+    89.7,
+    107.4
+   ],
+   "place": [
+    -8931.63,
+    539.29,
+    101.96,
+    3.81
+   ],
+   "expect": 105.6,
+   "band": [
+    105.9,
+    235.3
+   ],
+   "ground": null
+  },
+  {
+   "id": "7973038:3",
+   "map": 1,
+   "wmo": 7973038,
+   "room": 3,
+   "name": "",
+   "x": 4256.8,
+   "y": -5217.7,
+   "z": 125.7,
+   "go": ".go xyz 4256.8 -5217.7 125.7 1",
+   "need": "the floor Gatekeeper Rageroar stands on (NPC 6651; the model has no floor at that height)",
+   "known": [
+    0.4,
+    3.0,
+    7.1
+   ],
+   "place": [
+    4218.42,
+    -5237.37,
+    112.76,
+    3.75
+   ],
+   "expect": 124.2,
+   "band": [
+    112.7,
+    133.9
+   ],
+   "ground": 144.9
+  },
+  {
+   "id": "7973038:4",
+   "map": 1,
+   "wmo": 7973038,
+   "room": 4,
+   "name": "",
+   "x": 4246.4,
+   "y": -5228.4,
+   "z": 120.0,
+   "go": ".go xyz 4246.4 -5228.4 120.0 1",
+   "need": "the floor Timbermaw Den Watcher stands on (NPC 6187; the model has no floor at that height)",
+   "known": [
+    0.3
+   ],
+   "place": [
+    4218.42,
+    -5237.37,
+    112.76,
+    3.75
+   ],
+   "expect": 118.5,
+   "band": [
+    112.6,
+    127.7
+   ],
+   "ground": null
+  },
+  {
+   "id": "110594:1",
+   "map": 0,
+   "wmo": 110594,
+   "room": 1,
+   "name": "",
+   "x": 574.1,
+   "y": -1073.9,
+   "z": 106.2,
+   "go": ".go xyz 574.1 -1073.9 106.2 0",
+   "need": "the room's floor (the model has none there)",
+   "known": [],
+   "place": [
+    401.91,
+    -1011.96,
+    109.53,
+    2.6
+   ],
+   "expect": null,
+   "band": [
+    104.7,
+    116.1
+   ],
+   "ground": 158.4
+  },
+  {
+   "id": "110630:15",
+   "map": 0,
+   "wmo": 110630,
+   "room": 15,
+   "name": "",
+   "x": -11109.7,
+   "y": -1797.4,
+   "z": 2.9,
+   "go": ".go xyz -11109.7 -1797.4 2.9 0",
+   "need": "the room's floor (the model has none there)",
+   "known": [],
+   "place": [
+    -11087.06,
+    -1829.55,
+    71.86,
+    0.03
+   ],
+   "expect": null,
+   "band": [
+    1.4,
+    43.5
+   ],
+   "ground": 86.3
+  },
+  {
+   "id": "7675285:2",
+   "map": 0,
+   "wmo": 7675285,
+   "room": 2,
+   "name": "Ruins of Lordaeron",
+   "x": 1642.0,
+   "y": 239.9,
+   "z": 86.4,
+   "go": ".go xyz 1642.0 239.9 86.4 0",
+   "need": "the room's floor (the model has none there)",
+   "known": [],
+   "place": [
+    1647.72,
+    239.83,
+    62.55,
+    6.27
+   ],
+   "expect": null,
+   "band": [
+    84.9,
+    100.2
+   ],
+   "ground": null
+  },
+  {
+   "id": "7956012:43",
+   "map": 0,
+   "wmo": 7956012,
+   "room": 43,
+   "name": "",
+   "x": 3839.7,
+   "y": -3500.1,
+   "z": 164.0,
+   "go": ".go xyz 3839.7 -3500.1 164.0 0",
+   "need": "the room's floor (the model has none there)",
+   "known": [],
+   "place": [
+    3449.66,
+    -3379.7,
+    144.38,
+    3.14
+   ],
+   "expect": null,
+   "band": [
+    162.5,
+    168.9
+   ],
+   "ground": 46.0
+  },
+  {
+   "id": "7956012:44",
+   "map": 0,
+   "wmo": 7956012,
+   "room": 44,
+   "name": "",
+   "x": 3847.9,
+   "y": -3748.3,
+   "z": 167.9,
+   "go": ".go xyz 3847.9 -3748.3 167.9 0",
+   "need": "the room's floor (the model has none there)",
+   "known": [],
+   "place": [
+    3449.66,
+    -3379.7,
+    144.38,
+    3.14
+   ],
+   "expect": null,
+   "band": [
+    166.4,
+    172.8
+   ],
+   "ground": 46.0
+  },
+  {
+   "id": "7956012:49",
+   "map": 0,
+   "wmo": 7956012,
+   "room": 49,
+   "name": "",
+   "x": 4057.8,
+   "y": -3666.8,
+   "z": 155.4,
+   "go": ".go xyz 4057.8 -3666.8 155.4 0",
+   "need": "the room's floor (the model has none there)",
+   "known": [],
+   "place": [
+    3449.66,
+    -3379.7,
+    144.38,
+    3.14
+   ],
+   "expect": null,
+   "band": [
+    153.9,
+    160.3
+   ],
+   "ground": 46.0
+  },
+  {
+   "id": "7964229:13",
+   "map": 1,
+   "wmo": 7964229,
+   "room": 13,
+   "name": "The Drag",
+   "x": 1774.7,
+   "y": -4486.7,
+   "z": 60.0,
+   "go": ".go xyz 1774.7 -4486.7 60.0 1",
+   "need": "the room's floor (the model has none there)",
+   "known": [],
+   "place": [
+    1500.5,
+    -4418.19,
+    30.43,
+    3.73
+   ],
+   "expect": null,
+   "band": [
+    58.5,
+    61.0
+   ],
+   "ground": -38.0
+  },
+  {
+   "id": "7964229:47",
+   "map": 1,
+   "wmo": 7964229,
+   "room": 47,
+   "name": "",
+   "x": 1784.0,
+   "y": -4205.3,
+   "z": 54.6,
+   "go": ".go xyz 1784.0 -4205.3 54.6 1",
+   "need": "the room's floor (the model has none there)",
+   "known": [],
+   "place": [
+    1500.5,
+    -4418.19,
+    30.43,
+    3.73
+   ],
+   "expect": null,
+   "band": [
+    53.1,
+    55.6
+   ],
+   "ground": -21.8
+  },
+  {
+   "id": "7964229:71",
+   "map": 1,
+   "wmo": 7964229,
+   "room": 71,
+   "name": "",
+   "x": 2026.8,
+   "y": -4636.3,
+   "z": 44.1,
+   "go": ".go xyz 2026.8 -4636.3 44.1 1",
+   "need": "the room's floor (the model has none there)",
+   "known": [],
+   "place": [
+    1500.5,
+    -4418.19,
+    30.43,
+    3.73
+   ],
+   "expect": null,
+   "band": [
+    42.6,
+    45.6
+   ],
+   "ground": 9.0
+  }
+ ]
+}

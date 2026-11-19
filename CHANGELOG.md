@@ -15,6 +15,8 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Edit Road: Set Heights gives a stretch of a road a start and an end height, as stairs or a ramp.
 - Walking up or down a road with heights says how far it goes, "12 yd up".
 - Edit Wall: make a wall you drew a cliff, with the ground's height on each side. Routes go round it from below and jump down when the drop is safe.
+- Over a building's inside map, its roads and walls show for editing, the rest faded.
+- With the road or wall tools on, the pointer shows a building's floor heights, and roads drawn there start at the floor's height.
 - Roads: new roads and walls in Arathi Highlands.
 - Roads: the way up Grom'gol's zeppelin tower in Stranglethorn Vale.
 - Swims on a route show as a wavy line on the map and the minimap; hover one to see why, right-click it to go round by land for that trip.
