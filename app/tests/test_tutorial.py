@@ -247,6 +247,9 @@ def _start(locale=None, saved=None):
     ns.Nav.FUN = False
     lua.execute(SETUP)
     ns.Tutorial.DONE_PAUSE = 0  # (the next step at once, not after "Done!")
+    # (1.3.10: the setup, once for everyone, comes before the offer, Setup.lua; taken as seen here: the order is
+    # test_setup.py's)
+    ns.db.setup.shown = ns.Setup.VERSION
     return lua, ns
 
 
@@ -280,6 +283,7 @@ def _reset(lua, ns):
       -- (1.3.10: a first install's tips in the route panel stand in for the offer, Setup.lua; off here, the offer's
       -- own tests: test_setup.py has the first install's path)
       ns.db.tips = {}
+      ns.db.setup.shown = ns.Setup.VERSION
       ns.Nav.Clear()
       ns.GPS.PendingStops({})
       ns.GPS.Follow()

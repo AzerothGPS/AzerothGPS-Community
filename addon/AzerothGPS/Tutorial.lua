@@ -1912,6 +1912,11 @@ end
 function T.MaybePrompt()
   if T.prompted or T.run then return false end
   if not T.CanPrompt() then return false end
+  -- (1.3.10: the setup first, Setup.lua; this offer after it's closed, never two popups at once)
+  if ns.Setup and ns.Setup.Holds and ns.Setup.Holds() then
+    T.afterSetup = true
+    return false
+  end
   T.prompted = true
   local resume = T.resume
   if resume then
