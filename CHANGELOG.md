@@ -23,6 +23,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 ### Fixed
 
+- Ironforge: routes go round the Great Forge's lava pits on the walkway, not through the lava.
 - Walks from Tarren Mill's flight master head south-east again, not round by the town.
 - Routes no longer swim far out to sea where fatigue sets in, such as from the Wetlands across to Southshore; they keep near the shore.
 
