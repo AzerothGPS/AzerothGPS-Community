@@ -10,6 +10,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Detach the route panel into its own window that stays open while the map is closed (its button on the panel, or Options > Map window).
 - The detached route panel can hide its buttons and show only the route's text, and its background can be see-through (Options > Map window).
 - Resize the detached route panel by its corner; steps that don't fit show as "... 3 more steps".
+- Lock the detached route panel in place (its lock button, or Options > Map window).
 
 ## 1.3.8
 

@@ -95,6 +95,7 @@ ns.DEFAULTS = {
     -- (detached only, 1.3.9: just its text, every button hidden; its dark box's opacity in percent, 70 as before)
     navPanelHideButtons = false,
     navPanelAlpha = 70,
+    navPanelLocked = false, -- (detached: no dragging, sizing or right-click back to the map)
     reopenFollow = false, -- hidden while looking around the map (a route set): reopens on the player
     questing = true, -- a stop in a quest area is done when the quest's objectives are
     questZoneOnly = false, -- the quest route: only the quests in the zone you're in
