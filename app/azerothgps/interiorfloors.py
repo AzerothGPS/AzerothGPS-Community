@@ -13,7 +13,8 @@ the roads drawn there (their `gz`, never `zs`). The game gives addons no player 
    placed building's room: over one of the room's floor faces at about its height (NPC_UNDER_YD under, NPC_OVER_YD
    over it): that floor's confirmed; a floor face there that the gathering left out (a small balcony): its floor added
    from the NPC. In the room with no face under it and no floor near its height: a conflict, for the survey.
-3. **Surveyed in game** (overrides/interior_floors.json): heights measured where neither gave one; they win.
+3. **Surveyed in game** (overrides/interior_floors.json): heights measured where neither gave one; added to the room's
+   floors, replacing one within SURVEY_SAME_YD.
 
 What's left goes to the survey's list (FILE_TODO): rooms with no floor (a room of ROOM_MIN_AREA or more, ROOM_MIN_HIGH
 tall), and NPCs standing at a height no floor has. One spot per model's room: its floors are the model's, the same in
@@ -45,6 +46,7 @@ FLAT_YD = 0.6  # a face with this little height across it is flat: a floor's
 CHAIN_YD = 0.75  # flat faces this near in height: one floor
 MIN_AREA = 6.0  # square yards: a floor smaller is a shelf, a step, a table
 MERGE_YD = 2.5  # floors this near: one (a dais, a step down)
+SURVEY_SAME_YD = 1.0  # a floor in the data this near a surveyed height: the same floor (the measured height kept)
 NPC_UNDER_YD, NPC_OVER_YD = 1.0, 2.5  # an NPC's spot this far under or over a floor face: standing on it
 NPC_FLOOR_YD = 2.5  # an NPC this near a room's floor in height is on it (no face under it: a rug, a doodad)
 ROOM_MIN_AREA, ROOM_MIN_HIGH = 25.0, 2.5  # a room with no floor smaller or lower: a chimney, a beam, not to survey
@@ -365,8 +367,8 @@ def build(cd, data_dir: Path, log=print, interiors_text: str | None = None, spaw
     surveyed = 0
     for (fid, k), hs in over.items():
         if fid in floors and k < len(floors[fid]):
-            floors[fid][k] = [round(h, 1) for h in hs]
-            src[(fid, k)] = {round(h, 1): "survey" for h in hs}
+            floors[fid][k] = _merged(floors[fid][k], [round(h, 1) for h in hs])
+            src.setdefault((fid, k), {}).update({round(h, 1): "survey" for h in hs})
             conflicts.pop((fid, k), None)
             surveyed += 1
     # what's left: the survey's list (one placement per model's room)
@@ -494,8 +496,15 @@ def load_todo(path: Path = FILE_TODO) -> list:
     return json.loads(path.read_text(encoding="utf-8"))["todo"] if path.exists() else []
 
 
+def _merged(have: list, surveyed: list) -> list:
+    """A room's floors with the surveyed heights added: a floor within SURVEY_SAME_YD of a surveyed one gives way to it
+    (measured beats derived); the room's other floors are kept (a survey measures one floor, not the room's all)."""
+    out = [h for h in have if all(abs(h - v) > SURVEY_SAME_YD for v in surveyed)]
+    return sorted(set(out) | set(surveyed))
+
+
 def patch_lua(text: str, over: dict, rooms_of: dict) -> str:
-    """Data/InteriorFloors.lua with the surveyed rooms' heights put in ({(fid, room): [heights]}); `rooms_of` {fid:
+    """Data/InteriorFloors.lua with the surveyed rooms' heights added in ({(fid, room): [heights]}); `rooms_of` {fid:
     number of rooms} for a model the file has no line for yet."""
     lines = text.splitlines()
     by_fid = defaultdict(dict)
@@ -511,7 +520,7 @@ def patch_lua(text: str, over: dict, rooms_of: dict) -> str:
         for k, hs in by_fid[fid].items():
             while len(cells) <= k:
                 cells.append("")
-            cells[k] = " ".join(f"{h:g}" for h in hs)
+            cells[k] = " ".join(f"{h:g}" for h in _merged([float(v) for v in cells[k].split()], hs))
         lines[i] = f"  [{fid}] = {{ {', '.join(chr(34) + c + chr(34) for c in cells)} }},"
         seen.add(fid)
     end = max(i for i, line in enumerate(lines) if line == "}")
