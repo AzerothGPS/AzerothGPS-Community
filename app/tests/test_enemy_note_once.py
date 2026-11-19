@@ -217,10 +217,11 @@ def test_walking_by_dun_algaz_off_and_on_the_road_plans_a_bounded_amount(game):
         spots = {str(k): len(list(v.keys())) for k, v in work.spots.items()}
         # (each square's check made from one spot: before, from up to five as the player walked through it)
         assert spots and all(n == 1 for n in spots.values()), spots
-        # (before: 12 checks, 160 plans and 276 routes; now 9, 137 and 225)
+        # (before: 12 checks, 160 plans and 276 routes; now 9, 137 and 225; with Arathi's roads and walls by
+        # Hammerfall drawn in game, #654: 9, 143 and 255, the plans' walks over that ground)
         assert work.checks <= 10, f"{work.checks} ride checks in 2 minutes"
         assert work.plans <= 150, f"{work.plans} plans in 2 minutes"
-        assert work.routes <= 250, f"{work.routes} routes in 2 minutes"
+        assert work.routes <= 265, f"{work.routes} routes in 2 minutes"
     finally:
         R.WARM, R.SYNC_WALKS = False, True
         lua.execute("""
