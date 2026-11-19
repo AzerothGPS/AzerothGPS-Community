@@ -2,7 +2,7 @@
 
 Each version's section is its release notes (GitHub and CurseForge).
 
-## 1.3.9 (in progress)
+## 1.3.9
 
 ### New
 
