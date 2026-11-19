@@ -10,6 +10,9 @@ local _, ns = ...
 
 local R = {}
 ns.Router = R
+-- (read only, never written: `ipairs(t[k] or EMPTY)` in the long loops of the background work, not a new table each
+-- time; issue #657: that garbage, a table a bucket a segment, made the collector's 15+ ms steps)
+local EMPTY = {}
 
 R.OFFROAD_PENALTY = 1.25 -- road mode: off-road yards cost this much more than road yards
 -- Options > Routing's Road tolerance (asked 2026-11-04: `roadTolerance`, ROAD_TOLERANCE_MIN to MAX, 0 the default): a
@@ -280,7 +283,7 @@ function R.JoinOnto(nodes, edges, nRoads, base, joins)
       local ax, ay, bx, by = e[i], e[i + 1], e[i + 2], e[i + 3]
       for kx = math.floor((math.min(ax, bx) - R.JOIN_SNAP) / JOIN_BUCKET), math.floor((math.max(ax, bx) + R.JOIN_SNAP) / JOIN_BUCKET) do
         for ky = math.floor((math.min(ay, by) - R.JOIN_SNAP) / JOIN_BUCKET), math.floor((math.max(ay, by) + R.JOIN_SNAP) / JOIN_BUCKET) do
-          for _, ji in ipairs(want[kx * 65536 + ky] or {}) do
+          for _, ji in ipairs(want[kx * 65536 + ky] or EMPTY) do
             local j = base + joins[ji]
             local d2 = near(nodes[j * 2 - 1], nodes[j * 2], ax, ay, bx, by)
             if d2 <= snap2 and (not best[ji] or d2 < best[ji][1]) then best[ji] = { d2, e } end
@@ -442,7 +445,7 @@ function R.FloorIndex(edges, zs)
     local hs, seen = {}, {}
     for kx = math.floor((x - r) / B), math.floor((x + r) / B) do
       for ky = math.floor((y - r) / B), math.floor((y + r) / B) do
-        for _, s in ipairs(b[kx * 65536 + ky] or {}) do
+        for _, s in ipairs(b[kx * 65536 + ky] or EMPTY) do
           if not seen[s] then
             seen[s] = true
             local ax, ay, vx, vy = s[1], s[2], s[3] - s[1], s[4] - s[2]
@@ -636,7 +639,7 @@ function R.WithTracks(roads, tracks, cont)
     local seen, out = {}, {}
     for kx = math.floor(x0 / BK), math.floor(x1 / BK) do
       for ky = math.floor(y0 / BK), math.floor(y1 / BK) do
-        for ed in pairs(grid[kx * 65536 + ky] or {}) do
+        for ed in pairs(grid[kx * 65536 + ky] or EMPTY) do
           if not seen[ed] then
             seen[ed] = true
             local bb = EdgeBox(ed)
@@ -1124,20 +1127,34 @@ function R.WithTracks(roads, tracks, cont)
     end
   end
   -- dead-end stubs the cuts left (a road cut short beside a drawn one) go
+  -- (only the cut nodes' degrees, and a new list only when a stub goes: a table over every node of the continent, made
+  -- three times, was most of a 12 ms stretch of the background build with the collector's work, issue #657)
   if next(cutNodes) then
     for _ = 1, 3 do
       local deg = {}
       for _, ed in ipairs(e) do
-        deg[ed[1]] = (deg[ed[1]] or 0) + 1
-        deg[ed[2]] = (deg[ed[2]] or 0) + 1
+        tick(2000)
+        local a, b = ed[1], ed[2]
+        if cutNodes[a] then deg[a] = (deg[a] or 0) + 1 end
+        if cutNodes[b] then deg[b] = (deg[b] or 0) + 1 end
       end
-      local kept, gone = {}, false
-      for _, ed in ipairs(e) do
-        local stub = ed[3] < R.TRACK_STUB and ((cutNodes[ed[1]] and deg[ed[1]] == 1) or (cutNodes[ed[2]] and deg[ed[2]] == 1))
-        if stub then gone = true else kept[#kept + 1] = ed end
+      local function isStub(ed)
+        return ed[3] < R.TRACK_STUB and ((cutNodes[ed[1]] and deg[ed[1]] == 1) or (cutNodes[ed[2]] and deg[ed[2]] == 1))
+      end
+      local first
+      for k, ed in ipairs(e) do
+        tick(2000)
+        if isStub(ed) then first = k break end
+      end
+      if not first then break end
+      local kept = {}
+      for k = 1, first - 1 do kept[k] = e[k] end
+      for k = first, #e do
+        tick(2000)
+        local ed = e[k]
+        if not isStub(ed) then kept[#kept + 1] = ed end
       end
       e = kept
-      if not gone then break end
     end
   end
   return n, e, zs or roads.z, nzs or roads.nz, inside
@@ -1273,7 +1290,7 @@ local function Bridges(nodes, adj, short, nearOverlay, skip, zs, nz)
     local bx, by = math.floor(ax / B), math.floor(ay / B)
     for kx = bx - 1, bx + 1 do
       for ky = by - 1, by + 1 do
-        for _, b in ipairs(buckets[kx * 65536 + ky] or {}) do
+        for _, b in ipairs(buckets[kx * 65536 + ky] or EMPTY) do
           if b > a then consider(a, b, ax, ay, pa) end
         end
       end
@@ -1473,7 +1490,7 @@ function R.DeadEndLinks(nodes, adj, bridges, skip, nearOverlay, zs, edges, nz)
       local a = table.remove(open, bi)
       if not done[a] then
         done[a] = true
-        for _, l in ipairs(adj[a] or {}) do
+        for _, l in ipairs(adj[a] or EMPTY) do
           local b, d = l[1], dist[a] + l[2]
           if d <= limit and (dist[b] == nil or d < dist[b]) then
             dist[b] = d
@@ -1486,7 +1503,7 @@ function R.DeadEndLinks(nodes, adj, bridges, skip, nearOverlay, zs, edges, nz)
     local bx, by = math.floor(x / B), math.floor(y / B)
     for kx = bx - 1, bx + 1 do
       for ky = by - 1, by + 1 do
-        for _, m in ipairs(buckets[kx * 65536 + ky] or {}) do
+        for _, m in ipairs(buckets[kx * 65536 + ky] or EMPTY) do
           local dx, dy = nodes[m * 2 - 1] - x, nodes[m * 2] - y
           local d2 = dx * dx + dy * dy
           if m ~= n and d2 <= B2 and zok(n, m) and FloorsNear(nz, n, m, d2) then
@@ -1500,7 +1517,7 @@ function R.DeadEndLinks(nodes, adj, bridges, skip, nearOverlay, zs, edges, nz)
     for j = 1, math.min(#near, R.DEAD_END_LINKS) do
       local d, m = near[j][1], near[j][2]
       local have = false
-      for _, l in ipairs(bridges[n] or {}) do if l[1] == m then have = true end end
+      for _, l in ipairs(bridges[n] or EMPTY) do if l[1] == m then have = true end end
       if not have then
         bridges[n] = bridges[n] or {}
         bridges[m] = bridges[m] or {}
@@ -1524,6 +1541,8 @@ R.CAVE_JOIN_YD = 25
 R.CAVE_JOIN_WALK_FACTOR, R.CAVE_JOIN_WALK_EXTRA = 2, 10 -- ... and a walk over the grids between them this short
 R.CAVE_JOIN_CORNER_YD = 6 -- ... on the cave's own cells all the way, at most this many of them closed (a corner cut)
 R.CAVE_JOIN_ROAD_FACTOR = 4 -- ... and only where the roads between them are longer than this many times the link
+R.CAVE_JOIN_REACH_PAD = 10 -- yards: the roads round the ends looked at that far past where those could reach
+local CAVE_CELL = 128
 function R.JoinCavePieces(cont, n, e, base, nz)
   local P = ns.Passability
   if not (P and P.FindPath and P.OverlayRaw) then return {} end
@@ -1546,15 +1565,13 @@ function R.JoinCavePieces(cont, n, e, base, nz)
     end
     return shut <= R.CAVE_JOIN_CORNER_YD
   end
-  local adj, deg = {}, {}
+  -- (the caves' nodes' roads counted only: the ends looked for are theirs)
+  local deg = {}
   for k = 1, #e do
     Breathe(k, 2000)
-    local a, b, len = e[k][1], e[k][2], e[k][3] or 0
-    adj[a] = adj[a] or {}
-    adj[b] = adj[b] or {}
-    adj[a][#adj[a] + 1] = { b, len }
-    adj[b][#adj[b] + 1] = { a, len }
-    deg[a], deg[b] = (deg[a] or 0) + 1, (deg[b] or 0) + 1
+    local a, b = e[k][1], e[k][2]
+    if a > base then deg[a] = (deg[a] or 0) + 1 end
+    if b > base then deg[b] = (deg[b] or 0) + 1 end
   end
   -- (dead ends of the caves' roads, with no height: floors over floors keep their own roads, layers.py's)
   local function loose(nd)
@@ -1570,6 +1587,43 @@ function R.JoinCavePieces(cont, n, e, base, nz)
       buckets[key][#buckets[key] + 1] = nd
     end
   end
+  -- The roads by their ends (flat: { node, yards, node, yards, ... } a node), only round the ends: `near` goes no
+  -- further along them than CAVE_JOIN_ROAD_FACTOR times a link under CAVE_JOIN_YD, and a road is never shorter than
+  -- the line between its ends. (Every road of the continent, two tables each, were most of the garbage of the
+  -- background build and its collector's 10 ms steps, issue #657.)
+  local reach = B * R.CAVE_JOIN_ROAD_FACTOR + 1 + R.CAVE_JOIN_REACH_PAD
+  local cells = {}
+  for _, nd in ipairs(ends) do
+    local x, y = n[nd * 2 - 1], n[nd * 2]
+    for kx = math.floor((x - reach) / CAVE_CELL), math.floor((x + reach) / CAVE_CELL) do
+      for ky = math.floor((y - reach) / CAVE_CELL), math.floor((y + reach) / CAVE_CELL) do
+        cells[kx * 65536 + ky] = true
+      end
+    end
+  end
+  local function inCells(nd)
+    return cells[math.floor(n[nd * 2 - 1] / CAVE_CELL) * 65536 + math.floor(n[nd * 2] / CAVE_CELL)]
+  end
+  local adj = {}
+  local function link(a, b, len)
+    local l = adj[a]
+    if not l then
+      l = {}
+      adj[a] = l
+    end
+    l[#l + 1], l[#l + 2] = b, len
+  end
+  if #ends > 0 then
+    for k = 1, #e do
+      Breathe(k, 2000)
+      local a, b = e[k][1], e[k][2]
+      if inCells(a) or inCells(b) then
+        local len = e[k][3] or 0
+        link(a, b, len)
+        link(b, a, len)
+      end
+    end
+  end
   -- (the roads' yards from `a`, up to `limit`: a small Dijkstra; whether `b` is reached)
   local function near(a, b, limit)
     local dist, done, open = { [a] = 0 }, {}, { a }
@@ -1580,8 +1634,9 @@ function R.JoinCavePieces(cont, n, e, base, nz)
       if x == b then return true end
       if not done[x] then
         done[x] = true
-        for _, l in ipairs(adj[x] or {}) do
-          local y, d = l[1], dist[x] + l[2]
+        local l = adj[x] or EMPTY
+        for i = 1, #l - 1, 2 do
+          local y, d = l[i], dist[x] + l[i + 1]
           if d <= limit and (dist[y] == nil or d < dist[y]) then
             dist[y] = d
             open[#open + 1] = y
@@ -1601,7 +1656,7 @@ function R.JoinCavePieces(cont, n, e, base, nz)
     local bx, by = math.floor(x / B), math.floor(y / B)
     for kx = bx - 1, bx + 1 do
       for ky = by - 1, by + 1 do
-        for _, m in ipairs(buckets[kx * 65536 + ky] or {}) do
+        for _, m in ipairs(buckets[kx * 65536 + ky] or EMPTY) do
           if m ~= nd and not linked[m] then
             local d = math.sqrt((n[m * 2 - 1] - x) ^ 2 + (n[m * 2] - y) ^ 2)
             if d < bd and not near(nd, m, d * R.CAVE_JOIN_ROAD_FACTOR + 1) then
@@ -1624,8 +1679,8 @@ function R.JoinCavePieces(cont, n, e, base, nz)
       e[#e + 1] = ed
       made[#made + 1] = #e
       linked[nd], linked[best] = true, true
-      adj[nd][#adj[nd] + 1] = { best, ed[3] }
-      adj[best][#adj[best] + 1] = { nd, ed[3] }
+      link(nd, best, ed[3])
+      link(best, nd, ed[3])
     end
   end
   return made
@@ -1695,7 +1750,7 @@ function R.JoinDrawnEnds(nodes, edges, caveOf, dropOf, mouth)
   local function each(x0, x1, y0, y1, fn)
     for kx = math.floor((x0 - snap) / B), math.floor((x1 + snap) / B) do
       for ky = math.floor((y0 - snap) / B), math.floor((y1 + snap) / B) do
-        for _, j in ipairs(want[kx * 65536 + ky] or {}) do fn(j) end
+        for _, j in ipairs(want[kx * 65536 + ky] or EMPTY) do fn(j) end
       end
     end
   end
@@ -2144,7 +2199,7 @@ function BuildGraph(cont)
   for an = 1, #nodes / 2 do
     Breathe(an, 2000)
     adjIdx[an] = ak
-    for _, a in ipairs(adj[an] or {}) do
+    for _, a in ipairs(adj[an] or EMPTY) do
       adjTo[ak], adjLen[ak], adjE[ak], adjCost[ak] = a[1], a[2], a[4] and a[3] or -a[3], a[5] or 0
       ak = ak + 1
     end
@@ -2294,7 +2349,7 @@ function R.HostileTowns(cont, side)
     local x, y, r = list[i], list[i + 1], list[i + 2]
     for kx = math.floor((x - r - gap) / HB), math.floor((x + r + gap) / HB) do
       for ky = math.floor((y - r - gap) / HB), math.floor((y + r + gap) / HB) do
-        for _, j in ipairs(idx[kx * 65536 + ky] or {}) do
+        for _, j in ipairs(idx[kx * 65536 + ky] or EMPTY) do
           if j > i and (list[j] - x) ^ 2 + (list[j + 1] - y) ^ 2 <= (r + list[j + 2] + gap) ^ 2 then -- (each pair once)
             local a, b = find(i), find(j)
             if a ~= b then parent[a] = b end
@@ -2769,7 +2824,7 @@ local function NodesNear(g, x, y, maxd)
   local list = {}
   for kx = bx - reach, bx + reach do
     for ky = by - reach, by + reach do
-      for _, m in ipairs(buckets[Key(kx, ky)] or {}) do
+      for _, m in ipairs(buckets[Key(kx, ky)] or EMPTY) do
         local d = Dist(x, y, g.n[m * 2 - 1], g.n[m * 2])
         if d <= maxd then list[#list + 1] = { m, d } end
       end
@@ -2827,7 +2882,7 @@ local function NodeLinks(g, cont, n)
   -- the nearest reachable one in each direction (past rock, the next nearest)
   local links = {}
   for sector = 0, count - 1 do
-    for _, nd in ipairs(sectors[sector] or {}) do
+    for _, nd in ipairs(sectors[sector] or EMPTY) do
       local m = nd[1]
       local mx, my = g.n[m * 2 - 1], g.n[m * 2]
       local c = ns.Passability.SegmentCost(cont, x, y, mx, my)
@@ -3497,7 +3552,7 @@ function R.OnBridgeModel(cont, x, y)
     end
     R.bridgeIndex[cont] = ix
   end
-  for _, o in ipairs(ix.cells[math.floor(x / B) * 65536 + math.floor(y / B)] or {}) do
+  for _, o in ipairs(ix.cells[math.floor(x / B) * 65536 + math.floor(y / B)] or EMPTY) do
     if R.InOutline(o, x, y) then return true end
   end
   return false
@@ -4648,7 +4703,7 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
     local v = roadRatio[ei]
     if v == nil then
       local extra = 0
-      for t, yd in pairs(g.towns and g.towns[ei] or {}) do
+      for t, yd in pairs(g.towns and g.towns[ei] or EMPTY) do
         if not (exempt and exempt[t]) then extra = extra + yd end
       end
       v = 1 + (extra * (R.HOSTILE_FACTOR - 1) + (not near and g.light and g.light[ei] or 0)) / math.max(g.e[ei][3], 1)
@@ -5221,7 +5276,7 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
       end
       -- across a gap to another piece of the road network (walked around obstacles below)
       local x, y = g.n[n * 2 - 1], g.n[n * 2]
-      for _, b in ipairs(g.bridges[n] or {}) do
+      for _, b in ipairs(g.bridges[n] or EMPTY) do
         local m = b[1]
         local mx, my = g.n[m * 2 - 1], g.n[m * 2]
         if b.raw == nil and (not b.deadEnd or (opts and opts.deadEnds)) then
@@ -5261,7 +5316,7 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
             b.raw = (c or few or walked or b[2] * blockedPenalty(x, y, mx, my)) + HostileExtra(cont, x, y, mx, my)
           end
           if walked then -- (the same walk back: its twin too, whose own search from the other end may find none)
-            for _, t in ipairs(g.bridges[m] or {}) do
+            for _, t in ipairs(g.bridges[m] or EMPTY) do
               if t[1] == n and t.deadEnd then t.raw, t.shut, t.open = b.raw, nil, b.open end
             end
           end
@@ -5384,7 +5439,7 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
           if not (p.hop and walkAll) then freshHop = true end
           if b and not b.hop then
             b.hop = true
-            for _, t in ipairs(g.bridges[p.bm] or {}) do
+            for _, t in ipairs(g.bridges[p.bm] or EMPTY) do
               if t[1] == p.bn then t.hop = true end
             end
           end
@@ -5410,7 +5465,7 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
         if b and b.wide and not path and not searching and b[2] > R.JUMP_YD then
           if not b.jump then -- (its price is left alone: every other route as it was)
             b.jump = true
-            for _, t in ipairs(g.bridges[p.bm] or {}) do
+            for _, t in ipairs(g.bridges[p.bm] or EMPTY) do
               if t[1] == p.bn then t.jump = true end
             end
           end
