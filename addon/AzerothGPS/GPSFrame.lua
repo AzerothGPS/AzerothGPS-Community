@@ -3745,12 +3745,10 @@ end
 -- What a swim's tooltip says: { title, lines }.
 function G.SwimTip()
   local N = ns.Nav
-  local lines = { L["The route swims here: swimming is slower than running, and the time to the stop counts it, but it's still quicker than the way round by land."] }
+  local lines = {}
   local fast = N.WaterFast and N.WaterFast()
   if fast then
     lines[#lines + 1] = Format(L["%s: as fast as on land."], fast.name or "?")
-  else
-    lines[#lines + 1] = L["Faster with water walking (a spell, potion or elixir), levitation, or Aquatic Form."]
   end
   if N.SwimAllowed and not N.SwimAllowed() then
     lines[#lines + 1] = L["No way round by land: this swim stays."]
