@@ -144,7 +144,11 @@ end
 function Lay.LearnNode(name, line2)
   if not name or name == "" or not line2 then return nil end
   for kind, prof in pairs(Lay.PROFESSION) do
-    if line2 == prof and name ~= prof then
+    -- (the profession in the client's language too, its gathering spell's name: "Bergbau", "Kräuterkunde". A German
+    -- client's tooltips never said "Mining", no name was learned, and KNOWN_NODES are the English ones: no herb or
+    -- vein was ever saved, "Kupfervorkommen" isn't "Copper Vein"; reported 2026-11-19)
+    local shown = SpellName(Lay.GATHER_SPELLS[kind])
+    if (line2 == prof or line2 == shown) and name ~= prof and name ~= shown then
       local learned = Learned()
       if learned and not nodeKind[name] then learned[name] = kind end
       return kind
