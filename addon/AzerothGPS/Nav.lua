@@ -2048,6 +2048,16 @@ local function PlanParts(plan, routes)
   return { parts = parts }
 end
 
+-- Whether a trip from `cont` to stop `d` starts down in a city (a city level, Undercity's) on the stop's continent.
+-- (reported 2026-11-18, 1.3.9, Horde level 24 in Undercity to Loch Modan: "fly to The Sepulcher, walk 10.3k yd", away
+-- from the stop, with the flight to Tarren Mill known. The plan's straight walk from The Sepulcher missed the Arathi
+-- Highlands, too high, and from Tarren Mill crossed them; the road from either crosses them. The ride check, which
+-- routes the plan's walks and plans again past a long way round, ran only from the stop's own continent, never down
+-- in the city, so the plan's straight lines chose)
+function N.CityStart(cont, d)
+  return cont ~= d.cont and ns.CityLevels and ns.CityLevels[cont] ~= nil and Geo.Base(cont) == d.cont or false
+end
+
 local function CompareRide(cont, sx, sy, d, walk, tps, opts, sz)
   -- (the player's spot rounded; a stop's as it is: it doesn't move, and 25 yd off Cliffspring Falls' was out of the
   -- cave it's down in, so the ride compared wasn't the one taken, the overnight trip sweep, 2026-10-07)
@@ -2056,12 +2066,17 @@ local function CompareRide(cont, sx, sy, d, walk, tps, opts, sz)
   if opts.transient then qx, qy = math.floor(sx / q + 0.5) * q, math.floor(sy / q + 0.5) * q end
   local legs = N.Plan(cont, qx, qy, walk, d, tps, math.huge)
   local fixed = { fixed = opts.fixed }
-  local lr = LegRoute(cont, qx, qy, d.x, d.y, LegOpts(opts.fixed, sz, N.StopZ(d)), true)
-  if not (legs and lr and lr.pts and lr.length and lr.length >= N.RIDE_CHECK_MIN_YD) then return { won = false, final = true } end
+  -- (down in a city on the stop's continent, N.CityStart: no walk there in one, the way out is the city's lift or
+  -- tunnel, a ride of the plan's. Only the ways with a ride weighed against each other, the walk out among them; the
+  -- walk all the way never wins here, `lr` none)
+  local city = N.CityStart(cont, d)
+  local lr = not city and LegRoute(cont, qx, qy, d.x, d.y, LegOpts(opts.fixed, sz, N.StopZ(d)), true)
+  if not legs then return { won = false, final = true } end
+  if not city and not (lr and lr.pts and lr.length and lr.length >= N.RIDE_CHECK_MIN_YD) then return { won = false, final = true } end
   local Rt = ns.Router
   local exempt = Rt and Rt.ZoneAt and { [Rt.ZoneAt(Geo.Base(cont), sx, sy)] = true, [Rt.ZoneAt(Geo.Base(d.cont), d.x, d.y)] = true }
-  local walkGuard = Unwalkable(lr) and 0 or N.HostileWalkYards(cont, lr.pts)
-  local walkSecs = Unwalkable(lr) and math.huge or Weighed(cont, lr.pts, walk, exempt, lr.blocked)
+  local walkGuard = (city or Unwalkable(lr)) and 0 or N.HostileWalkYards(cont, lr.pts)
+  local walkSecs = (city or Unwalkable(lr)) and math.huge or Weighed(cont, lr.pts, walk, exempt, lr.blocked)
   -- (issue #348: as an Alliance player walking by Brill, every check was provisional, the ride's walks to far flight
   -- masters and docks, 6k to 30k yd, still searched: each check routed them all, 2 s of background work, and was queued
   -- again at the next recalculation, without a break, though the walk took 211 s and the rides alone thousands.) The
@@ -2137,7 +2152,7 @@ local function CompareRide(cont, sx, sy, d, walk, tps, opts, sz)
     pending = pending or p
     if N.HostileBetter(s, g, secs, guard) then legs, routes, secs, guard, replanned = try, tryRoutes, s, g, true end
   end
-  pending = pending or lr.pending
+  pending = pending or (lr and lr.pending)
   local won = N.HostileBetter(secs, guard, walkSecs, walkGuard) or (secs == math.huge and walkSecs == math.huge) -- (neither: the plan's ride)
   -- (one way HOSTILE_RIDE_YD or more nearer the other faction's guards, and the safe one HOSTILE_SLOWER or more slower:
   -- the player's answer, N.riskOk; none yet, the safe way meanwhile and the question for the popup, `risk`)
@@ -2157,7 +2172,7 @@ local function CompareRide(cont, sx, sy, d, walk, tps, opts, sz)
     end
   end
   N.lastRideCheck = string.format("walk routed %.0fs (%.0f yd, %.0f past guards) vs with rides %.0fs (%.0f past guards)%s: %s%s%s",
-    walkSecs, lr.length, walkGuard, secs, guard, replanned and " (planned again past a long way round)" or "",
+    walkSecs, lr and lr.length or 0, walkGuard, secs, guard, replanned and " (planned again past a long way round)" or "",
     won and "rides" or "walk", risk and " (the safe way, asking)" or "", pending and " (provisional, not remembered)" or "")
   return { won = won, final = not pending, legs = legs, x = qx, y = qy, replanned = replanned, risk = risk }
 end
@@ -2409,13 +2424,15 @@ local function Stretch(cont, sx, sy, d, walk, opts, sz)
     local r = routes[1]
     check = r and not r.pending and r.length >= N.RIDE_CHECK_FAR_YD or false
   end
-  if ((#legs == 1 and legs[1].walk) or rides) and legs[1].cont == cont and d.cont == cont and check then
+  -- (and from down in a city on the stop's continent with a ride, N.CityStart: the rides weighed, not the walk)
+  local city = rides and N.CityStart(cont, d)
+  if ((#legs == 1 and legs[1].walk) or rides) and legs[1].cont == cont and (d.cont == cont or city) and check then
     local ride, rideRoutes, won = RideInstead(cont, sx, sy, d, walk, tps, opts, sz)
     if ride then
       legs, routes = ride, rideRoutes
-    elseif won == false and rides then -- (walking all the way wins)
+    elseif won == false and rides and not city then -- (walking all the way wins)
       legs, routes = { { walk = true, cont = cont, x1 = sx, y1 = sy, x2 = d.x, y2 = d.y } }, nil
-    elseif won == nil and rides then
+    elseif won == nil and rides and not city then
       -- (the ride check not done yet, and nothing it said for this stop: meanwhile the walk, routed, where there's a way
       -- on foot and it weighs (as the check weighs it) no more than INTERIM_WALK_SHARE times the plan's time; the ride
       -- once the check says so. Not the plan's ride, chosen by straight lines: reported 2026-11-14, level 20 from Tarren
