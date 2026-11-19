@@ -715,6 +715,64 @@ def cmd_npc_floors(args) -> int:
     return 0
 
 
+def cmd_interior_floors(args) -> int:
+    """The floors' heights in the buildings' inside maps (Data/InteriorFloors.lua) from the models, checked and filled
+    with the NPCs' spots; the rooms neither settles go to the floor height survey's list."""
+    from . import interiorfloors as F
+
+    cd = _client(args)
+    doc = F.build(cd, DATA)
+    r = doc["report"]
+    print(f"{r['models']} models, {r['rooms']} rooms: {r['rooms_with_floors']} with floors; {r['floors_model']} floors "
+          f"from the models, {r['floors_npc']} from NPCs, {r['floors_survey']} surveyed; {r['npc_confirmed']} confirmed "
+          f"by NPCs; {r['todo']} rooms to survey")
+    if args.write:
+        F.FILE.write_text(F.lua_text(doc["floors"]), encoding="utf-8", newline="\n")
+        F.write_todo(doc["todo"])
+        print(f"wrote {F.FILE} and {F.FILE_TODO}")
+    return 0
+
+
+def _survey_dirs(args) -> list:
+    dirs = [Path(args.wow_path) / args.flavor / "Interface" / "AddOns"] + extra_addons_dirs()
+    return [d for d in dirs if d.is_dir()]
+
+
+def cmd_floor_survey(args) -> int:
+    """The floor height survey: `export` writes the rooms still to measure into the survey addon's folder (any addon
+    whose .toc lists FloorSurvey.lua); `watch` opens the window that checks and keeps each height as it's measured
+    (floorsurvey.py); `import` takes the heights measured (the window's file, then the addon's SavedVariables) into
+    the floor data (overrides/interior_floors.json, Data/InteriorFloors.lua) and off the list."""
+    from . import interiorfloors as F
+
+    dirs = _survey_dirs(args)
+    if args.action == "watch":
+        from . import floorsurvey as W
+        return W.run_window()
+    if args.action == "export":
+        n = F.export_survey(dirs)
+        print(f"{len(F.load_todo())} rooms to measure; {n} survey addon(s) found")
+        return 0 if n else 1
+    from .floorsurvey import CAPTURES
+    doc = F.read_survey(dirs, CAPTURES)
+    if not doc["rooms"]:
+        print("nothing measured yet")
+        return 0
+    tmp = DATA / "debug" / "floor_survey.json"
+    tmp.parent.mkdir(parents=True, exist_ok=True)
+    tmp.write_text(json.dumps(doc, indent=1), encoding="utf-8")
+    n = F.import_survey(tmp)
+    over = F.load_overrides()
+    wmos, _places = F.shipped_interiors()
+    text = F.FILE.read_text(encoding="utf-8")
+    F.FILE.write_text(F.patch_lua(text, over, {f: len(r) for f, r in wmos.items()}), encoding="utf-8", newline="\n")
+    todo = [e for e in F.load_todo() if tuple(int(v) for v in e["id"].split(":")) not in over]
+    F.write_todo(todo)
+    F.export_survey(dirs, todo)
+    print(f"{n} rooms measured taken in ({F.OVERRIDES}); {len(todo)} left to measure")
+    return 0
+
+
 def cmd_npc_spots(args) -> int:
     """NPC spots marked in game (a JSON list of marks: npcspots.py) into overrides/npc_spots.json, and the overrides
     into Data/Npcs.lua (only the spawns marked change; the dump isn't needed)."""
@@ -896,6 +954,11 @@ def _install_into(addons: Path, dev: bool) -> int:
         shutil.rmtree(old)  # replaced by AzerothGPS
         print(f"removed old {old}")
     print(f"copied addon to {dst} -- /reload in game to pick up changes")
+    try:  # (the floor height survey's list, where an addon there takes it: kept up to date with every install)
+        from .interiorfloors import export_survey
+        export_survey([addons])
+    except Exception as e:  # (never fails an install)
+        print(f"floor survey list not written: {e}")
     if dev:
         # the developer tools (a checkout next to this repo, _dev_addon()): never shipped
         src = _dev_addon()
@@ -1263,6 +1326,17 @@ def main(argv: list[str] | None = None) -> int:
     sp = sub.add_parser("npc-floors", help="the heights of the NPCs' spots in the capitals and caves (Data/NpcFloors.lua)")
     sp.add_argument("--write", action="store_true")
     sp.set_defaults(fn=cmd_npc_floors)
+
+    sp = sub.add_parser("interior-floors", help="the floors' heights in the buildings' inside maps (Data/InteriorFloors.lua)")
+    client_args(sp)
+    sp.add_argument("--write", action="store_true", help="write Data/InteriorFloors.lua and the survey's list")
+    sp.set_defaults(fn=cmd_interior_floors)
+
+    sp = sub.add_parser("floor-survey", help="the floor height survey's list out, the heights measured in")
+    sp.add_argument("action", choices=("export", "import", "watch"))
+    sp.add_argument("--wow-path", default=str(DEFAULT_WOW))
+    sp.add_argument("--flavor", default=DEFAULT_FLAVOR)
+    sp.set_defaults(fn=cmd_floor_survey)
 
     sp = sub.add_parser("npcs", help="every friendly NPC, for the search (Data/Npcs.lua)")
     sp.add_argument("--write", action="store_true")

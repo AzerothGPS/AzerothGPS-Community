@@ -45,6 +45,7 @@ Data\Instances.lua
 Data\Transit.lua
 Data\DungeonMaps.lua
 Data\InteriorMaps.lua
+Data\InteriorFloors.lua
 Data\CityPlaces.lua
 Data\Hostile.lua
 Data\Zones.lua

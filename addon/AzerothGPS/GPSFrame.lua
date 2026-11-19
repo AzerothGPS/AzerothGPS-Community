@@ -660,7 +660,7 @@ end
 
 -- Walls near the view (Passability.WallLines, and with `edges` the terrain's impassable
 -- borders: G.BlockEdges): { x1, y1, x2, y2 } in UI units.
-function G.LayoutWalls(px, py, cont, rot, zoom, half, edges)
+function G.LayoutWalls(px, py, cont, rot, zoom, half, edges, focus)
   local segs = {}
   local P = ns.Passability
   if not (P and P.WallLines) then return segs end
@@ -681,7 +681,9 @@ function G.LayoutWalls(px, py, cont, rot, zoom, half, edges)
         -- (a cliff's level section: open, drawn faint; its high side shaded along it with the tools on, 1.3.10)
         local sec = (i - 1) / 2
         local open = w.kind == "cliff" and P.CliffSection and P.CliffSection(w, sec) == "open"
-        segs[#segs + 1] = { lx, ly, dx, dy, faint = faint or (open and true) or nil, own = w.own }
+        -- (a building's inside map being edited, 1.3.10: the walls elsewhere faded, G.EditInterior)
+        local away = focus and not (focus(wx, wy) or focus(w[i - 2], w[i - 1])) or nil
+        segs[#segs + 1] = { lx, ly, dx, dy, faint = faint or (open and true) or nil, own = w.own, away = away }
         if tools and w.kind == "cliff" then
           local x1, y1, x2, y2 = G.CliffShade(w, sec, s)
           if x1 then
@@ -707,7 +709,8 @@ function G.LayoutWalls(px, py, cont, rot, zoom, half, edges)
           dx1, dy1 = Geo.Rotate(dx1 * s, dy1 * s, rot)
           local dx2, dy2 = Geo.ScreenOffset(px, py, bx, by)
           dx2, dy2 = Geo.Rotate(dx2 * s, dy2 * s, rot)
-          segs[#segs + 1] = { dx1, dy1, dx2, dy2, edge = true }
+          segs[#segs + 1] = { dx1, dy1, dx2, dy2, edge = true,
+            away = focus and not (focus(ax, ay) or focus(bx, by)) or nil }
         end
       end
     end
@@ -828,7 +831,9 @@ function G.NodeDots(g)
   G.nodeDots[g] = d
   return d
 end
-function G.LayoutRoads(px, py, cont, rot, zoom, half)
+-- `focus` (optional, 1.3.10): a function (x, y) -> whether a world point is in the building being edited (its inside
+-- map shown, G.EditInterior); the roads elsewhere faded to G.INTERIOR_FADE_ALPHA.
+function G.LayoutRoads(px, py, cont, rot, zoom, half, focus)
   local segs = {}
   -- (the road graph not built yet, after a /reload or a road or wall edit: built in the
   -- background; meanwhile the roads as they were, and the player's drawn ones as drawn)
@@ -883,6 +888,7 @@ function G.LayoutRoads(px, py, cont, rot, zoom, half)
             local alpha = tf and ei and G.OtherFloor(fg, ei, cont, tf) and G.OTHER_FLOOR_ALPHA or nil
             local lx, ly, lc -- last point kept (screen) and its grid cell
             local fx, fy, any -- the first point, and whether any line was kept
+            local lin -- (focus: whether the last point kept is in the building)
             local pvx, pvy -- (the last line's way: a join where the next turns)
             for i = 5, #e, 2 do
               if erases and G.UnderErase(erases, e[i], e[i + 1], e.time, fg and applies or nil) then
@@ -891,6 +897,9 @@ function G.LayoutRoads(px, py, cont, rot, zoom, half)
               local dx, dy = Geo.ScreenOffset(px, py, e[i], e[i + 1])
               dx, dy = Geo.Rotate(dx * s, dy * s, rot)
               local c = (math.floor(dx / cell) + 2048) * 4096 + math.floor(dy / cell) + 2048
+              local pin = focus and focus(e[i], e[i + 1]) or false
+              local a = alpha
+              if focus and not (pin or lin) then a = G.INTERIOR_FADE_ALPHA * (alpha or 1) end
               if c ~= lc then
                 -- (not a piece wholly off one side of the view, nor one drawn already)
                 if lx and not ((lx < -edge and dx < -edge) or (lx > edge and dx > edge)
@@ -899,13 +908,13 @@ function G.LayoutRoads(px, py, cont, rot, zoom, half)
                   any = true
                   if not seen[key] then
                     seen[key] = true
-                    out[#out + 1] = { lx, ly, dx, dy, src, alpha }
+                    out[#out + 1] = { lx, ly, dx, dy, src, a }
                     if #out >= G.MAX_SEGMENTS then return out, true end
                     local vx, vy = dx - lx, dy - ly
                     if tools and pvx then
                       local n1, n2 = math.sqrt(pvx * pvx + pvy * pvy), math.sqrt(vx * vx + vy * vy)
                       if n1 > 0 and n2 > 0 and (pvx * vx + pvy * vy) / (n1 * n2) < G.JOIN_TURN_COS then
-                        out[#out + 1] = { lx - 1.5, ly, lx + 1.5, ly, src, alpha, 3 }
+                        out[#out + 1] = { lx - 1.5, ly, lx + 1.5, ly, src, a, 3 }
                         if #out >= G.MAX_SEGMENTS then return out, true end
                       end
                     end
@@ -913,14 +922,14 @@ function G.LayoutRoads(px, py, cont, rot, zoom, half)
                   end
                 end
                 if not lx then fx, fy = dx, dy end
-                lx, ly, lc = dx, dy, c
+                lx, ly, lc, lin = dx, dy, c, pin
               end
               if i >= #e - 1 and not any and lx and math.abs(lx) <= edge and math.abs(ly) <= edge then
                 -- (all of it within one cell: one short line in that cell, once)
                 local key = lc * 16777216 + lc
                 if not seen[key] then
                   seen[key] = true
-                  out[#out + 1] = { fx, fy, dx, dy, src, alpha }
+                  out[#out + 1] = { fx, fy, dx, dy, src, a }
                   if #out >= G.MAX_SEGMENTS then return out, true end
                 end
               end
@@ -955,7 +964,8 @@ function G.LayoutRoads(px, py, cont, rot, zoom, half)
         dx, dy = Geo.Rotate(dx * s, dy * s, rot)
         if math.abs(dx) <= edge and math.abs(dy) <= edge then
           local w = d[3] and G.JUNCTION_DOT or G.END_DOT
-          segs[#segs + 1] = { dx - w / 2, dy, dx + w / 2, dy, d[3] and G.JUNCTION_COLOR or G.ROAD_END_COLOR, nil, w }
+          local a = focus and not focus(d[1], d[2]) and G.INTERIOR_FADE_ALPHA or nil
+          segs[#segs + 1] = { dx - w / 2, dy, dx + w / 2, dy, d[3] and G.JUNCTION_COLOR or G.ROAD_END_COLOR, a, w }
         end
       end
     end
@@ -1210,6 +1220,123 @@ function G.InteriorUnder(x, y, cont)
     end
   end
   return best, bestW, bestG
+end
+
+-- Editing a building on its inside map (1.3.10, asked 2026-11-19: "When mousing over an interior the road data is
+-- hidden when really we should fade all the lines out and only show the road data for that interior for editing"):
+-- with the roads shown (the option, the road or wall tools) over a building's inside map, hovered, held or the
+-- player's own (not a city's whole map), its roads and walls draw as ever and every other one faded to
+-- INTERIOR_FADE_ALPHA. G.editInterior = { place, wmo, room, cont } (G.SetEditInterior at each redraw), the held one
+-- shown with it too (G.alsoInside); G.InEditInterior(x, y): whether a world point is in one of their rooms shown.
+G.INTERIOR_FADE_ALPHA = 0.18
+G.EDIT_INTERIOR_PAD_YD = 1.5 -- (a room's box this much bigger: its doorstep, a road along its wall)
+function G.SetEditInterior(place, wmo, room, cont)
+  if not (place and wmo) then
+    G.editInterior = nil
+    return
+  end
+  local e = G.editInterior
+  if e and e[1] == place and e[3] == room and e.cont == cont and e.also == G.alsoInside then return end
+  G.editInterior = { place, wmo, room, cont = cont, also = G.alsoInside }
+end
+-- whether world (x, y) is in a room of model `wmo` placed at `place` (G.RoomGroupShown's, with `room`), padded `pad`
+function G.InPlaceRooms(place, wmo, room, x, y, pad)
+  if x < place[6] - pad or x > place[8] + pad or y < place[7] - pad or y > place[9] + pad then return false end
+  local dx, dy = x - place[2], y - place[3]
+  local c, sn = math.cos(place[5]), math.sin(place[5])
+  local lx, ly = dx * c + dy * sn, -dx * sn + dy * c
+  for _, g in ipairs(wmo.groups) do
+    if g["in"] and lx >= g[1] - pad and lx <= g[4] + pad and ly >= g[2] - pad and ly <= g[5] + pad
+        and G.RoomGroupShown(place, room, g) then
+      return true
+    end
+  end
+  return false
+end
+function G.InEditInterior(x, y)
+  local e = G.editInterior
+  if not (e and x and y) then return false end
+  local pad = G.EDIT_INTERIOR_PAD_YD
+  if G.InPlaceRooms(e[1], e[2], e[3], x, y, pad) then return true end
+  local a = e.also
+  return a ~= nil and a[1] ~= nil and a[2] ~= nil and G.InPlaceRooms(a[1], a[2], a[3], x, y, pad)
+end
+-- The floors' heights (Data/InteriorFloors.lua, `agps interior-floors`: the model's floor faces, the NPCs on them, the
+-- heights surveyed) of room `k` (its number in ns.WMOs[model].groups) of model `model`: { heights } in its own frame,
+-- bottom up, parsed once.
+G.roomFloorCache = {}
+function G.RoomFloors(model, k)
+  local key = model * 4096 + k
+  local hit = G.roomFloorCache[key]
+  if hit then return hit end
+  hit = {}
+  local rows = ns.InteriorFloors and ns.InteriorFloors[model]
+  local str = rows and rows[k]
+  if type(str) == "string" then
+    for v in str:gmatch("%S+") do hit[#hit + 1] = tonumber(v) end
+  end
+  G.roomFloorCache[key] = hit
+  return hit
+end
+-- The floors' heights (the game's, world) at world (x, y) in the building placed at `place` (model `wmo`; `room`: the
+-- room shown, G.RoomGroupShown's rule): every floor of its rooms there, bottom up, those within FLOOR_SAME_YD one;
+-- x nil: the whole building's.
+G.FLOOR_SAME_YD = 1.5
+function G.InteriorFloorsAt(place, wmo, room, x, y)
+  local out = {}
+  if not (place and wmo and wmo.groups) then return out end
+  local lx, ly
+  if x then
+    local dx, dy = x - place[2], y - place[3]
+    local c, sn = math.cos(place[5]), math.sin(place[5])
+    lx, ly = dx * c + dy * sn, -dx * sn + dy * c
+  end
+  local hs = {}
+  for k, g in ipairs(wmo.groups) do
+    if g["in"] and (not lx or (lx >= g[1] and lx <= g[4] and ly >= g[2] and ly <= g[5]))
+        and G.RoomGroupShown(place, room, g) then
+      for _, h in ipairs(G.RoomFloors(place[1], k)) do hs[#hs + 1] = place[4] + h end
+    end
+  end
+  table.sort(hs)
+  for _, h in ipairs(hs) do
+    if not out[#out] or h - out[#out] > G.FLOOR_SAME_YD then out[#out + 1] = math.floor(h * 10 + 0.5) / 10 end
+  end
+  return out
+end
+-- A drawn road's point's height in the building being edited (Ground.lua's GD.PointHeight, for its `gz`): the floor
+-- picked there (Shift + mouse wheel: the floor nearest it), else its lowest floor there; nil outside it or with none.
+function G.BuildingFloorZ(x, y)
+  if not (G.editInterior and G.InEditInterior(x, y)) then return nil end
+  local hs2 = G.EditInteriorFloorsAt(x, y)
+  if #hs2 == 0 then return nil end
+  local f = G.editFloor
+  if f and f.gz and f.z then
+    local best
+    for _, h in ipairs(hs2) do
+      if not best or math.abs(h - f.z) < math.abs(best - f.z) then best = h end
+    end
+    return best
+  end
+  return hs2[1]
+end
+-- The floors at world (x, y) of the building being edited (G.editInterior; the held one too): bottom up, or {}.
+function G.EditInteriorFloorsAt(x, y)
+  local e = G.editInterior
+  if not e then return {} end
+  local out = G.InteriorFloorsAt(e[1], e[2], e[3], x, y)
+  local a = e.also
+  if #out == 0 and a and a[1] and a[2] then out = G.InteriorFloorsAt(a[1], a[2], a[3], x, y) end
+  return out
+end
+-- What the tools' hover says of the floors there: "Floor: 63 yd", "Floors: 57, 63 yd", or nil (none known there).
+function G.FloorHeightText(x, y)
+  local hs2 = G.EditInteriorFloorsAt(x, y)
+  if #hs2 == 0 then return nil end
+  if #hs2 == 1 then return Format(L["Floor: %d yd"], math.floor(hs2[1] + 0.5)) end
+  local parts = {}
+  for k, h in ipairs(hs2) do parts[k] = tostring(math.floor(h + 0.5)) end
+  return Format(L["Floors: %s yd"], table.concat(parts, ", "))
 end
 
 -- The NPCs in a building's or cave's inside map (asked 2026-11-14: "for every npc in the building I want a small dot to
@@ -2458,6 +2585,16 @@ function G.EditFloors(level, x, y)
       return out
     end
   end
+  -- (a building's inside map being edited, 1.3.10: its floors' heights, Data/InteriorFloors.lua, there or the whole
+  -- building's; `gz`: a road drawn on one takes its height as its ground heights, never as a floor road's `zs`)
+  if not (g and g.floorsAt) and G.editInterior then
+    local ifl = G.EditInteriorFloorsAt(x, y)
+    if #ifl == 0 then ifl = G.InteriorFloorsAt(G.editInterior[1], G.editInterior[2], G.editInterior[3]) end
+    if #ifl >= 2 then
+      for _, h in ipairs(ifl) do out[#out + 1] = { z = h, gz = true } end
+      return out
+    end
+  end
   if g and g.floorsAt then
     local hs = g.floorsAt(x, y, G.FLOOR_PICK_YD)
     table.sort(hs)
@@ -2506,6 +2643,7 @@ end
 -- middle (IsIndoors), for the data's build (roads/graph.py).
 function G.EditFloor(level, pts)
   local f = G.editFloor
+  if f and f.gz then return nil end -- (a building's floor, 1.3.10: its height goes in the road's `gz`, G.BuildingFloorZ)
   if f then
     if f.z then return f.z, nil, nil end
     return nil, f.down, f.down
@@ -9106,9 +9244,14 @@ function G.Update()
   -- (not over a building's inside map, an inn's; but a capital's inside, Ironforge's, is its streets:
   -- its roads, and the road tools' edits, show there)
   local capitalInside = place and not artLevel and ns.Router and ns.Router.CapitalAt and ns.Router.CapitalAt(viewCont, cx, cy)
-  if (st.showRoads or G.roadMode or forced) and (not place or artLevel or capitalInside)
+  -- (1.3.10, asked 2026-11-19: over a building's inside map the roads were hidden; now every other road and wall is
+  -- faded and the building's own show, to edit them there: G.EditInterior, the roads and walls in it, G.InEditInterior)
+  G.SetEditInterior(place and not artLevel and not capitalInside and not inst and not browse
+    and not G.WholeCityPlace(place, viewCont) and place or nil, wmo, room, viewCont)
+  local focus = G.editInterior and G.InEditInterior or nil
+  if (st.showRoads or G.roadMode or forced) and (not place or artLevel or capitalInside or focus)
       and not (view.artOnly and not G.SeamDataNear(zoom)) then -- (the art alone, far out: its own roads)
-    for _, sg in ipairs(G.LayoutRoads(cx, cy, inst or artLevel or viewCont, rot, zoom, half)) do
+    for _, sg in ipairs(G.LayoutRoads(cx, cy, inst or artLevel or viewCont, rot, zoom, half, focus)) do
       AddSeg(sg[1], sg[2], sg[3], sg[4], forced or sg[5], forced and 4 or sg[7], forced and 0.9 or sg[6])
     end
   end
@@ -9147,12 +9290,12 @@ function G.Update()
   elseif G.ShowsWalls() and not (view.artOnly and not G.SeamDataNear(zoom)) then -- (inside maps too: a city's own floors and walls)
     local wc = artLevel or viewCont -- (the level shown: an underground city's on its map)
     -- (the terrain's impassable borders thinner, drawn walls thicker)
-    for _, sg in ipairs(G.LayoutWalls(cx, cy, wc, rot, zoom, half, true)) do
+    for _, sg in ipairs(G.LayoutWalls(cx, cy, wc, rot, zoom, half, true, focus)) do
       if sg.shade then -- (a cliff's high side)
-        AddSeg(sg[1], sg[2], sg[3], sg[4], G.CLIFF_SHADE_COLOR, 3, 0.55)
+        AddSeg(sg[1], sg[2], sg[3], sg[4], G.CLIFF_SHADE_COLOR, 3, 0.55 * (sg.away and G.INTERIOR_FADE_ALPHA or 1))
       else
         AddSeg(sg[1], sg[2], sg[3], sg[4], sg.own and G.OWN_WALL_COLOR or 7, sg.edge and 2 or 3,
-          sg.faint and G.OTHER_FLOOR_ALPHA or nil)
+          (sg.faint or sg.away) and (sg.faint and G.OTHER_FLOOR_ALPHA or 1) * (sg.away and G.INTERIOR_FADE_ALPHA or 1) or nil)
       end
     end
   end
@@ -13218,6 +13361,13 @@ function G.StairHeights(level, x, y)
   for _, f in ipairs(G.EditFloors(level, x, y)) do
     if f.z then hs[#hs + 1] = f.z end
   end
+  -- (in a building being edited: its floors' heights there too, 1.3.10, Data/InteriorFloors.lua)
+  for _, h in ipairs(G.EditInteriorFloorsAt(x, y)) do
+    local have = false
+    for _, o in ipairs(hs) do have = have or math.abs(o - h) < 0.5 end
+    if not have then hs[#hs + 1] = h end
+  end
+  table.sort(hs)
   if #hs == 0 then
     local R = ns.Router
     local near = R and R.HeightsNear and R.HeightsNear(level, x, y, G.FLOOR_PICK_YD)
@@ -14188,6 +14338,9 @@ function G.RoadHover(dt)
     -- (and the ground's height there from the map's data, 1.3.10: "Ground: 123 yd", or "No ground data"; a cliff's
     -- two sides)
     local ground = G.GroundText(level, x, y)
+    -- (over a building's inside map: its floors' heights there, 1.3.10)
+    local floors = G.FloorHeightText(x, y)
+    if floors then ground = floors .. "\n" .. ground end
     local cliff = G.wallMode and G.CliffText(level, x, y, G.ROAD_HOVER_PX / view.s)
     if cliff then ground = cliff .. "\n" .. ground end
     if info then
@@ -17618,7 +17771,7 @@ function G.Init()
         -- (a road's: the floor picked at each point, Shift + wheel while drawing changes it: asked 2026-10-06)
         if l.road and not l.wall then
           l.zs = l.zs or {}
-          l.zs[#l.pts / 2] = G.editFloor and G.editFloor.z or false
+          l.zs[#l.pts / 2] = G.editFloor and not G.editFloor.gz and G.editFloor.z or false
         end
         l.sx, l.sy = dx, dy
         elapsed = 1
