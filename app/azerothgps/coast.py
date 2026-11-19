@@ -51,10 +51,12 @@ def grids(path: Path | None = None) -> dict:
     text = text[:text.find("ns.Hills")]
     out = {}
     for m in re.finditer(r"^  \[(\d+)\] = \{ tx0 = (-?\d+), ty0 = (-?\d+), cell = [\d.]+, w = (\d+), h = (\d+), "
-                         r"rows = \{\n(.*?)\n  \} \},", text, re.S | re.M):
+                         r"(?:deep = (\d+), )?rows = \{\n(.*?)\n  \} \},", text, re.S | re.M):
         w, h = int(m.group(4)), int(m.group(5))
-        rows = [decode_row(r.strip().strip('",')) for r in m.group(6).splitlines()]
+        rows = [decode_row(r.strip().strip('",')) for r in m.group(7).splitlines()]
         cells = np.array(rows, np.uint8)
+        if m.group(6):  # (deep water far out, closed for routes: the sea's here, water)
+            cells[cells == int(m.group(6))] = 1
         assert cells.shape == (h, w), (m.group(1), cells.shape)
         out[int(m.group(1))] = (int(m.group(2)), int(m.group(3)), cells)
     return out

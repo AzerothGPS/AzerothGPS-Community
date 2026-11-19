@@ -263,6 +263,43 @@ def test_a_slower_trip_that_went_through_a_new_wall_is_walled_not_worse():
         assert [r["trip"] for r in res["worse"]] == ["trip 1"] and not res["walled"]
 
 
+def test_a_slower_trip_whose_older_route_swam_new_deep_water_is_deep_not_worse():
+    # AzerothGPS#687: the Wetlands to Southshore swum straight over the strait into fatigue; with the deep sea far out
+    # closed the trip goes round by land, a boat or a flight (its rides may differ)
+    import numpy as np
+
+    from azerothgps.roads.terrain import encode_row
+
+    cells = np.full((16, 16), 3, np.uint8)  # (16 x 16 cells of 8.33 yd, all deep: x and y -133 to 0)
+    head = "  [1] = { tx0 = 32, ty0 = 32, cell = 8.333333, w = 16, h = 16, "
+    rows = "".join(f'    "{encode_row(r)}",\n' for r in cells)
+    deep = rq.deep_cells(f"ns.Terrain = {{\n{head}deep = 3, rows = {{\n{rows}  }} }},\n}}\nns.Hills = {{}}\n")
+    assert deep[1][:3] == (32, 32, 8.333333) and deep[1][3].all()
+    assert not rq.deep_cells(f"ns.Terrain = {{\n{head}rows = {{\n{rows}  }} }},\n}}\nns.Hills = {{}}\n")  # (none)
+    swim, round_ = _pts((-5, -5), (-125, -5)), _pts((-5, -5), (-5, 20), (-125, 20), (-125, -5))
+    assert round(rq.deep_yards(swim, deep)) == 120 and rq.deep_yards(round_, deep) < 15
+    coast = _pts((-5, 5), (-125, 5))  # (along the coast: outside the grid, no deep water)
+
+    def walks(pts):  # (as walk_parts: [[cont, [x, y, ...]]])
+        return [[pts[0][0], [v for p in pts for v in p[1:]]]]
+
+    def compare(before_walk, after_walk):
+        return rq.compare([{**_row(1, 665), "guard_walks": walks(before_walk)}],
+                          [{**_row(1, 2630, ["boat"]), "guard_walks": walks(after_walk)}], None, None, deep)
+
+    # (a way round it, its rides other; and the same swim, to an end out at sea, weighed now as closed ground)
+    for before_walk, after_walk in ((swim, coast), (swim, swim)):
+        res = compare(before_walk, after_walk)
+        assert [r["trip"] for r in res["deep"]] == ["trip 1"] and not res["worse"]
+    for before_walk, after_walk in ((coast, coast), (coast, swim), (round_, swim)):  # (never out there, or more: worse)
+        res = compare(before_walk, after_walk)
+        assert [r["trip"] for r in res["worse"]] == ["trip 1"] and not res["deep"]
+    # (a boat over it isn't a swim: only the walks count)
+    res = rq.compare([{**_row(1, 665), "pts": swim, "guard_walks": walks(coast)}],
+                     [{**_row(1, 2630), "pts": swim, "guard_walks": walks(coast)}], None, None, deep)
+    assert [r["trip"] for r in res["worse"]] == ["trip 1"] and not res["deep"]
+
+
 def test_a_slower_trip_past_fewer_of_the_other_factions_guards_is_safer_not_worse():
     # The Barrens: new roads gave Alliance trips a way round the Crossroads and Camp Taurajo
     def compare(guard_before, guard_after, after_secs=1862):
