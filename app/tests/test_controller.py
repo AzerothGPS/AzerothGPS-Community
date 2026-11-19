@@ -2154,7 +2154,7 @@ def test_the_defaults_put_the_route_controls_on_lb(pad):
         assert keys == {"select": "PAD1", "yes": "PAD1", "back": "PAD2", "remove": "PAD3", "menu": "PAD4",
                         "zoomIn": "PADRTRIGGER", "zoomOut": "PADLTRIGGER", "recenter": "PADLSTICK", "options": "PADRSTICK",
                         "click": "PADLSHOULDER", "viewControls": "PADRSHOULDER", "clear": "PADLSHOULDER+PAD3",
-                        "questRoute": "PADLSHOULDER+PAD4", "pause": "PADLSHOULDER+PAD2"}
+                        "questRoute": "PADLSHOULDER+PAD4", "pause": "PADFORWARD"}  # (Start: 1.3.9)
         # (no two the same way: each default its own button or pair)
         seen = set()
         for a in P.ACTIONS.values():
@@ -2426,3 +2426,125 @@ def test_the_crosshair_shows_an_icons_tooltip_with_the_pads_buttons(pad):
         pois[n] = None
         P.SetHovered(None)
         lua.execute("if AGPS_TADD then GameTooltip.AddLine = AGPS_TADD end")
+
+
+# -- Pause/Unpause on Start, its hint over the glowing Resume buttons (1.3.9, asked 2026-11-18: "Make a new controller
+# action 'Pause/Unpause' default keybind to Start button. When map is open and controller in use and pause is active the
+# button needed to unpause the route fades like the others") ------------------------------------------------------------
+
+def _defaults_on(lua):
+    lua.execute("for _, a in ipairs(AGPS_NS.Pad.ACTIONS) do if AGPS_DEF[a[1]] then a[2] = AGPS_DEF[a[1]] end end")
+
+
+def _defaults_off(lua):
+    lua.execute("for _, a in ipairs(AGPS_NS.Pad.ACTIONS) do if AGPS_DEF[a[1]] then a[2] = nil end end")
+
+
+def test_pause_unpause_is_on_start_by_default_and_toggles_pause(pad):
+    lua, ns = pad
+    P, N, G = ns.Pad, ns.Nav, ns.GPS
+    _defaults_on(lua)
+    try:
+        P.ResetBinds()
+        assert str(P.Action("pause")[3]) == "Pause/Unpause"
+        assert str(P.Key("pause")) == "PADFORWARD" and str(P.ActionLabel("pause")) == "Start"
+        # (no other control on Start by default, and Start is the game's game menu only: ours only while the map's open)
+        assert [str(a[1]) for a in P.ACTIONS.values() if P.Key(a[1]) == "PADFORWARD"] == ["pause"]
+        P.Clear()
+        assert P.Apply() is True and "PADFORWARD" in _bound(lua)
+        assert _press(lua, "PADFORWARD") and not N.paused  # (no route: nothing to pause)
+        _press(lua, "PADFORWARD", False)
+        _a_route(lua)
+        N.dest = N.stops[1]
+        _press(lua, "PADFORWARD")
+        _press(lua, "PADFORWARD", False)
+        assert N.paused == "manual"
+        _press(lua, "PADFORWARD")
+        _press(lua, "PADFORWARD", False)
+        assert N.paused is None
+    finally:
+        N.Clear()
+        N.dest = None
+        _defaults_off(lua)
+        P.ResetBinds()
+        P.Clear()
+
+
+def test_start_given_to_another_control_or_pause_on_its_own_button_is_kept(pad):
+    lua, ns = pad
+    P, st = ns.Pad, ns.settings.gps
+    _defaults_on(lua)
+    try:
+        # (an existing player's own Start: theirs; Pause/Unpause then on none, never over it)
+        st.padBinds = lua.eval("{ remove = 'PADFORWARD' }")
+        assert str(P.Key("remove")) == "PADFORWARD" and P.Key("pause") is None
+        # (their own button for it, from before: kept)
+        st.padBinds = lua.eval("{ pause = 'PADLSHOULDER+PAD2' }")
+        assert str(P.Key("pause")) == "PADLSHOULDER+PAD2"
+        # (none of their own: the new default)
+        st.padBinds = lua.eval("{}")
+        assert str(P.Key("pause")) == "PADFORWARD"
+    finally:
+        _defaults_off(lua)
+        P.ResetBinds()
+
+
+def _hint_ids(lua, P, frame):
+    same = lua.eval("rawequal")
+    return [str(t[2]) for t in P.HintTargets().values() if same(t[1], frame)]
+
+
+def test_the_pause_hint_shows_over_the_glowing_button_only_while_paused_with_a_controller(pad):
+    lua, ns = pad
+    P, N, G = ns.Pad, ns.Nav, ns.GPS
+    _defaults_on(lua)
+    try:
+        P.ResetBinds()
+        P.Clear()
+        P.Apply()
+        P.SawInput(True)
+        P.ShowMarks(True)
+        _a_route(lua)
+        N.dest = N.stops[1]
+        lua.execute("AGPS_T = AGPS_T + 1")
+        G.Update()
+        b = G.PauseButton()
+        assert b is not None
+        assert _hint_ids(lua, P, b) == []  # (not paused: no hint)
+        N.SetPaused(True, "manual")
+        lua.execute("AGPS_T = AGPS_T + 1")
+        G.Update()
+        assert b._shown and _hint_ids(lua, P, b) == ["pause"]  # (on the bar, glowing, Start's icon over it)
+        assert "Menu_" in str(P.HintText("pause"))  # (Start's own icon, as the other hints draw theirs)
+        # (the minimap square's Resume button too, while it shows: the square kept beside the opened map)
+        r = G.MakeMinimapResume()
+        r.Show(r)
+        assert _hint_ids(lua, P, r) == ["pause"]
+        r.Hide(r)
+        assert _hint_ids(lua, P, r) == []
+        # (faded in and out as the others: the round button's pulse, Pad.HintAlpha)
+        lua.execute("AGPS_NS.Pad.hintTargets = nil")
+        P.hintT = 0
+        P.HintTick(0.5)
+        h = next(h for h in P.hints.values() if h._shown and lua.eval("rawequal")(h.target, b))
+        assert abs(h.alpha - P.HintAlpha(0.5)) < 1e-9 and h.alpha > 0.9
+        P.HintTick(1.0)
+        assert h.alpha == 0  # (clear the rest of the period)
+        # (rebound: the hint shows their button)
+        assert P.Assign("pause", "PADLSHOULDER+PAD2", False) is True
+        assert "LB_" in str(P.HintText("pause")) and "Menu_" not in str(P.HintText("pause"))
+        # (no controller in use: no marks, no hint)
+        P.SawInput(False)
+        P.ShowMarks(False)
+        assert _hint_ids(lua, P, b) == []
+        P.SawInput(True)
+        P.ShowMarks(True)
+        assert _hint_ids(lua, P, b) == ["pause"]
+        # (resumed: gone)
+        N.SetPaused(False)
+        assert _hint_ids(lua, P, b) == []
+    finally:
+        N.Clear()
+        N.dest = None
+        _defaults_off(lua)
+        P.ResetBinds()

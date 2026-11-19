@@ -50,7 +50,7 @@ Zoomed in, hover any building or cave and its roof comes off: its inside map, an
 ## And more
 
 *   **Steer clear of enemy territory:** routes go round the other faction's guards, quest givers and vendors that would flag you for PvP, and ask before taking you through.
-*   **Pause Routing:** keep your stops without the route being worked out or drawn, from the map menu or `/agps pause`.
+*   **Pause Routing:** keep your stops without the route being worked out or drawn, from the map menu, `/agps pause` or a controller's Start button. While paused the button glows, and a Resume button shows by the logo on the GPS minimap.
 *   **Round, crisp icons:** map icons in a gold ring (class trainers in their class color), in three sizes.
 *   **Quests in a click:** double-click a quest in the quest log or tracker to route to it.
 

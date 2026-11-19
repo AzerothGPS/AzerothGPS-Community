@@ -1931,6 +1931,14 @@ local function BuildWindow()
   Key("replaceMinimapRoute")
   check(L["Route on the minimap square"], L["Your route's line on the GPS map in the minimap corner. Off: only the stops' markers there. The GPS map opened out of it, and the one in the world map, still show the route."],
     function() return GPS().replaceMinimapRoute ~= false end, function(v) GPS().replaceMinimapRoute = v end, Replacing, INDENT)
+  -- (asked 2026-11-18 for 1.3.9: "(enabled by default) I'd like the unpause button to also show in the minimap glowing
+  -- here", by the logo; GPSFrame's G.PlaceMinimapResume)
+  Key("replaceMinimapResume")
+  check(L["Show a Resume button on the minimap square while paused"], L["While routing is paused, a glowing Resume Routing button shows next to the logo in the minimap square's corner. Click it to resume."],
+    function() return GPS().replaceMinimapResume ~= false end, function(v)
+      GPS().replaceMinimapResume = v and true or false
+      if ns.GPS and ns.GPS.RefreshMinimapResume then ns.GPS.RefreshMinimapResume() end
+    end, Replacing, INDENT)
   -- (asked 2026-11-15: the square left as it is while the map is open out of it, both shown)
   Key("replaceMinimapKeepSquare")
   check(L["Keep the minimap while the map is open"], L["The opened GPS map grows out of the minimap corner while the minimap stays as it is, so both show. Off: the game's own minimap goes back to its usual place and shape while the GPS map is open."],

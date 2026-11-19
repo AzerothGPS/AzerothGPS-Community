@@ -47,6 +47,7 @@ NEW = ["mapEditIdle", "toolShiftClick", "language", "layerCity", "showRoads", "s
        "padControl", "padLegend",  # (2026-11-16: controller support, Pad.lua)  # (asked 2026-11-15: quest areas on the map and on the minimap apart)
        "showCoords",  # (asked 2026-11-17: hide the map's X, Y line)
        "replaceMinimapRoute",  # (asked 2026-11-17: the route off the minimap square)
+       "replaceMinimapResume",  # (1.3.9: a Resume button on the minimap square while paused)
        "navPanelWidth", "navPanelAlign", "navPanelDetached",  # (1.3.9: the route panel's width, side, own window)
        "navPanelHideButtons", "navPanelAlpha", "navPanelLocked", "navPanelWrap",  # (1.3.9: detached, its buttons hidden and its background's opacity)
        "dirLocked",  # (1.3.9: the directions text's own lock, apart from the arrow's)
@@ -60,7 +61,7 @@ HOME = {
     "Map": "style seamExploredOnly seamTerrainYd seamTerrainBlend seamContinentAt seamContinentBlend seamWorldAt "
            "seamWorldBlend interiorZoomYd interiorHoldSec routeColor rotate approachZoom reopenFollow terrainZoomOut interiors "
            "replaceMinimap replaceMinimapSize replaceMinimapCollapseOnMove replaceMinimapCollapseOnCombat useWorldMap "
-           "replaceMinimapIdle replaceMinimapKeepSquare replaceMinimapRoute",
+           "replaceMinimapIdle replaceMinimapKeepSquare replaceMinimapRoute replaceMinimapResume",
     "Window": "locked size width lockSize freeSize navPanelWidth navPanelAlign navPanelDetached navPanelHideButtons "
               "navPanelAlpha navPanelWrap navPanelLocked windowFrame windowTint "
               "windowClose windowButtons charm charmSwing arrivalEffect",

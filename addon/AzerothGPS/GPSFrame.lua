@@ -7023,7 +7023,10 @@ function G.PlaceMinimapButton()
     b:SetFrameLevel((parent:GetFrameLevel() or 1) + 30 + G.ArtSpan())
   end
   b:SetShown(shown and true or false)
-  if not shown then return end
+  if not shown then
+    G.PlaceMinimapResume(nil)
+    return
+  end
   local _, _, _, _, right, top = G.MinimapCorner(G.MinimapSquareSide())
   local x, y = right == false and -1 or 1, top == false and -1 or 1 -- (toward the screen's corner)
   b.icon:SetRotation((math.atan2 or math.atan)(-x, y))
@@ -7054,6 +7057,100 @@ function G.PlaceMinimapButton()
   else
     b:SetPoint("BOTTOMRIGHT", frame, "BOTTOMLEFT", -6, 0)
   end
+  G.PlaceMinimapResume(logo and on or nil)
+end
+
+-- The square's Resume Routing button (asked 2026-11-18 for 1.3.9, a red circle just right of the logo: "(enabled by
+-- default) I'd like the unpause button to also show in the minimap glowing here"; option `replaceMinimapResume`):
+-- the Pause Routing quick button's look and icon, small, just right of the logo in the square's bottom-left corner,
+-- shown only while routing is paused (by hand, the auto-pause or the stutter watch) and the logo is on the square,
+-- glowing as the quick button does (G.MakeGlow, G.GlowAlpha). A click resumes. Its size follows the logo's
+-- (MINIMAP_RESUME_SHARE of it), so a smaller square shrinks both; it sits inside the square's bottom, right of the
+-- logo's plate, clear of it. The opened map and the world map have the quick bar's glowing button instead.
+G.MINIMAP_RESUME_SHARE = 0.35 -- (half the first 0.7: asked 2026-11-18, "reduce minimap unpause button by 50%")
+G.MINIMAP_RESUME_MIN = 8
+G.MINIMAP_RESUME_GAP = 2
+G.PAUSE_ICON = "Interface\\Icons\\Spell_Nature_TimeStop" -- (the Pause Routing quick button's)
+function G.MakeMinimapResume()
+  if G.mmResume or G.clone then return G.mmResume end
+  local r = CreateFrame("Button", nil, frame)
+  r:SetSize(22, 22)
+  local bg = r:CreateTexture(nil, "BACKGROUND")
+  bg:SetAllPoints()
+  bg:SetTexture("Interface\\AddOns\\AzerothGPS\\Media\\MapMenu") -- (the quick buttons' round frame)
+  bg:SetVertexColor(0.35, 0.35, 0.35)
+  local icon = r:CreateTexture(nil, "ARTWORK")
+  icon:SetPoint("TOPLEFT", 4, -4)
+  icon:SetPoint("BOTTOMRIGHT", -4, 4)
+  ns.SetIcon(icon, G.PAUSE_ICON, "Interface\\Icons\\INV_Misc_QuestionMark")
+  local mask = r:CreateMaskTexture()
+  mask:SetAllPoints(icon)
+  mask:SetTexture("Interface\\CharacterFrame\\TempPortraitAlphaMask", "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+  icon:AddMaskTexture(mask)
+  local hl = r:CreateTexture(nil, "HIGHLIGHT")
+  hl:SetAllPoints()
+  hl:SetTexture("Interface\\AddOns\\AzerothGPS\\Media\\MapMenu")
+  hl:SetBlendMode("ADD")
+  hl:SetAlpha(0.3)
+  r.icon = icon
+  r:RegisterForClicks("LeftButtonUp")
+  r:SetScript("OnClick", function(self)
+    GameTooltip_Hide()
+    ns.Nav.SetPaused(false)
+    G.RefreshMinimapResume()
+  end)
+  r:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:SetText(L["Resume Routing"], 1, 1, 1)
+    local why = ns.Nav.PausedHead and ns.Nav.PausedHead()
+    if why then GameTooltip:AddLine(why, nil, nil, nil, true) end
+    GameTooltip:AddLine(L["Click to work the route out again from where you are."], 0.8, 0.8, 0.8, true)
+    GameTooltip:Show()
+  end)
+  r:SetScript("OnLeave", GameTooltip_Hide)
+  -- (the glow's pulse: only while shown, so nothing runs while routing goes on)
+  r:SetScript("OnUpdate", function(self)
+    if self.glow then self.glow:SetAlpha(G.GlowAlpha and G.GlowAlpha() or 0.8) end
+  end)
+  r:Hide()
+  G.mmResume = r
+  return r
+end
+function G.MinimapResumeOn()
+  return S().replaceMinimapResume ~= false
+end
+-- `on`: what the logo is placed on while it's on the square (nil: it isn't; no button either)
+function G.PlaceMinimapResume(on)
+  local r = G.mmResume
+  if not r then return false end
+  G.mmResumeOn = on
+  local b = G.mmButton
+  local want = (on and b and ns.Nav and ns.Nav.paused and G.MinimapResumeOn()) and true or false
+  if not want then
+    r:Hide()
+    return false
+  end
+  if r:GetParent() ~= b:GetParent() then r:SetParent(b:GetParent()) end
+  r:SetFrameStrata(b:GetFrameStrata() or "MEDIUM")
+  r:SetFrameLevel((b:GetFrameLevel() or 1) + 1)
+  local size = b.logoSize or G.MinimapLogoUnits()
+  local side = math.max(G.MINIMAP_RESUME_MIN, math.floor(size * G.MINIMAP_RESUME_SHARE + 0.5))
+  r:SetSize(side, side)
+  r:ClearAllPoints()
+  -- (the logo's middle is MINIMAP_LOGO_IN of its width in from the square's left: its right edge half a width further)
+  r:SetPoint("BOTTOMLEFT", on, "BOTTOMLEFT", size * (G.MINIMAP_LOGO_IN + 0.5) + G.MINIMAP_RESUME_GAP,
+    G.MINIMAP_RESUME_GAP * 2)
+  if not r.glow and G.MakeGlow then r.glow = G.MakeGlow(r) end
+  if r.glow then
+    r.glow:SetSize(side * 1.45, side * 1.45)
+    r.glow:Show()
+  end
+  r:Show()
+  return true
+end
+-- again as it is now (routing paused or resumed, the option changed)
+function G.RefreshMinimapResume()
+  return G.PlaceMinimapResume(G.mmResumeOn)
 end
 
 -- What it's doing, for /agps replace status: the radius both ways, the turn, the hiding.
@@ -7206,6 +7303,7 @@ function G.InitMinimapReplace()
   b:SetScript("OnLeave", GameTooltip_Hide)
   b:Hide()
   G.mmButton = b
+  G.MakeMinimapResume()
   -- (and on the opened window while the square is kept, the logo staying on the square: the arrow back as before 1.3.0,
   -- asked 2026-11-16 for 1.3.5, "the little arrow in the pop out map in the bottom left is gone ... lets add that back")
   local back = CreateFrame("Button", nil, frame)
@@ -15032,6 +15130,9 @@ function G.Init()
       when = function() return ns.Nav.dest ~= nil end,
       labelNow = function() return ns.Nav.paused and L["Resume Routing"] or L["Pause Routing"] end,
       pinWhen = function() return ns.Nav.paused ~= nil end,
+      -- (asked 2026-11-18 for 1.3.9: "when the route gets paused, on the GPS menu make the button glow": the quick
+      -- buttons' gold ring, G.RefreshEditGlow, however it was paused: by hand, the auto-pause, the stutter watch)
+      glowWhen = function() return ns.Nav.paused ~= nil end,
       action = function()
         if G.mapMenu then G.mapMenu:Hide() end
         ns.Nav.TogglePaused()
@@ -15256,6 +15357,10 @@ function G.Init()
   -- set in the options (gps.quickOrder: slot ids), the rest after in the built-in order.
   local byId, SLOTS, openGroup, groupIdle = {}, {}, nil, 0
   for _, t in ipairs(QUICK) do byId[t.id] = t end
+  -- the Pause Routing quick button (the controller's Pause/Unpause hint goes over it while paused: Pad.HintTargets)
+  function G.PauseButton()
+    return byId.pauseRoute and byId.pauseRoute.button or nil
+  end
   G.groupOf = {}
   local memberOf = {}
   for _, grp in ipairs(G.QUICK_GROUPS) do
@@ -15537,6 +15642,11 @@ function G.Init()
     local now = GetTime()
     if G.quickWatchAt and now - G.quickWatchAt < G.QUICK_WATCH_SECONDS then return end
     G.quickWatchAt = now
+    -- (the square's Resume Routing button with it: a route cleared or the option changed meanwhile)
+    if G.mmResume and (G.mmResume:IsShown() and true or false) ~= (G.mmResumeOn ~= nil and ns.Nav.paused ~= nil
+        and G.MinimapResumeOn()) then
+      G.RefreshMinimapResume()
+    end
     local sig, shown = {}, {}
     for _, t in ipairs(QUICK) do
       if t.isOn then sig[#sig + 1] = G.QuickOn(t) and "1" or "0" end
@@ -15583,6 +15693,20 @@ function G.Init()
   G.EDIT_GLOW = { "roadTools", "wallTools" }
   G.EDIT_GLOW_COLOR = { 1, 0.82, 0.1 }
   G.EDIT_GLOW_HZ = 1.2 -- pulses a second
+  -- The glow itself: the map menu's round art added in gold round a button (the minimap square's Resume button's too).
+  function G.MakeGlow(button)
+    local g = button:CreateTexture(nil, "OVERLAY")
+    g:SetPoint("CENTER")
+    g:SetSize(button:GetWidth() * 1.45, button:GetHeight() * 1.45)
+    g:SetTexture("Interface\\AddOns\\AzerothGPS\\Media\\MapMenu")
+    g:SetBlendMode("ADD")
+    local c = G.EDIT_GLOW_COLOR
+    g:SetVertexColor(c[1], c[2], c[3])
+    return g
+  end
+  function G.GlowAlpha()
+    return 0.55 + 0.4 * math.sin((GetTime() or 0) * G.EDIT_GLOW_HZ * 2 * math.pi)
+  end
   function G.EditGlowWanted()
     return (G.mapEditOpen and not G.roadMode and not G.wallMode) and true or false
   end
@@ -15610,23 +15734,14 @@ function G.Init()
     for _, t in ipairs(glowing) do
       local on = want[t.id] or false
       if t.button then
-        if on and not t.glow then
-          local g = t.button:CreateTexture(nil, "OVERLAY")
-          g:SetPoint("CENTER")
-          g:SetSize(t.button:GetWidth() * 1.45, t.button:GetHeight() * 1.45)
-          g:SetTexture("Interface\\AddOns\\AzerothGPS\\Media\\MapMenu")
-          g:SetBlendMode("ADD")
-          local c = G.EDIT_GLOW_COLOR
-          g:SetVertexColor(c[1], c[2], c[3])
-          t.glow = g
-        end
+        if on and not t.glow then t.glow = G.MakeGlow(t.button) end
         if t.glow then t.glow:SetShown(on) end
       end
     end
     if any and not glowDriver then
       glowDriver = CreateFrame("Frame", nil, top)
       glowDriver:SetScript("OnUpdate", function()
-        local a = 0.55 + 0.4 * math.sin((GetTime() or 0) * G.EDIT_GLOW_HZ * 2 * math.pi)
+        local a = G.GlowAlpha()
         for _, t in ipairs(glowing) do
           if t.glow and t.glow:IsShown() then t.glow:SetAlpha(a) end
         end

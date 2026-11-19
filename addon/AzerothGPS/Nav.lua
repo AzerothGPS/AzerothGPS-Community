@@ -662,6 +662,7 @@ function N.Clear()
   N.redOk, N.skipLearn, N.noWalk, N.walkKept, N.riskOk, N.riskQuestion, N.riskAsking = {}, {}, {}, {}, {}, nil, nil
   N.ClearSkippedRides()
   Changed()
+  if ns.GPS and ns.GPS.RefreshMinimapResume then ns.GPS.RefreshMinimapResume() end -- (no route: no Resume button)
 end
 
 -- Called at login: bring back the saved stops.
@@ -4819,6 +4820,7 @@ function N.SetPaused(on, why)
       if ns.GPS.LayoutQuick then ns.GPS.LayoutQuick() end
       if ns.GPS.RefreshQuick then ns.GPS.RefreshQuick() end
       if ns.GPS.Redraw then ns.GPS.Redraw() end
+      if ns.GPS.RefreshMinimapResume then ns.GPS.RefreshMinimapResume() end -- (the square's Resume button)
     end
   end
   return true
@@ -4826,10 +4828,15 @@ end
 function N.TogglePaused()
   return N.SetPaused(not N.paused, "manual")
 end
-function N.PausedText()
-  local head = N.paused == "auto" and L["|cffffd100Routing paused: you're not following the route|r"]
+-- why it's paused, one line (nil when it isn't): the directions' and the square's Resume button's tooltip
+function N.PausedHead()
+  if not N.paused then return nil end
+  return N.paused == "auto" and L["|cffffd100Routing paused: you're not following the route|r"]
     or N.paused == "perf" and L["|cffffd100Routing paused: it was making your game stutter|r"]
     or L["|cffffd100Routing is paused|r"]
+end
+function N.PausedText()
+  local head = N.PausedHead() or L["|cffffd100Routing is paused|r"]
   return head .. "\n" .. L["|cff9d9d9dResume Routing in the map menu, or /agps pause|r"]
 end
 -- Auto-pause (Options > Performance, its own option, off by default, usable with any settings; asked 2026-11-16: the

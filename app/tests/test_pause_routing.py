@@ -628,3 +628,99 @@ def test_a_slow_reroute_in_the_frame_is_seen_by_the_watch(game):
         assert N.degraded
     finally:
         lua.execute("debugprofilestop = AGPS_DPS")
+
+
+# -- the glow (1.3.9, asked 2026-11-18: "when the route gets paused, on the GPS menu make the button glow") -----------
+
+
+def _glowing(lua, ns):
+    _tick(lua, ns, 2)  # (G.WatchQuickOn: laid out and refreshed again)
+    t = _slot(ns, "pauseRoute")
+    on = bool(ns.GPS.GlowingIds()["pauseRoute"])
+    shown = bool(t and t.glow and t.glow._shown and t.button._shown)
+    assert on == shown, (on, shown)
+    return shown
+
+
+def test_the_pause_button_glows_while_paused_by_hand_and_stops_on_resume(game):
+    lua, ns = game
+    N = ns.Nav
+    _route(lua, ns)
+    assert not _glowing(lua, ns)
+    N.TogglePaused()
+    assert N.paused == "manual" and _glowing(lua, ns)
+    t = _slot(ns, "pauseRoute")
+    assert str(t.where) == "barRight"  # (on the bar, seen without opening the menu)
+    N.TogglePaused()
+    assert N.paused is None and not _glowing(lua, ns)
+    # (cleared while paused: no button, no glow, nothing broken)
+    N.SetPaused(True, "manual")
+    N.Clear()
+    _tick(lua, ns, 2)
+    assert _slot(ns, "pauseRoute") is None and not ns.GPS.GlowingIds()["pauseRoute"]
+
+
+def test_the_pause_button_glows_when_the_auto_pause_pauses(game):
+    lua, ns = game
+    st, N = ns.settings.gps, ns.Nav
+    st.autoPauseRouting, st.autoPauseSeconds = True, 30
+    _route(lua, ns)
+    assert _wander_off(lua, ns) and N.paused == "auto"
+    assert _glowing(lua, ns)
+    N.SetPaused(False)
+    assert not _glowing(lua, ns)
+
+
+def test_the_pause_button_glows_when_the_stutter_watch_pauses(game):
+    lua, ns = game
+    N = ns.Nav
+    _trip(lua, ns)
+    for _ in range(6):
+        _slow(lua, ns)
+    assert N.paused == "perf"
+    N.STUTTER_WATCH = False
+    assert _glowing(lua, ns)
+    N.TogglePaused()
+    assert not N.paused and not _glowing(lua, ns)
+
+
+def test_the_glowing_pause_button_hidden_breaks_nothing(game):
+    lua, ns = game
+    N, G, st = ns.Nav, ns.GPS, ns.settings.gps
+    old = st.quick
+    try:
+        st.quick = lua.eval("{ pauseRoute = 'hidden' }")
+        G.LayoutQuick()
+        _route(lua, ns)
+        N.SetPaused(True, "manual")
+        _tick(lua, ns, 2)
+        G.RefreshQuick()
+        assert N.paused == "manual"
+    finally:
+        st.quick = old
+        N.SetPaused(False)
+        G.LayoutQuick()
+
+
+def test_the_minimap_resume_option_is_kept_over_a_reload():
+    # (1.3.9: "Show a Resume button on the minimap square while paused", on by default; turned off, it stays off)
+    pytest.importorskip("lupa.lua51")
+    from azerothgps.gameharness import start
+    from test_keep_data import SERIALIZE  # (the saved file written as the game does)
+
+    def start_(saved=None):
+        lua, ns = start(saved=saved)
+        lua.execute(SERIALIZE)
+        return lua, ns
+    lua, ns = start_()
+    assert ns.settings.gps.replaceMinimapResume is True
+    ns.settings.gps.replaceMinimapResume = False
+    lua.eval("AGPS_FIRE")("PLAYER_LOGOUT")
+    text = lua.eval("AGPS_SERIALIZE")("AzerothGPSDB", lua.globals().AzerothGPSDB)
+    lua2, ns2 = start_(text)
+    assert ns2.settings.gps.replaceMinimapResume is False
+    ns2.settings.gps.replaceMinimapResume = True
+    lua2.eval("AGPS_FIRE")("PLAYER_LOGOUT")
+    text = lua2.eval("AGPS_SERIALIZE")("AzerothGPSDB", lua2.globals().AzerothGPSDB)
+    _, ns3 = start_(text)
+    assert ns3.settings.gps.replaceMinimapResume is True

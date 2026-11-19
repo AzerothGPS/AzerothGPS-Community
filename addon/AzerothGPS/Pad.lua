@@ -26,8 +26,11 @@ Pad.OWNER = "AzerothGPSPadOwner" -- our own frame: the override bindings' owner 
 -- The defaults (asked 2026-11-16: "update the default controller settings to what you think would be most optimal"):
 -- the face buttons for the map's own (A a stop, B back, X remove, Y the map menu), the triggers zoom, the D-pad pans,
 -- the stick presses recenter and open Options; LB alone Select (an entrance's map, Confirm Route), RB alone View
--- Controls; LB with a face button the route's own (+ X Clear Route, + Y Quest Route, + B Pause Routing), so the one
--- that loses a route is never a single press. Back: Show/Hide GPS (the game's binding).
+-- Controls; LB with a face button the route's own (+ X Clear Route, + Y Quest Route), so the one that loses a route is
+-- never a single press. Back: Show/Hide GPS (the game's binding). Start: Pause/Unpause (1.3.9, asked 2026-11-18: "Make
+-- a new controller action 'Pause/Unpause' default keybind to Start button"; it was Pause Routing on LB + B: the same
+-- control, id "pause", renamed and moved, so a button the player gave it is kept, and Start given to another control
+-- by the player keeps it, Pause/Unpause then on none: Pad.Key's step-aside).
 Pad.ACTIONS = {
   { "select", "PAD1", L["Set a stop, or route to the icon"] },
   { "yes", "PAD1", L["Yes on a question"] },
@@ -37,7 +40,7 @@ Pad.ACTIONS = {
   { "clear", "PADLSHOULDER+PAD3", L["Clear Route"] },
   -- (asked 2026-11-16: "I want quest route and pause route to allow be assignable actions"; no button by default)
   { "questRoute", "PADLSHOULDER+PAD4", L["Quest Route"] },
-  { "pause", "PADLSHOULDER+PAD2", L["Pause Routing"] },
+  { "pause", "PADFORWARD", L["Pause/Unpause"] },
   -- (asked 2026-11-16: "Need another action to do the same action as left click to open dungeon maps for example")
   -- (named Select, the stop's control Set Stop again: asked 2026-11-16, "Change the name of Open to Select and the
   -- existing Select to Set Stop")
@@ -655,6 +658,13 @@ function Pad.HintTargets()
   end
   local g = G()
   add(g and g.mapButton, "menu")
+  -- (routing paused: Pause/Unpause's button over the glowing Resume Routing buttons, the quick bar's and the minimap
+  -- square's while it's kept beside the map; asked 2026-11-18 for 1.3.9, "when map is open and controller in use and
+  -- pause is active the button needed to unpause the route fades like the others")
+  if g and ns.Nav and ns.Nav.paused then
+    add(g.PauseButton and g.PauseButton(), "pause")
+    add(g.mmResume, "pause")
+  end
   if Pad.MenuOpen() then
     add(Pad.focus, "select")
     -- (a group or Quick Find open: Back's icon over the button that opened it, where Back goes; asked 2026-11-16, "we
@@ -768,7 +778,7 @@ Pad.DIAGRAM = { w = 200, h = 186, row0 = 14, step = 22, scales = { 1, 1.5, 2, 2.
 Pad.SHORT = { select = L["Set Stop"], yes = L["Yes"], remove = L["Remove"], back = L["Back"], clear = L["Clear Route"],
   zoomIn = L["Zoom in"], zoomOut = L["Zoom out"], panUp = L["Pan up"], panDown = L["Pan down"], panLeft = L["Pan left"],
   panRight = L["Pan right"], recenter = L["Recenter"], toggle = L["Show/Hide GPS"], menu = L["Map Menu"],
-  options = L["Options"], questRoute = L["Quest Route"], pause = L["Pause Routing"], click = L["Select"], viewControls = L["View Controls"] }
+  options = L["Options"], questRoute = L["Quest Route"], pause = L["Pause/Unpause"], click = L["Select"], viewControls = L["View Controls"] }
 -- What `key` does on the map now: its label (its icon, then each control on it: "Set Stop", "Clear Route (hold)", a
 -- pair's "[LT]+ Zoom in") and the tooltip's lines (each in full: "LT + A: Clear Route"), or nil when it does nothing.
 -- Options > Controller's label for pad button `key`: its controls pressed, then " : " and the held ones, each after a

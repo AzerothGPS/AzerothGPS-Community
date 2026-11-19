@@ -24,6 +24,8 @@ ns.DEFAULTS = {
     replaceMinimapCollapseOnCombat = false, -- ... as combat starts (both asked 2026-11-09, off by default)
     replaceMinimapRoute = true, -- the route's line on the square (asked 2026-11-17; off: not drawn there, the opened map
     -- and the world map keep it; GPSFrame's G.SquareHidesRoute)
+    replaceMinimapResume = true, -- a glowing Resume Routing button by the square's logo while routing is paused (1.3.9,
+    -- asked 2026-11-18; GPSFrame's G.PlaceMinimapResume)
     replaceMinimapSize = "small", -- its square: "small" (200), "medium" (260), "large" (320) (G.MINIMAP_SIDES)
     replaceMinimapHide = "ground", -- how the minimap's ground is hidden: "ground" (C_Minimap.SetDrawGroundTextures) or
     -- "mask" (a fully transparent mask); /agps replace ground|mask
