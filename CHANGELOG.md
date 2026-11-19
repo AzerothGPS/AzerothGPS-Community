@@ -18,6 +18,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - While routing is paused, the Pause Routing button glows, and a glowing Resume button shows by the logo on the GPS minimap (Options > Map to turn it off). On a controller, Start pauses and resumes.
 - The mouse wheel zooms toward the spot under the cursor, on the map window and in the world map.
 - Zooming all the way out on the OpenMap style shows Kalimdor and the Eastern Kingdoms together, with both continents' flight masters and docks, and no panning needed.
+- Map buttons are drawn sharp at every size, not blurry or jagged.
 
 ### Fixed
 
