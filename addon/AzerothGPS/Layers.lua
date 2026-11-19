@@ -811,16 +811,48 @@ function Lay.ZoneOf(id)
   return id
 end
 
+-- Whether a quest in the log is one the player tracks (`questTrackedOnly`): the quests Questie's tracker shows when
+-- it's on (with its "Auto Track Quests" every quest but the ones untracked, else just the ones tracked: its quests
+-- show there with the game's quest log's track box empty), else the game's own quest watch.
+function Lay.QuestTracked(id)
+  local qdb = type(_G.Questie) == "table" and type(_G.Questie.db) == "table" and _G.Questie.db
+  local prof, char = qdb and qdb.profile, qdb and qdb.char
+  if type(prof) == "table" and type(char) == "table" and prof.trackerEnabled then
+    if prof.autoTrackQuests then
+      return not (char.AutoUntrackedQuests and char.AutoUntrackedQuests[id]) and true or false
+    end
+    return (char.TrackedQuests and char.TrackedQuests[id]) and true or false
+  end
+  local Q = C_QuestLog
+  local function known(v) return v ~= nil and not (ns.IsSecret and ns.IsSecret(v)) end
+  if Q and Q.GetQuestWatchType then
+    local ok, w = pcall(Q.GetQuestWatchType, id)
+    return ok and known(w) or false
+  end
+  if Q and Q.IsQuestWatched then
+    local ok, w = pcall(Q.IsQuestWatched, id)
+    return ok and known(w) and w and true or false
+  end
+  if IsQuestWatched and GetQuestLogIndexByID then
+    local i = GetQuestLogIndexByID(id)
+    return i and i > 0 and IsQuestWatched(i) and true or false
+  end
+  return true -- (no way to tell: every quest)
+end
+
 -- `onlyZone`: just the quests whose spot is in the zone the player is in (counts.elsewhere:
--- how many were left out).
-function Lay.QuestStops(onlyZone)
+-- how many were left out). `onlyTracked`: just the quests the player tracks (Lay.QuestTracked;
+-- counts.untracked: how many were left out).
+function Lay.QuestStops(onlyZone, onlyTracked)
   local Q = C_QuestLog
   local out, placed = {}, {}
-  local counts = { todo = 0, turnin = 0, missing = {}, elsewhere = 0 }
+  local counts = { todo = 0, turnin = 0, missing = {}, elsewhere = 0, untracked = 0 }
   local myZone = onlyZone and Lay.ZoneOf(C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player"))
   if not Q then return out, counts end
   local wanted = {}
-  for _, id in ipairs(Lay.LogQuests()) do wanted[id] = true end
+  for _, id in ipairs(Lay.LogQuests()) do
+    if not onlyTracked or Lay.QuestTracked(id) then wanted[id] = true else counts.untracked = counts.untracked + 1 end
+  end
   local function secret(v) return ns.IsSecret and ns.IsSecret(v) end
   -- (the city levels' own maps: a pin there is down in the city)
   local cityMap = {}
@@ -882,11 +914,13 @@ function Lay.QuestStops(onlyZone)
     RestorePOIMap()
   end
   for _, id in ipairs(Lay.LogQuests()) do
-    if not placed[id] and Q.GetNextWaypoint then
-      local mapID, u, v = Q.GetNextWaypoint(id)
-      if mapID and u and v and ns.Maps and ns.Maps[mapID] then add(id, mapID, u, v) end
+    if wanted[id] then -- (not the ones left out as not tracked)
+      if not placed[id] and Q.GetNextWaypoint then
+        local mapID, u, v = Q.GetNextWaypoint(id)
+        if mapID and u and v and ns.Maps and ns.Maps[mapID] then add(id, mapID, u, v) end
+      end
+      if not placed[id] then counts.missing[#counts.missing + 1] = QuestTitle(id) or string.format(L["Quest %d"], id) end
     end
-    if not placed[id] then counts.missing[#counts.missing + 1] = QuestTitle(id) or string.format(L["Quest %d"], id) end
   end
   return out, counts
 end

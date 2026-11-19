@@ -1406,6 +1406,61 @@ def test_quest_route_stops_from_the_quest_log(env):
     assert wolves.quest == 1 and not wolves.turnin and letter.quest == 2 and letter.turnin
 
 
+def test_quest_route_only_tracked_quests(env):
+    # (questTrackedOnly, Options > Routing) the quest route from the quests the player tracks: the game's quest watch
+    # without Questie; with Questie's tracker on, the quests it shows (Auto Track Quests: all but the untracked ones,
+    # shown with the game's track box empty; off: just the ones tracked). Off: every quest, as before.
+    lua, ns = env
+    ns.db = lua.eval("{}")
+    ns.settings = lua.eval("{ gps = {} }")
+    lua.execute("""
+      GetTime = function() return 10 end
+      C_Map = C_Map or {}
+      C_Map.GetBestMapForUnit = function() return 1411 end
+      AGPS_WATCHED = { [1] = true }
+      C_QuestLog = {
+        GetNumQuestLogEntries = function() return 3, 3 end,
+        GetInfo = function(i) return { questID = i } end,
+        IsComplete = function(id) return false end,
+        GetTitleForQuestID = function(id) return ({ "Wolves", "Boars", "Lost" })[id] end,
+        GetQuestsOnMap = function(mapID)
+          if mapID == 1411 then return { { questID = 1, x = 0.4, y = 0.5 }, { questID = 2, x = 0.6, y = 0.3 } } end
+          return {}
+        end,
+        GetNextWaypoint = function(id) end,
+        GetQuestWatchType = function(id) if AGPS_WATCHED[id] then return 0 end end,
+      }
+      Questie = nil
+    """)
+    load(lua, ns, "Data/Maps.lua", "Layers.lua")
+    L = ns.Layers
+
+    def names(*args):
+        stops, c = L.QuestStops(*args)
+        return sorted(stops[i].name for i in range(1, len(stops) + 1)), c
+
+    # off: every quest (Lost has no place: missing)
+    got, c = names(False, False)
+    assert got == ["Boars", "Wolves"] and list(c.missing.values()) == ["Lost"] and c.untracked == 0
+    # the game's watch: Wolves alone; the untracked ones aren't missing, they're left out
+    got, c = names(False, True)
+    assert got == ["Wolves"] and c.untracked == 2 and len(c.missing) == 0
+    # Questie's tracker, Auto Track Quests: every quest but the untracked, whatever the game's track box says
+    lua.execute("""Questie = { db = { profile = { trackerEnabled = true, autoTrackQuests = true },
+      char = { AutoUntrackedQuests = { [1] = true }, TrackedQuests = {} } } }""")
+    got, c = names(False, True)
+    assert got == ["Boars"] and c.untracked == 1 and list(c.missing.values()) == ["Lost"]
+    # Questie's tracker by hand: just the quests tracked there
+    lua.execute("Questie.db.profile.autoTrackQuests = false; Questie.db.char.TrackedQuests = { [2] = true }")
+    got, c = names(False, True)
+    assert got == ["Boars"] and c.untracked == 2
+    # Questie's tracker off: the game's watch again
+    lua.execute("Questie.db.profile.trackerEnabled = false")
+    got, c = names(False, True)
+    assert got == ["Wolves"]
+    lua.execute("Questie = nil")
+
+
 def test_group_quests_are_told_from_their_size_or_elite_tag(env):
     # (asked 2026-10-06) a quest for a group: more than one player suggested, or elite / group / dungeon tagged
     lua, ns = env
