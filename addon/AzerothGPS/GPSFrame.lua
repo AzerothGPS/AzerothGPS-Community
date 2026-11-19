@@ -16435,6 +16435,14 @@ function G.Init()
       warn = function()
         return ns.Layers.NodeFilter() ~= nil and L["A filter is on: only the herbs and ore you picked show on the map."] or nil
       end },
+    -- (1.3.10, asked 2026-11-19: GatherMate2's herbs and mines into the player's own; shown only with GatherMate2
+    -- loaded; glows when it has some not imported, Layers' L.GM2Glow, checked once a startup; the progress on it)
+    { id = "gm2Import", icon = "Interface\\Icons\\INV_Misc_Bag_10", label = L["Import From GatherMate2"],
+      tip = L["Adds the herbs and mines GatherMate2 knows to your own, and every one GatherMate2_Data lists when it's installed, shown faded until you gather there. It glows when there are some you haven't imported. (Shown with GatherMate2 installed)"],
+      when = function() return ns.Layers.GM2Loaded() end,
+      action = function() ns.Layers.GM2Import() end,
+      glowWhen = function() return ns.Layers.GM2Glow() end,
+      warn = function() return ns.Layers.GM2Status() end },
     { id = "city", key = "layerCity", icon = "Interface\\Icons\\INV_Helmet_03", label = L["City Locations"],
       tip = L["Places guards pointed out to you (trainers, bank, ...), for all your characters."], defaultOn = true },
     -- (asked 2026-11-16: "remove the boss route button ... replace it with Show Routes": on, as before, a dungeon's
@@ -16570,7 +16578,7 @@ function G.Init()
     { id = "questsG", label = L["Quests"], members = { "quests", "questAreas" }, tip = L["Quests and quest areas on the map."] },
     { id = "dungeonsG", label = L["Caves/Dungeons/Raids"], icon = INSTANCE_ICON, members = { "caves", "instances", "dungeonPaths" },
       tip = L["Cave, dungeon and raid entrances on the map, and a route through a dungeon's bosses."] },
-    { id = "gather", label = L["Herbs, Ore and Farming"], members = { "herbs", "ore", "nodeFind", "farm" },
+    { id = "gather", label = L["Herbs, Ore and Farming"], members = { "herbs", "ore", "nodeFind", "gm2Import", "farm" },
       tip = L["Herb and ore nodes on the map, finding particular ones, and drawing a farming area."] },
     -- (asked 2026-11-14: the road and wall tools as one button, "map editing tools"; opened, the roads and walls show,
     -- closed, they're hidden; it stays open until the map goes unused for the time set: G.SetMapEditOpen)
@@ -16752,6 +16760,28 @@ function G.Init()
     end
   end
   for _, t in ipairs(QUICK) do G.MakeQuickButton(t) end
+  -- A quick button's progress over its icon ("45%": Import From GatherMate2's, L.GM2Pump), or none (`frac` nil).
+  function G.SetQuickProgress(id, frac)
+    for _, t in ipairs(QUICK) do
+      if t.id == id and t.button then
+        if frac and not t.progressText then
+          local fs = t.button:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+          fs:SetPoint("CENTER", 0, 0)
+          fs:SetShadowOffset(1, -1)
+          t.progressText = fs
+        end
+        if t.progressText then
+          t.progressText:SetText(frac and string.format("%d%%", math.floor(frac * 100 + 0.5)) or "")
+          t.progressText:SetShown(frac ~= nil)
+        end
+        if t.button.IsMouseOver and t.button:IsMouseOver() and GameTooltip:GetOwner() == t.button then
+          t.button:GetScript("OnEnter")(t.button)
+        end
+        return t.progressText
+      end
+    end
+    return nil
+  end
 
   -- The slots: a button on its own, or a group's one button. G.QuickSlots() in the order
   -- set in the options (gps.quickOrder: slot ids), the rest after in the built-in order.
@@ -16782,7 +16812,9 @@ function G.Init()
       GameTooltip:SetText(slot.label, 1, 1, 1)
       GameTooltip:AddLine(slot.tip, nil, nil, nil, true)
       local names = {}
-      for _, m in ipairs(slot.members) do names[#names + 1] = m.label end
+      for _, m in ipairs(slot.members) do
+        if not m.when or m.when() then names[#names + 1] = m.label end
+      end
       GameTooltip:AddLine(Format(L["Click for: %s"], table.concat(names, L[", "])), 0.8, 0.8, 0.8, true)
       for _, m in ipairs(slot.members) do
         local warn = m.warn and m.warn()
@@ -16886,9 +16918,13 @@ function G.Init()
     for _, grp in pairs(G.groupOf) do
       local open = grp == openGroup or (grp.keep and G.mapEditOpen and true or false)
       local up = grp.where == "barUp" or grp.where == "menuUp"
-      for j, m in ipairs(grp.members) do
+      local j = 0
+      for _, m in ipairs(grp.members) do
         m.button:ClearAllPoints()
-        if open then
+        -- (a member shown only with its addon loaded, Import From GatherMate2's: none and no gap without it)
+        local here = open and (not m.when or m.when())
+        if here then j = j + 1 end
+        if here then
           if up then
             m.button:SetPoint("LEFT", grp.button, "RIGHT", 4 + (j - 1) * G.QUICK_STEP_BAR, 0)
           else
