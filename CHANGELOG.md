@@ -10,6 +10,8 @@ Each version's section is its release notes (GitHub and CurseForge).
 - With the road tools on, roads show their kind in color, with smooth corners and their connection points.
 - A road under a bridge stays apart from it: routes from under the bridge go round to its end.
 - Routes can jump off a bridge onto a road below when the fall is safe.
+- With the road or wall tools on, the pointer shows the ground's height from the map's data.
+- New drawn roads start with the ground's height at each point.
 - Roads: new roads and walls in Arathi Highlands.
 - Roads: the way up Grom'gol's zeppelin tower in Stranglethorn Vale.
 

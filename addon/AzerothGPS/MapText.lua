@@ -4,6 +4,7 @@
 -- Data/Maps.lua's ns.Maps first):
 --   R <add|remove|area> <level> <time> [z=<h>] [indoors=1|0] [down=1] [zs=<h>,<h>,...] <x,y> <x,y> ...
 --                                        a road drawn or erased; `zs`: a height per point (1.1.6's road tools)
+--   ... [gz=<h|->,<h|->,...] ...         a drawn road's ground heights from the map's data, "-" for none (1.3.10)
 --   R stair <level> <time> zs=<h>,<h>,... <x,y> <x,y> ...   stairs (1.1.6): their heights, foot and top at least
 --   R <wall|unwall|unwallarea> ...                                                       a wall drawn or erased
 --   P add <level> <time> <x,y> [z=<h>] [down=1|0] icon=<file id or path> name=<the rest>  a pin
@@ -252,6 +253,13 @@ function M.ParseLine(line, currentMap)
           if not z or math.abs(z) > M.MAX_Z or #e.zs >= M.MAX_POINTS then return false, L["not a list of heights"] end
           e.zs[#e.zs + 1] = z
         end
+      elseif key == "gz" then -- (the ground's heights from the map's data: "-" for none)
+        e.gz = {}
+        for h in (v .. ","):gmatch("([^,]*),") do
+          local z = h == "-" and false or Num(h)
+          if z == nil or (z and math.abs(z) > M.MAX_Z) or #e.gz >= M.MAX_POINTS then return false, L["not a list of heights"] end
+          e.gz[#e.gz + 1] = z
+        end
       elseif key == "z" then
         e.z = Num(v)
         if not e.z or math.abs(e.z) > M.MAX_Z then return false, L["not a height"] end
@@ -268,6 +276,7 @@ function M.ParseLine(line, currentMap)
     end
     if #e.pts < 4 then return false, L["fewer than 2 points"] end
     if e.zs and #e.zs ~= #e.pts / 2 then return false, L["its heights don't match its points"] end
+    if e.gz and #e.gz ~= #e.pts / 2 then e.gz = nil end -- (the ground's: only a help, left out when off)
     if e.stair and not e.zs then return false, L["stairs need their heights"] end
     return (op == "wall" or op == "unwall") and "wall" or "road", e
   elseif k == "P" then
@@ -384,6 +393,12 @@ function M.RoadLine(t)
     local hs = {}
     for i, h in ipairs(t.zs) do hs[i] = string.format("%.1f", h) end
     line[#line + 1] = "zs=" .. table.concat(hs, ",")
+  end
+  -- (a drawn road's ground heights from the map's data, 1.3.10: "-" where it had none)
+  if type(t.gz) == "table" and #t.gz == #t.pts / 2 then
+    local hs = {}
+    for i, h in ipairs(t.gz) do hs[i] = type(h) == "number" and string.format("%.1f", h) or "-" end
+    line[#line + 1] = "gz=" .. table.concat(hs, ",")
   end
   for i = 1, #t.pts - 1, 2 do line[#line + 1] = string.format("%.1f,%.1f", t.pts[i], t.pts[i + 1]) end
   return table.concat(line, " ")
