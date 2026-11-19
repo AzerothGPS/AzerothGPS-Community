@@ -14,6 +14,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - The directions text has its own lock, apart from the arrow (Options > Directions, or right-click it).
 - Imported routes now visit their stops in the order listed, on by default; untick "Route in the listed order" in Import and Share (or Options > Routing) for the fastest order.
 - Extra large map icons (Options > Map icons > Icon size); stops, your arrow and minimap icons grow with it too.
+- While routing is paused, the Pause Routing button glows, and a glowing Resume button shows by the logo on the GPS minimap (Options > Map to turn it off). On a controller, Start pauses and resumes.
 
 ### Fixed
 

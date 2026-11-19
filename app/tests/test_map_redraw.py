@@ -11304,6 +11304,81 @@ def test_the_directions_text_hidden_leaves_the_arrow(game):
         _arrow_restore(ns, saved)
 
 
+def test_a_glowing_resume_button_shows_on_the_minimap_square_while_paused(minimap):
+    # (1.3.9, asked 2026-11-18 with a red circle just right of the square's logo: "(enabled by default) I'd like the
+    # unpause button to also show in the minimap glowing here") replaceMinimapResume on (the default): while routing is
+    # paused, however it was, a glowing Resume Routing button right of the logo; a click resumes; off, or not paused, or
+    # the map opened out of the square (the quick bar's glowing button there): none
+    lua, ns = minimap
+    G, st, N = ns.GPS, ns.settings.gps, ns.Nav
+    assert ns.DEFAULTS.gps.replaceMinimapResume is True and st.replaceMinimapResume is not False
+    try:
+        st.replaceMinimap = True
+        G.ApplySettings()
+        N.SetStops(lua.eval("{ { x = 2050, y = 520, cont = 0 } }"), False, "red")
+        assert G.MinimapMode()
+        r = G.mmResume
+        assert r is not None and not r._shown  # (routing on: none)
+        for why in ("manual", "auto", "perf"):
+            N.SetPaused(True, why)
+            assert r._shown and r.glow._shown, why
+            N.SetPaused(False)
+            assert not r._shown, why
+        N.SetPaused(True, "auto")
+        # (the Pause Routing button's icon; just right of the logo, clear of it, inside the square's bottom)
+        assert "Spell_Nature_TimeStop" in str(r.icon._tex)
+        b = G.mmButton
+        size = b.logoSize
+        p = r._pts.BOTTOMLEFT
+        assert p[3] == "BOTTOMLEFT" and p[4] >= size * (G.MINIMAP_LOGO_IN + 0.5) and p[5] > 0
+        assert r._w < size and r._w >= G.MINIMAP_RESUME_MIN  # (smaller than the logo, which it follows)
+        # (its tooltip: Resume Routing and why it was paused)
+        lua.execute("AGPS_TIP = {} AGPS_AL = GameTooltip.AddLine GameTooltip.AddLine = function(_, t) AGPS_TIP[#AGPS_TIP + 1] = t end")
+        try:
+            r._scripts.OnEnter(r)
+            assert str(lua.eval("GameTooltip._text")) == "Resume Routing"
+            assert any("not following the route" in str(t) for t in lua.eval("AGPS_TIP").values())
+        finally:
+            lua.execute("GameTooltip.AddLine = AGPS_AL")
+        # (the glow pulses as the quick buttons' does)
+        lua.execute("AGPS_T = AGPS_T + 0.1")
+        r._scripts.OnUpdate(r, 0.1)
+        assert abs(r.glow._alpha - G.GlowAlpha()) < 1e-9
+        # a click resumes
+        r._scripts.OnClick(r, "LeftButton")
+        assert N.paused is None and not r._shown
+        # the option off: none; on again: back
+        N.SetPaused(True, "manual")
+        assert r._shown
+        st.replaceMinimapResume = False
+        G.RefreshMinimapResume()
+        assert not r._shown
+        st.replaceMinimapResume = True
+        G.RefreshMinimapResume()
+        assert r._shown
+        # (a smaller square: the logo and the button shrink together)
+        st.replaceMinimapSize = "large"
+        G.ApplySettings()
+        big = r._w
+        st.replaceMinimapSize = "small"
+        G.ApplySettings()
+        assert r._shown and r._w < big
+        # opened out of the square (the square not kept): the window's quick bar has the glowing button instead
+        G.SetMinimapExpanded(True)
+        _tick(lua, ns)
+        assert not r._shown
+        G.SetMinimapExpanded(False)
+        _tick(lua, ns)
+        assert r._shown
+        # the route cleared while paused: gone
+        N.Clear()
+        assert not r._shown
+    finally:
+        st.replaceMinimapResume = True
+        N.SetPaused(False)
+        N.Clear()
+
+
 def test_the_route_can_be_left_off_the_minimap_square(minimap):
     # (asked 2026-11-17: "add option to not show the route on our minimap replacement") replaceMinimapRoute off: no route
     # line on the square; on (the default): drawn; the map opened out of the square keeps its route either way
