@@ -314,6 +314,7 @@ L["Some of the stops are in %s: too high for your level %d.\n\nRoute there anywa
 L["Some of the stops are in %s: too high for your level.\n\nRoute there anyway?"] = "Certaines étapes se trouvent dans %s : trop haut niveau pour vous.\n\nY aller quand même ?"
 L["The only way there walks through %s: too high for your level %d.\n\nKeep this route?"] = "Le seul chemin passe par %s : trop haut niveau pour votre niveau %d.\n\nGarder cet itinéraire ?"
 L["The only way there walks through %s: too high for your level.\n\nKeep this route?"] = "Le seul chemin passe par %s : trop haut niveau pour vous.\n\nGarder cet itinéraire ?"
+L["Trip kept: it goes round zones too high for you where it can, and won't ask again this trip."] = "Trajet conservé : il contourne les zones de trop haut niveau pour vous quand c'est possible, et ne le demandera plus pour ce trajet."
 L["Dungeon route: the game doesn't give your position in here, so it isn't started (/agps bosses starts it anyway)."] = "Itinéraire de donjon : le jeu ne donne pas votre position ici, il n'est donc pas lancé (/agps bosses le lance quand même)."
 L["Dungeon route on: entering a dungeon or raid starts its boss route."] = "Itinéraire de donjon activé : entrer dans un donjon ou un raid lance son itinéraire des boss."
 L["Dungeon route off: routes are yours again (the Boss Route button still makes one)."] = "Itinéraire de donjon désactivé : les itinéraires sont de nouveau les vôtres (le bouton Itinéraire des boss en crée toujours un)."

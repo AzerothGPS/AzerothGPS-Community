@@ -314,6 +314,7 @@ L["Some of the stops are in %s: too high for your level %d.\n\nRoute there anywa
 L["Some of the stops are in %s: too high for your level.\n\nRoute there anyway?"] = "部分停靠點位於%s：對你的等級來說太高。\n\n仍要規劃路線嗎？"
 L["The only way there walks through %s: too high for your level %d.\n\nKeep this route?"] = "唯一的路線會經過%s：對你的等級%d來說太高。\n\n要保留這條路線嗎？"
 L["The only way there walks through %s: too high for your level.\n\nKeep this route?"] = "唯一的路線會經過%s：對你的等級來說太高。\n\n要保留這條路線嗎？"
+L["Trip kept: it goes round zones too high for you where it can, and won't ask again this trip."] = "已保留行程：會盡量繞開等級過高的區域，本次行程不再詢問。"
 L["Dungeon route: the game doesn't give your position in here, so it isn't started (/agps bosses starts it anyway)."] = "地城路線：遊戲在此不提供你的位置，因此未啟動（/agps bosses 可強制啟動）。"
 L["Dungeon route on: entering a dungeon or raid starts its boss route."] = "地城路線已開啟：進入地城或團隊副本時會啟動首領路線。"
 L["Dungeon route off: routes are yours again (the Boss Route button still makes one)."] = "地城路線已關閉：路線由你自行規劃（「首領路線」按鈕仍可建立）。"
