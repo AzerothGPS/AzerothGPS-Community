@@ -2344,6 +2344,9 @@ local function BuildWindow()
   Key("questZoneOnly")
   check(L["Quest route: only this zone"], L["The Quest Route button takes only the quests whose objective or turn-in is in the zone you're in (a city counts as its zone). Off: every quest in your log, anywhere."],
     function() return GPS().questZoneOnly end, function(v) GPS().questZoneOnly = v end)
+  Key("questTrackedOnly")
+  check(L["Quest route: only tracked quests"], L["The Quest Route button takes only the quests you track: the ones Questie's tracker shows when it's on, else the ones ticked to track in the quest log. Off: every quest in your log."],
+    function() return GPS().questTrackedOnly end, function(v) GPS().questTrackedOnly = v end)
   Key("questAutoReroute")
   check(L["Quest route: reroute by itself"], L["When you pick up or finish a quest on a quest route, the route is made again with it by itself, as clicking the pulsing Sprint icon in the directions does. Off: the icon pulses until you click it. (Either way, quest stops you removed stay out of the route until it ends.)"],
     function() return GPS().questAutoReroute end, function(v) GPS().questAutoReroute = v end)

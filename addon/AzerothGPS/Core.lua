@@ -105,6 +105,7 @@ ns.DEFAULTS = {
     reopenFollow = false, -- hidden while looking around the map (a route set): reopens on the player
     questing = true, -- a stop in a quest area is done when the quest's objectives are
     questZoneOnly = false, -- the quest route: only the quests in the zone you're in
+    questTrackedOnly = false, -- the quest route: only the quests you track (Questie's tracker's, else the game's; Layers.QuestTracked)
     questAutoReroute = false, -- the quest route made again by itself on a quest picked up or finished (Nav.MarkQuestRouteStale)
     questPickRoute = false, -- the route to the quest picked in the quest log or tracker (C_SuperTrack; G.PickedQuestRoute)
     avoidHighZones = true, -- routes keep out of zones too high for the character (red on the map), if there's a way round
