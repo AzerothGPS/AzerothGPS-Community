@@ -2179,6 +2179,10 @@ local function BuildWindow()
   slider(L["Background opacity"], 0, 100, 5, "%d%%",
     function() return ns.GPS.NavAlphaPct() end, function(v) GPS().navPanelAlpha = v end, Detached,
     L["How dark the detached panel's background is. All the way down, only the text shows. The text always stays fully visible."])
+  Key("navPanelWrap")
+  check(L["Wrap the text"], L["While the panel is detached, a line too long for it goes on to the next line instead of being cut short with \"...\". Steps that don't fit still show as \"... N more steps\"."],
+    function() return GPS().navPanelWrap == true end, function(v) GPS().navPanelWrap = v and true or false end,
+    Detached, 20)
   Key("navPanelLocked")
   check(L["Lock the panel"], L["While the panel is detached, it can't be dragged, resized, or put back on the map with a right-click. Its buttons still work. The lock button on the panel turns this on and off too."],
     function() return GPS().navPanelLocked == true end, function(v) GPS().navPanelLocked = v and true or false end,

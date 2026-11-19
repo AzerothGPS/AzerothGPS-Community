@@ -12,7 +12,7 @@ from test_world_map_host import SETUP
 
 KEYS = ("useWorldMap", "replaceMinimap", "shown", "minimized", "windowFrame", "navPanelWidth", "navPanelAlign",
         "navPanelDetached", "navPanelPoint", "navPanelDetachedWidth", "navPanelHideButtons", "navPanelAlpha",
-        "navPanelDetachedHeight", "stepsAll", "stepsCollapsed", "navPanelLocked")
+        "navPanelDetachedHeight", "stepsAll", "stepsCollapsed", "navPanelLocked", "navPanelWrap")
 
 
 @pytest.fixture
@@ -574,3 +574,165 @@ def test_the_width_edge_is_the_maps_alone(rp):
     assert not edge.drag and st.navPanelDetachedWidth == w
     G.navDetach._scripts.OnClick(G.navDetach, "LeftButton")
     assert not G.navDetached and edge._shown and not G.navGrip._shown
+
+
+def test_after_a_reload_the_sized_panel_fits_again_once_its_layout_settles(rp):
+    # (Kooki3z's test of #617, 2026-11-18: right after a /reload the detached, sized panel showed step 1 alone. The
+    # first fit came before the client had laid its text out: no width yet, each word a line of its own, the steps
+    # "too tall"; and nothing fitted it again. Now an unsettled measure isn't trusted, and it's fitted again shortly.)
+    lua, ns = rp
+    G, st = ns.GPS, ns.settings.gps
+    _detach(lua, ns)
+    G.SizeNavDetached(480, 12 + 24 + 4 - 2 + 14 * 6)  # (saved: room for 6 step lines)
+    steps = "\n".join("|cffb0b0b0%d. Step %d|r" % (i, i) for i in range(1, 10))
+    old_steps = ns.Nav.StepsText
+    lua.execute("""AGPS_TIMERS = {}
+      AGPS_OLD_AFTER = C_Timer.After
+      C_Timer.After = function(_, f) AGPS_TIMERS[#AGPS_TIMERS + 1] = f end""")
+    nt, stx, m = G.navText, G.stepsText, G.navMeasure
+    G.navRefitPending = None  # (the stand-in's timers never ran: none on its way)
+
+    def unsettled():
+        # (the client before its layout: no width, each word on a line of its own, the font measuring nothing)
+        nt.GetWidth = lua.eval("function() return 0 end")
+        stx.GetWidth = lua.eval("function() return 0 end")
+        stx.GetStringHeight = lua.eval("function() return 9999 end")
+        m.GetUnboundedStringWidth = lua.eval("function() return 0 end")
+
+    def settled():
+        nt.GetWidth, stx.GetWidth, stx.GetStringHeight, m.GetUnboundedStringWidth = None, None, None, None
+
+    def drawn():
+        G.navText._text = "Walk 4m 35s\nAll stops 9m"
+        G.FitNavPanel(steps, 9, 0)
+        return str(G.stepsText._text).split("\n")
+
+    def fire():
+        timers = list(lua.globals().AGPS_TIMERS.values())
+        lua.execute("AGPS_TIMERS = {}")
+        for f in timers:
+            f()
+        return len(timers)
+
+    try:
+        # (a fresh load: the saved size, detached again as at login, before the client's layout)
+        st.navPanelDetached = False
+        G.ApplySettings()
+        unsettled()
+        st.navPanelDetached = True
+        G.ApplySettings()
+        assert G.NavFixed() and not G.NavLayoutSettled()
+        lines = drawn()
+        # (an unsettled "9999 high" isn't too tall: the lines by the font's height, not step 1 alone)
+        assert len(lines) == 6 and lines[-1] == "|cff808080... 4 more steps|r"
+        G.navPanelSig = "stale"
+        assert fire() == 1  # (and fitted again shortly: laid out again on the next update)
+        assert G.navPanelSig is None
+        # (the real size arrives: that fit has every step that fits)
+        settled()
+        lines = drawn()
+        assert len(lines) == 6 and lines[:5] == steps.split("\n")[:5] and G.navMore == 4
+        assert fire() == 0  # (settled: no more tries)
+        # (its size changing, as the client settles it: fitted again)
+        G.navPanel._scripts.OnSizeChanged(G.navPanel, 480, 200)
+        assert fire() == 1
+        # (a zero height never counts as too tall either)
+        stx.GetStringHeight = lua.eval("function() return 0 end")
+        assert len(drawn()) == 6
+        stx.GetStringHeight = None
+        # (unsettled forever: a bounded number of tries)
+        unsettled()
+        G.navRefits = 0
+        n = 0
+        for _ in range(50):
+            drawn()
+            n += fire()
+        assert n == G.NAV_REFIT_MAX
+    finally:
+        settled()
+        ns.Nav.StepsText = old_steps
+        lua.execute("C_Timer.After = AGPS_OLD_AFTER")
+
+
+def test_wrap_the_text_keeps_whole_wrapped_steps_and_counts_the_rest(rp):
+    # (asked 2026-11-18, "Wrap the text": long lines wrap instead of "...", each step kept whole, counted by its lines)
+    lua, ns = rp
+    G, st = ns.GPS, ns.settings.gps
+    assert ns.DEFAULTS.gps.navPanelWrap is False
+    _detach(lua, ns)
+    m = G.navMeasure
+    m.GetUnboundedStringWidth = lua.eval("""function(s)
+      local t = s._text:gsub("|T.-|t", "XX"):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+      return #t * 6
+    end""")
+    word = "Hillsbrad "
+    longs = ["|cffb0b0b0%d. Then to " % i + word * 9 + "Foothills|r" for i in (2, 3)]  # (~110 characters: 2 lines)
+    steps = "\n".join(["|cffffffff1. Take the flight|r"] + longs
+                      + ["|cffb0b0b0%d. Walk 1m|r" % i for i in range(4, 10)])
+    lua.execute("AGPS_TIMERS = {} AGPS_OLD_AFTER = C_Timer.After "
+                "C_Timer.After = function(_, f) AGPS_TIMERS[#AGPS_TIMERS + 1] = f end")
+    G.navRefitPending = None
+
+    def drawn():
+        G.navText._text = "Walk 4m 35s\nAll stops 9m"
+        G.FitNavPanel(steps, 9, 0)
+        return _rendered(G.stepsText)
+
+    try:
+        G.SizeNavDetached(480, 12 + 24 + 4 - 2 + 14 * 6)  # (6 lines for the steps; 442 wide: 73 characters)
+        ww = 480 - 6 - G.NavTextInsets()[1]
+        assert G.WrapCount(longs[0], ww) == 2 and G.WrapCount("|cffb0b0b04. Walk 1m|r", ww) == 1
+        # wrap off (as before): every line one, the long ones cut short
+        st.navPanelWrap = False
+        G.ApplySettings()
+        lines = drawn()
+        assert len(lines) == 6 and lines[1].endswith("...|r") and lines[-1] == "|cff808080... 4 more steps|r"
+        # wrap on: the long ones whole, 2 lines each; 1 + 2 + 2 = 5 lines and the count
+        st.navPanelWrap = True
+        G.ApplySettings()
+        assert G.NavWrap()
+        lines = drawn()
+        assert lines == ["|cffffffff1. Take the flight|r"] + longs + ["|cff808080... 6 more steps|r"]
+        assert G.navMore == 6 and G.stepsText._wrap is not False
+        # (one line less: step 3 doesn't fit whole, so it's left to the count, never cut halfway)
+        G.SizeNavDetached(480, 12 + 24 + 4 - 2 + 14 * 5)
+        lines = drawn()
+        assert lines == ["|cffffffff1. Take the flight|r", longs[0], "|cff808080... 7 more steps|r"]
+        # (room for all: every step, nothing said)
+        G.SizeNavDetached(480, 12 + 24 + 4 - 2 + 14 * 11)
+        assert drawn() == steps.split("\n") and G.navMore == 0
+        # (kept over a reload; before the layout settles the font measures nothing: one line each, then fitted again)
+        assert ns.db.settings.gps.navPanelWrap is True
+        G.SizeNavDetached(480, 12 + 24 + 4 - 2 + 14 * 6)
+        st.navPanelDetached = False
+        G.ApplySettings()
+        m.GetUnboundedStringWidth = lua.eval("function() return 0 end")
+        st.navPanelDetached = True
+        G.ApplySettings()
+        assert not G.NavLayoutSettled()
+        assert len(drawn()) == 6
+        m.GetUnboundedStringWidth = lua.eval("""function(s)
+          local t = s._text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+          return #t * 6
+        end""")
+        for f in list(lua.globals().AGPS_TIMERS.values()):
+            f()
+        assert G.navPanelSig is None
+        assert drawn() == ["|cffffffff1. Take the flight|r"] + longs + ["|cff808080... 6 more steps|r"]
+    finally:
+        m.GetUnboundedStringWidth = None
+        st.navPanelWrap = False
+        lua.execute("C_Timer.After = AGPS_OLD_AFTER")
+
+
+def test_fit_steps_with_line_costs(rp):
+    lua, ns = rp
+    G = ns.GPS
+    lines = STEPS.split("\n")
+    two = lua.eval("function(l) return l:find('[13]%. ') and 2 or 1 end")  # (steps 1 and 3 wrap to 2 lines)
+    out, more = G.FitSteps(STEPS, 6, 10, two)  # (1:2, 2:1, 3:2 = 5, the count: 6)
+    assert out.split("\n") == lines[:3] + ["|cff808080... 7 more steps|r"] and more == 7
+    out, more = G.FitSteps(STEPS, 12, 10, two)
+    assert out == STEPS and more == 0
+    out, more = G.FitSteps(STEPS, 2, 10, two)  # (step 1 alone is 2: only the count)
+    assert out == "|cff808080... 10 more steps|r" and more == 10

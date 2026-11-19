@@ -7572,6 +7572,11 @@ function G.ApplyNavDetach()
   if fl.bar and fl.bar:IsShown() then G.PlaceFloorBar() end
   if G.pathColorBox and G.pathColorBox:IsShown() then G.PlacePathColorPicker() end
   if want and not G.IsVisible() then G.RefreshDetachedNav() end -- (shown now, the map closed)
+  -- (and fitted again once the client has laid it out: at login and after a /reload the first fit comes before that)
+  if want and G.NavFixed() then
+    G.navRefits = 0
+    G.NavRefitSoon()
+  end
 end
 -- Detached, two looks of its own (1.3.9, asked 2026-11-18: "for the detached route panel, add options to hide all
 -- buttons in it and set the opacity of the background"). `navPanelHideButtons`: only its text, every button in it
@@ -7698,17 +7703,25 @@ function G.MoreStepsLine(n)
 end
 -- The steps' lines (`text`) that fit in `fit` lines: all of them, or the first ones and, last, "... N more steps"
 -- (`total`, the steps in all; false: not known, "... more turns further on"). Gives the text and how many were left out.
-function G.FitSteps(text, fit, total)
+-- `cost` (optional): how many lines each takes (wrapped: G.NavWrap), else one; a step is kept whole or not at all.
+function G.FitSteps(text, fit, total, cost)
   local lines = G.SplitLines(text)
-  if #lines <= fit then return text, 0 end
+  local costs, sum = {}, 0
+  for i, l in ipairs(lines) do
+    costs[i] = cost and math.max(1, cost(l)) or 1
+    sum = sum + costs[i]
+  end
+  if sum <= fit then return text, 0 end
   local numbered = 0
   for _, l in ipairs(lines) do
     if G.IsStepLine(l) then numbered = numbered + 1 end
   end
   if fit <= 0 then return "", total or numbered end
-  local out, kept = {}, 0
-  for i = 1, fit - 1 do
+  local out, kept, used = {}, 0, 0
+  for i = 1, #lines do
+    if used + costs[i] > fit - 1 then break end -- (a line kept for the rest's count)
     out[i] = lines[i]
+    used = used + costs[i]
     if G.IsStepLine(lines[i]) then kept = kept + 1 end
   end
   local more = (total or numbered) - kept
@@ -7717,9 +7730,38 @@ function G.FitSteps(text, fit, total)
   elseif more > 0 then
     out[#out + 1] = G.MoreStepsLine(more)
   else -- (only lines after the steps left over: the one more that fits)
-    out[#out + 1] = lines[fit]
+    local nx = lines[#out + 1]
+    if nx and used + costs[#out + 1] <= fit then out[#out + 1] = nx end
   end
   return table.concat(out, "\n"), math.max(0, more)
+end
+-- Detached, wrapping its lines (`navPanelWrap`, asked 2026-11-18: "Wrap the text"): a line too long for the panel goes
+-- on to the next instead of being cut short; the fit counts each step's lines, kept whole or not at all.
+function G.NavWrap()
+  return G.navDetached == true and S().navPanelWrap == true
+end
+-- How many lines `line` takes wrapped at `w` wide (the client's way: at the spaces; a word wider than a line broken).
+-- One while the font measures nothing (not settled yet: fitted again after).
+function G.WrapCount(line, w)
+  if line == "" or w <= 0 then return 1 end
+  local full = G.TextWidth(line)
+  if full <= w then return 1 end
+  local n, cur = 1, ""
+  for word in line:gmatch("%S+") do
+    local try = cur == "" and word or (cur .. " " .. word)
+    if cur ~= "" and G.TextWidth(try) > w then
+      n = n + 1
+      cur = word
+    else
+      cur = try
+    end
+    local cw = G.TextWidth(cur)
+    if cw > w then -- (one word past the width: broken over lines of its own)
+      n = n + math.ceil(cw / w) - 1
+      cur = ""
+    end
+  end
+  return n
 end
 -- Sized: its text fitted inside it (from G.UpdateNavPanel, the full text set). `steps` the steps' text, `total` their
 -- count, `rowsH` the quest rows' height. G.navMore: how many steps were left out (the tests).
@@ -7731,11 +7773,32 @@ function G.FitNavPanel(steps, total, rowsH)
   local lh = G.NavLineH(navText)
   local status = G.SplitLines(navText:GetText() or "")
   local fitS = math.max(1, math.floor(room / lh))
-  for i = #status, fitS + 1, -1 do status[i] = nil end
-  for i, l in ipairs(status) do status[i] = G.FitLineWidth(l, w - 6 - textR) end
+  local wrap, tw = G.NavWrap(), w - 6 - textR
+  local statusLines = 0
+  if wrap then -- (whole lines while they fit; the first always, cut short if it alone is past the room)
+    local keep = {}
+    for i, l in ipairs(status) do
+      local c = G.WrapCount(l, tw)
+      if statusLines + c > fitS then
+        if i == 1 then keep[1], statusLines = G.FitLineWidth(l, tw), 1 end
+        break
+      end
+      keep[i], statusLines = l, statusLines + c
+    end
+    status = keep
+  else
+    for i = #status, fitS + 1, -1 do status[i] = nil end
+    for i, l in ipairs(status) do status[i] = G.FitLineWidth(l, tw) end
+    statusLines = #status
+  end
   navText:SetText(table.concat(status, "\n"))
-  -- (as tall as the client lays it out, where it says: a line's height isn't always the font's)
-  local used = math.max(#status * lh, tonumber(navText:GetStringHeight()) or 0)
+  -- (the client's own measures only once they're settled, G.NavLayoutSettled: right after a /reload the text strings
+  -- have no width yet, every word a line of its own, and the panel came up with step 1 alone; Kooki3z's test of
+  -- #617, 2026-11-18. Unsettled: by the font's line height, and fitted again shortly, G.NavRefitSoon)
+  local settled = G.NavLayoutSettled()
+  local used = statusLines * lh
+  local measured = tonumber(navText:GetStringHeight()) or 0
+  if settled and measured > used and measured <= used * G.NAV_MEASURE_TRUST then used = measured end
   room = room - used
   if rowsH > 0 and rowsH > room then -- (no room for the quest rows)
     G.LayoutGroupRows(navPanel, navText, false)
@@ -7748,19 +7811,57 @@ function G.FitNavPanel(steps, total, rowsH)
     local fit = math.floor((stepRoom + G.NAV_STEPS_SPACING) / (sl + G.NAV_STEPS_SPACING))
     local ww = w - 6 - stepsR
     local out
+    local cost = wrap and function(l) return G.WrapCount(l, ww) end or nil
     repeat
-      out, G.navMore = G.FitSteps(steps, fit, total)
+      out, G.navMore = G.FitSteps(steps, fit, total, cost)
       local lines = G.SplitLines(out)
-      for i, l in ipairs(lines) do lines[i] = G.FitLineWidth(l, ww) end
+      local count = #lines
+      if wrap then
+        count = 0
+        for _, l in ipairs(lines) do count = count + cost(l) end
+      else
+        for i, l in ipairs(lines) do lines[i] = G.FitLineWidth(l, ww) end
+      end
       out = table.concat(lines, "\n")
       stepsText:SetText(out)
       fit = fit - 1
-      -- (laid out taller than the room by the client's own measure: one line fewer)
-    until fit < 0 or out == "" or (tonumber(stepsText:GetStringHeight()) or 0) <= stepRoom + 1
+      -- (laid out taller than the room by the client's own measure: one line fewer. Not on a measure that isn't
+      -- settled, nor one far past what its lines can be: a string with no width yet, each word a line, isn't "too
+      -- tall"; nor zero or none)
+      local mh = tonumber(stepsText:GetStringHeight()) or 0
+      local expect = count * (sl + G.NAV_STEPS_SPACING)
+      local over = settled and mh > stepRoom + 1 and mh <= expect * G.NAV_MEASURE_TRUST
+    until fit < 0 or out == "" or not over
     stepsText:SetShown(out ~= "")
     if out == "" and rowsH > 0 then G.LayoutGroupRows(navPanel, navText, true) end
   end
   navPanel:SetHeight(h)
+  if settled then G.navRefits = 0 else G.NavRefitSoon() end
+end
+G.NAV_MEASURE_TRUST = 2 -- (a measured height up to twice what its lines make is the client's; past that, not settled)
+G.NAV_REFIT_WAIT, G.NAV_REFIT_MAX = 0.25, 20 -- (seconds; tries while it isn't settled)
+-- The panel's text laid out by the client yet: its strings have a width, and the font measures text.
+function G.NavLayoutSettled()
+  local tw = tonumber(navText:GetWidth()) or 0
+  local sw = tonumber(stepsText:GetWidth()) or 0
+  local pw = tonumber(navPanel:GetWidth()) or 0
+  return tw > 1 and sw > 1 and pw > 1 and G.TextWidth("0") > 0
+end
+-- Fitted again shortly (its text laid out once more: G.navPanelSig cleared), while the client's layout settles; at
+-- most NAV_REFIT_MAX tries in a row.
+function G.NavRefitSoon()
+  if (G.navRefits or 0) >= G.NAV_REFIT_MAX or not (C_Timer and C_Timer.After) then return end
+  local now = GetTime()
+  if G.navRefitPending and now - G.navRefitPending < 1 then return end -- (one on its way)
+  G.navRefits = (G.navRefits or 0) + 1
+  G.navRefitPending = now
+  C_Timer.After(G.NAV_REFIT_WAIT, G.NavRefit)
+end
+function G.NavRefit()
+  G.navRefitPending = nil
+  if not G.NavFixed() then return end
+  G.navPanelSig = nil
+  if not G.IsVisible() then G.RefreshDetachedNav() end -- (the map shown: its next update lays it out)
 end
 -- The pieces of a line of text: each escape sequence whole (a color, its end, an icon, a link, "||") and each
 -- character (UTF-8), so a line is cut between them, never inside one.
@@ -7868,7 +7969,8 @@ function G.UpdateNavPanel(px, py, cont, hidden, route, dest)
     grouped and "g" or "-", manySteps and "m" or "-", st.stepsAll and "a" or "-",
     #ns.Nav.stops > 0 and "s" or "-", tostring(ns.Nav.Version()), tostring(navClosedAt),
     G.Held() and "H" or "-", tostring(G.drawVersion), G.tpAhead or "", G.hostileNote or "",
-    G.NavBare() and "b" or "-", G.NavFixed() and tostring(G.NavDetachedHeight()) or "-" }, "|")
+    G.NavBare() and "b" or "-", G.NavFixed() and tostring(G.NavDetachedHeight()) or "-",
+    G.NavWrap() and "w" or "-" }, "|")
   if psig ~= G.navPanelSig then
   G.navPanelSig = psig
   navText:SetText((collapsed and G.CollapsedStatus(status) or status or "") .. (G.tpAhead and "\n" .. G.tpAhead or "")
@@ -15917,6 +16019,10 @@ function G.Init()
   grip:Hide()
   G.navGrip = grip
   top:HookScript("OnSizeChanged", function() G.PlaceNavPanel() end) -- (a share of the map's width: kept as it's sized)
+  -- (sized by its corner, its size settling, as after a /reload: its text fitted again)
+  navPanel:HookScript("OnSizeChanged", function()
+    if G.NavFixed() then G.NavRefitSoon() end
+  end)
   local toggle = SmallBox(detach, "-") -- (left of the lock while it shows: G.UpdateNavPanel)
   toggle:SetScript("OnClick", function()
     local st = S()

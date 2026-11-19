@@ -99,6 +99,7 @@ ns.DEFAULTS = {
     navPanelHideButtons = false,
     navPanelAlpha = 70,
     navPanelLocked = false, -- (detached: no dragging, sizing or right-click back to the map)
+    navPanelWrap = false, -- (detached and sized: long lines wrap instead of being cut short)
     reopenFollow = false, -- hidden while looking around the map (a route set): reopens on the player
     questing = true, -- a stop in a quest area is done when the quest's objectives are
     questZoneOnly = false, -- the quest route: only the quests in the zone you're in
