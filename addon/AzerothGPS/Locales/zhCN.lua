@@ -1857,3 +1857,5 @@ L["Lets you drag and resize this panel again."] = "可以再次拖动和调整�
 L["Locked. To unlock it: Options > Map window > Lock the panel."] = "已锁定。解锁：选项 > 地图窗口 > 锁定面板。"
 L["Wrap the text"] = "文字自动换行"
 L["While the panel is detached, a line too long for it goes on to the next line instead of being cut short with \"...\". Steps that don't fit still show as \"... N more steps\"."] = "面板分离时，过长的行会换到下一行，而不是用 \"...\" 截断。放不下的步骤仍显示为 \"... 还有 N 步\"。"
+L["|cffffd100Routing paused: it was making your game stutter|r"] = "|cffffd100路线已暂停：它让你的游戏卡顿|r"
+L["Routing paused: it was making your game stutter. Resume it with the Pause Routing button or /agps pause."] = "路线已暂停：它让你的游戏卡顿。用“暂停路线”按钮或 /agps pause 恢复。"

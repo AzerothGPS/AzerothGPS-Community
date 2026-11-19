@@ -1857,3 +1857,5 @@ L["Lets you drag and resize this panel again."] = "이 패널을 다시 끌고 �
 L["Locked. To unlock it: Options > Map window > Lock the panel."] = "잠겨 있습니다. 잠금 해제: 설정 > 지도 창 > 패널 잠금."
 L["Wrap the text"] = "텍스트 줄 바꿈"
 L["While the panel is detached, a line too long for it goes on to the next line instead of being cut short with \"...\". Steps that don't fit still show as \"... N more steps\"."] = "패널이 분리된 동안에는 너무 긴 줄이 \"...\"로 잘리지 않고 다음 줄로 이어집니다. 들어가지 않는 단계는 여전히 \"... N단계 더\"로 표시됩니다."
+L["|cffffd100Routing paused: it was making your game stutter|r"] = "|cffffd100경로 안내 일시 정지: 게임이 끊기게 만들었습니다|r"
+L["Routing paused: it was making your game stutter. Resume it with the Pause Routing button or /agps pause."] = "경로 안내 일시 정지: 게임이 끊기게 만들었습니다. 경로 일시 정지 버튼이나 /agps pause로 다시 시작하세요."

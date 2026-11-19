@@ -1857,3 +1857,5 @@ L["Lets you drag and resize this panel again."] = "Снова позволяет
 L["Locked. To unlock it: Options > Map window > Lock the panel."] = "Закреплена. Чтобы открепить: Настройки > Окно карты > Закрепить панель."
 L["Wrap the text"] = "Переносить текст"
 L["While the panel is detached, a line too long for it goes on to the next line instead of being cut short with \"...\". Steps that don't fit still show as \"... N more steps\"."] = "Пока панель откреплена, слишком длинная строка переносится на следующую, а не обрезается многоточием \"...\". Не поместившиеся шаги по-прежнему показываются как \"... ещё N шагов\"."
+L["|cffffd100Routing paused: it was making your game stutter|r"] = "|cffffd100Маршрут приостановлен: из-за него игра подтормаживала|r"
+L["Routing paused: it was making your game stutter. Resume it with the Pause Routing button or /agps pause."] = "Маршрут приостановлен: из-за него игра подтормаживала. Возобновите его кнопкой «Пауза маршрута» или командой /agps pause."

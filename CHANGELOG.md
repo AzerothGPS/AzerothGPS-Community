@@ -17,6 +17,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 ### Fixed
 
 - Going off course on a long route no longer causes a hitch.
+- If routing still makes your game stutter, it works out only the way to your next stop until things are smooth again, and pauses with a message if that isn't enough (resume with Pause Routing or /agps pause).
 
 ## 1.3.8
 
