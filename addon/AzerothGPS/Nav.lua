@@ -144,6 +144,7 @@ local function Save()
   local rides = {}
   for key in pairs(N.skipRides or {}) do rides[#rides + 1] = key end
   cdb.skipRides = (#list > 0 and #rides > 0) and rides or nil
+  cdb.noSwim = (#list > 0 and N.noSwim) or nil -- (a swim removed from this trip: N.SkipSwim)
   local dropped = {}
   for i, e in ipairs(N.questDropped or {}) do dropped[i] = Copy(e) end
   cdb.questDropped = (#list > 0 and #dropped > 0) and dropped or nil
@@ -357,6 +358,208 @@ function N.EachHostilePiece(spans, fn)
   end
   if t < 1 then fn(t, 1, false) end
 end
+
+-- Swims on the route (asked for 1.3.10): the walks' stretches off the roads over water to swim (Passability.WaterSpans,
+-- the terrain grid's water; the deep sea far out is closed). Drawn as a wavy line on both maps and the minimap, timed
+-- at the game's swim speed (N.TripSecs), and removable from the trip (right-click: N.SkipSwim). Shorter than
+-- SWIM_MIN_YD on a piece: a stream waded, not counted.
+N.SWIM_MIN_YD = 10
+N.SWIM_SPEED = 4.72 -- yd/s, the game's base swim speed (GetUnitSpeed's fourth value once seen: N.SwimSpeed)
+local swimSpans = setmetatable({}, { __mode = "k" }) -- [part] = { [i] = spans or false }
+-- The stretches of route part `part`'s piece i that are swum: { t1, t2, ... } (0 to 1 along the piece), or false.
+function N.SwimSpans(part, i)
+  local P, R = ns.Passability, ns.Router
+  if not (part and part.pts and P and P.WaterSpans and R) then return false end
+  local memo = swimSpans[part]
+  if not memo then
+    memo = {}
+    swimSpans[part] = memo
+  end
+  local v = memo[i]
+  if v ~= nil then return v end
+  v = false
+  local pts, k = part.pts, part.kinds and part.kinds[i]
+  local x1, y1, x2, y2 = pts[2 * i - 1], pts[2 * i], pts[2 * i + 1], pts[2 * i + 2]
+  if x2 and k == R.KIND_OFFROAD then
+    local wet = P.WaterSpans(part.cont, x1, y1, x2, y2)
+    if wet then
+      local len = math.sqrt((x2 - x1) ^ 2 + (y2 - y1) ^ 2)
+      for j = 1, #wet - 1, 2 do
+        if (wet[j + 1] - wet[j]) * len >= N.SWIM_MIN_YD then
+          v = v or {}
+          v[#v + 1], v[#v + 2] = wet[j], wet[j + 1]
+        end
+      end
+    end
+  end
+  memo[i] = v
+  return v
+end
+-- Pieces of a route piece for drawing it: fn(t1, t2, hostile, swim) for each stretch from 0 to 1, in order: the other
+-- faction's guards' reach (N.HostileSpans) and the swims (N.SwimSpans) cut it alike.
+local function InSpans(list, t)
+  if not list then return false end
+  for j = 1, #list - 1, 2 do
+    if t >= list[j] and t <= list[j + 1] then return true end
+  end
+  return false
+end
+function N.EachRoutePiece(part, i, fn)
+  local h = N.HostileSpans(part, i)
+  local w = N.SwimSpans(part, i)
+  if not h and not w then return fn(0, 1, false, false) end
+  local cuts, seen = { 0, 1 }, { [0] = true, [1] = true }
+  for _, list in ipairs({ h or {}, w or {} }) do
+    for _, t in ipairs(list) do
+      if not seen[t] then cuts[#cuts + 1], seen[t] = t, true end
+    end
+  end
+  table.sort(cuts)
+  for k = 1, #cuts - 1 do
+    local a, b = cuts[k], cuts[k + 1]
+    if b > a then
+      local m = (a + b) / 2
+      fn(a, b, InSpans(h, m), InSpans(w, m))
+    end
+  end
+end
+-- The yards swum along `part`: all of it, or before its piece i at t along it (from its start).
+local swimAlong = setmetatable({}, { __mode = "k" }) -- [part] = { cumulative yards swum before each piece }
+local function SwimCum(part)
+  local cum = swimAlong[part]
+  if cum then return cum end
+  cum = { 0 }
+  local pts = part.pts or {}
+  local R = ns.Router
+  for i = 1, #pts / 2 - 1 do
+    if R and R.Breathe then R.Breathe(i, 50) end -- (in a background job: a pause along a long walk)
+    local w, yd = N.SwimSpans(part, i), 0
+    if w then
+      local len = math.sqrt((pts[2 * i + 1] - pts[2 * i - 1]) ^ 2 + (pts[2 * i + 2] - pts[2 * i]) ^ 2)
+      for j = 1, #w - 1, 2 do yd = yd + (w[j + 1] - w[j]) * len end
+    end
+    cum[i + 1] = cum[i] + yd
+  end
+  swimAlong[part] = cum
+  return cum
+end
+function N.SwimYards(part, i, t)
+  if not (part and part.pts) then return 0 end
+  local cum = SwimCum(part)
+  if not i then return cum[#cum] end
+  local before = cum[i] or cum[#cum]
+  local w = t and t > 0 and cum[i] and N.SwimSpans(part, i)
+  if w then
+    local pts = part.pts
+    local len = math.sqrt((pts[2 * i + 1] - pts[2 * i - 1]) ^ 2 + (pts[2 * i + 2] - pts[2 * i]) ^ 2)
+    for j = 1, #w - 1, 2 do
+      if t > w[j] then before = before + (math.min(t, w[j + 1]) - w[j]) * len end
+    end
+  end
+  return before
+end
+-- The yards swum on a stretch's walks (its parts; a ride's has no piece off the roads).
+function N.StretchSwim(st)
+  if not st then return 0 end
+  if st.swimYd then return st.swimYd end
+  local yd = 0
+  for _, p in ipairs(st.parts or {}) do yd = yd + N.SwimYards(p) end
+  st.swimYd = yd
+  return yd
+end
+-- The route's swims: r.swimYards to the next stop, r.totalSwim to the last one planned (from its stretches).
+local function SetSwim(r)
+  local yd, total = 0, 0
+  for i, st in pairs(r.stretches or {}) do
+    if type(i) == "number" and st then
+      local s = N.StretchSwim(st)
+      if i == 1 then yd = s end
+      total = total + s
+    end
+  end
+  r.swimYards, r.totalSwim = yd, total
+end
+N.SetSwim = SetSwim
+
+-- What makes water as fast as land for this character (asked for 1.3.10): water walking or levitation on, known or in
+-- the bags, or Aquatic Form (a druid swims about as fast as running in it). What the addon can read: the auras
+-- (N.AuraOn), the spells known (IsPlayerSpell / IsSpellKnown) and the bags (GetItemCount). { spell, item, name, icon,
+-- active } or nil; the auras checked at most every second, the spells and bags every 10 s.
+N.WATER_FAST = {
+  { spell = 546 },   -- Water Walking (shaman)
+  { spell = 1706 },  -- Levitate (priest)
+  { spell = 1066 },  -- Aquatic Form (druid)
+  { spell = 11319, item = 8827 }, -- Elixir of Water Walking
+}
+local waterHave, waterHaveAt, waterNow, waterNowAt
+function N.WaterFast()
+  local now = GetTime()
+  if waterNowAt and now - waterNowAt < 1 and now >= waterNowAt then return waterNow or nil end
+  if not waterHaveAt or now - waterHaveAt >= 10 or now < waterHaveAt then
+    waterHave, waterHaveAt = {}, now
+    local count = (C_Item and C_Item.GetItemCount) or GetItemCount
+    for _, w in ipairs(N.WATER_FAST) do
+      local have = false
+      if w.item then
+        local ok, n = false, nil
+        if count then ok, n = pcall(count, w.item) end
+        have = ok and type(n) == "number" and not (ns.IsSecret and ns.IsSecret(n)) and n > 0
+      else
+        have = N.KnownSpell(w.spell)
+      end
+      if have then waterHave[#waterHave + 1] = w end
+    end
+  end
+  local best, on
+  for _, w in ipairs(N.WATER_FAST) do
+    if N.AuraOn(w.spell) then best, on = w, true break end
+  end
+  best = best or waterHave[1]
+  if best then
+    best.active = on or false
+    best.name = (best.item and ns.ItemName and ns.ItemName(best.item)) or (ns.SpellName and ns.SpellName(best.spell))
+      or best.name or L["Water walking"]
+    best.icon = (ns.SpellIcon and ns.SpellIcon(best.spell)) or best.icon
+  end
+  waterNow, waterNowAt = best or false, now
+  return best
+end
+function N.ForgetWaterFast() waterHaveAt, waterNowAt = nil, nil end -- (the tests: checked again at once)
+-- Seconds for `yards` on foot (`swim` of them swum) and `ride` seconds of rides at `speed` (walking, mounted, the
+-- player's now): the swum yards at the swim speed (a mount is left at the water's edge), unless water's as fast
+-- as land for them (N.WaterFast).
+function N.TripSecs(yards, swim, ride, speed)
+  yards = yards or 0
+  speed = math.max(speed or DEFAULT_RUN, 0.1)
+  swim = math.max(0, math.min(swim or 0, yards))
+  local secs = (yards - swim) / speed + (ride or 0)
+  if swim > 0 then secs = secs + swim / ((N.WaterFast() and speed) or math.min(speed, N.SwimSpeed())) end
+  return secs
+end
+
+-- Swimming left out of routes: the option off (Options > Routing, "Allow swimming"), or a swim removed from this trip
+-- (N.SkipSwim); Passability weighs water dearly then (P.avoidSwim). Checked at each route worked out.
+function N.SwimAllowed()
+  local st = ns.settings and ns.settings.gps
+  return not (st and st.allowSwim == false) and not N.noSwim
+end
+function N.SyncSwim()
+  local P = ns.Passability
+  if not (P and P.SetAvoidSwim) then return false end
+  if not P.SetAvoidSwim(not N.SwimAllowed()) then return false end
+  if ns.Router and ns.Router.WallsChanged then ns.Router.WallsChanged() end -- (the walks worked out again)
+  N.Invalidate(true, true)
+  return true
+end
+-- A swim right-clicked on the map, "Remove?": this trip goes round by land wherever there's a way (an isle is still
+-- swum to), rerouting and after a /reload (saved with the stops); a new trip swims again.
+N.noSwim = nil
+function N.SkipSwim()
+  N.noSwim = true
+  N.SaveStops()
+  N.SyncSwim()
+end
+
 -- A name for where a town's guard stands (continent `c`, x, y): the nearest town (Data/Pois.lua kind 2), else place
 -- label (kind 3), within HOSTILE_NAME_YD; else its zone's name; else nil.
 local function GuardPlace(c, x, y)
@@ -511,7 +714,9 @@ N.trip = 0
 
 function N.SetStops(stops, fastest, force, keep)
   if Locked(force) then return false end
-  if not N.SameTrip(stops) then N.hostileSaid = {} end -- (another trip: its towns said again, N.CheckHostileRoute)
+  if not N.SameTrip(stops) then -- (another trip: its towns said again, N.CheckHostileRoute; it swims again, N.SkipSwim)
+    N.hostileSaid, N.noSwim = {}, nil
+  end
   if force ~= "red" then
     -- (the "risk it?" answers kept for the stops still in it: the same route set again, a quest route's update, a
     -- reorder, isn't asked again; a new stop is)
@@ -711,7 +916,7 @@ function N.Clear()
   N.paused, N.pauseWatch = nil, nil
   N.questDropped = {}
   N.redOk, N.skipLearn, N.noWalk, N.walkKept, N.riskOk, N.riskQuestion, N.riskAsking = {}, {}, {}, {}, {}, nil, nil
-  N.hostileSaid = {}
+  N.hostileSaid, N.noSwim = {}, nil
   N.trip = N.trip + 1
   N.ClearSkippedRides()
   Changed()
@@ -759,6 +964,7 @@ function N.Restore()
   for _, node in ipairs(#N.stops > 0 and cdb.skipLearn or {}) do N.skipLearn[node] = true end
   N.skipRides = {}
   for _, key in ipairs(#N.stops > 0 and cdb.skipRides or {}) do N.skipRides[key] = true end
+  N.noSwim = (#N.stops > 0 and cdb.noSwim == true) or nil
   N.questDropped = {}
   for _, e in ipairs(#N.stops > 0 and cdb.questDropped or {}) do
     if type(e) == "table" and e.quest and e.x and e.y and e.cont then N.questDropped[#N.questDropped + 1] = Copy(e) end
@@ -921,6 +1127,7 @@ end
 -- was chosen with the old one: a flight since turned off), and the map redrawn now.
 function N.OptionsChanged()
   flightCache = nil
+  N.SyncSwim() -- ("Allow swimming")
   if ns.Teleports and ns.Teleports.Changed then ns.Teleports.Changed() end
   N.Invalidate(true, true)
   local st = ns.settings and ns.settings.gps
@@ -2688,6 +2895,9 @@ local function Follow(r, px, py, ahead)
   r.length = math.max(0, b.length - consumed)
   r.walkYards = math.max(0, b.walkYards - consumed)
   r.totalYards = math.max(0, b.totalYards - consumed)
+  local swum = N.SwimYards(full, bi, bt) -- (the swims behind the player: N.TripSecs)
+  r.swimYards = math.max(0, (b.swimYards or 0) - swum)
+  r.totalSwim = math.max(0, (b.totalSwim or 0) - swum)
   return true
 end
 
@@ -2803,12 +3013,14 @@ local function RideOn(px, py, cont, walk, offroad, L, key, path, secs, row, info
     end
   end
   info.seconds = secs
-  return {
+  local r = {
     pts = flight.pts, kinds = flight.kinds, road = rest.road, length = 0,
     walkYards = rest.walk, rideSeconds = secs + rest.ride, extraSeconds = secs + rest.ride,
     totalYards = yards, totalRide = ride, parts = parts, legs = legs, stretches = stretches,
     flying = info, version = version, offroad = offroad, cont = cont,
   }
+  SetSwim(r)
+  return r
 end
 
 function N.FlyingRoute(px, py, cont, walk, offroad, f)
@@ -3039,7 +3251,9 @@ local function Assemble(first, px, py, cont, walk, offroad)
   }
   -- for following: the first part (the walk from the player) and its running lengths
   r.version, r.offroad, r.cont, r.pending, r.firstStretch = version, offroad, cont, first.pending, first
-  r.base = { length = r.length, walkYards = r.walkYards, totalYards = r.totalYards }
+  SetSwim(r)
+  r.base = { length = r.length, walkYards = r.walkYards, totalYards = r.totalYards, swimYards = r.swimYards,
+    totalSwim = r.totalSwim }
   r.followIdx, r.consumed = 1, 0
   if p1 and first.legs[1] and first.legs[1].walk then
     r.fullFirst = p1
@@ -3326,6 +3540,7 @@ function N.Route(px, py, cont)
     N.route = nil
     return nil
   end
+  N.SyncSwim() -- (swimming allowed or left out: the option, the trip's)
   cont = N.PlayerLevel(cont)
   N.playerX, N.playerY = px, py
   local d = N.dest
@@ -4062,6 +4277,7 @@ local function AuraOn(spell)
   end)
   return ok and on == true
 end
+N.KnownSpell, N.AuraOn = Known, AuraOn -- (N.WaterFast)
 
 -- The movement ability to show: the one on, else the fastest known. { spell, name, icon,
 -- speed, active } or nil. Checked at most every half second (the auras) and 10 s (the
@@ -4116,16 +4332,17 @@ end
 -- movement ability or a mount (asked 2026-10-02: a shaman with Ghost Wolf and riding sees "Walk ... Mount ...",
 -- not all three). The mount's speed is the riding skill's (60% at apprentice, 100% at journeyman) until it's
 -- seen on a mount, then that (N.Speeds).
-function N.TimesLine(yards, ride, walk, mount, mounted, ability)
-  if mount and mounted then return Format(L["Mount %s"], N.FormatTime(yards / mount + ride)) end
+-- (`swim`: the yards of it swum, at the swim speed: N.TripSecs)
+function N.TimesLine(yards, ride, walk, mount, mounted, ability, swim)
+  local function T(speed) return N.FormatTime(N.TripSecs(yards, swim, ride, speed)) end
+  if mount and mounted then return Format(L["Mount %s"], T(mount)) end
   local on = ability and ability.active
-  local line = on and (N.AbilityLabel(ability) .. " " .. N.FormatTime(yards / walk + ride))
-    or Format(L["Walk %s"], N.FormatTime(yards / walk + ride))
+  local line = on and (N.AbilityLabel(ability) .. " " .. T(walk)) or Format(L["Walk %s"], T(walk))
   local other = ability and not on and ability.speed
   if mount and mount > (other or walk) then
-    line = line .. "    " .. Format(L["Mount %s"], N.FormatTime(yards / mount + ride))
+    line = line .. "    " .. Format(L["Mount %s"], T(mount))
   elseif other and other > walk then
-    line = line .. "    " .. N.AbilityLabel(ability) .. " " .. N.FormatTime(yards / other + ride)
+    line = line .. "    " .. N.AbilityLabel(ability) .. " " .. T(other)
   end
   return line
 end
@@ -4150,10 +4367,13 @@ end
 -- and the movement ability (N.MoveAbility) or nil. The walking speed is the plain run speed
 -- (the Speed stat and items in it), or the ability's while it's on.
 -- GetUnitSpeed is secret in combat; the last values seen are used then.
+local lastSwim = N.SWIM_SPEED -- the swim speed (GetUnitSpeed's fourth value: items and Aquatic Form in it)
+function N.SwimSpeed() return lastSwim end
 function N.Speeds()
   local cur, run
-  local ok, a, b = pcall(GetUnitSpeed, "player")
+  local ok, a, b, _, sw = pcall(GetUnitSpeed, "player")
   if ok and a and not ns.IsSecret(a) then cur, run = a, b end
+  if ok and type(sw) == "number" and not ns.IsSecret(sw) and sw > 0.5 then lastSwim = sw end
   -- a flight counts as mounted to the game: not here (and its speed isn't a mount's)
   local onTaxi = UnitOnTaxi and UnitOnTaxi("player") or false
   local mounted = not onTaxi and IsMounted and IsMounted() or false
@@ -4359,7 +4579,9 @@ function N.Steps()
     if st and d then
       local legs = st.legs
       local done = i == 1 and (r.consumed or 0) or 0 -- already walked (following the route)
-      local took = string.format("  |cffffd100%s|r", N.FormatTime(math.max(0, st.walk - done) / speed + st.ride))
+      -- (its swims at the swim speed: the first's still to go, r.swimYards)
+      local swim = i == 1 and (r.swimYards or 0) or N.StretchSwim(st)
+      local took = string.format("  |cffffd100%s|r", N.FormatTime(N.TripSecs(math.max(0, st.walk - done), swim, st.ride, speed)))
       for k, leg in ipairs(legs) do
         if leg.ride then
           local t, from = leg.ride, leg.from
@@ -5190,7 +5412,7 @@ function N.WatchFollowing(r, cont)
   end
   local _, walk, mount, mounted = N.Speeds()
   local speed = (mounted and mount or walk) or 7
-  local secs = (r.walkYards or r.length or 0) / math.max(speed, 1) + (r.rideSeconds or 0)
+  local secs = N.TripSecs(r.walkYards or r.length or 0, r.swimYards, r.rideSeconds, math.max(speed, 1))
   local w = N.pauseWatch
   if not w or w.dest ~= N.dest then
     w = { dest = N.dest, best = secs }
@@ -5264,16 +5486,16 @@ function N.Status(px, py, cont)
     end
   end
   if cur and cur > 0.5 and not r.flying then
-    head = head .. "   " .. Format(L["|cffffffffETA %s|r"], N.FormatTime(r.walkYards / cur + r.rideSeconds))
+    head = head .. "   " .. Format(L["|cffffffffETA %s|r"], N.FormatTime(N.TripSecs(r.walkYards, r.swimYards, r.rideSeconds, cur)))
   end
   -- walking and mounted times: to the stop, or for the whole trip with several stops
-  local yards, ride, line = r.walkYards, r.rideSeconds, ""
+  local yards, ride, line, swim = r.walkYards, r.rideSeconds, "", r.swimYards
   if multi then
-    yards, ride = r.totalYards, r.totalRide
+    yards, ride, swim = r.totalYards, r.totalRide, r.totalSwim
     local planned = N.PlannedStops()
     line = (planned < #N.stops and not N.loop) and planned or "all"
   end
-  local times = N.TimesLine(yards, ride, walk, mount, mounted, ability)
+  local times = N.TimesLine(yards, ride, walk, mount, mounted, ability, swim)
   if line == "all" then
     line = Format(L["All stops: %s"], times)
   elseif line ~= "" then

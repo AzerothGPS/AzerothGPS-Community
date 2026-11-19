@@ -356,7 +356,7 @@ local function UpdateText(px, py, cont)
     local lines = N.QuestLines(N.areaQuests)
     if m and not stopsOnly then lines[#lines + 1] = { string.format("%s  |cffffffff%s|r", m.text, N.FormatDistance(m.dist)), 1, 0.82, 0 } end
     lines[#lines + 1] = { string.format("%s  |cffffffff%s|r  |cffffd100%s|r", StopLabel(d, #N.stops),
-      N.FormatDistance(r.walkYards), N.FormatTime(r.walkYards / speed + r.rideSeconds)), 1, 1, 1 }
+      N.FormatDistance(r.walkYards), N.FormatTime(N.TripSecs(r.walkYards, r.swimYards, r.rideSeconds, speed))), 1, 1, 1 }
     return RenderLines(lines)
   end
   if r.flying then
@@ -370,7 +370,7 @@ local function UpdateText(px, py, cont)
   end
   -- the stop: its marker and name, distance and ETA
   local speed = (cur and cur > 0.5 and not r.flying) and cur or (mounted and mount or walk)
-  local yards, eta = N.FormatDistance(r.walkYards), N.FormatTime(r.walkYards / speed + r.rideSeconds)
+  local yards, eta = N.FormatDistance(r.walkYards), N.FormatTime(N.TripSecs(r.walkYards, r.swimYards, r.rideSeconds, speed))
   if stopsOnly then
     -- (dirStopsOnly, asked 2026-10-30: the stops alone, no turns) the first on the top line, the later ones under it
     line1:SetText(string.format("%s%s  |cffffffff%s|r  |cffffd100%s|r", #N.stops > 1 and "1. " or "", StopLabel(d, #N.stops),

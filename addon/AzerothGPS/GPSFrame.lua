@@ -3541,6 +3541,121 @@ function G.ClipSeg(x1, y1, x2, y2, b)
 end
 G.CLIP_PAD = 40 -- past the map's edge, lines are clipped this far out
 G.MAX_DASH_REPEAT = 1000
+-- Swims on the route (Nav.SwimSpans, asked for 1.3.10): a wavy line, short straight lines along a sine (no texture of
+-- its own), the same on the GPS map, in the world map and on the minimap. G.WaveLines(ax, ay, bx, by, amp, wave, s0,
+-- total, fn): fn(x1, y1, x2, y2) for each line of the wave from (ax, ay) to (bx, by), `s0` its start's units along the
+-- whole swim, `total` that swim's units (the wave flattens out at its ends, so it meets the route either side; its
+-- waves stay put as the view moves). At most G.waveLeft lines a redraw, then straight lines.
+G.SWIM_WAVE_PX, G.SWIM_WAVE_STEPS, G.SWIM_WAVE_MAX = 12, 6, 800
+G.waveLeft = G.SWIM_WAVE_MAX
+function G.WaveLines(ax, ay, bx, by, amp, wave, s0, total, fn)
+  local len = math.sqrt((bx - ax) ^ 2 + (by - ay) ^ 2)
+  if len < 0.5 then return end
+  local q = wave / G.SWIM_WAVE_STEPS
+  local n = math.ceil(len / q) + 1
+  if n > G.waveLeft then return fn(ax, ay, bx, by) end
+  G.waveLeft = G.waveLeft - n
+  local ux, uy = (bx - ax) / len, (by - ay) / len
+  local edge = wave / 2
+  local function At(s)
+    local g = s0 + s
+    local o = amp * math.sin(g / wave * 2 * math.pi) * math.max(0, math.min(1, g / edge, (total - g) / edge))
+    return ax + ux * s - uy * o, ay + uy * s + ux * o
+  end
+  local px, py = At(0)
+  local s = (math.floor(s0 / q) + 1) * q - s0
+  while s < len do
+    local x, y = At(s)
+    fn(px, py, x, y)
+    px, py = x, y
+    s = s + q
+  end
+  local x, y = At(len)
+  fn(px, py, x, y)
+end
+-- The swims drawn on the map at the last redraw, on the screen (round G.markLayer's middle): G.swimSegs[1..G.swimSegN]
+-- = { x1, y1, x2, y2 }, for their tooltip (G.SwimHover) and right-click (G.SwimClick).
+G.swimSegs, G.swimSegN = {}, 0
+G.SWIM_HOVER_PX = 8
+function G.AddSwimSeg(x1, y1, x2, y2)
+  G.swimSegN = G.swimSegN + 1
+  local sg = G.swimSegs[G.swimSegN]
+  if not sg then
+    sg = {}
+    G.swimSegs[G.swimSegN] = sg
+  end
+  sg[1], sg[2], sg[3], sg[4] = x1, y1, x2, y2
+end
+-- A swim on the map at the cursor (within SWIM_HOVER_PX): its spot round G.markLayer's middle, or nil.
+function G.SwimAtCursor()
+  if G.clone or G.swimSegN == 0 or not (G.markLayer and GetCursorPosition) then return nil end
+  local mx, my = GetCursorPosition()
+  local sc = G.markLayer:GetEffectiveScale()
+  local lx, ly = G.markLayer:GetCenter()
+  if not (lx and sc and sc > 0) then return nil end
+  local x, y = mx / sc - lx, my / sc - ly
+  local r2 = G.SWIM_HOVER_PX ^ 2
+  for i = 1, G.swimSegN do
+    local sg = G.swimSegs[i]
+    local vx, vy = sg[3] - sg[1], sg[4] - sg[2]
+    local L2 = vx * vx + vy * vy
+    local t = L2 > 0 and math.max(0, math.min(1, ((x - sg[1]) * vx + (y - sg[2]) * vy) / L2)) or 0
+    if (sg[1] + vx * t - x) ^ 2 + (sg[2] + vy * t - y) ^ 2 <= r2 then return x, y end
+  end
+  return nil
+end
+-- What a swim's tooltip says: { title, lines }.
+function G.SwimTip()
+  local N = ns.Nav
+  local lines = { L["The route swims here: swimming is slower than running, and the time to the stop counts it, but it's still quicker than the way round by land."] }
+  local fast = N.WaterFast and N.WaterFast()
+  if fast then
+    lines[#lines + 1] = Format(L["%s: as fast as on land."], fast.name or "?")
+  else
+    lines[#lines + 1] = L["Faster with water walking (a spell, potion or elixir), levitation, or Aquatic Form."]
+  end
+  if N.SwimAllowed and not N.SwimAllowed() then
+    lines[#lines + 1] = L["No way round by land: this swim stays."]
+  else
+    lines[#lines + 1] = L["Right-click: go round by land instead (this trip)"]
+  end
+  return { title = L["Swim"], lines = lines }
+end
+function G.SwimHover(dt)
+  G.swimHoverWait = (G.swimHoverWait or 0) - dt
+  if G.swimHoverWait > 0 then return end
+  G.swimHoverWait = 0.1
+  local on = canvas and canvas:IsMouseOver() and not drag and not G.lasso and not (G.roadMode or G.wallMode)
+    and G.SwimAtCursor()
+  local owned = GameTooltip:IsShown() and GameTooltip:GetOwner() == frame
+  if on and GameTooltip:IsShown() and not owned then return end -- (another tooltip, an icon's, has it)
+  if not on then
+    if owned and G.swimTip then GameTooltip:Hide() end
+    G.swimTip = nil
+    return
+  end
+  if owned and G.swimTip then return end
+  local tip = G.SwimTip()
+  G.swimTip = true
+  GameTooltip:SetOwner(frame, "ANCHOR_CURSOR")
+  GameTooltip:SetText(tip.title, 1, 1, 1)
+  for k, l in ipairs(tip.lines) do
+    if k == #tip.lines then
+      GameTooltip:AddLine(l, 0.7, 0.7, 0.7, true)
+    else
+      GameTooltip:AddLine(l, nil, nil, nil, true)
+    end
+  end
+  GameTooltip:Show()
+end
+-- A right-click on the map over a swim: "Remove?" there (G.AskRemove); true when it was one.
+function G.SwimClick()
+  local x, y = G.SwimAtCursor()
+  if not x then return false end
+  if ns.Nav.SwimAllowed and not ns.Nav.SwimAllowed() then return false end -- (left out already: the map's own click)
+  G.AskRemove({ swim = true, swimX = x, swimY = y })
+  return true
+end
 -- Only the route near what's shown (asked 2026-10-06: zoomed in on a long route cost as much as zoomed out): each of
 -- the route's parts is cut once into chunks of ROUTE_CHUNK segments, its points in the view's continent coordinates,
 -- each chunk with its bounds and the yards along the route to it (G.RouteChunks, kept per part: a trim makes a new
@@ -5166,9 +5281,22 @@ function G.UpdateMinimapRoute(force)
   local rad = width / 2 - 1
   local n = 0
   local col = G.MINIMAP_ROUTE_COLOR
-  local function Piece(x1, y1, x2, y2, kind, c)
+  G.waveLeft = G.SWIM_WAVE_MAX
+  local Line
+  local function Piece(x1, y1, x2, y2, kind, c, swim)
     local ax, ay = G.MinimapPoint(px, py, x1, y1, yards, width, facing)
     local bx, by = G.MinimapPoint(px, py, x2, y2, yards, width, facing)
+    if swim then -- (a swim: wavy, Nav.SwimSpans)
+      local total = math.sqrt((bx - ax) ^ 2 + (by - ay) ^ 2)
+      local sx1, sy1, sx2, sy2, t0 = G.ClipSeg(ax, ay, bx, by, rad + 4) -- (only what's on the minimap)
+      if sx1 then
+        G.WaveLines(sx1, sy1, sx2, sy2, 1.5, 8, total * t0, total, function(a, b, cc, d) Line(a, b, cc, d, 0, c) end)
+      end
+      return
+    end
+    Line(ax, ay, bx, by, kind, c)
+  end
+  function Line(ax, ay, bx, by, kind, c)
     local cx1, cy1, cx2, cy2
     if square then
       cx1, cy1, cx2, cy2 = G.ClipSeg(ax, ay, bx, by, rad)
@@ -5192,11 +5320,11 @@ function G.UpdateMinimapRoute(force)
   G.EachSegmentNear(r, cont, px, py, yards, function(x1, y1, x2, y2, kind, stop, partCont, _, _, _, part, i)
     if paused or (stop or 1) ~= 1 or partCont ~= level then return end -- (the way to the next stop, on this level)
     -- (the other faction's territory: red, Nav.HostileSpans; asked 2026-11-14, on the minimap square too)
-    local spans = N.HostileSpans and N.HostileSpans(part, i)
-    if spans then
-      N.EachHostilePiece(spans, function(t1, t2, hostile)
+    -- (and the swims: wavy, Nav.SwimSpans)
+    if N.HostileSpans(part, i) or N.SwimSpans(part, i) then
+      N.EachRoutePiece(part, i, function(t1, t2, hostile, swim)
         Piece(x1 + (x2 - x1) * t1, y1 + (y2 - y1) * t1, x1 + (x2 - x1) * t2, y1 + (y2 - y1) * t2, kind,
-          hostile and N.HOSTILE_COLOR or col)
+          hostile and N.HOSTILE_COLOR or col, swim)
       end)
     else
       Piece(x1, y1, x2, y2, kind, col)
@@ -9037,6 +9165,7 @@ function G.Update()
   ns.Nav.Tick()
   local dest = ns.Nav.dest
   local route = not hidden and ns.Nav.Route(px, py, cont) or nil
+  G.swimSegN = 0 -- (the swims drawn: none till the route's are, G.SwimAtCursor)
   if route and ns.Nav.RedAsking and ns.Nav.RedAsking() then route = nil end -- (asked "keep this route?": not drawn yet)
   -- (held by another addon: the route goes on, not drawn; the square with its route off, G.SquareHidesRoute: same)
   if route and not G.Held() and not G.SquareHidesRoute() then
@@ -9087,7 +9216,11 @@ function G.Update()
     -- (a new route still being checked for a shorter way: faded until it has settled, Nav.Checking; asked 2026-10-08)
     G.routeFade = ns.Nav.Checking and ns.Nav.Checking() and G.CHECKING_ALPHA or 1
     -- One stretch of the route on the screen, in its look: faint and dotted on another level, else solid or dotted.
-    local function DrawLeg(ax, ay, bx, by, col, width, dotted, partCont)
+    -- (`swim`: { t0, total }, a swim (Nav.SwimSpans): wavy, solid; t0 the share of `total` screen units of the whole
+    -- swim before (ax, ay))
+    G.waveLeft = G.SWIM_WAVE_MAX
+    local swimBound = half + G.CLIP_PAD
+    local function DrawLeg(ax, ay, bx, by, col, width, dotted, partCont, swim)
       local under = partCont and partCont ~= shown and ns.CityLevels and ns.CityLevels[partCont]
       if under and not under.instance and not ns.CityLevels[shown] then
         -- (down in an underground city while the player is up top: not drawn over the land above)
@@ -9095,7 +9228,17 @@ function G.Update()
         AddSeg(ax, ay, bx, by, col, math.max(2, width - 2), 0.45 * G.routeFade, true, true) -- (another level)
       else
         if look and look.glow then AddSeg(ax, ay, bx, by, col, width * 2.6 + 2, 0.3 * G.routeFade, true) end -- (under it)
-        if not dotted then
+        local cx1, cy1, cx2, cy2, t0
+        if swim then cx1, cy1, cx2, cy2, t0 = G.ClipSeg(ax, ay, bx, by, swimBound) end
+        if swim and cx1 then
+          G.AddSwimSeg(cx1, cy1, cx2, cy2)
+          local full = math.sqrt((bx - ax) ^ 2 + (by - ay) ^ 2)
+          local w = math.max(2, width - 1)
+          G.WaveLines(cx1, cy1, cx2, cy2, 1.5 + width * 0.5, G.SWIM_WAVE_PX + width * 2, swim[1] + full * t0, swim[2],
+            function(x1, y1, x2, y2) AddSeg(x1, y1, x2, y2, col, w, G.routeFade, true) end)
+        elseif swim then
+          -- (nowhere on the map)
+        elseif not dotted then
           AddSeg(ax, ay, bx, by, col, width, G.routeFade, true)
         elseif G.dashTexture then
           AddSeg(ax, ay, bx, by, col, width, G.routeFade, true, true)
@@ -9145,11 +9288,13 @@ function G.Update()
         -- (asked 2026-11-14: "that part of the route should be red ... if they have that setting turned off for avoiding
         -- it should still show red for that area": the stretches in the other faction's guards' reach, Nav.HostileSpans,
         -- red over any look, dotted off the roads as the rest)
-        local spans = ns.Nav.HostileSpans and ns.Nav.HostileSpans(part, i)
-        if spans then
-          ns.Nav.EachHostilePiece(spans, function(t1, t2, hostile)
+        -- (and the swims, Nav.SwimSpans: wavy, asked for 1.3.10)
+        local N = ns.Nav
+        if N.HostileSpans(part, i) or N.SwimSpans(part, i) then
+          local full = math.sqrt((bx - ax) ^ 2 + (by - ay) ^ 2)
+          N.EachRoutePiece(part, i, function(t1, t2, hostile, swim)
             DrawLeg(ax + (bx - ax) * t1, ay + (by - ay) * t1, ax + (bx - ax) * t2, ay + (by - ay) * t2,
-              hostile and ns.Nav.HOSTILE_COLOR or col, width, dotted, partCont)
+              hostile and N.HOSTILE_COLOR or col, width, dotted, partCont, swim and { 0, full * (t2 - t1) } or nil)
           end)
         else
           DrawLeg(ax, ay, bx, by, col, width, dotted, partCont)
@@ -13825,6 +13970,9 @@ function G.AskRemove(pin)
       elseif self.ride then -- (a ride, or a flight's connection: not taken on this route)
         ns.Nav.SkipRide(self.ride, self.hop, self.rideName)
         G.Redraw()
+      elseif self.swim then -- (a swim: this trip goes round by land, Nav.SkipSwim)
+        ns.Nav.SkipSwim()
+        G.Redraw()
       elseif self.customPin then -- (a pin: gone)
         ns.Pins.Remove(self.customPin)
         G.Redraw()
@@ -13842,9 +13990,14 @@ function G.AskRemove(pin)
   removeAsk.pendingIndex, removeAsk.stopIndex, removeAsk.learnNode = pin.pendingIndex, pin.stopIndex, pin.learnNode
   removeAsk.ride, removeAsk.hop, removeAsk.customPin = pin.ride, pin.hop, pin.pin
   removeAsk.rideName = pin.ride and pin.title or nil
+  removeAsk.swim = pin.swim
   removeAsk.shownAt = GetTime()
   removeAsk:ClearAllPoints()
-  removeAsk:SetPoint("BOTTOM", pin, "TOP", 0, 2)
+  if pin.swim then -- (a swim on the map, G.SwimClick: over the spot clicked)
+    removeAsk:SetPoint("BOTTOM", G.markLayer, "CENTER", pin.swimX, pin.swimY + 8)
+  else
+    removeAsk:SetPoint("BOTTOM", pin, "TOP", 0, 2)
+  end
   removeAsk:Show()
   GameTooltip_Hide()
 end
@@ -15397,6 +15550,7 @@ function G.Init()
       return
     end
     if button == "RightButton" then
+      if G.SwimClick() then return end -- (a swim on the route: "Remove?", asked for 1.3.10)
       if G.IsMapStyle(G.Style()) then
         G.ZoomOut()
       elseif S().terrainZoomOut ~= false then
@@ -17422,6 +17576,7 @@ function G.Init()
       local ft = ns.PerfStart()
       G.AreaTooltip(fdt)
       G.RoadHover(fdt)
+      G.SwimHover(fdt)
       G.BuildingHover()
       G.UpdateFade(fdt)
       ns.PerfEnd("every frame: fade, tooltip", ft)

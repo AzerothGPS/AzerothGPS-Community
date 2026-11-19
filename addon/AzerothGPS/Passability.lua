@@ -5,7 +5,22 @@ local _, ns = ...
 local P = {}
 ns.Passability = P
 
-P.SWIM_COST = 1.5 -- swimming is about 2/3 of run speed
+P.SWIM_COST = 1.5 -- swimming is about 2/3 of run speed (the game's base swim speed 4.72 yd/s, its run 7)
+-- Swimming left out (Options > Routing "Allow swimming" off, or a swim removed from the trip on the map: Nav.SyncSwim):
+-- water costs AVOID_SWIM_COST a yard instead, so a route goes round by land wherever there's a way, and still swims to
+-- an isle with none. The prepared blocks (TerrainHPA.lua) keep SWIM_COST; their ways across water pay the rest
+-- (ByBlocks). Never set by itself: P.SetAvoidSwim.
+P.AVOID_SWIM_COST = 10
+P.avoidSwim = false
+function P.SwimCost() return P.avoidSwim and P.AVOID_SWIM_COST or P.SWIM_COST end
+-- Whether it changed (then the remembered straight checks start over).
+function P.SetAvoidSwim(on)
+  on = on and true or false
+  if P.avoidSwim == on then return false end
+  P.avoidSwim = on
+  if P.ClearSegMemo then P.ClearSegMemo() end
+  return true
+end
 local TILE = 1600 / 3
 local QUADS = 128 -- terrain quads per tile edge
 
@@ -690,7 +705,7 @@ local function SegmentCostRaw(cont, x1, y1, x2, y2, endSlack)
     elseif v == 2 and t > slack and t < 1 - slack then return nil end
     if v == 1 then water = water + 1 end
   end
-  return len + len * (water / (n + 1)) * (P.SWIM_COST - 1)
+  return len + len * (water / (n + 1)) * (P.SwimCost() - 1)
 end
 
 -- Every caller's checks remembered, the exact points and end slack the key (no rounding: routes stay the
@@ -709,6 +724,50 @@ function P.SegmentCost(cont, x1, y1, x2, y2, endSlack)
     segMemo[key], segMemoN = c, segMemoN + 1
   end
   return c or nil
+end
+
+-- The stretches of the straight line (x1, y1)-(x2, y2) in water to swim (the grid's 1; deep sea far out is closed,
+-- never swum) as { t1, t2, ... } from 0 to 1 along it, in order; false when none. Sampled every half cell straight off
+-- the continent's grid (no grid laid over it: a capital's water is a level of its own). Remembered by the points: a
+-- route worked out again keeps most of its pieces (Nav.SwimSpans, the map's wavy swims and the honest swim time).
+local WET_MEMO_MAX = 20000
+local wetMemo, wetMemoN = {}, 0
+function P.WaterSpans(cont, x1, y1, x2, y2)
+  local key = cont .. ":" .. x1 .. ":" .. y1 .. ":" .. x2 .. ":" .. y2
+  local v = wetMemo[key]
+  if v ~= nil then return v end
+  v = false
+  local g = ns.Terrain and ns.Terrain[cont]
+  local dx, dy = x2 - x1, y2 - y1
+  local len = math.sqrt(dx * dx + dy * dy)
+  if g and not g.slack and not g.overlay and len > 0 then
+    local n = math.max(1, math.ceil(len / (g.cell / 2)))
+    local k = TILE / g.cell
+    local lastRow, lastCol, lastV
+    local s
+    for i = 0, n - 1 do
+      local t = (i + 0.5) / n
+      local col = math.floor(((32 - (y1 + dy * t) / TILE) - g.tx0) * k) + 1
+      local row = math.floor(((32 - (x1 + dx * t) / TILE) - g.ty0) * k) + 1
+      if row ~= lastRow or col ~= lastCol then
+        lastRow, lastCol, lastV = row, col, Cell(g, row, col)
+      end
+      if lastV == 1 then
+        if not s then s = i / n end
+      elseif s then
+        v = v or {}
+        v[#v + 1], v[#v + 2] = s, i / n
+        s = nil
+      end
+    end
+    if s then
+      v = v or {}
+      v[#v + 1], v[#v + 2] = s, 1
+    end
+  end
+  if wetMemoN >= WET_MEMO_MAX then wetMemo, wetMemoN = {}, 0 end
+  wetMemo[key], wetMemoN = v, wetMemoN + 1
+  return v
 end
 
 -- Binary heap keyed on f.
@@ -1067,6 +1126,7 @@ local function ByBlocks(g, H, cont, c1, r1, c2, r2, step, box, hostile, pause)
   local sdist, scame, slines = Reach(S, bs, c1, r1, false)
   local gdist, gcame, glines = Reach(Gb, bg, c2, r2, true)
   local HF = ns.Router and ns.Router.HOSTILE_FACTOR or 1
+  local WF = P.SwimCost() / P.SWIM_COST -- (swimming left out: the blocks' walks across water pay the rest)
   local function h(r, c) return math.sqrt((c - c2) ^ 2 + (r - r2) ^ 2) end
   local gs, came, closed, open = {}, {}, {}, {}
   for i = 1, S.n do
@@ -1114,6 +1174,13 @@ local function ByBlocks(g, H, cont, c1, r1, c2, r2, step, box, hostile, pause)
               if hostile(math.floor(c + (cj - c) * q / 4 + 0.5), math.floor(r + (rj - r) * q / 4 + 0.5)) then inside = inside + 1 end
             end
             d = d * (1 + inside / 5 * (HF - 1))
+          end
+          if WF ~= 1 then -- (and the share of them in water, P.avoidSwim)
+            local cj, rj, wet = bl.c[j], bl.r[j], 0
+            for q = 0, 4 do
+              if Cell(g, math.floor(r + (rj - r) * q / 4 + 0.5), math.floor(c + (cj - c) * q / 4 + 0.5)) == 1 then wet = wet + 1 end
+            end
+            d = d * (1 + wet / 5 * (WF - 1))
           end
           local kj = b * 4096 + j
           local ng = gk + d
@@ -1237,6 +1304,7 @@ function P.FindPath(cont, x1, y1, x2, y2, road1, road2)
   local bset = Buildings(g)
   local inB1 = bset[r1 * 65536 + c1] and Cell(g, r1, c1) == 2
   local inB2 = bset[r2 * 65536 + c2] and Cell(g, r2, c2) == 2
+  local swimCost = P.SwimCost()
   local function cost0(c, r)
     if wc and wc[r * 65536 + c] then return nil end -- (a wall: not even near the ends)
     local v = Cell(g, r, c)
@@ -1258,7 +1326,7 @@ function P.FindPath(cont, x1, y1, x2, y2, road1, road2)
       if not near1 and not near2 then return nil end
       return 1
     end
-    return v == 1 and P.SWIM_COST or 1
+    return v == 1 and swimCost or 1
   end
   local memo = {} -- (by row: Row)
   local function step(c, r) -- step multiplier into (c, r), or nil where it can't go
@@ -1306,13 +1374,21 @@ function P.FindPath(cont, x1, y1, x2, y2, road1, road2)
   -- not back into the other faction's guards' reach where the path went round it)
   -- (the path's yards in their reach so far, from its start: a shortcut may not add any)
   local hostileSoFar = { 0 }
+  -- (swimming left out, P.avoidSwim: nor across water the path went round)
+  local wetSoFar = P.avoidSwim and { 0 } or nil
   for k = 2, #pts do
     local inside = hostile(cells[k][1], cells[k][2])
     local d = math.sqrt((pts[k][1] - pts[k - 1][1]) ^ 2 + (pts[k][2] - pts[k - 1][2]) ^ 2)
     hostileSoFar[k] = hostileSoFar[k - 1] + (inside and d or 0)
+    if wetSoFar then wetSoFar[k] = wetSoFar[k - 1] + (Cell(g, cells[k][2], cells[k][1]) == 1 and d or 0) end
   end
   local function shortcut(i, j)
-    if not P.SegmentCost(cont, pts[i][1], pts[i][2], pts[j][1], pts[j][2], 0) then return false end
+    local sc = P.SegmentCost(cont, pts[i][1], pts[i][2], pts[j][1], pts[j][2], 0)
+    if not sc then return false end
+    if wetSoFar then
+      local len = math.sqrt((pts[j][1] - pts[i][1]) ^ 2 + (pts[j][2] - pts[i][2]) ^ 2)
+      if (sc - len) / (swimCost - 1) > wetSoFar[j] - wetSoFar[i] + g.cell then return false end
+    end
     if side then
       local h = Rt.HostileYards(cont, pts[i][1], pts[i][2], pts[j][1], pts[j][2], side)
       if h > hostileSoFar[j] - hostileSoFar[i] + g.cell then return false end
@@ -1353,6 +1429,7 @@ end
 
 function P.ClearCache()
   cache, ovIndex, hpaBlocks = {}, {}, {}
+  wetMemo, wetMemoN = {}, 0
   if P.ClearSegMemo then P.ClearSegMemo() end
 end
 

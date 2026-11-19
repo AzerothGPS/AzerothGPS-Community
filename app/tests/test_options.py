@@ -33,7 +33,7 @@ replaceMinimapCollapseOnCombat replaceMinimapSize windowTint windowButtons windo
 charmSwing devTools recordHint pinning copyRoads copyWalls copyRoutes copyPins""".split()
 # (askToSave, "Remind me to save": removed with the map's Save and Dismiss buttons, asked 2026-11-17)
 # Settings that were a slash command only (or the Quick buttons page's "On" column only) and have a control now.
-NEW = ["mapEditIdle", "toolShiftClick", "language", "layerCity", "showRoads", "showWalls", "useWorldMap", "replaceMinimapIdle", "questAutoReroute", "quietChat",
+NEW = ["allowSwim", "mapEditIdle", "toolShiftClick", "language", "layerCity", "showRoads", "showWalls", "useWorldMap", "replaceMinimapIdle", "questAutoReroute", "quietChat",
        "questPickRoute", "seamTerrainYd", "seamContinentAt", "seamWorldAt", "seamTerrainBlend",
        "seamContinentBlend", "seamWorldBlend", "interiorZoomYd", "roundIcons", "interiorHoldSec", "iconSize",
        # (asked 2026-11-14: how far out each kind of icon shows, GPSFrame's G.IconShown)
@@ -71,7 +71,7 @@ HOME = {
               "iconYdCaves iconYdHerbs iconYdOre iconYdPins minimap.hide minimapRoute minimapIcons minimapShape",
     "Opacity": "alpha fadeMoving movingAlpha combatHideMap combatAlpha combatHideArrow arrowCombatAlpha "
                "clickThroughMoving clickThroughCombat",
-    "Routing": "useFlights flightMapRing useHearthstone useTeleports avoidHighZones avoidHostile roadTolerance fastestOrder "
+    "Routing": "useFlights flightMapRing useHearthstone useTeleports avoidHighZones avoidHostile allowSwim roadTolerance fastestOrder "
                "cityKeepOrder importKeepOrder questZoneOnly questAutoReroute questPickRoute navCloseClears acceptWay acceptMapPins acceptShared",
     "Directions": "arrow arrowLocked arrowPx arrowBg dirShown dirLocked dirStopsOnly arrowSnap arrowSide dirTextScale dirBg "
                   "questing",
