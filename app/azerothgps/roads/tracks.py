@@ -27,8 +27,24 @@ def floor_of(t: dict) -> dict:
 
 
 class WallLine(list):
-    """A wall's points ([x, y] pairs), with its floor's height `z` when it has one."""
+    """A wall's points ([x, y] pairs), with its floor's height `z` when it has one, and a cliff's sides (`kind`
+    "cliff", `cl`, `cr`: the ground's height left and right of it, a height or None per point)."""
     z: float | None = None
+    kind: str | None = None
+    cl: list | None = None
+    cr: list | None = None
+
+
+def cliff_of(t: dict, n: int) -> dict:
+    """A cliff wall's sides (Edit Wall, 1.3.10, issue #685): {"kind": "cliff", "cl": [..], "cr": [..]} (a height or
+    None per point, left and right of it as drawn) when well formed; {} otherwise."""
+    if t.get("kind") != "cliff" or t.get("op", "wall") != "wall":
+        return {}
+    cl, cr = _lua_list(t.get("cl")), _lua_list(t.get("cr"))
+    if len(cl) != n or len(cr) != n:
+        return {}
+    side = lambda vs: [round(float(v), 1) if _num(v) else None for v in vs]
+    return {"kind": "cliff", "cl": side(cl), "cr": side(cr)}
 
 
 def read_tracks(wtf_account_dir: Path) -> list[dict]:
@@ -55,6 +71,7 @@ def read_tracks(wtf_account_dir: Path) -> list[dict]:
                 **recorded_of(t, len(pts) // 2),
                 **edit_of(t, len(pts) // 2),
                 **ground_of(t, len(pts) // 2),
+                **cliff_of(t, len(pts) // 2),
             })
     return tracks
 
@@ -258,6 +275,13 @@ def parse_shared(text: str) -> list[dict]:
             heights = {"zs": zs, **({"stair": True} if parts[1] == "stair" else {})}
         elif parts[1] == "stair":
             continue
+        if parts[1] == "wall" and fl.get("kind") == "cliff" and "cl" in fl and "cr" in fl:  # (a cliff's sides)
+            try:
+                sides = [[None if v == "-" else float(v) for v in fl[k].split(",")] for k in ("cl", "cr")]
+            except ValueError:
+                sides = []
+            if sides and len(sides[0]) == len(coords) == len(sides[1]):
+                heights.update({"kind": "cliff", "cl": sides[0], "cr": sides[1]})
         if "gz" in fl:  # (a drawn road's ground heights from the map's data, "-" for none: 1.3.10)
             try:
                 gz = [None if v == "-" else float(v) for v in fl["gz"].split(",")]
@@ -291,7 +315,8 @@ def import_shared(text: str, overrides_dir: Path, per_continent: dict | None = N
                 "properties": {"op": t["op"], "source": "recorded", "zone": t["zone"], "time": t["time"], "trim": True,
                                **({"area": True} if t["area"] else {}), **floor_of(t),
                                **{k: t[k] for k in ("zs", "stair") if k in t},
-                               **({"gz": t["gz"]} if t.get("gz") and "zs" not in t and t["op"] == "add" else {})},
+                               **({"gz": t["gz"]} if t.get("gz") and "zs" not in t and t["op"] == "add" else {}),
+                               **({k: t[k] for k in ("kind", "cl", "cr") if k in t} if t["op"] == "wall" else {})},
                 "geometry": {"type": "LineString", "coordinates": t["coords"]},
             })
             new += 1
@@ -342,6 +367,8 @@ def walls(overrides_dir: Path) -> dict[int, list[list[float]]]:
             if props.get("op") == "wall":
                 w = WallLine(line)
                 w.z = props.get("z")
+                if props.get("kind") == "cliff" and len(props.get("cl") or []) == len(line) == len(props.get("cr") or []):
+                    w.kind, w.cl, w.cr = "cliff", props["cl"], props["cr"]
                 ws.append(w)
             elif props.get("op") == "unwall":
                 area, z = props.get("area"), props.get("z")
@@ -455,7 +482,9 @@ def import_tracks(wtf_account_dir: Path, overrides_dir: Path, per_continent: dic
                     "properties": {"op": t["op"], "source": "recorded", "zone": t["zone"], "time": t["time"],
                                    "trim": True, **({"area": True} if t.get("area") else {}), **floor_of(t),
                                    **{k: t[k] for k in ("zs", "stair") if k in t},
-                                   **({"gz": t["gz"]} if t.get("gz") and "zs" not in t and t["op"] == "add" else {})},
+                                   **({"gz": t["gz"]} if t.get("gz") and "zs" not in t and t["op"] == "add" else {}),
+                                   **({k: t[k] for k in ("kind", "cl", "cr", "replaces") if k in t}
+                                      if t["op"] == "wall" else {})},
                     "geometry": {"type": "LineString", "coordinates": t["coords"]},
                 })
             if per_continent is not None:

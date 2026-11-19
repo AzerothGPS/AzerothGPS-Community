@@ -7,6 +7,7 @@
 --   ... [gz=<h|->,<h|->,...] ...         a drawn road's ground heights from the map's data, "-" for none (1.3.10)
 --   R stair <level> <time> zs=<h>,<h>,... <x,y> <x,y> ...   stairs (1.1.6): their heights, foot and top at least
 --   R <wall|unwall|unwallarea> ...                                                       a wall drawn or erased
+--   R wall ... [kind=cliff cl=<h|->,... cr=<h|->,...] ...   a cliff wall's ground heights left and right (1.3.10)
 --   P add <level> <time> <x,y> [z=<h>] [down=1|0] icon=<file id or path> name=<the rest>  a pin
 --   [AzerothGPS Pin: Name (Place) @<level>:<x>,<y>[,z<h>][,down] #<icon>]   a pin's chat tag, anywhere in a line
 --   H <level> <x,y> name=<name>          a herb
@@ -253,13 +254,16 @@ function M.ParseLine(line, currentMap)
           if not z or math.abs(z) > M.MAX_Z or #e.zs >= M.MAX_POINTS then return false, L["not a list of heights"] end
           e.zs[#e.zs + 1] = z
         end
-      elseif key == "gz" then -- (the ground's heights from the map's data: "-" for none)
-        e.gz = {}
+      elseif key == "gz" or key == "cl" or key == "cr" then -- (the ground's heights, a cliff's sides: "-" for none)
+        local list = {}
         for h in (v .. ","):gmatch("([^,]*),") do
           local z = h == "-" and false or Num(h)
-          if z == nil or (z and math.abs(z) > M.MAX_Z) or #e.gz >= M.MAX_POINTS then return false, L["not a list of heights"] end
-          e.gz[#e.gz + 1] = z
+          if z == nil or (z and math.abs(z) > M.MAX_Z) or #list >= M.MAX_POINTS then return false, L["not a list of heights"] end
+          list[#list + 1] = z
         end
+        e[key] = list
+      elseif key == "kind" then
+        e.kind = v == "cliff" and "cliff" or nil
       elseif key == "z" then
         e.z = Num(v)
         if not e.z or math.abs(e.z) > M.MAX_Z then return false, L["not a height"] end
@@ -277,6 +281,9 @@ function M.ParseLine(line, currentMap)
     if #e.pts < 4 then return false, L["fewer than 2 points"] end
     if e.zs and #e.zs ~= #e.pts / 2 then return false, L["its heights don't match its points"] end
     if e.gz and #e.gz ~= #e.pts / 2 then e.gz = nil end -- (the ground's: only a help, left out when off)
+    if not (op == "wall" and e.kind == "cliff" and e.cl and e.cr and #e.cl == #e.pts / 2 and #e.cr == #e.pts / 2) then
+      e.kind, e.cl, e.cr = nil, nil, nil -- (a cliff's sides: only whole, on a wall)
+    end
     if e.stair and not e.zs then return false, L["stairs need their heights"] end
     return (op == "wall" or op == "unwall") and "wall" or "road", e
   elseif k == "P" then
@@ -393,6 +400,16 @@ function M.RoadLine(t)
     local hs = {}
     for i, h in ipairs(t.zs) do hs[i] = string.format("%.1f", h) end
     line[#line + 1] = "zs=" .. table.concat(hs, ",")
+  end
+  -- (a cliff wall's sides, 1.3.10: the ground's height left and right of it, "-" where a section is a plain wall)
+  if t.op == "wall" and t.kind == "cliff" and type(t.cl) == "table" and type(t.cr) == "table"
+      and #t.cl == #t.pts / 2 and #t.cr == #t.pts / 2 then
+    line[#line + 1] = "kind=cliff"
+    for _, side in ipairs({ { "cl", t.cl }, { "cr", t.cr } }) do
+      local hs = {}
+      for i, h in ipairs(side[2]) do hs[i] = type(h) == "number" and string.format("%.1f", h) or "-" end
+      line[#line + 1] = side[1] .. "=" .. table.concat(hs, ",")
+    end
   end
   -- (a drawn road's ground heights from the map's data, 1.3.10: "-" where it had none)
   if type(t.gz) == "table" and #t.gz == #t.pts / 2 then

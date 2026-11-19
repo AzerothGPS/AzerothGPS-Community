@@ -14,6 +14,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - New drawn roads start with the ground's height at each point.
 - Edit Road: Set Heights gives a stretch of a road a start and an end height, as stairs or a ramp.
 - Walking up or down a road with heights says how far it goes, "12 yd up".
+- Edit Wall: make a wall you drew a cliff, with the ground's height on each side. Routes go round it from below and jump down when the drop is safe.
 - Roads: new roads and walls in Arathi Highlands.
 - Roads: the way up Grom'gol's zeppelin tower in Stranglethorn Vale.
 

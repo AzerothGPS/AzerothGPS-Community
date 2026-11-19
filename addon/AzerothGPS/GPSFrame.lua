@@ -669,6 +669,7 @@ function G.LayoutWalls(px, py, cont, rot, zoom, half, edges)
   -- the walls first (drawn and shipped: never the ones left out), then the terrain's edges up to
   -- MAX_SEGMENTS in all (the tools on: another floor's walls faint)
   local tf = G.ToolFloor(cont)
+  local tools = G.roadMode or G.wallMode
   for _, w in ipairs(P.WallLines(cont)) do
     local lx, ly
     local faint = tf and w.fl and P.SameWallFloor and not P.SameWallFloor(cont, w[1], w[2], w.fl, tf) or nil
@@ -677,7 +678,20 @@ function G.LayoutWalls(px, py, cont, rot, zoom, half, edges)
       local dx, dy = Geo.ScreenOffset(px, py, wx, wy)
       dx, dy = Geo.Rotate(dx * s, dy * s, rot)
       if lx and (math.abs(wx - px) <= reach and math.abs(wy - py) <= reach or math.abs(dx) <= half * 2) then
-        segs[#segs + 1] = { lx, ly, dx, dy, faint = faint, own = w.own }
+        -- (a cliff's level section: open, drawn faint; its high side shaded along it with the tools on, 1.3.10)
+        local sec = (i - 1) / 2
+        local open = w.kind == "cliff" and P.CliffSection and P.CliffSection(w, sec) == "open"
+        segs[#segs + 1] = { lx, ly, dx, dy, faint = faint or (open and true) or nil, own = w.own }
+        if tools and w.kind == "cliff" then
+          local x1, y1, x2, y2 = G.CliffShade(w, sec, s)
+          if x1 then
+            local sx1, sy1 = Geo.ScreenOffset(px, py, x1, y1)
+            sx1, sy1 = Geo.Rotate(sx1 * s, sy1 * s, rot)
+            local sx2, sy2 = Geo.ScreenOffset(px, py, x2, y2)
+            sx2, sy2 = Geo.Rotate(sx2 * s, sy2 * s, rot)
+            segs[#segs + 1] = { sx1, sy1, sx2, sy2, shade = true }
+          end
+        end
       end
       lx, ly = dx, dy
     end
@@ -9006,8 +9020,12 @@ function G.Update()
     local wc = artLevel or viewCont -- (the level shown: an underground city's on its map)
     -- (the terrain's impassable borders thinner, drawn walls thicker)
     for _, sg in ipairs(G.LayoutWalls(cx, cy, wc, rot, zoom, half, true)) do
-      AddSeg(sg[1], sg[2], sg[3], sg[4], sg.own and G.OWN_WALL_COLOR or 7, sg.edge and 2 or 3,
-        sg.faint and G.OTHER_FLOOR_ALPHA or nil)
+      if sg.shade then -- (a cliff's high side)
+        AddSeg(sg[1], sg[2], sg[3], sg[4], G.CLIFF_SHADE_COLOR, 3, 0.55)
+      else
+        AddSeg(sg[1], sg[2], sg[3], sg[4], sg.own and G.OWN_WALL_COLOR or 7, sg.edge and 2 or 3,
+          sg.faint and G.OTHER_FLOOR_ALPHA or nil)
+      end
     end
   end
   -- Quest objective areas (Layers.lua), outlined in the minimap's blue, on their own layer.
@@ -9189,6 +9207,7 @@ function G.Update()
   G.DrawEraser(s) -- (the magic eraser's circle at the pointer)
   G.DrawRecording(cx, cy, rot, s, viewCont, half) -- (a walk being recorded: the road tools' Record)
   G.DrawRoadEdit(cx, cy, rot, s, viewCont, half) -- (the road picked with Edit Road)
+  G.DrawWallEdit(cx, cy, rot, s, viewCont, half) -- (the wall picked with Edit Wall: its sides)
   -- (other addons' lines, through the API's SetOverlay: timed apart from AzerothGPS's own, `/agps debug perf`; their
   -- count in G.overlaySegs)
   local ot = ns.PerfStart()
@@ -12485,6 +12504,10 @@ function G.RoadHint()
   local text
   if G.eraserMode then
     text = Format(L["|cffe080ffMagic eraser (%d yd): drag over your changes to put the map's own back|r  ·  |cff9d9d9dCtrl + wheel: size  ·  Middle-drag: pan|r"], G.EraserYd())
+  elseif G.wallMode and G.editWallMode then
+    local pick = G.wallEdit and G.wallEdit.pick
+    text = pick and L["|cffffd100Edit Wall: click the section's end on the wall|r  ·  |cff9d9d9dMiddle-drag: pan|r"]
+      or L["|cffffd100Edit Wall: click a wall you drew on the map|r  ·  |cff9d9d9dthe Edit Wall button again: done|r"]
   elseif G.wallMode then
     text = L["|cffd02020Left-drag: draw a wall|r  ·  |cffb0b0b0Right-drag: erase walls (circle an area to erase them all)|r  ·  |cff9d9d9dMiddle-drag: pan|r"]
   elseif G.editRoadMode then
@@ -12568,6 +12591,7 @@ function G.SetWallMode(on)
   ToolsOff()
   if G.wallMode then G.roadMode, G.stairMode = false, nil end
   if G.wallMode and G.editRoadMode then G.SetEditRoadMode(false) end
+  if not G.wallMode and G.editWallMode and G.SetEditWallMode then G.SetEditWallMode(false) end -- (and Edit Wall)
   G.lasso, drag = nil, nil
   if G.drawMode then G.drawMode = false end
   if drawHint then
@@ -13324,6 +13348,247 @@ function G.AskRoadEdit(level, sel)
   elapsed = 1
   return f
 end
+-- Edit Wall (asked 2026-11-19 for 1.3.10, issue #685: "cliff walls"): with the wall tools on, a click picks a wall the
+-- player drew (Record.WallAt), and its window (G.AskWallEdit) makes it a Cliff, with the ground's height on its left and
+-- its right (filled in from the map's ground, Record.WallSides), or a plain Wall again; Pick Start and Pick End: only
+-- that section. Save Wall saves it (Record.EditWall: a new wall that replaces the old one). The picked wall is drawn
+-- with its left side in CLIFF_LEFT_COLOR and its right in CLIFF_RIGHT_COLOR, as the window's rows.
+G.CLIFF_LEFT_COLOR, G.CLIFF_RIGHT_COLOR = { 0.35, 0.65, 1 }, { 1, 0.6, 0.15 }
+G.CLIFF_SHADE_COLOR = { 0.85, 0.75, 0.55 } -- (a cliff's high side, drawn along it with the tools on)
+G.CLIFF_SHADE_PX = 4
+G.WALL_EDIT_DIM = { 0.6, 0.6, 0.6 }
+function G.SetEditWallMode(on)
+  if on and not G.wallMode then G.SetWallMode(true) end
+  G.editWallMode = (on and G.wallMode) and true or nil
+  if G.editWallMode then G.eraserMode = nil end
+  if not G.editWallMode then
+    G.wallEdit = nil
+    if G.wallEditWindow then G.wallEditWindow:Hide() end
+  end
+  if G.wallMode and G.RoadHint then G.RoadHint() end
+  if G.RefreshQuick then G.RefreshQuick() end
+  elapsed = 1
+end
+-- A click with Edit Wall at (x, y) of `level`: a section's end when picking one, else the wall there picked. Taken or
+-- not.
+function G.EditWallClick(level, x, y)
+  if not (G.editWallMode and level and x) then return false end
+  local we = G.wallEdit
+  local Rec = ns.Record
+  if we and we.pick and we.sel and we.level == level then
+    we[we.pick] = Rec.NearestPoint(we.sel.t, x, y)
+    we.pick = nil
+    if G.RoadHint then G.RoadHint() end
+    if G.wallEditWindow and G.wallEditWindow:IsShown() then G.FillWallEdit(true) end
+    elapsed = 1
+    return true
+  end
+  local sel = Rec.WallAt(level, x, y)
+  if not sel then
+    ns.Print(L["no wall of yours there to edit (click on one you drew)"])
+    return true
+  end
+  G.AskWallEdit(level, sel)
+  return true
+end
+-- The section picked: first, last point (the whole wall with none picked).
+function G.WallSection(we)
+  local n = #we.sel.t.pts / 2
+  local i, j = we.a or 1, we.b or n
+  if j < i then i, j = j, i end
+  if i == j then i, j = math.max(1, i - 1), math.min(n, j + 1) end
+  return i, j
+end
+-- The window filled for the wall picked: its kind lit, its sides (its own, else the map's ground there). `ground`: the
+-- ground's again (a new section picked).
+function G.FillWallEdit(ground)
+  local f, we = G.wallEditWindow, G.wallEdit
+  if not (f and we and we.sel) then return end
+  for _, b in ipairs(f.kinds) do b:SetEnabled(b.kind ~= we.kind) end
+  local t = we.sel.t
+  local i, j = G.WallSection(we)
+  local zl, zr
+  if not ground and t.kind == "cliff" and type(t.cl) == "table" and type(t.cr) == "table" then
+    zl, zr = tonumber(t.cl[i]), tonumber(t.cr[i])
+  end
+  if not (zl and zr) then zl, zr = ns.Record.WallSides(we.level, t, i, j) end
+  f.left:SetText(zl and string.format("%.1f", zl) or "")
+  f.right:SetText(zr and string.format("%.1f", zr) or "")
+  local cliff = we.kind == "cliff"
+  f.left:SetShown(cliff)
+  f.right:SetShown(cliff)
+  f.leftLabel:SetShown(cliff)
+  f.rightLabel:SetShown(cliff)
+end
+function G.AskWallEdit(level, sel)
+  local f = G.wallEditWindow
+  if not f then
+    f = ns.Window("AzerothGPSWallEdit", 400, 230, L["Edit Wall"])
+    f.kinds = {}
+    for k, kind in ipairs({ "wall", "cliff" }) do
+      local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+      b:SetSize(90, 22)
+      b:SetPoint("TOPLEFT", 14 + (k - 1) * 94, f.top - 8)
+      b:SetText(kind == "cliff" and L["Cliff"] or L["Wall"])
+      b.kind = kind
+      b:SetScript("OnClick", function()
+        if G.wallEdit then G.wallEdit.kind = kind end
+        G.FillWallEdit()
+        elapsed = 1
+      end)
+      f.kinds[k] = b
+    end
+    local function Row(label, color, y)
+      local t = f:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+      t:SetPoint("TOPLEFT", 14, f.top - y)
+      t:SetText(label)
+      t:SetTextColor(color[1], color[2], color[3])
+      local box = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
+      box:SetSize(70, 20)
+      box:SetPoint("TOPLEFT", 160, f.top - y + 3)
+      box:SetAutoFocus(false)
+      box:SetMaxLetters(8)
+      box:SetScript("OnEscapePressed", function() f:Hide() end)
+      return box, t
+    end
+    f.left, f.leftLabel = Row(L["Left side (blue)"], G.CLIFF_LEFT_COLOR, 44)
+    f.right, f.rightLabel = Row(L["Right side (orange)"], G.CLIFF_RIGHT_COLOR, 72)
+    local function Pick(label, which, x)
+      local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+      b:SetSize(110, 22)
+      b:SetPoint("TOPLEFT", x, f.top - 102)
+      b:SetText(label)
+      b:SetWidth(math.max(110, (b:GetTextWidth() or 0) + 24))
+      b:SetScript("OnClick", function()
+        if G.wallEdit then G.wallEdit.pick = which end
+        if G.RoadHint then G.RoadHint() end
+      end)
+      return b
+    end
+    f.pickA, f.pickB = Pick(L["Pick Start"], "a", 14), Pick(L["Pick End"], "b", 130)
+    local note = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    note:SetPoint("TOPLEFT", 14, f.top - 132)
+    note:SetPoint("RIGHT", -14, 0)
+    note:SetJustifyH("LEFT")
+    f.note = note
+    local save = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    save:SetSize(110, 22)
+    save:SetPoint("BOTTOMRIGHT", -12, 10)
+    save:SetText(L["Save Wall"])
+    save:SetWidth(math.max(110, (save:GetTextWidth() or 0) + 24))
+    save:SetScript("OnClick", function()
+      if G.SaveWallEdit() then f:Hide() end
+    end)
+    f.save = save
+    local cancel = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    cancel:SetSize(90, 22)
+    cancel:SetPoint("RIGHT", save, "LEFT", -6, 0)
+    cancel:SetText(L["Cancel"])
+    cancel:SetScript("OnClick", function() f:Hide() end)
+    f:HookScript("OnHide", function()
+      if G.wallEdit then G.wallEdit.sel = nil end
+      elapsed = 1
+    end)
+    G.wallEditWindow = f
+  end
+  G.wallEdit = { level = level, sel = sel, kind = "cliff" }
+  f.note:SetText(L["The ground's height on each side, filled in from the map: type over them. Level sides: open. Low to high: blocked. High to low: a jump down when it's safe, else blocked both ways."])
+  G.FillWallEdit()
+  f:Show()
+  elapsed = 1
+  return f
+end
+-- Save Wall: the wall picked saved as edited (Record.EditWall). Its number, or nil (and the window says why).
+function G.SaveWallEdit()
+  local f, we = G.wallEditWindow, G.wallEdit
+  if not (f and we and we.sel) then return nil end
+  local i, j = G.WallSection(we)
+  local idx, why = ns.Record.EditWall(we.sel, { kind = we.kind, i = i, j = j, zl = tonumber(f.left:GetText()),
+    zr = tonumber(f.right:GetText()) })
+  if not idx then
+    f.note:SetText(L["|cffff6060Give both sides a height.|r"])
+    return nil, why
+  end
+  ns.Print(Format(we.kind == "cliff" and L["saved your cliff (#%d): routes use it now. /agps draw undo takes it back."]
+    or L["saved your wall (#%d): routes use it now. /agps draw undo takes it back."], idx))
+  G.wallEdit = nil
+  elapsed = 1
+  return idx
+end
+-- The wall picked with Edit Wall, drawn over the map: its section bright, its left and right sides in their colors.
+function G.DrawWallEdit(cx, cy, rot, s, viewCont, half)
+  local we = G.wallEdit
+  local t = we and we.sel and we.sel.t
+  if not (t and t.pts and we.level == viewCont) then return 0 end
+  local p, n = t.pts, 0
+  local i, j = G.WallSection(we)
+  local off = G.CLIFF_SHADE_PX / s -- (yards: the side lines this far off it on the screen)
+  local function seg(x1, y1, x2, y2, c, w)
+    local dx1, dy1 = Geo.ScreenOffset(cx, cy, x1, y1)
+    dx1, dy1 = Geo.Rotate(dx1 * s, dy1 * s, rot)
+    local dx2, dy2 = Geo.ScreenOffset(cx, cy, x2, y2)
+    dx2, dy2 = Geo.Rotate(dx2 * s, dy2 * s, rot)
+    AddSeg(dx1, dy1, dx2, dy2, c, w, 0.9, true)
+    n = n + 1
+  end
+  for k = 1, #p / 2 - 1 do
+    local ax, ay, bx, by = p[2 * k - 1], p[2 * k], p[2 * k + 1], p[2 * k + 2]
+    local ex, ey = bx - ax, by - ay
+    local L = math.sqrt(ex * ex + ey * ey)
+    if L > 0 then
+      local lx, ly = -ey / L * off, ex / L * off
+      local on = k >= i and k < j
+      seg(ax, ay, bx, by, on and G.EDIT_ROAD_COLOR or G.WALL_EDIT_DIM, on and 4 or 2)
+      if on then
+        seg(ax + lx, ay + ly, bx + lx, by + ly, G.CLIFF_LEFT_COLOR, 2)
+        seg(ax - lx, ay - ly, bx - lx, by - ly, G.CLIFF_RIGHT_COLOR, 2)
+      end
+    end
+  end
+  return n
+end
+-- With the tools on, a cliff's high side shaded along it (G.LayoutWalls' `shade` lines): for wall `w`'s section from
+-- point p, the line CLIFF_SHADE_PX off it on its high side, in world yards at scale `s`; nil for none.
+function G.CliffShade(w, p, s)
+  local P = ns.Passability
+  local zl, zr
+  if P and P.CliffSides then zl, zr = P.CliffSides(w, p) end
+  if not zl or math.abs(zl - zr) <= (P.CLIFF_STEP or 2) then return nil end
+  local ax, ay, bx, by = w[2 * p - 1], w[2 * p], w[2 * p + 1], w[2 * p + 2]
+  local ex, ey = bx - ax, by - ay
+  local L = math.sqrt(ex * ex + ey * ey)
+  if L <= 0 then return nil end
+  local off = G.CLIFF_SHADE_PX / s
+  local lx, ly = -ey / L * off, ex / L * off
+  if zr > zl then lx, ly = -lx, -ly end
+  return ax + lx, ay + ly, bx + lx, by + ly
+end
+-- The cliff under the pointer (within `reach` yards) as the tools' hover says it: "Cliff: left 30 yd, right 18 yd" and
+-- what it does, or nil.
+function G.CliffText(level, x, y, reach)
+  local P = ns.Passability
+  if not (P and P.WallLines and level) then return nil end
+  local best, bw, bp
+  for _, w in ipairs(P.WallLines(level)) do
+    if w.kind == "cliff" then
+      for k = 1, #w - 3, 2 do
+        local ax, ay, bx, by = w[k], w[k + 1], w[k + 2], w[k + 3]
+        local vx, vy = bx - ax, by - ay
+        local L2 = vx * vx + vy * vy
+        local f = L2 > 0 and math.max(0, math.min(1, ((x - ax) * vx + (y - ay) * vy) / L2)) or 0
+        local d = math.sqrt((ax + vx * f - x) ^ 2 + (ay + vy * f - y) ^ 2)
+        if d <= reach and (not best or d < best) then best, bw, bp = d, w, (k + 1) / 2 end
+      end
+    end
+  end
+  if not bw then return nil end
+  local zl, zr = P.CliffSides(bw, bp)
+  if not zl then return nil end
+  local how = P.CliffSection(bw, bp)
+  local what = how == "open" and L["level: open"] or how == "down" and L["a safe jump down"] or L["too high: blocked"]
+  return Format(L["Cliff: left %d yd, right %d yd (%s)"], math.floor(zl + 0.5), math.floor(zr + 0.5), what)
+end
+
 -- Set Heights (asked 2026-11-19 for 1.3.10, issue #685: "players can shape stairs and cliffs themselves"): the stretch
 -- of the road picked in Edit Road from its foot to its top (Pick Foot, Pick Top; neither: the whole road) gets a start
 -- and an end height, filled in from the road's own heights or the map's ground (Record.StretchBase) and typed over, the
@@ -13767,8 +14032,11 @@ function G.RoadHover(dt)
     local x, y = G.ScreenToWorld(view.x, view.y, mx / sc - ccx, my / sc - ccy, view.rot, view.s)
     local level = G.PinLevel(x, y)
     info = level and G.RoadHoverInfo(level, x, y, G.ROAD_HOVER_PX / view.s, G.editFloor and G.editFloor.z)
-    -- (and the ground's height there from the map's data, 1.3.10: "Ground: 123 yd", or "No ground data")
+    -- (and the ground's height there from the map's data, 1.3.10: "Ground: 123 yd", or "No ground data"; a cliff's
+    -- two sides)
     local ground = G.GroundText(level, x, y)
+    local cliff = G.wallMode and G.CliffText(level, x, y, G.ROAD_HOVER_PX / view.s)
+    if cliff then ground = cliff .. "\n" .. ground end
     if info then
       info.lines[#info.lines + 1] = ground
     else
@@ -15077,6 +15345,14 @@ function G.Init()
         G.lasso = { pts = { x, y }, cont = view.cont, eraser = true, r = G.EraserYd(), button = button, color = G.ERASER_COLOR }
         return
       end
+      if button == "LeftButton" and G.editWallMode and G.wallMode then -- (Edit Wall: a wall picked, or its section's ends)
+        local mx, my = GetCursorPosition()
+        local sc = canvas:GetEffectiveScale()
+        local ccx, ccy = canvas:GetCenter()
+        local x, y = G.ScreenToWorld(view.x, view.y, mx / sc - ccx, my / sc - ccy, view.rot, view.s)
+        G.EditWallClick(G.PinLevel(x, y), x, y)
+        return
+      end
       if button == "LeftButton" and G.editRoadMode then -- (Edit Road: a road picked, or its stairs' foot or top)
         local mx, my = GetCursorPosition()
         local sc = canvas:GetEffectiveScale()
@@ -15900,6 +16176,13 @@ function G.Init()
         if G.mapMenu then G.mapMenu:Hide() end
         G.SetStairMode(not G.stairMode)
       end },
+    { id = "wallEdit", icon = "Interface\\Icons\\INV_Misc_Rune_01", label = L["Edit Wall"], wallDev = true,
+      tip = L["Make a wall you drew a cliff: click this, then the wall on the map, and give the ground's height on each side (filled in from the map). Routes go round it from the low side and jump down from the high side when the drop is safe; level sides are open. Pick Start and Pick End: only that section. Undo takes it back. Click it again when done. (Shown with the wall tools)"],
+      isOn = function() return G.editWallMode ~= nil end,
+      action = function()
+        if G.mapMenu then G.mapMenu:Hide() end
+        G.SetEditWallMode(not G.editWallMode)
+      end },
     { id = "roadEdit", icon = "Interface\\Icons\\Trade_Engineering", label = L["Edit Road"], dev = true,
       tip = L["Change a road you drew or recorded: click this, then the road on the map, and set what it is: ground, a floor, a bridge, stairs or a lift, and its height (the floors near it, or type one). Stairs on part of it: Pick Foot and Pick Top on the road. Routes use it at once, and Undo takes it back. Click it again when done. (Shown with the road tools)"],
       isOn = function() return G.editRoadMode ~= nil end,
@@ -15967,7 +16250,7 @@ function G.Init()
     -- closed, they're hidden; it stays open until the map goes unused for the time set: G.SetMapEditOpen)
     { id = "mapEdit", label = L["Map Editing"], icon = "Interface\\Icons\\INV_Misc_Note_02", edit = true, keep = true,
       members = { "roadTools", "wallTools", "roadUndo", "magicEraser", "restoreZone", "restoreContinent", "shiftClick",
-        "roadStairs", "roadRecord", "roadEdit" },
+        "roadStairs", "roadRecord", "roadEdit", "wallEdit" },
       tip = L["The map editing tools: roads, walls, the magic eraser and restoring, Undo, Stairs and Record. While it's open the roads and walls show on the map; it closes by itself after the map goes unused a while (Options > Tools), hiding them and turning the tools off."] },
   }
   G.GROUP_IDLE = 8 -- seconds an opened group stays open with the mouse away

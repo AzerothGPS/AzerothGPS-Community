@@ -68,6 +68,9 @@ def stamp(lua, ns, cont) -> str:
             pts = w.pts if w.pts else w
             h.update(",".join(f"{pts[k]:.2f}" for k in range(1, len(pts) + 1)).encode())
             h.update(b"|" + (b"a" if w.area else b""))
+            if w.kind == "cliff" and w.cl and w.cr:  # (a cliff wall's sides: they open or close its cells)
+                for side in (w.cl, w.cr):
+                    h.update(",".join(str(side[k]) for k in range(1, len(side) + 1)).encode() + b";")
 
     h.update(repr((K, RUN_SPLIT, P.SWIM_COST)).encode())
     grid(ns.Terrain[cont])

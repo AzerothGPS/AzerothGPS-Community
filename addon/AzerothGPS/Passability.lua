@@ -97,10 +97,21 @@ P.Buildings = Buildings
 
 -- Cell value at (row, col) of grid g (2 outside the grid, on a wall, and in a building; a wall
 -- eraser opens a building's cells too, as the terrain's).
+local CellBase
 local function Cell(g, row, col)
   if row < 1 or row > g.h or col < 1 or col > g.w then return 2 end
   local wc = wallCells[g]
   if wc and wc[row * 65536 + col] then return 2 end
+  return CellBase(g, row, col)
+end
+-- (a cell under a cliff walked down only, a cliff wall's: its way down, { x, y } toward the low side; else nil)
+local function CliffCell(g, row, col)
+  local wc = wallCells[g]
+  local v = wc and wc[row * 65536 + col]
+  return type(v) == "table" and v or nil
+end
+-- (the cell's value but the walls')
+CellBase = function(g, row, col)
   local oc = openCells[g]
   if oc and oc[row * 65536 + col] then return 0 end
   if Buildings(g)[row * 65536 + col] then return 2 end
@@ -177,17 +188,50 @@ function P.SameWallFloor(cont, x, y, a, b)
   if not (a.z and b.z) then return true end
   return math.abs(a.z - b.z) <= P.WALL_FLOOR_Z
 end
--- (a drawn wall's points with its floor, made once per stroke: its saved points stay as they are)
+-- (a drawn wall's points with its floor and a cliff's sides, made once per stroke: its saved points stay as they are)
 local floorLines = setmetatable({}, { __mode = "k" })
 local function DrawnLine(t)
-  if t.z == nil and t.indoors == nil and t.down == nil then return t.pts end
+  local cliff = t.kind == "cliff" and type(t.cl) == "table" and type(t.cr) == "table"
+  if t.z == nil and t.indoors == nil and t.down == nil and not cliff then return t.pts end
   local c = floorLines[t.pts]
   if not c then
-    c = { fl = { z = t.z, indoors = t.indoors, down = t.down } }
+    c = { fl = (t.z ~= nil or t.indoors ~= nil or t.down ~= nil) and { z = t.z, indoors = t.indoors, down = t.down } or nil }
     for i = 1, #t.pts do c[i] = t.pts[i] end
+    if cliff then c.kind, c.cl, c.cr = "cliff", t.cl, t.cr end
     floorLines[t.pts] = c
   end
   return c
+end
+
+-- Cliff walls (1.3.10, issue #685): a wall's section (`kind` "cliff", with `cl` and `cr`: the ground's height on its
+-- left and its right, as drawn from its first point to its last, a height or false per point; a section is a cliff
+-- where both its points have both) is open where the two sides are within CLIFF_STEP; walked down from its high side
+-- where the drop is at most CLIFF_DROP_MAX (Router.TRACK_DROP_MAX, the safe jumps': never up; walks over the grid go
+-- round it either way); else a wall both ways. P.CliffSection(w, p): "open", "down" (and the way down: a unit vector
+-- toward the low side, and the drop) or nil (a plain wall) for its section from point p to p + 1.
+P.CLIFF_STEP = 2
+P.CLIFF_DROP_MAX = 14
+function P.CliffSides(w, p)
+  local cl, cr = w.cl, w.cr
+  if w.kind ~= "cliff" or type(cl) ~= "table" or type(cr) ~= "table" then return nil end
+  local a, b, c, d = tonumber(cl[p]), tonumber(cl[p + 1]), tonumber(cr[p]), tonumber(cr[p + 1])
+  if not (a and b and c and d) then return nil end
+  return (a + b) / 2, (c + d) / 2
+end
+function P.CliffSection(w, p)
+  local zl, zr = P.CliffSides(w, p)
+  if not zl then return nil end
+  local dz = zl - zr
+  if math.abs(dz) <= P.CLIFF_STEP then return "open" end
+  local max = ns.Router and ns.Router.TRACK_DROP_MAX or P.CLIFF_DROP_MAX
+  if math.abs(dz) > max then return nil end
+  local ax, ay, bx, by = w[2 * p - 1], w[2 * p], w[2 * p + 1], w[2 * p + 2]
+  local ex, ey = bx - ax, by - ay
+  local L = math.sqrt(ex * ex + ey * ey)
+  if L <= 0 then return nil end
+  local lx, ly = -ey / L, ex / L -- (its left)
+  if dz > 0 then lx, ly = -lx, -ly end -- (toward the low side)
+  return "down", lx, ly, math.abs(dz)
 end
 
 -- The walls on `cont`: the shipped ones, then the player's drawn ones in order (an erase
@@ -200,8 +244,13 @@ function P.WallLines(cont)
     out[#out + 1] = w
   end
   local shipped = ns.RoadTracksIn or {}
+  -- (a wall edited with Edit Wall: the new one `replaces` the old one's time, left out)
+  local gone = {}
   for _, t in ipairs(ns.db and ns.db.tracks or {}) do
-    if t.continent == cont and t.pts and #t.pts >= 4 and not shipped[t.time or -1] then
+    if t.op == "wall" and t.replaces then gone[t.replaces] = true end
+  end
+  for _, t in ipairs(ns.db and ns.db.tracks or {}) do
+    if t.continent == cont and t.pts and #t.pts >= 4 and not shipped[t.time or -1] and not (t.op == "wall" and gone[t.time or -1]) then
       if t.op == "wall" then
         local w = DrawnLine(t)
         w.own = true -- (the player's own, not in the data: drawn in its own color, GPSFrame's G.LayoutWalls)
@@ -260,16 +309,28 @@ local function WallGrid(g, lines, opens)
   for _, w in ipairs(lines) do
     for k = 1, #w - 3, 2 do
       local ax, ay, bx, by = w[k], w[k + 1], w[k + 2], w[k + 3]
+      -- (a cliff's section: none where its sides are level, one way where the drop is safe)
+      local how, nx, ny, dz
+      if w.kind == "cliff" then how, nx, ny, dz = P.CliffSection(w, (k + 1) / 2) end
+      if how == "open" then
+        -- (nothing: walked across either way)
+      else
       -- its cells, every third of a cell along it (so none it crosses is skipped)
       if g then
         local len = math.sqrt((bx - ax) ^ 2 + (by - ay) ^ 2)
         local n = math.max(1, math.ceil(len / (g.cell / 3)))
         for i = 0, n do
           local c, r = ToCell(g, ax + (bx - ax) * i / n, ay + (by - ay) * i / n)
-          cells[r * 65536 + c] = true
+          local key = r * 65536 + c
+          -- (a cliff's walked down only: its way down, for the straight legs, SegmentCost; walks go round)
+          if how == "down" then
+            if cells[key] ~= true then cells[key] = { nx, ny } end
+          else
+            cells[key] = true
+          end
         end
       end
-      local seg = { ax, ay, bx, by, fl = w.fl }
+      local seg = { ax, ay, bx, by, fl = w.fl, down = how == "down" and { nx, ny } or nil, dz = dz }
       for kx = math.floor(math.min(ax, bx) / B), math.floor(math.max(ax, bx) / B) do
         for ky = math.floor(math.min(ay, by) / B), math.floor(math.max(ay, by) / B) do
           local key = kx * 65536 + ky
@@ -277,6 +338,7 @@ local function WallGrid(g, lines, opens)
           local list = segs[key]
           list[#list + 1] = seg
         end
+      end
       end
     end
   end
@@ -370,7 +432,7 @@ function P.WallHit(cont, x1, y1, x2, y2, ok)
   for kx = math.floor(math.min(x1, x2) / B), math.floor(math.max(x1, x2) / B) do
     for ky = math.floor(math.min(y1, y2) / B), math.floor(math.max(y1, y2) / B) do
       for _, s in ipairs(segs[kx * 65536 + ky] or {}) do
-        if not seen[s] then
+        if not seen[s] and not (s.down and dx * s.down[1] + dy * s.down[2] > 0) then -- (a cliff walked down: no wall)
           seen[s] = true
           local ex, ey = s[3] - s[1], s[4] - s[2]
           local den = dx * ey - dy * ex
@@ -427,7 +489,7 @@ function P.CrossesWall(cont, x1, y1, x2, y2, ok)
   for kx = math.floor(math.min(x1, x2) / B), math.floor(math.max(x1, x2) / B) do
     for ky = math.floor(math.min(y1, y2) / B), math.floor(math.max(y1, y2) / B) do
       for _, s in ipairs(segs[kx * 65536 + ky] or {}) do
-        if not seen[s] then
+        if not seen[s] and not (s.down and (x2 - x1) * s.down[1] + (y2 - y1) * s.down[2] > 0) then -- (a cliff walked down)
           seen[s] = true
           local o1, o2 = Orient(x1, y1, x2, y2, s[1], s[2]), Orient(x1, y1, x2, y2, s[3], s[4])
           local o3, o4 = Orient(s[1], s[2], s[3], s[4], x1, y1), Orient(s[1], s[2], s[3], s[4], x2, y2)
@@ -614,6 +676,9 @@ local function SegmentCostRaw(cont, x1, y1, x2, y2, endSlack)
         v, b = lastV, lastB
       else
         v = Cell(g, row, col)
+        -- (a cliff's cell crossed toward its low side: the ground's own value, the drop is safe)
+        local cd = v == 2 and CliffCell(g, row, col)
+        if cd and dx * cd[1] + dy * cd[2] > 0 then v = CellBase(g, row, col) end
         b = v == 2 and bset[row * 65536 + col] or false
         lastRow, lastCol, lastV, lastB = row, col, v, b
       end
