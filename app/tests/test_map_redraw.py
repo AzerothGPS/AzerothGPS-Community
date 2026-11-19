@@ -3732,6 +3732,23 @@ def test_a_question_pops_up_next_to_the_directions_with_the_map_closed_or_the_mi
         frame._shown, dir._shown, G.MinimapMode = was
 
 
+def test_a_one_button_message_has_no_no_button_over_the_map_too(game):
+    # (2026-11-18, Kooki3z: the import order notice showed "Got It" and "No" over the open map: "No shouldn't be an
+    # option, just Got It". The map's own placement dropped `single`.)
+    lua, ns = game
+    G = ns.GPS
+    frame, dir = lua.globals().AzerothGPSFrame, ns.Arrow.dir
+    was = (frame._shown, dir._shown, G.MinimapMode)
+    try:
+        G.MinimapMode = lua.eval("function() return false end")
+        for shown, by_dir in ((True, False), (False, True), (False, False)):  # (over the map; by the directions; alone)
+            frame._shown, dir._shown = shown, by_dir
+            box = G.Ask("AzerothGPSTestTold", "Something told.", "Got It", None, None, None, lua.table(single=True))
+            assert box._shown and box.yes._shown and not box.no._shown, (shown, by_dir)
+            box.yes._scripts.OnClick(box.yes)
+    finally:
+        frame._shown, dir._shown, G.MinimapMode = was
+
 def test_the_map_is_square_or_any_shape_up_to_a_4k_screen(game):
     # (asked 2026-10-04: big maps "up to 4k display", then "just support free sizing? just make square default and have
     # a check box available to enable the window sizing via corner pull to freely size the map however") square by

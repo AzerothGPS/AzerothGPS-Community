@@ -13714,7 +13714,7 @@ function G.Ask(name, text, yes, no, onYes, onNo, opts)
   end
   if frame and frame:IsShown() and topLayer then
     local o = { parent = topLayer, strata = topLayer:GetFrameStrata(), level = topLayer:GetFrameLevel() + 20,
-      timeout = opts.timeout, check = opts.check, key = name .. "@map",
+      timeout = opts.timeout, check = opts.check, single = opts.single, key = name .. "@map",
       place = function(f) f:SetPoint("CENTER", canvas, "CENTER", 0, 20) end }
     G.askBox = ns.Ask(name, text, yes, no, onYes, onNo, o)
     if G.askBox then G.askBox.onMap = true end
