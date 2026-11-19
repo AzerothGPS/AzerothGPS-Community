@@ -14,6 +14,10 @@ Each version's section is its release notes (GitHub and CurseForge).
 - The directions text has its own lock, apart from the arrow (Options > Directions, or right-click it).
 - Imported routes now visit their stops in the order listed, on by default; untick "Route in the listed order" in Import and Share (or Options > Routing) for the fastest order.
 
+### Fixed
+
+- Going off course on a long route no longer causes a hitch.
+
 ## 1.3.8
 
 ### New

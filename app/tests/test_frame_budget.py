@@ -385,3 +385,79 @@ def test_floor_heights_asked_in_the_frame_never_build_the_road_index_there(game)
         R.WARM, R.SYNC_WALKS = False, True
         if g.segIndex is None:
             g.segIndex = idx
+
+
+# (asked 2026-11-18, Kooki3z in game: "long routes going off course is causing lag spikes for each route". The capture's
+# trip: a Horde level 24 from Kalimdor to Hillsbrad by Orgrimmar's flight, the zeppelin to Brill, Undercity's lift and
+# Tarren Mill's flight, then Loch Modan and Westfall. Off the route with a short walk from the player, the whole plan
+# was worked out in the frame, again every few seconds while off it: 20 to 40 ms each time here; off a long walk, the
+# way back onto it was routed in the frame. Counted, not timed: a plan or a route in the frame is the hitch.)
+REROUTE_STOPS = ("{ { x = -427.73204, y = -1909.33, cont = 0, name = 'Hillsbrad' }, "
+                 "{ x = -4717.4475, y = -3226.72351, cont = 0, name = 'Loch Modan' }, "
+                 "{ x = -10622.66492, y = 1641.17, cont = 0, name = 'Westfall' } }")
+
+
+# (from 1100, 1150 the walk to Thunder Bluff's flight master is 400 yd: the whole plan again; from the capture's own
+# spot it's 2,000 yd, past Nav.REJOIN_MIN_YD: the way back onto it)
+@pytest.mark.parametrize("sx, sy", [(1100.0, 1150.0), (1212.9, 1258.1)])
+def test_going_off_course_on_a_long_route_works_nothing_out_in_the_frame(sx, sy):
+    pytest.importorskip("lupa.lua51")
+    from azerothgps import tripsweep as ts
+    from azerothgps.gameharness import start
+
+    lua, ns = start()
+    N, R = ns.Nav, ns.Router
+    N.FUN = False
+    lua.execute('UnitFactionGroup = function() return "Horde", "Horde" end; AGPS_LEVEL = 24')
+    cdb = ns.CharDB()
+    cdb.faction = "Horde"
+    known = {1415: ts._masters(ns, 0, "H"), 1414: ts._masters(ns, 1, "H")}
+    cdb.taxiNodes = lua.eval("{ " + ", ".join(f"[{m}] = {{ nodes = {{ "
+                                              + "".join(f"{{ nodeID = {n}, known = true }}, " for n in ids) + "} }"
+                                              for m, ids in known.items()) + " }")
+    ns.Teleports.Changed()
+    N.FlightsChanged()
+    R.WARM, R.SYNC_WALKS = True, False
+    lua.execute(f"AGPS_POS = {{ {sx}, {sy}, 1 }}")
+    N.SetStops(lua.eval(REROUTE_STOPS), False, "red")
+    lua.execute("""
+      AGPS_WORK = { plans = 0, routes = 0 }
+      local N, R = AGPS_NS.Nav, AGPS_NS.Router
+      local plan, route = N.Plan, R.Route
+      N.Plan = function(...) AGPS_WORK.plans = AGPS_WORK.plans + 1 return plan(...) end
+      R.Route = function(...) AGPS_WORK.routes = AGPS_WORK.routes + 1 return route(...) end
+    """)
+    work = lua.eval("AGPS_WORK")
+    clock = lua.eval("function() return os.clock() * 1000 end")
+
+    def frame(x, y, budget):
+        """One frame: the arrow's update in it (its plans and routes counted), then the background's slice."""
+        lua.execute(f"AGPS_POS = {{ {x}, {y}, 1 }}; AGPS_T = AGPS_T + 0.1")
+        work.plans, work.routes = 0, 0
+        N.Status(x, y, 1)
+        did = (work.plans, work.routes)
+        if R.HasWork():
+            R.Pump(clock() + budget, clock)
+        return did
+
+    for _ in range(400):  # (settled: the trip worked out, its searches done)
+        frame(sx, sy, 50)
+        if N.route and not R.HasWork():
+            break
+    assert N.route and not R.HasWork()
+    rides = [str(N.route.legs[i].ride[10]) for i in range(1, len(N.route.legs) + 1) if N.route.legs[i].ride]
+    assert rides[0] == "Orgrimmar, Durotar" and "Tarren Mill, Hillsbrad" in rides, rides
+    try:
+        x, landed, frames = sx, 0, 0
+        for _ in range(300):  # (walking east, away from the walk south-west to the flight master: 30 s off course)
+            x += 0.7
+            before = N.route
+            plans, routes = frame(x, sy, 5)
+            assert (plans, routes) == (0, 0), f"{plans} plans and {routes} routes in the frame, {x - sx:.0f} yd off"
+            frames += 1
+            if N.route is not before and N.route and abs(N.route.pts[1] - x) < 40:
+                landed, frames = landed + 1, 0
+            assert frames < 60, "no route from where the player went"  # (two reroutes' worth)
+        assert landed >= 5  # (rerouted all the way, from the player's spot each time)
+    finally:
+        R.WARM, R.SYNC_WALKS = False, True
