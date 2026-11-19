@@ -126,7 +126,8 @@ function M.SplitLines(text)
 end
 
 -- The uiMap named `name` (any case; a unique beginning of a name also works, e.g. "elwynn"). Several maps can share
--- a name: the one with art and bounds, most detailed.
+-- a name: the one with art and bounds, most detailed. The name in the game's language works too (ns.ZoneName, when
+-- loaded: a German player's /way lines from a German guide, "/way Silberwald 63.4 64.3", were "unknown zone").
 function M.FindMap(name)
   local want = Trim(name):lower()
   if want == "" then return nil end
@@ -134,8 +135,10 @@ function M.FindMap(name)
   for id, m in pairs(ns.Maps or {}) do
     if m.bounds and m.name then
       local n = m.name:lower()
-      if n == want then exact[#exact + 1] = id
-      elseif n:sub(1, #want) == want then prefix[#prefix + 1] = id end
+      local shown = ns.ZoneName and ns.ZoneName(id, m.name)
+      shown = type(shown) == "string" and shown:lower() or n
+      if n == want or shown == want then exact[#exact + 1] = id
+      elseif n:sub(1, #want) == want or shown:sub(1, #want) == want then prefix[#prefix + 1] = id end
     end
   end
   local function best(list)

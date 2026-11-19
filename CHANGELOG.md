@@ -16,6 +16,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 ### Fixed
 
 - Walks from Tarren Mill's flight master head south-east again, not round by the town.
+- /way lines take the zone in your game's language too ("/way Silberwald 63.4 64.3" on a German client), not only the English name.
 
 ## 1.3.9
 
