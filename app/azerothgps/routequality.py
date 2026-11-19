@@ -85,7 +85,7 @@ CAVES_FILE = "addon/AzerothGPS/Data/Caves.lua"
 _CAVE_CONT = re.compile(r"^\s*local overlays = ns\.RoadOverlays\[(\d+)\]")
 _CAVE_EDGE = re.compile(r"^\s*\{(\d+),\d+,[\d.]+,\d+,(\"[^\"]*\"|[-\d.,]+)\},?\s*$")
 _PACK = {ch: i for i, ch in enumerate("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_")}
-_WALL = re.compile(r"^\s*\{([-\d.,]+?)(?:,\s*z = [-\d.]+)?\},?\s*$")
+_WALL = re.compile(r"^\s*\{([-\d.,]+?)(?:,\s*z = [-\d.]+)?(?:,\s*kind = \"cliff\", cl = \{[^}]*\}, cr = \{[^}]*\})?\},?\s*$")
 
 
 def road_lines(text: str) -> dict:

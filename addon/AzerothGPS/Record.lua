@@ -333,6 +333,95 @@ function R.EditHeights(pts, kind, z, old, stairs, z1, z2, base)
   return nil
 end
 
+-- Edit Wall (the wall tools, 1.3.10, issue #685): a wall the player drew (not in the data yet) made a cliff on a
+-- section of it, with the ground's height on each side (Passability.CliffSection: open where they're level, walked down
+-- only where the drop is safe, else a wall both ways), or a plain wall again. Saved as a new wall that `replaces` the
+-- old one (its time): Undo takes it back, and the road watcher ships it in its place.
+R.WALL_PICK_YD = 12
+R.CLIFF_SIDE_YD = 5 -- (the ground's height this far either side of the wall: the sides filled in)
+-- The player's own walls on `cont` (not in the data yet), less those an edit replaced.
+function R.EditableWalls(cont)
+  local shipped = ns.RoadTracksIn or {}
+  local gone, out = {}, {}
+  for _, t in ipairs(Tracks()) do
+    if t.op == "wall" and t.replaces then gone[t.replaces] = true end
+  end
+  for _, t in ipairs(Tracks()) do
+    if t.op == "wall" and t.continent == cont and t.pts and #t.pts >= 4 and not shipped[t.time or -1]
+        and not gone[t.time or -1] then out[#out + 1] = t end
+  end
+  return out
+end
+-- The editable wall nearest (x, y) on `cont` within `reach`: { t, d, i (the section's first point) }, or nil.
+function R.WallAt(cont, x, y, reach)
+  reach = reach or R.WALL_PICK_YD
+  local best
+  for _, t in ipairs(R.EditableWalls(cont)) do
+    local p = t.pts
+    for k = 1, #p - 3, 2 do
+      local ax, ay, bx, by = p[k], p[k + 1], p[k + 2], p[k + 3]
+      local vx, vy = bx - ax, by - ay
+      local L2 = vx * vx + vy * vy
+      local f = L2 > 0 and math.max(0, math.min(1, ((x - ax) * vx + (y - ay) * vy) / L2)) or 0
+      local d = math.sqrt((ax + vx * f - x) ^ 2 + (ay + vy * f - y) ^ 2)
+      if d <= reach and (not best or d < best.d) then best = { t = t, d = d, i = (k + 1) / 2 } end
+    end
+  end
+  return best
+end
+-- The ground's height on each side of wall `t`'s points i .. j (R.CLIFF_SIDE_YD off each section's middle, its left and
+-- its right as drawn; ns.Ground), averaged: zl, zr (either nil with no ground data there).
+function R.WallSides(level, t, i, j)
+  local GD = ns.Ground
+  if not GD then return nil, nil end
+  local sl, nl, sr, nr = 0, 0, 0, 0
+  local p = t.pts
+  for k = i, math.max(i, j - 1) do
+    local ax, ay, bx, by = p[2 * k - 1], p[2 * k], p[2 * k + 1], p[2 * k + 2]
+    if bx then
+      local ex, ey = bx - ax, by - ay
+      local L = math.sqrt(ex * ex + ey * ey)
+      if L > 0 then
+        local mx, my, lx, ly = (ax + bx) / 2, (ay + by) / 2, -ey / L * R.CLIFF_SIDE_YD, ex / L * R.CLIFF_SIDE_YD
+        local hl, hr = GD.At(level, mx + lx, my + ly), GD.At(level, mx - lx, my - ly)
+        if hl then sl, nl = sl + hl, nl + 1 end
+        if hr then sr, nr = sr + hr, nr + 1 end
+      end
+    end
+  end
+  local function r1(v) return math.floor(v * 10 + 0.5) / 10 end
+  return nl > 0 and r1(sl / nl) or nil, nr > 0 and r1(sr / nr) or nil
+end
+-- Save an edit of the wall picked (`sel`, R.WallAt's): { kind ("cliff" or "wall"), i, j (the section's points), zl, zr
+-- (a cliff's sides) }. The rest keeps its own sides. Its number in the drawn roads, or nil and why.
+function R.EditWall(sel, edit)
+  local t = sel and sel.t
+  if not (t and t.pts and #t.pts >= 4 and edit) then return nil, "nothing" end
+  local n = #t.pts / 2
+  local i, j = tonumber(edit.i) or 1, tonumber(edit.j) or n
+  if j < i then i, j = j, i end
+  i, j = math.max(1, i), math.min(n, j)
+  if i == j then return nil, "section" end
+  local zl, zr = tonumber(edit.zl), tonumber(edit.zr)
+  if edit.kind == "cliff" and not (zl and zr) then return nil, "height" end
+  local cl, cr = {}, {}
+  for k = 1, n do
+    cl[k] = type(t.cl) == "table" and tonumber(t.cl[k]) or false
+    cr[k] = type(t.cr) == "table" and tonumber(t.cr[k]) or false
+  end
+  for k = i, j do
+    if edit.kind == "cliff" then cl[k], cr[k] = zl, zr else cl[k], cr[k] = false, false end
+  end
+  local any = false
+  for k = 1, n do any = any or (cl[k] and cr[k]) and true or false end
+  local pts = {}
+  for k = 1, #t.pts do pts[k] = t.pts[k] end
+  local w = { op = "wall", drawn = true, edit = true, continent = t.continent, zone = t.zone or "?", time = time(),
+    pts = pts, z = t.z, indoors = t.indoors, down = t.down, replaces = t.time,
+    kind = any and "cliff" or nil, cl = any and cl or nil, cr = any and cr or nil }
+  return R.Save(w)
+end
+
 -- Set Heights (Edit Road, 1.3.10, issue #685): the heights the rest of road `t` keeps around a stretch, a height or
 -- false per point: its own (`zs`), else the ground's it was drawn on (`gz`), else the map's grid there (ns.Ground).
 function R.StretchBase(t, level)

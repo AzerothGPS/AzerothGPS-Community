@@ -48,7 +48,12 @@ def roads_lua(data_dir: Path, continents=None) -> str:
         out.append(f"  [{cont}] = {{")
         for w in ws[cont]:
             z = getattr(w, "z", None)
-            out.append("    {" + ",".join(f"{x:g},{y:g}" for x, y in w) + (f", z = {z:g}" if z is not None else "") + "},")
+            cliff = ""
+            if getattr(w, "kind", None) == "cliff":  # (a cliff wall's sides: Passability.CliffSection; 1.3.10, #685)
+                side = lambda vs: "{" + ",".join("false" if v is None else f"{v:g}" for v in vs) + "}"
+                cliff = f', kind = "cliff", cl = {side(w.cl)}, cr = {side(w.cr)}'
+            out.append("    {" + ",".join(f"{x:g},{y:g}" for x, y in w) + (f", z = {z:g}" if z is not None else "")
+                       + cliff + "},")
         out.append("  },")
     out.append("}")
     from .tracks import wall_opens
