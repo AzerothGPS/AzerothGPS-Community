@@ -7,6 +7,7 @@ BLP and ADT files; no writing, no network.
 
 from __future__ import annotations
 
+import re
 import struct
 import zlib
 from dataclasses import dataclass
@@ -14,6 +15,11 @@ from pathlib import Path
 
 LOCALE_ENUS = 0x2
 LOCALE_ALL = 0xFFFFFFFF
+# (the root's locale flags; the client keeps only its own language's localized files: a German client has
+# deDE's Map.db2 and AreaTable.db2, not enUS's)
+LOCALES = {"enUS": 0x2, "koKR": 0x4, "frFR": 0x10, "deDE": 0x20, "zhCN": 0x40, "esES": 0x80, "zhTW": 0x100,
+           "enGB": 0x200, "enCN": 0x400, "enTW": 0x800, "esMX": 0x1000, "ruRU": 0x2000, "ptBR": 0x4000,
+           "itIT": 0x8000, "ptPT": 0x10000}
 CONTENT_LOW_VIOLENCE = 0x80
 CONTENT_NO_NAME_HASH = 0x10000000
 
@@ -101,6 +107,8 @@ class CascStorage:
             raise CascError(f"product {product} not in .build.info")
         self.build_info = rows[0]
         self.version = self.build_info.get("Version", "?")
+        m = re.search(r"(\w{4}) text\?", self.build_info.get("Tags", ""))
+        self.text_locale = m.group(1) if m else "enUS"
         bk = self.build_info["Build Key"]
         self.data_dir = self.wow_path / "Data"
         self.build_config = _config(self.data_dir / "config" / bk[:2] / bk[2:4] / bk)
@@ -173,6 +181,9 @@ class CascStorage:
     def _load_root(self) -> None:
         data = self.read_ckey(bytes.fromhex(self.build_config["root"][0]))
         self.root: dict[int, bytes] = {}
+        self.root_installed: dict[int, bytes] = {}  # (the client's own language's, where it isn't enUS)
+        mine = LOCALES.get(self.text_locale, 0) if self.text_locale != "enUS" else 0
+        self._warned = False
         pos = 0
         version = 0
         if data[:4] == b"TSFM":
@@ -196,13 +207,19 @@ class CascStorage:
             pos += 16 * n
             if not (content & CONTENT_NO_NAME_HASH):
                 pos += 8 * n
-            usable = (locale & LOCALE_ENUS or locale == LOCALE_ALL) and not (content & CONTENT_LOW_VIOLENCE)
-            if not usable:
+            if content & CONTENT_LOW_VIOLENCE:
+                continue
+            usable = locale & LOCALE_ENUS or locale == LOCALE_ALL
+            installed = mine and not usable and locale & mine
+            if not (usable or installed):
                 continue
             fdid = -1
             for i, d in enumerate(deltas):
                 fdid += d + 1
-                self.root.setdefault(fdid, data[ckeys + 16 * i : ckeys + 16 * (i + 1)])
+                if usable:
+                    self.root.setdefault(fdid, data[ckeys + 16 * i : ckeys + 16 * (i + 1)])
+                if installed:
+                    self.root_installed.setdefault(fdid, data[ckeys + 16 * i : ckeys + 16 * (i + 1)])
 
     def has(self, fdid: int) -> bool:
         return fdid in self.root
@@ -211,7 +228,20 @@ class CascStorage:
         ckey = self.root.get(fdid)
         if ckey is None:
             raise CascError(f"FileDataID {fdid} not in root")
+        alt = self.root_installed.get(fdid)
+        if alt is not None and alt != ckey and not self._on_disk(ckey) and self._on_disk(alt):
+            # (an enUS file a client in another language doesn't have: its own language's, with a warning once,
+            # as its names are in that language)
+            if not self._warned:
+                print(f"warning: enUS files missing (a {self.text_locale} client): reading {self.text_locale}'s; "
+                      f"names from them are in that language")
+                self._warned = True
+            ckey = alt
         return self.read_ckey(ckey, zero_encrypted)
+
+    def _on_disk(self, ckey: bytes) -> bool:
+        ekey = self.encoding.get(ckey)
+        return ekey is not None and ekey[:9] in self.index
 
 
 class Listfile:
