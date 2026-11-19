@@ -236,3 +236,72 @@ def test_the_swims_split_a_piece_in_order_with_the_guards_reach(game):
     # a road or a ride over water isn't a swim
     for k in (0, 2):
         assert N.SwimSpans(lua.eval(f"{{ cont = 0, pts = {{ {ISLE[0]}, {ISLE[1]}, {SHORE[0]}, {SHORE[1]} }}, kinds = {{ {k} }} }}"), 1) is False
+
+
+WETLANDS = (-2860.0, -1400.0)  # (the Wetlands' north coast, west of the strait to Arathi and Hillsbrad)
+NEAR = (-2875.0, -1395.0)  # (a stop just along the coast from there)
+OFF = (-2740.0, -1200.0)  # (up the coast toward the strait: off the way to Thandol Span)
+MALEB = (-861.0, -473.7)  # (Magistrate Henry Maleb, Southshore)
+
+
+def _strait_swim(ns, r):
+    """Yards of the route's swims out in the strait north of Thandol Span (Nav.SwimSpans past x -2600)."""
+    yd = 0.0
+    for p in r.parts.values():
+        for i in range(1, len(p.pts) // 2):
+            sp = ns.Nav.SwimSpans(p, i)
+            if sp:
+                x1, y1, x2, y2 = p.pts[2 * i - 1], p.pts[2 * i], p.pts[2 * i + 1], p.pts[2 * i + 2]
+                for j in range(1, len(sp), 2):
+                    a, b = sp[j], sp[j + 1]
+                    if max(x1 + (x2 - x1) * a, x1 + (x2 - x1) * b) > -2600:
+                        yd += (b - a) * math.dist((x1, y1), (x2, y2))
+    return yd
+
+
+def _over_thandol(r):
+    return any(-2500 < p.pts[i] < -2250 and -2550 < p.pts[i + 1] < -2350
+               for p in r.parts.values() for i in range(1, len(p.pts), 2))
+
+
+@pytest.mark.parametrize("how", ["removed", "option off"])
+def test_a_swim_left_out_stays_out_on_every_reroute_the_stops_reached_and_a_reload(game, trip, how):
+    # (reported 2026-11-19 with a video: from the Wetlands' coast toward Southshore the route swam the strait; the swim
+    # removed, the route came back hugging the coast in the same water, "No way round by land", though Thandol Span
+    # is. A walk searched over the water lost to the roads, but rerouting from beside where it was searched took it up
+    # again priced by its yards alone (Router's Reuse), the water at running cost)
+    lua, ns = game
+    N, P = ns.Nav, ns.Passability
+    trip(WETLANDS, MALEB, allow=(how != "option off"))
+    N.SetStops(lua.eval(f"{{ {{ x = {NEAR[0]}, y = {NEAR[1]}, cont = 0, name = 'near' }},"
+                        f" {{ x = {MALEB[0]}, y = {MALEB[1]}, cont = 0, name = 'stop' }} }}"), False, "red")
+    trip.settle()
+    if how == "removed":
+        N.SkipSwim()
+        trip.settle()
+        assert N.noSwim and ns.CharDB().noSwim
+    assert P.avoidSwim
+
+    def check(where):
+        r = N.route
+        assert r is not None, where
+        assert _strait_swim(ns, r) == 0 and _over_thandol(r), (where, round(r.swimYards), round(_strait_swim(ns, r)))
+
+    check("left out")
+    # off course, up the coast toward the strait: worked out again from there, still by land
+    lua.execute(f"AGPS_POS[1], AGPS_POS[2] = {OFF[0]}, {OFF[1]}")
+    trip.settle()
+    check("off course")
+    # the first stop reached: on to the next, still by land
+    lua.execute(f"AGPS_POS[1], AGPS_POS[2] = {NEAR[0]}, {NEAR[1]}")
+    trip.settle()
+    assert len(N.stops) == 1
+    check("a stop reached")
+    # (a /reload: the stops and the trip's swim left out brought back)
+    lua.execute(f"AGPS_POS[1], AGPS_POS[2] = {WETLANDS[0]}, {WETLANDS[1]}")
+    N.noSwim = None
+    N.Restore()
+    N.Invalidate(True, True)
+    trip.settle()
+    assert (N.noSwim is not None) == (how == "removed")
+    check("after a reload")

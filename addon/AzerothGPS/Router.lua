@@ -2781,6 +2781,11 @@ local byTarget = {} -- walks found, by where they go: [cont:x:y] = { [walk key] 
 -- (the roads the walls cut, the links between them) waits for the tools to be turned off (Record.Apply, R.Reset).
 function R.WallsChanged()
   walks, walkCount, failed, walkJobs, walkQueued, byTarget = {}, 0, {}, {}, {}, {}
+  -- (the road nodes' straight links off the roads too: priced by SegmentCost, the walls and the swim cost in them;
+  -- their background job just dropped with the others, so none is waited on)
+  for _, g in pairs(graphs) do
+    if g then g.links, g.linkQueued, g.linkJob = nil, nil, nil end
+  end
   R.ClearSegMemo()
 end
 local function Remember(key, rough, c, path, tkey)
@@ -2880,10 +2885,19 @@ local function Reuse(cont, x1, y1, tkey)
     local w = walks[key]
     local path = w and w[2]
     if path and #path >= 4 then
-      local remain = { [#path - 1] = 0 }
-      for i = #path - 3, 1, -2 do
-        local dx, dy = path[i + 2] - path[i], path[i + 3] - path[i + 1]
-        remain[i] = remain[i + 2] + math.sqrt(dx * dx + dy * dy)
+      -- (its cost from each corner on, and each piece's, as the search priced them (P.SegmentCost: water dearer, more
+      -- so with swimming left out): by yards alone a walk over a lake, found and lost to the roads, came back cheap on
+      -- the next reroute from beside where it was searched; a removed swim was swum again, 2026-11-19)
+      local remain, piece = w.remain, w.piece
+      if not remain then
+        remain, piece = { [#path - 1] = 0 }, {}
+        for i = #path - 3, 1, -2 do
+          local dx, dy = path[i + 2] - path[i], path[i + 3] - path[i + 1]
+          local len = math.sqrt(dx * dx + dy * dy)
+          piece[i] = math.max(len, P.SegmentCost(cont, path[i], path[i + 1], path[i + 2], path[i + 3]) or len)
+          remain[i] = remain[i + 2] + piece[i]
+        end
+        w.remain, w.piece = remain, piece
       end
       -- (anywhere along it, not only at its corners, asked 2026-10-06: a walk's corners are far apart, and the only
       -- one near was where its search started, behind the player: the route stepped back there, or, once past it,
@@ -2896,9 +2910,12 @@ local function Reuse(cont, x1, y1, tkey)
         if L2 > 0 then t = math.max(0, math.min(1, ((x1 - ax) * vx + (y1 - ay) * vy) / L2)) end
         local qx, qy = ax + vx * t, ay + vy * t
         local d = math.sqrt((qx - x1) ^ 2 + (qy - y1) ^ 2)
-        local c = d + (1 - t) * math.sqrt(L2) + remain[i + 2]
-        if d <= R.WALK_REUSE_YD and (not bestC or c < bestC) and P.SegmentCost(cont, x1, y1, qx, qy) then
-          bestC, bestI, bestPath, bestX, bestY = c, i, path, qx, qy
+        if d <= R.WALK_REUSE_YD then
+          local join = P.SegmentCost(cont, x1, y1, qx, qy)
+          local c = join and join + (1 - t) * piece[i] + remain[i + 2]
+          if c and (not bestC or c < bestC) then
+            bestC, bestI, bestPath, bestX, bestY = c, i, path, qx, qy
+          end
         end
       end
     end

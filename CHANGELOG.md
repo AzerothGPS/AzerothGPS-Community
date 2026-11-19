@@ -31,6 +31,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 - Walks from Tarren Mill's flight master head south-east again, not round by the town.
 - Routes no longer swim far out to sea where fatigue sets in, such as from the Wetlands across to Southshore; they keep near the shore.
+- A swim you removed, or left out with Allow swimming off, no longer comes back along the shore when the route is worked out again.
 
 ## 1.3.9
 
