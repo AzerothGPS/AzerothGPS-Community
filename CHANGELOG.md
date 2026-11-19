@@ -19,6 +19,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - With the road or wall tools on, the pointer shows a building's floor heights, and roads drawn there start at the floor's height.
 - Roads: new roads and walls in Arathi Highlands.
 - Roads: the way up Grom'gol's zeppelin tower in Stranglethorn Vale.
+- Walls: a wall moved in the Wetlands.
 - Swims on a route show as a wavy line on the map and the minimap; hover one to see why, right-click it to go round by land for that trip.
 - Trip times count swimming at swimming speed, or as land with water walking, levitation or Aquatic Form.
 - New option, Routing > Allow swimming: off, routes go round by land wherever there's a way.
