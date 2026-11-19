@@ -8769,6 +8769,8 @@ function G.UpdateNavPanel(px, py, cont, hidden, route, dest)
   -- (a dungeon's floor and route note: under the panel while it shows, not under its text)
   if fl.bar and fl.bar:IsShown() then G.PlaceFloorBar() end
   if G.pathColorBox and G.pathColorBox:IsShown() then G.PlacePathColorPicker() end
+  -- (no route to show: a first install's tips in the panel's place until its first route, Setup.lua)
+  if not G.clone and ns.Setup and ns.Setup.RefreshTips then ns.Setup.RefreshTips(G) end
 end
 
 function G.Update()

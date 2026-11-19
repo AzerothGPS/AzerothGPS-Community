@@ -205,7 +205,9 @@ function Pad.MapOpen()
 end
 function Pad.Wanted()
   -- (Options open: the pad is its, PadOptions.lua)
+  -- (the first-run setup showing: the pad is its, Setup.lua)
   return Pad.Active() and Pad.MapOpen() and not InCombat() and not (Pad.Opt and Pad.Opt.Open())
+    and not (ns.Setup and ns.Setup.padBound)
 end
 
 -- Our buttons the bindings click: "AnyDown" and "AnyUp", so a held D-pad or trigger is known.
@@ -321,6 +323,7 @@ Pad.TOGGLE_UI_NOTE = "|cffff4040" .. L["NOTICE:"] .. "|r\n"
   .. (L["With the game's controller UI on, the game keeps its buttons for its own panels: Show/Hide GPS can't be set on one. Make a macro with /agps toggle and put it on a controller button to open/close the map."]:gsub("/agps toggle", "|cffffd100/agps toggle|r"))
 function Pad.Apply()
   if Pad.Opt then Pad.Opt.Apply() end -- (Options' own: PadOptions.lua)
+  if ns.Setup and ns.Setup.PadApply and not ns.Setup.inPadApply then ns.Setup.PadApply() end -- (the setup's: Setup.lua)
   -- (in the lockdown no binding call at all, not even a pcall'd one: it would be blocked and reported; they were
   -- cleared as the fight began)
   if Locked() then
@@ -349,6 +352,7 @@ function Pad.Apply()
 end
 function Pad.Clear()
   if Pad.Opt then Pad.Opt.Clear() end
+  if ns.Setup and ns.Setup.PadClear then ns.Setup.PadClear() end
   if owner and not Locked() then pcall(ClearOverrideBindings, owner) end
   Pad.bound, Pad.held, Pad.holds = false, {}, {}
   if Pad.WatchHolds then Pad.WatchHolds() end

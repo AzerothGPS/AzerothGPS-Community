@@ -36,7 +36,7 @@ end
 -- Wanted: a controller active (Options > Controller's support on), Options open, out of combat.
 function PO.Wanted()
   local w = Window()
-  return (Pad.Active() and w and w:IsShown() and not InCombat()) and true or false
+  return (Pad.Active() and w and w:IsShown() and not InCombat() and not (ns.Setup and ns.Setup.Shown())) and true or false
 end
 function PO.Open() local w = Window() return (w and w:IsShown()) and true or false end
 

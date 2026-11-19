@@ -277,6 +277,9 @@ def _reset(lua, ns):
       local T = ns.Tutorial
       T.run, T.prompted, T.resume, T.panelMoved = nil, nil, nil, nil
       ns.db.tutorial = { seen = {}, ask = true, declined = 0, fresh = true }
+      -- (1.3.10: a first install's tips in the route panel stand in for the offer, Setup.lua; off here, the offer's
+      -- own tests: test_setup.py has the first install's path)
+      ns.db.tips = {}
       ns.Nav.Clear()
       ns.GPS.PendingStops({})
       ns.GPS.Follow()

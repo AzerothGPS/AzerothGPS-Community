@@ -35,6 +35,7 @@ local HELP = {
   L["/agps minimap on|off     (minimap button)"],
   L["/agps replace on|off|small|medium|large|ground|mask|status  (the GPS map as the minimap)"],
   L["/agps tutorial [section|exit]  (the tutorial, or one of its sections: Options > Help lists them)"],
+  L["/agps setup               (the first-time setup: minimap, map, directions, icons)"],
   L["/agps pad                (a controller: open and close the map with its Back button)"],
   L["/agps pad select|yes|remove|back|recenter | menu | zoom in|out | pan up|down|left|right  (the controller's controls, for macros)"],
   "/agps debug              (API probe; see `agps probes`)",
@@ -142,6 +143,9 @@ Command = function(msg)
     if all or b == "directions" or b == "text" then gps.dirLocked = lock end
   elseif a == "minimap" then
     ns.settings.minimap.hide = not OnOff(b, not ns.settings.minimap.hide)
+  elseif a == "setup" then -- (the first-run setup again, Setup.lua)
+    if ns.Setup then ns.Setup.Open() end
+    return
   elseif a == "tutorial" then -- (the tutorial: all of it, one section by its id, or out of it)
     if ns.Tutorial then ns.Tutorial.Slash(b) end
     return
