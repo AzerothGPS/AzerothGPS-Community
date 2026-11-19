@@ -2382,6 +2382,7 @@ local TAXI_ICON = {
 local LABEL_MAX_ZOOM = 1200 -- place names only when zoomed in this far
 local ROUTE_COLOR = 3
 G.CHECKING_ALPHA = 0.45 -- (a new route still being checked for a shorter way: drawn this faint, Nav.Checking)
+G.ROUTE_TOP_SUB = 2 -- (the draw sublevel of the leg to the next stop with several stops: over the later legs, DrawLines)
 local pool, poolUsed = {}, 0
 local lines, linesUsed = {}, 0
 local dashes, dashesUsed = {}, 0 -- textured dotted lines (DASH_TEXTURE)
@@ -3097,10 +3098,11 @@ local function DrawQuads(quads)
 end
 
 -- Line records for the current redraw, reused from frame to frame (no garbage):
--- segPool[1..segN] = { x1, y1, x2, y2, color (index or { r, g, b }), thickness, alpha, keep }
--- (keep: part of the route, which doesn't fade while moving).
+-- segPool[1..segN] = { x1, y1, x2, y2, color (index or { r, g, b }), thickness, alpha, keep, dotted, sublevel }
+-- (keep: part of the route, which doesn't fade while moving; sublevel: its line's draw sublevel, 0 but for the
+-- route's leg to the next stop, G.ROUTE_TOP_SUB).
 local segPool, segN = {}, 0
-local function AddSeg(ax, ay, bx, by, c, w, a, keep, dotted)
+local function AddSeg(ax, ay, bx, by, c, w, a, keep, dotted, sub)
   segN = segN + 1
   local sg = segPool[segN]
   if not sg then
@@ -3108,6 +3110,7 @@ local function AddSeg(ax, ay, bx, by, c, w, a, keep, dotted)
     segPool[segN] = sg
   end
   sg[1], sg[2], sg[3], sg[4], sg[5], sg[6], sg[7], sg[8], sg[9] = ax, ay, bx, by, c, w, a, keep or false, dotted or false
+  sg[10] = sub or 0
 end
 function G.DrawnSegs() return segPool, segN end -- (the tests: the last redraw's lines)
 
@@ -3651,7 +3654,16 @@ local function DrawLines(n, thickness, colors, alpha)
       end
       Style(l, c, a, sg[6] or thickness, false)
     end
-    if l then PlaceLine(l, x1, y1, x2, y2) end
+    if l then
+      PlaceLine(l, x1, y1, x2, y2)
+      -- (the lines are reused for any segment: each one's sublevel set when it changes, the leg to the next stop over
+      -- the rest of the route, G.ROUTE_TOP_SUB)
+      local sub = sg[10] or 0
+      if (l.agpsSub or 0) ~= sub then
+        l:SetDrawLayer("OVERLAY", sub)
+        l.agpsSub = sub
+      end
+    end
   end
   for i = nl + 1, linesUsed do HideLine(lines[i]) end
   for i = nd + 1, dashesUsed do HideLine(dashes[i]) end
@@ -9068,6 +9080,10 @@ function G.Update()
     -- (a new route still being checked for a shorter way: faded until it has settled, Nav.Checking; asked 2026-10-08)
     G.routeFade = ns.Nav.Checking and ns.Nav.Checking() and G.CHECKING_ALPHA or 1
     -- One stretch of the route on the screen, in its look: faint and dotted on another level, else solid or dotted.
+    -- (asked 2026-11-19: following the leg to the next stop, the legs after it drawn back over the same way covered it.
+    -- With several stops that leg's lines are drawn on a higher sublevel (G.ROUTE_TOP_SUB, its glow one under), over
+    -- the rest of the route; `legTop`, set for each stretch below)
+    local legTop
     local function DrawLeg(ax, ay, bx, by, col, width, dotted, partCont)
       local under = partCont and partCont ~= shown and ns.CityLevels and ns.CityLevels[partCont]
       if under and not under.instance and not ns.CityLevels[shown] then
@@ -9075,18 +9091,18 @@ function G.Update()
       elseif partCont and partCont ~= shown and (ns.CityLevels and (ns.CityLevels[partCont] or ns.CityLevels[shown])) then
         AddSeg(ax, ay, bx, by, col, math.max(2, width - 2), 0.45 * G.routeFade, true, true) -- (another level)
       else
-        if look and look.glow then AddSeg(ax, ay, bx, by, col, width * 2.6 + 2, 0.3 * G.routeFade, true) end -- (under it)
+        if look and look.glow then AddSeg(ax, ay, bx, by, col, width * 2.6 + 2, 0.3 * G.routeFade, true, nil, legTop and legTop - 1) end -- (under it)
         if not dotted then
-          AddSeg(ax, ay, bx, by, col, width, G.routeFade, true)
+          AddSeg(ax, ay, bx, by, col, width, G.routeFade, true, nil, legTop)
         elseif G.dashTexture then
-          AddSeg(ax, ay, bx, by, col, width, G.routeFade, true, true)
+          AddSeg(ax, ay, bx, by, col, width, G.routeFade, true, true, legTop)
         else
           local vx, vy = bx - ax, by - ay
           local len = math.sqrt(vx * vx + vy * vy)
           local t, n = 0, 0
           while t < len and n < 400 do
             local t2 = math.min(t + DASH, len)
-            AddSeg(ax + vx * t / len, ay + vy * t / len, ax + vx * t2 / len, ay + vy * t2 / len, col, width, G.routeFade, true)
+            AddSeg(ax + vx * t / len, ay + vy * t / len, ax + vx * t2 / len, ay + vy * t2 / len, col, width, G.routeFade, true, nil, legTop)
             t, n = t2 + GAP, n + 1
           end
         end
@@ -9103,6 +9119,7 @@ function G.Update()
       if (ax > reach and bx > reach) or (ax < -reach and bx < -reach) or (ay > reach and by > reach)
           or (ay < -reach and by < -reach) then return end
       local style = ROUTE_STYLE[kind] or ROUTE_STYLE[1]
+      legTop = multi and stop == 1 and G.ROUTE_TOP_SUB or nil
       local col, width, dotted = G.RouteLegLook(look, color(stop, kind, style[1]), style[2], style[3], kind, mid,
         multi, not (stops[stop] and stops[stop].corpse))
       -- (asked 2026-10-06) the last yards to a stop upstairs or in a cellar (G.FLOOR_LEG_YD round it): dotted in the

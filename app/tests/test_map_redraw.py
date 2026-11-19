@@ -11424,3 +11424,44 @@ def test_the_route_can_be_left_off_the_minimap_square(minimap):
     finally:
         st.replaceMinimapRoute = True
         N.Clear()
+
+
+def test_the_leg_to_the_next_stop_is_drawn_over_the_later_legs(game):
+    # (asked 2026-11-19: following the leg to the next stop, the next leg drawn back the same way covered it) with
+    # several stops the leg to the next stop is on a higher draw sublevel (G.ROUTE_TOP_SUB) than the later legs, its
+    # lines too; with one stop every line stays on sublevel 0, as before
+    lua, ns = game
+    N, G = ns.Nav, ns.GPS
+    N.Clear()
+    lua.execute("AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = 2254.0, 293.0, 0")
+
+    def route_subs():
+        for t in range(3):
+            lua.execute("AGPS_T = AGPS_T + 1")
+            _redraw(lua, ns)
+        segs, n = G.DrawnSegs()
+        # (the route's segments: kept while moving; their color, a table with several stops, else an index)
+        def col(c):
+            return tuple(c[k] for k in (1, 2, 3)) if lua.eval("type")(c) == "table" else c
+        return [(segs[i][10], col(segs[i][5])) for i in range(1, n + 1) if segs[i][8]]
+
+    try:
+        # there and back: Two is next to where the player stands, so its leg goes back over the leg to One
+        N.SetStops(lua.eval("{ { x = 2290, y = 293, cont = 0, name = 'One' }, { x = 2256, y = 293, cont = 0, name = 'Two' } }"),
+                   False, "red")
+        subs = route_subs()
+        top = [c for s, c in subs if s == G.ROUTE_TOP_SUB]
+        rest = [c for s, c in subs if s == 0]
+        assert top and rest, subs
+        assert not set(top) & set(rest)  # (One's leg up top in its color, Two's under it in its own)
+        assert all(s in (0, G.ROUTE_TOP_SUB) for s, _ in subs)
+        lines = _shown(lua, lambda w: getattr(w, "_sub", None) == G.ROUTE_TOP_SUB and w._layer == "OVERLAY" and w._kind == "Line")
+        assert lines  # (and the lines themselves set to it)
+        # one stop: nothing raised, and the lines reused go back to sublevel 0
+        N.SetStops(lua.eval("{ { x = 2290, y = 293, cont = 0, name = 'One' } }"), False, "red")
+        subs = route_subs()
+        assert subs and all(s == 0 for s, _ in subs)
+        assert not _shown(lua, lambda w: getattr(w, "_sub", None) == G.ROUTE_TOP_SUB and w._layer == "OVERLAY"
+                          and w._kind == "Line")
+    finally:
+        N.Clear()

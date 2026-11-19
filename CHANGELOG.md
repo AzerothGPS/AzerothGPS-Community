@@ -13,6 +13,10 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Roads: new roads and walls in Arathi Highlands.
 - Roads: the way up Grom'gol's zeppelin tower in Stranglethorn Vale.
 
+### Fixed
+
+- With several stops, the way to your next stop is drawn over the rest of the route, not hidden under a later stop's way back over the same road.
+
 ## 1.3.9
 
 ### New
