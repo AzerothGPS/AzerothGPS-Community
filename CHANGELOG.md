@@ -34,6 +34,10 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Routes no longer swim far out to sea where fatigue sets in, such as from the Wetlands across to Southshore; they keep near the shore.
 - A swim you removed, or left out with Allow swimming off, no longer comes back along the shore when the route is worked out again.
 
+### Fixed
+
+- With several stops, the way to your next stop is drawn over the rest of the route, not hidden under a later stop's way back over the same road.
+
 ## 1.3.9
 
 ### New
