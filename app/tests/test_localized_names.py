@@ -345,3 +345,19 @@ def test_the_generator_reads_the_dump_and_keeps_only_what_differs(tmp_path):
     assert names["frFR"] == {7: (None, "Fabricant d'armures")}  # (the name the same: only the title)
     text = M.lua_text("frFR", names["frFR"])
     assert '"Fabricant d\'armures",' in text and "\n7||1\n" in text
+
+
+def test_way_lines_take_the_zone_in_the_games_language(game):
+    # (a German player, 2026-11-19: "/way Silberwald 63.4 64.3 Leylinienfokus" from a German guide was "unknown zone";
+    # TomTom takes the client's names, and the search here finds both)
+    locale, lua, ns = game
+    parse = lua.eval("function(line) return { AGPS_NS.MapText.ParseWay(line) } end")  # (its nil and why, as a list)
+    shown = NAMES[locale]["maps"][WETLANDS]
+    for line in (f"/way {shown} 50 60 Here", f"/way {shown.lower()} 50 60 Here", f"/way {shown[:5]} 50 60 Here",
+                 "/way Wetlands 50 60 Here"):
+        r = parse(line)
+        wp, why = r[1], r[2]
+        assert wp is not None and wp.mapID == WETLANDS and (wp.x, wp.y, wp.name) == (50, 60, "Here"), (line, why)
+    r = parse("/way Nirgendwo 50 60")
+    wp, why = r[1], r[2]
+    assert wp is None and "Nirgendwo" in str(why)

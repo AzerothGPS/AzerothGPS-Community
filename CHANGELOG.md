@@ -37,6 +37,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 ### Fixed
 
 - With several stops, the way to your next stop is drawn over the rest of the route, not hidden under a later stop's way back over the same road.
+- /way lines take the zone in your game's language too ("/way Silberwald 63.4 64.3" on a German client), not only the English name.
 
 ## 1.3.9
 
