@@ -1007,7 +1007,7 @@ local function NamedBand(w, name)
   if b == nil then
     b = false
     for _, g in ipairs(w.groups) do
-      if g.n == name then
+      if ns.IsPlaceNamed(g.n, name) then -- (the zone text is the client's language: Data/PlaceNames)
         if not b then b = { g[3], g[6] } else b[1], b[2] = math.min(b[1], g[3]), math.max(b[2], g[6]) end
       end
     end
@@ -1064,7 +1064,7 @@ function G.FindInterior(px, py, pz, cont, zoneText, indoors, cityZ, cityWmo, map
       local band = hasName and NamedBand(w, zoneText)
       local nearest, nearestD
       for _, g in ipairs(w.groups) do
-        local named = hasName and g.n == zoneText
+        local named = hasName and ns.IsPlaceNamed(g.n, zoneText)
         local inside = lx >= g[1] and lx <= g[4] and ly >= g[2] and ly <= g[5]
         local ok
         if haveZ then
@@ -1310,7 +1310,7 @@ function G.DebugInterior()
       for _, g in ipairs(w.groups) do
         if lx >= g[1] and lx <= g[4] and ly >= g[2] and ly <= g[5] then
           inXY = inXY + 1
-          if g.n == zt then named = named + 1 end
+          if ns.IsPlaceNamed(g.n, zt) then named = named + 1 end
         end
       end
       out[#out + 1] = string.format("  wmo %d: local %.1f, %.1f; %d rooms contain it, %d named %q",

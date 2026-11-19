@@ -23,6 +23,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 ### Fixed
 
+- On a client in another language than English, places are found by the name the game gives them: Gnomeregan's Train Depot shows its inside map, not Dun Morogh's terrain; up top in the Ruins of Lordaeron counts as up top; the hearthstone's inn is found; rooms' labels on inside maps are in your language.
 - Walks from Tarren Mill's flight master head south-east again, not round by the town.
 - Routes no longer swim far out to sea where fatigue sets in, such as from the Wetlands across to Southshore; they keep near the shore.
 

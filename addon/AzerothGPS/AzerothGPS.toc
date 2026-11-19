@@ -61,6 +61,15 @@ Data\NpcNames\koKR.lua
 Data\NpcNames\ruRU.lua
 Data\NpcNames\zhCN.lua
 Data\NpcNames\zhTW.lua
+Data\PlaceNames\deDE.lua
+Data\PlaceNames\esES.lua
+Data\PlaceNames\esMX.lua
+Data\PlaceNames\frFR.lua
+Data\PlaceNames\koKR.lua
+Data\PlaceNames\ptBR.lua
+Data\PlaceNames\ruRU.lua
+Data\PlaceNames\zhCN.lua
+Data\PlaceNames\zhTW.lua
 Data\IconSizes.lua
 Passability.lua
 Router.lua
