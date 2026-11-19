@@ -116,6 +116,7 @@ ns.DEFAULTS = {
     fastestOrder = true, -- routes with several stops: visit them in the fastest order
     autoPauseRouting = false, -- routing paused when you're not following it (Nav.WatchFollowing; the low-end settings turn it on)
     autoPauseSeconds = 120, -- ... the time to the stop grown by this many seconds over its lowest
+    stutterPause = true, -- routing cut back, then paused, when it makes the game stutter (Nav.RouteWork)
     stopsAhead = 3, -- stops routed and drawn on the map at a time (1 to Nav.PLAN_AHEAD); the next come in as they're reached
     avoidHostile = true, -- routes keep away from the other faction's guards (their towns)
     cityKeepOrder = true, -- ... except stops down in a city: in the order placed

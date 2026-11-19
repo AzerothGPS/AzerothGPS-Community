@@ -2819,6 +2819,10 @@ local function BuildWindow()
   slider(L["Pause when longer by"], 30, 900, 30, function(v) return ns.Nav.FormatTime(v) end,
     function() return GPS().autoPauseSeconds or 120 end, function(v) GPS().autoPauseSeconds = v end)
   note(L["Paused once the time to your stop has grown by this much."])
+  -- (asked 2026-11-18: the stutter watch, Nav.RouteWork, its own option, on by default)
+  Key("stutterPause")
+  check(L["Pause routing when it makes the game stutter"], L["When working out the route keeps slowing frames down, only the way to your next stop is worked out until things are smooth again; if that isn't enough, routing is paused and the chat says so. Resume Routing in the map menu, or /agps pause. Not while the game is in the background."],
+    function() return GPS().stutterPause ~= false end, function(v) GPS().stutterPause = v and true or false end)
   Key("gentleBackground")
   check(L["Gentle background work"], L["Walks around obstacles and the road data (after a /reload) are worked out in smaller slices of each frame: fewer stutters on a slow PC. The first route after a /reload, and walks off the roads, take a little longer to appear."],
     function() return GPS().gentleBackground end, function(v) GPS().gentleBackground = v end)
