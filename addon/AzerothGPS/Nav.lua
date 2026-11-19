@@ -1124,8 +1124,12 @@ function N.RidePins(r)
           for k = 1, #t.hops - 1 do
             local a, b = masters and masters[t.hops[k]], masters and masters[t.hops[k + 1]]
             if a and b then
-              add({ cont = a[1], x = a[2], y = a[3], kind = "flight", ride = t, hop = k,
-                title = Format(L["Flight: %s to %s"], tostring(a[4]), tostring(b[4])) })
+              -- (a flight from a flight master to learn first: its pin stays the not-learned icon, over the map's
+              -- own; it was the known one, and Kargath looked known, issue #652)
+              local learn = t.learn and k == 1 or nil
+              add({ cont = a[1], x = a[2], y = a[3], kind = "flight", ride = t, hop = k, learn = learn,
+                title = learn and Format(L["Learn the flight path, then take the flight to %s"], tostring(t[10]))
+                  or Format(L["Flight: %s to %s"], tostring(a[4]), tostring(b[4])) })
             end
           end
         elseif t.use then

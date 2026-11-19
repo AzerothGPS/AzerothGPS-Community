@@ -32,8 +32,8 @@ def _discover(lua, ns, game_has_it, at=(0.5, 0.5)):
     """A character who knows node 28, standing at node 33's flight master: "New flight path discovered!"."""
     T = ns.Taxi
     T.StoreNodes(1415, lua.eval("{ { nodeID = 28, state = 1, position = { x = 0.2, y = 0.2 } },"
-                                " { nodeID = 33, state = 2, position = { x = 0.5, y = 0.5 } } }"), "login")
-    T.StoreNodes(1414, lua.eval("{ { nodeID = 2, state = 1, position = { x = 0.5, y = 0.5 } } }"), "login")
+                                " { nodeID = 33, state = 2, position = { x = 0.5, y = 0.5 } } }"), "taximap")
+    T.StoreNodes(1414, lua.eval("{ { nodeID = 2, state = 1, position = { x = 0.5, y = 0.5 } } }"), "taximap")
     lua.execute(f"""
       ERR_NEWTAXIPATH = "New flight path discovered!"
       C_Timer.After = function(_, fn) fn() end
