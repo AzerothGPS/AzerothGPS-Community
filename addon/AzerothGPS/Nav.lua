@@ -3290,7 +3290,11 @@ function N.CityHere()
       -- (the halls at the lifts' tops report the city's map too, but they're up top)
       local sub = GetSubZoneText and GetSubZoneText()
       local mini = GetMinimapZoneText and GetMinimapZoneText()
-      local up = l.upper and ((sub and l.upper[sub]) or (mini and l.upper[mini]))
+      -- (the zone text is the client's language, "Ruinen von Lordaeron": `upper`'s names are the English ones)
+      local up = false
+      for en in pairs(l.upper or {}) do
+        if ns.IsPlaceNamed(en, sub) or ns.IsPlaceNamed(en, mini) then up = true break end
+      end
       if not up then return id end
     end
   end
