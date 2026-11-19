@@ -241,6 +241,9 @@ def cmd_route_quality(args) -> int:
     for r in res.get("asking", []):
         print(f"  slower on the safe way while the game asks to risk the guards (not worse): {r['trip']}: {r['before']} s "
               f"-> {r['after']} s, {r['guard_before']} -> {r['guard_after']} yd in their reach")
+    for r in res.get("deep", []):
+        print(f"  slower where the older route swam fatigue water this change closes (not worse): {r['trip']}: "
+              f"{r['before']} s -> {r['after']} s, {r['deep_before']} -> {r['deep_after']} yd of it")
     return 1 if res["errors"] else 0
 
 

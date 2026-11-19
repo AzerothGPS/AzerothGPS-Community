@@ -18,8 +18,9 @@ local cache = {} -- [grid][row] = { end1, v1, end2, v2, ... }
 
 -- Decode one run-length encoded row (see encode_row in app/azerothgps/roads/terrain.py;
 -- `short`: the longest short run, SHORT unless the grid says (a cave's: 15); `long`: the
--- digits of a long run's length, 3 unless the grid says (a cave's: 2)).
-local function DecodeRow(text, short, long)
+-- digits of a long run's length, 3 unless the grid says (a cave's: 2); `deep`: the grid's value for deep water far
+-- out (fatigue: never swum), read as 2, blocked).
+local function DecodeRow(text, short, long, deep)
   short = short or SHORT
   local runs, pos, i, n = {}, 0, 1, #text
   while i <= n do
@@ -40,6 +41,7 @@ local function DecodeRow(text, short, long)
       len = k % short + 1
       i = i + 1
     end
+    if v == deep then v = 2 end
     pos = pos + len
     runs[#runs + 1] = pos
     runs[#runs + 1] = v
@@ -122,7 +124,7 @@ CellBase = function(g, row, col)
   end
   local runs = rc[row]
   if not runs then
-    runs = DecodeRow(Rows(g)[row], g.short, g.long)
+    runs = DecodeRow(Rows(g)[row], g.short, g.long, g.deep)
     rc[row] = runs
   end
   -- binary search for the run containing col
@@ -1412,7 +1414,7 @@ function P.WarmRows(cont, x, y, yd)
   local n = 0
   for row = math.max(1, math.min(r1, r2)), math.min(g.h, math.max(r1, r2)) do
     if not rc[row] and Rows(g)[row] then
-      rc[row] = DecodeRow(Rows(g)[row], g.short, g.long)
+      rc[row] = DecodeRow(Rows(g)[row], g.short, g.long, g.deep)
       n = n + 1
       if canYield and n % 6 == 0 then coroutine.yield() end
     end

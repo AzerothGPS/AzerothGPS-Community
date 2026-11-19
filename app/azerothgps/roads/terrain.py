@@ -2,7 +2,7 @@
 
 Each continent is divided into cells of CELL_QUADS x CELL_QUADS terrain quads
 (a quad is 1/8 of a chunk, 4.17 yd). A cell is:
-  0 passable, 1 water (swimmable, slower), 2 blocked (too steep to climb).
+  0 passable, 1 water (swimmable, slower), 2 blocked (too steep to climb, or deep water: fatigue).
 """
 
 from __future__ import annotations
@@ -26,6 +26,16 @@ HILL_BLOCK = 4  # the hills grid is this many cells to a side coarser (33 yd)
 # steep bed stays closed (off the Ruins of Lordaeron, a 25 yd cliff down into the lake ended a straight leg the end
 # slack let through, and the lake behind it opened)
 SWIM_DEPTH = 2.0
+# The client's water marks its open sea "deep" (MH2O's attributes: the deep mask, none given: all deep, what server
+# cores swim into fatigue as). A route from the Wetlands' coast to Southshore swam 2 km straight over the strait into
+# fatigue (reported 2026-11-19, 1.3.9). Fatigue takes about a minute to run out, so deep water is closed, as steep
+# ground, only DEEP_REACH_YD or more from water that isn't deep: a crossing of a narrow deep band stays a swim (from
+# Alterac's coast to Silverpine, walked over 130 yd of it, issue #271). A cell is deep with DEEP_FRACTION of its quads.
+DEEP_FRACTION = 0.5
+DEEP_REACH_YD = 100.0
+# In Data/Terrain.lua such a cell is written as this value (the grid's `deep`), read as 2 by Passability.lua: the
+# seamless map's coastline (coast.py) keeps it the sea's
+DEEP_VALUE = 3
 MCNK_HEADER = 128
 
 
@@ -57,9 +67,10 @@ def chunk_tops(mcvt: np.ndarray) -> np.ndarray:
     return np.maximum.reduce([outer[:-1, :-1], outer[:-1, 1:], outer[1:, :-1], outer[1:, 1:], inner])
 
 
-def tile_grid(root: bytes, hills: bool = False, swim_types=None):
+def tile_grid(root: bytes, hills: bool = False, swim_types=None, deep_out=None):
     """(steep, water) as 128x128 quad grids for one ADT tile [row = south, col = east];
-    with `hills`, also the quads that are a climb (steeper than HILL_SLOPE). With `swim_types` (the
+    with `hills`, also the quads that are a climb (steeper than HILL_SLOPE). `deep_out` (a 128x128 bool array, or
+    None): set where the water is deep (fatigue). With `swim_types` (the
     LiquidType ids swum through: the sea's), a quad SWIM_DEPTH under one of those liquids isn't steep: a
     steep seabed is swum over (Alterac's coast to Silverpine, walked: issue #271)."""
     steep = np.zeros((128, 128), bool)
@@ -83,10 +94,16 @@ def tile_grid(root: bytes, hills: bool = False, swim_types=None):
                     break
         elif magic == "MH2O":
             for ci in range(256):
-                off_inst, n_layers, _ = struct.unpack_from("<III", root, a + ci * 12)
+                off_inst, n_layers, off_attr = struct.unpack_from("<III", root, a + ci * 12)
                 if not n_layers or not off_inst:
                     continue
                 cy, cx = divmod(ci, 16)
+                if deep_out is not None:  # (fishable u64, then deep u64: bit y * 8 + x; none given: all deep, as
+                    # server cores read it)
+                    deep_bits = struct.unpack_from("<Q", root, a + off_attr + 8)[0] if off_attr else (1 << 64) - 1
+                    if deep_bits:
+                        bits = np.array([(deep_bits >> i) & 1 for i in range(64)], bool).reshape(8, 8)
+                        deep_out[cy * 8 : cy * 8 + 8, cx * 8 : cx * 8 + 8] |= bits
                 for li in range(n_layers):
                     p = a + off_inst + li * 24
                     ltype, _f, low, _mx, x0, y0, w, h, off_mask, _ov = struct.unpack_from("<HHffBBBBII", root, p)
@@ -138,13 +155,16 @@ def _continent_grid(cd: ClientData, continent: int, log=print) -> dict:
     water = np.zeros((H, W), bool)
     land = np.zeros((H, W), bool)
     hill = np.zeros((H, W), bool)
+    deep = np.zeros((H, W), bool)
     swim = sea_types(cd)
     for (tx, ty) in tiles:
         try:
-            s, w, hl = tile_grid(cd.casc.read(wdt.tiles[(tx, ty)].root), hills=True, swim_types=swim)
+            dp = np.zeros((qpt, qpt), bool)
+            s, w, hl = tile_grid(cd.casc.read(wdt.tiles[(tx, ty)].root), hills=True, swim_types=swim, deep_out=dp)
         except Exception:
             continue
         r, c = (ty - ty0) * qpt, (tx - tx0) * qpt
+        deep[r : r + qpt, c : c + qpt] = dp & w
         steep[r : r + qpt, c : c + qpt] = s
         water[r : r + qpt, c : c + qpt] = w
         hill[r : r + qpt, c : c + qpt] = hl
@@ -155,11 +175,15 @@ def _continent_grid(cd: ClientData, continent: int, log=print) -> dict:
     cells = np.zeros((H // k, W // k), np.uint8)
     cells[pool(water) >= 0.5] = 1
     cells[pool(steep) >= BLOCK_FRACTION] = 2
+    from scipy import ndimage
+
+    far = pool(deep) >= DEEP_FRACTION
+    far &= ndimage.distance_transform_edt(far) * QUAD_YD * k > DEEP_REACH_YD
+    far &= cells == 1  # (water till now: what Data/Terrain.lua writes as DEEP_VALUE)
+    cells[far] = 2  # (far out in fatigue water: never swum)
     cells[pool(land) < 0.5] = 2  # no terrain: void / off the map
     cells = despeckle(cells)
     # hilly: open ground that's a climb (the route may wind for a reason there)
-    from scipy import ndimage
-
     hilly = ndimage.binary_closing(pool(hill) >= HILL_FRACTION, iterations=2) & (cells == 0)
     lab, n = ndimage.label(hilly)
     if n:
@@ -168,7 +192,7 @@ def _continent_grid(cd: ClientData, continent: int, log=print) -> dict:
     log(f"  [{continent}] passability grid {cells.shape[1]}x{cells.shape[0]} cells "
         f"({QUAD_YD * k:.2f} yd): {np.mean(cells == 2) * 100:.0f}% blocked, {np.mean(cells == 1) * 100:.0f}% water")
     return {"continent": continent, "tileX0": tx0, "tileY0": ty0, "cellYd": QUAD_YD * k, "cells": cells,
-            "hilly": hilly}
+            "hilly": hilly, "deep": far & (cells == 2)}
 
 
 def runs(row: np.ndarray) -> list[int]:
@@ -261,14 +285,16 @@ def terrain_lua(cd: ClientData, continents=None, log=print) -> str:
     hills = []
     out = [f"-- GENERATED by `agps gen-addon-data` from client {cd.casc.version}. Do not edit by hand.",
            "-- Passability per continent for offroad routing: cells of cell yards, row = south,",
-           "-- col = east, from terrain tile (tx0, ty0). Values: 0 open, 1 water, 2 blocked (too steep).",
+           "-- col = east, from terrain tile (tx0, ty0). Values: 0 open, 1 water, 2 blocked (too steep), `deep`",
+           "-- (3) deep water far out (fatigue): blocked too.",
            "-- Each row is run-length encoded; see app/azerothgps/roads/terrain.py (encode_row).",
            "local _, ns = ...", "ns.Terrain = {"]
     for cont in continents:
         g = continent_grid(cd, cont, log)
-        cells = g["cells"]
+        cells = g["cells"].copy()
+        cells[g["deep"]] = DEEP_VALUE
         out.append(f"  [{cont}] = {{ tx0 = {g['tileX0']}, ty0 = {g['tileY0']}, cell = {g['cellYd']:.6f}, "
-                   f"w = {cells.shape[1]}, h = {cells.shape[0]}, rows = {{")
+                   f"w = {cells.shape[1]}, h = {cells.shape[0]}, deep = {DEEP_VALUE}, rows = {{")
         for r in cells:
             out.append(f'    "{encode_row(r)}",')
         out.append("  } },")
