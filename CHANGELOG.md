@@ -10,6 +10,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - With the road tools on, roads show their kind in color, with smooth corners and their connection points.
 - A road under a bridge stays apart from it: routes from under the bridge go round to its end.
 - Routes can jump off a bridge onto a road below when the fall is safe.
+- Roads: new roads and walls in Arathi Highlands.
 
 ## 1.3.9
 
