@@ -21,7 +21,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Over a building's inside map, its roads and walls show for editing, the rest faded.
 - With the road or wall tools on, the pointer shows a building's floor heights, and roads drawn there start at the floor's height.
 - Roads: new roads and walls in Arathi Highlands.
-- Quest Route can take only the quests you track: the ones Questie's tracker shows, or the ones ticked in the quest log without Questie (Options > Routing).
+- Quest Route can take only the quests you track: the ones Questie's tracker shows, or the ones ticked in the quest log without Questie (Options > Routing). (thanks, DarkByteZero)
 - Roads: the way up Grom'gol's zeppelin tower in Stranglethorn Vale.
 - Walls: a wall moved in the Wetlands.
 - Swims on a route show as a wavy line on the map and the minimap; hover one to see why, right-click it to go round by land for that trip.
@@ -30,14 +30,14 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 ### Fixed
 
-- Ironforge: routes go round the Great Forge's lava pits on the walkway, not through the lava.
-- On a client in another language than English, places are found by the name the game gives them: Gnomeregan's Train Depot shows its inside map, not Dun Morogh's terrain; up top in the Ruins of Lordaeron counts as up top; the hearthstone's inn is found; rooms' labels on inside maps are in your language.
-- On a client in another language than English, the herbs and veins you gather are saved: their names are learned from the tooltip's profession line in your language ("Bergbau", "Kräuterkunde").
+- Ironforge: routes go round the Great Forge's lava pits on the walkway, not through the lava. (thanks, DarkByteZero)
+- On a client in another language than English, places are found by the name the game gives them: Gnomeregan's Train Depot shows its inside map, not Dun Morogh's terrain; up top in the Ruins of Lordaeron counts as up top; the hearthstone's inn is found; rooms' labels on inside maps are in your language. (thanks, DarkByteZero)
+- On a client in another language than English, the herbs and veins you gather are saved: their names are learned from the tooltip's profession line in your language ("Bergbau", "Kräuterkunde"). (thanks, DarkByteZero)
 - Walks from Tarren Mill's flight master head south-east again, not round by the town.
 - Routes no longer swim far out to sea where fatigue sets in, such as from the Wetlands across to Southshore; they keep near the shore.
 - A swim you removed, or left out with Allow swimming off, no longer comes back along the shore when the route is worked out again.
-- With several stops, the way to your next stop is drawn over the rest of the route, not hidden under a later stop's way back over the same road.
-- /way lines take the zone in your game's language too ("/way Silberwald 63.4 64.3" on a German client), not only the English name.
+- With several stops, the way to your next stop is drawn over the rest of the route, not hidden under a later stop's way back over the same road. (thanks, DarkByteZero)
+- /way lines take the zone in your game's language too ("/way Silberwald 63.4 64.3" on a German client), not only the English name. (thanks, DarkByteZero)
 
 ## 1.3.9
 
