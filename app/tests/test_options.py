@@ -43,6 +43,7 @@ NEW = ["mapEditIdle", "toolShiftClick", "language", "layerCity", "showRoads", "s
        "flightMapRing",  # (asked 2026-11-17: the route's flight ringed on the flight map)
        # (1.3.6: pause routing when not following it, Performance)
        "autoPauseRouting", "autoPauseSeconds",
+       "stutterPause",  # (1.3.9: the stutter watch, its own option)
        "layerQuestAreasMinimap",
        "padControl", "padLegend",  # (2026-11-16: controller support, Pad.lua)  # (asked 2026-11-15: quest areas on the map and on the minimap apart)
        "showCoords",  # (asked 2026-11-17: hide the map's X, Y line)
@@ -74,7 +75,7 @@ HOME = {
                "cityKeepOrder importKeepOrder questZoneOnly questAutoReroute questPickRoute navCloseClears acceptWay acceptMapPins acceptShared",
     "Directions": "arrow arrowLocked arrowPx arrowBg dirShown dirLocked dirStopsOnly arrowSnap arrowSide dirTextScale dirBg "
                   "questing",
-    "Performance": "hz rerouteSeconds stopsAhead autoPauseRouting autoPauseSeconds gentleBackground arrowHz",
+    "Performance": "hz rerouteSeconds stopsAhead autoPauseRouting autoPauseSeconds stutterPause gentleBackground arrowHz",
     "Tools": "devTools mapEditIdle recordHint showRoads showWalls toolShiftClick pinning",
     "Help": "copyRoads copyWalls copyRoutes copyPins",
 }

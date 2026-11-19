@@ -489,7 +489,10 @@ function N.SetStops(stops, fastest, force, keep)
       local o = N.stops[i]
       same = same and o and d.x and N.RiskKey(d) == N.RiskKey(o)
     end
-    if not same then N.paused = nil end
+    if not same then
+      N.paused = nil
+      N.PauseShown() -- (the Pause button's glow and the square's Resume button gone with it)
+    end
   end
   N.pauseWatch = nil
   -- (a route with no quest route stop: the quest route run is over, its dropped stops let go)
@@ -662,7 +665,17 @@ function N.Clear()
   N.redOk, N.skipLearn, N.noWalk, N.walkKept, N.riskOk, N.riskQuestion, N.riskAsking = {}, {}, {}, {}, {}, nil, nil
   N.ClearSkippedRides()
   Changed()
-  if ns.GPS and ns.GPS.RefreshMinimapResume then ns.GPS.RefreshMinimapResume() end -- (no route: no Resume button)
+  N.PauseShown() -- (no route: no Resume button, and the Pause button's glow gone; cleared while paused, it stayed lit
+  -- on the next route's button, 2026-11-18)
+end
+-- The buttons that show routing paused, laid out again: the quick bar's Pause button (its place and glow) and the
+-- minimap square's Resume button. (N.SetPaused does it on a change; a route cleared or replaced while paused too.)
+function N.PauseShown()
+  local G = ns.GPS
+  if not G then return end
+  if G.LayoutQuick then G.LayoutQuick() end
+  if G.RefreshQuick then G.RefreshQuick() end
+  if G.RefreshMinimapResume then G.RefreshMinimapResume() end
 end
 
 -- Called at login: bring back the saved stops.
@@ -676,7 +689,7 @@ function N.Restore()
   N.loop = cdb.loop and #N.stops > 1 or false
   N.keepOrder = cdb.keepOrder and #N.stops > 0 or false
   N.keepOrder = N.ListedOrder() -- (or its stops say so)
-  N.paused = (#N.stops > 0 and (cdb.paused == "auto" or cdb.paused == "manual")) and cdb.paused or nil
+  N.paused = (#N.stops > 0 and (cdb.paused == "auto" or cdb.paused == "manual" or cdb.paused == "perf")) and cdb.paused or nil
   N.pauseWatch = nil
   N.redOk = {}
   for _, z in ipairs(#N.stops > 0 and cdb.redOk or {}) do N.redOk[z] = true end
@@ -4813,7 +4826,9 @@ function N.SetPaused(on, why)
   N.ResetStutter()
   if was ~= N.paused then
     N.route, kept = nil, nil
-    if not N.paused then N.Invalidate(true, true) end
+    -- (resumed: worked out again from where you are, the ride checks' answers kept, remembered by place: forgotten,
+    -- each resume worked the whole trip out afresh, its rides and ways round the other faction's guards with it)
+    if not N.paused then N.Invalidate(true) end
     Save()
     version = version + 1
     if ns.GPS then
@@ -4900,19 +4915,76 @@ end
 -- for STUTTER_RECOVER seconds: full routing again, quietly (longer than the window: no flapping).
 N.STUTTER_MS, N.STUTTER_HITS, N.STUTTER_WINDOW, N.STUTTER_GRACE, N.STUTTER_RECOVER = 25, 3, 60, 5, 90
 N.degraded = nil -- (GetTime() when routing was cut back to the first stop)
+-- (started over, by a new trip, a pause or a resume, or full routing back: the first STUTTER_RESUME_GRACE seconds aren't
+-- counted, the trip worked out again in them; asked 2026-11-18: resumed, a re-plan read as stutter paused it again)
+N.STUTTER_RESUME_GRACE = 8
+N.STUTTER_SAY_EVERY = 300 -- (the chat line at most this often; the directions say it all along)
 local stutter = { hits = {} }
+local stutterSaidAt = -math.huge
 function N.ResetStutter()
-  stutter = { hits = {} }
+  stutter = { hits = {}, quietUntil = GetTime and GetTime() + N.STUTTER_RESUME_GRACE or nil }
   N.degraded = nil
 end
 -- (watched as in the game, the route work in the background; the tests' and the route checks' work at once isn't,
 -- but with STUTTER_WATCH set)
 N.STUTTER_WATCH = false
+-- Not while the game is in the background (asked 2026-11-18, Kooki3z: routing paused "due to stutter" with the game's
+-- window not focused). What's counted is our own work, timed around it (N.Route's wrapper, the pump's slice), never the
+-- time between frames; but that's the clock's time, and with the window in the background the client runs at its
+-- background frame cap (maxFPSBk) at a lower priority, and the system can hold it in the middle of our work: a few
+-- milliseconds of routing read as tens. There's no focus event in this client (SystemDocumentation, checked
+-- 2026-11-18): the frame rate held at that cap (GetFramerate within BG_CAP_SHARE of it, the cap on, `useMaxFPSBk`)
+-- is the background, and the first FOCUS_SETTLE seconds back from it don't count either (its average catching up).
+-- (A client whose own frame rate sits at its background cap isn't watched there: no false pause, the safe side.)
+N.FOCUS_SETTLE, N.BG_CAP_SHARE, N.BG_CAP_EVERY = 5, 0.8, 5
+local bgFrames = { capAt = -math.huge }
+function N.BackgroundCap()
+  local now = GetTime()
+  if now - bgFrames.capAt >= N.BG_CAP_EVERY or now < bgFrames.capAt then
+    bgFrames.capAt = now
+    local cap
+    if GetCVar then
+      local ok, use = pcall(GetCVar, "useMaxFPSBk")
+      local ok2, v = pcall(GetCVar, "maxFPSBk")
+      cap = ok2 and tonumber(v) or nil
+      if (ok and use == "0") or not cap or cap <= 0 then cap = nil end
+    end
+    bgFrames.cap = cap
+  end
+  return bgFrames.cap
+end
+-- Whether the frames now tell nothing of routing's work: at the background cap, or just back from it.
+function N.FramesInBackground(now)
+  local cap = N.BackgroundCap()
+  local fps = cap and GetFramerate and GetFramerate()
+  if fps and fps <= cap + 1 and fps >= cap * N.BG_CAP_SHARE then
+    bgFrames.until_ = now + N.FOCUS_SETTLE
+    return true
+  end
+  return bgFrames.until_ ~= nil and now < bgFrames.until_
+end
 function N.RouteWork(ms)
   local R = ns.Router
   if N.paused or not ms or not ((R.WARM and not R.SYNC_WALKS) or N.STUTTER_WATCH) then return end
   local now = GetTime()
+  -- (the option off, Options > Performance: never cut back or paused; cut back already, full again)
+  local st = ns.settings and ns.settings.gps
+  if st and st.stutterPause == false then
+    if N.degraded then
+      N.ResetStutter()
+      N.Invalidate(true)
+    end
+    return
+  end
+  if N.FramesInBackground(now) then
+    stutter.frame, stutter.ms, stutter.counted = now, 0, true -- (this frame not counted, whatever comes in it)
+    return
+  end
   local s = stutter
+  if s.quietUntil and now < s.quietUntil then
+    s.frame, s.ms, s.counted = now, 0, true
+    return
+  end
   if N.degraded and now - math.max(N.degraded, s.lastSlow or 0) >= N.STUTTER_RECOVER then
     N.ResetStutter()
     N.Invalidate(true) -- (the stretches after the first stop worked out again, in the background)
@@ -4934,7 +5006,8 @@ function N.RouteWork(ms)
     return
   end
   N.SetPaused(true, "perf")
-  if ns.Print then
+  if ns.Print and now - stutterSaidAt >= N.STUTTER_SAY_EVERY then
+    stutterSaidAt = now
     ns.Print(L["Routing paused: it was making your game stutter. Resume it with the Pause Routing button or /agps pause."])
   end
 end

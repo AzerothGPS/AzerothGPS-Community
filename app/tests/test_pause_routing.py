@@ -29,6 +29,10 @@ def fresh(game):
     N.SetPaused(False)
     N.ResetStutter()
     N.STUTTER_WATCH = False
+    st.stutterPause = True
+    lua.execute("GetFramerate = function() return 60 end; GetCVar = nil")
+    lua.execute("AGPS_T = (AGPS_T or 1000) + 10")
+    N.BackgroundCap()  # (read again: no cap)
     st.autoPauseRouting, st.autoPauseSeconds, st.autoPauseDeclined = False, 120, None
     N.autoPauseOffered = None
     N.ResetCompute()
@@ -551,7 +555,7 @@ def test_routing_work_in_one_frame_adds_up(game):
     _trip(lua, ns)
     N.STUTTER_WATCH = True
     for _ in range(3):  # (each frame's work in pieces under STUTTER_MS: N.Route, the pump's slice)
-        lua.execute("AGPS_T = AGPS_T + 5")
+        lua.execute("AGPS_T = AGPS_T + 10")
         for _ in range(3):
             N.RouteWork(10.0)
     assert N.degraded
@@ -630,6 +634,98 @@ def test_a_slow_reroute_in_the_frame_is_seen_by_the_watch(game):
         lua.execute("debugprofilestop = AGPS_DPS")
 
 
+# (asked 2026-11-18, Kooki3z: routing paused "due to stutter" with the game's window not focused. In the background the
+# client runs at its background frame cap (maxFPSBk) at a lower priority: the clock around a few milliseconds of our
+# work reads tens. Frames at that cap don't count, nor the first seconds back from it; and the watch has its option.)
+def _background(lua, ns, fps, cap=8, on="1", reread=True):
+    """The client's frame rate now and its background frame cap (the CVars useMaxFPSBk / maxFPSBk)."""
+    lua.execute(f'GetFramerate = function() return {fps} end; GetCVar = function(k) '
+                f'if k == "maxFPSBk" then return "{cap}" elseif k == "useMaxFPSBk" then return "{on}" end end')
+    if reread:
+        lua.execute(f"AGPS_T = AGPS_T + {ns.Nav.BG_CAP_EVERY}")  # (the cap read again)
+    ns.Nav.BackgroundCap()
+
+
+def test_long_frames_in_the_background_never_cut_routing_back(game):
+    lua, ns = game
+    N = ns.Nav
+    _trip(lua, ns)
+    _background(lua, ns, 8)  # (unfocused: held at the 8 fps cap)
+    for _ in range(10):  # (its slow clock round a little routing work, frame after frame)
+        _slow(lua, ns, 60.0, 2.0)
+    assert not N.degraded and not N.paused
+    _background(lua, ns, 100, reread=False)  # (focused again: the first seconds back don't count)
+    _slow(lua, ns, 60.0, 1.0)
+    _slow(lua, ns, 60.0, 1.0)
+    _slow(lua, ns, 60.0, 1.0)
+    assert not N.degraded
+    for _ in range(3):  # (past them, routing's own spikes count again)
+        _slow(lua, ns)
+    assert N.degraded
+
+
+def test_a_low_frame_rate_away_from_the_cap_is_still_watched(game):
+    # (routing's own stutter at a low frame rate, the cap off or the rate far from it: still counted)
+    lua, ns = game
+    N = ns.Nav
+    _trip(lua, ns)
+    _background(lua, ns, 9, cap=30)
+    for _ in range(3):
+        _slow(lua, ns)
+    assert N.degraded
+    N.ResetStutter()
+    _background(lua, ns, 8, cap=8, on="0")  # (the background cap turned off: these frames are the game's own)
+    for _ in range(3):
+        _slow(lua, ns)
+    assert N.degraded
+
+
+def test_the_option_off_never_cuts_back_or_pauses(game):
+    lua, ns = game
+    N = ns.Nav
+    st = ns.settings.gps
+    _trip(lua, ns)
+    for _ in range(3):
+        _slow(lua, ns)
+    assert N.degraded
+    st.stutterPause = False  # (turned off while cut back: full routing again)
+    _slow(lua, ns)
+    assert not N.degraded
+    for _ in range(12):
+        _slow(lua, ns, 500.0)
+    assert not N.degraded and not N.paused
+
+
+
+def test_resuming_starts_the_count_over_and_its_re_plan_isnt_stutter(game):
+    # (asked 2026-11-18, Kooki3z: "keeps pausing" on a trip through Dun Algaz, the chat line over and over. Resumed, the
+    # trip worked out again was read as stutter and paused it again. Now a resume, a new trip or a pause starts the
+    # count over, its first STUTTER_RESUME_GRACE seconds not counted; the chat line at most every STUTTER_SAY_EVERY.)
+    lua, ns = game
+    N = ns.Nav
+    said = lua.eval("{}")
+    old_print = ns.Print
+    ns.Print = lua.eval("function(t) return function(msg) t[#t + 1] = msg end end")(said)
+    try:
+        _trip(lua, ns)
+        for _ in range(6):
+            _slow(lua, ns)
+        assert N.paused == "perf"
+        N.TogglePaused()
+        assert not N.paused
+        for _ in range(4):  # (the re-plan's frames just after the resume)
+            _slow(lua, ns, 300.0, 1.5)
+        assert not N.degraded and not N.paused
+        for _ in range(6):  # (stutter for real again, past the grace: paused again, the chat not told twice so soon)
+            _slow(lua, ns)
+        assert N.paused == "perf"
+        msgs = [str(said[i]) for i in range(1, len(said) + 1) if "making your game stutter" in str(said[i])]
+        assert len(msgs) <= 1, msgs
+        assert "making your game stutter" in _status(lua, ns)
+    finally:
+        ns.Print = old_print
+        N.SetPaused(False)  # (the quick button's glow is refreshed on the way out)
+        _tick(lua, ns, 2)
 # -- the glow (1.3.9, asked 2026-11-18: "when the route gets paused, on the GPS menu make the button glow") -----------
 
 
@@ -724,3 +820,23 @@ def test_the_minimap_resume_option_is_kept_over_a_reload():
     text = lua2.eval("AGPS_SERIALIZE")("AzerothGPSDB", lua2.globals().AzerothGPSDB)
     _, ns3 = start_(text)
     assert ns3.settings.gps.replaceMinimapResume is True
+
+
+
+def test_a_route_cleared_while_paused_leaves_no_glow_on_the_next(game):
+    # (paused by the stutter watch, the route cleared, then a new one: its Pause button was still lit, though routing
+    # wasn't paused; found merging #634 with the watch's tests, 2026-11-18. N.Clear and a new route lay them out again)
+    lua, ns = game
+    N = ns.Nav
+    _trip(lua, ns)
+    for _ in range(6):
+        _slow(lua, ns)
+    assert N.paused == "perf"
+    N.Clear()
+    N.STUTTER_WATCH = False
+    _route(lua, ns)
+    assert not N.paused and not _glowing(lua, ns)
+    N.SetPaused(True, "manual")  # (and a different route set while paused: not paused, not lit)
+    _at(lua, *BRILL)
+    N.SetStops(lua.eval("{ { x = 2400, y = 100, cont = 0 } }"), False, "red")
+    assert not N.paused and not _glowing(lua, ns)
