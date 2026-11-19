@@ -148,6 +148,37 @@ def test_loch_modan_no_hop_over_the_cliffs_by_the_makers_terrace(world, start, s
         assert r.hops == 0
 
 
+
+# Grom'gol (Stranglethorn Vale, issue #676): a recorded walk up the zeppelin tower, its pieces and stairs 35 to 70 yd from
+# the flight master, were the stop's nearest roads, all reached straight, and took every walk round
+# (WALK_AROUND_CANDIDATES) from the road 430 yd off whose walk round the hill is the way: 540 yd by the roads, 13 points.
+
+def test_a_walk_up_a_tower_by_the_stop_leaves_the_walk_round_to_the_further_road(world):
+    lua, ns = world
+    ns.Router.Reset()
+    tower = [t for t in ns.FloorTracks[0].values() if t.time == 1795054079]
+    assert len(tower) == 3  # (shipped, stairs and all)
+    r = ns.Router.Route(0, -12113.5, -161.5, -12414.2, 146.3, lua.table(offroad=False))
+    pts, kinds = route_pts(r)
+    assert r.length < 450, (r.length, pts)
+    assert blocked_run(ns, 0, pts, kinds, (-12113.5, -161.5), (-12414.2, 146.3)) < BLOCKED_RUN_YD
+
+
+def test_a_recorded_walks_top_isnt_joined_to_the_ground_road_by_its_foot(world):
+    # (the same walk's top, 31 yd up the tower, ended 14 yd from its own way to the stairs' foot on the ground and was
+    # joined onto it: a step from the ground onto the tower's top. WithTracks' LandHeightOK, R.LAND_CLIMB)
+    lua, ns = world
+    ns.Router.Reset()
+    ns.Router.Route(0, -12113.5, -161.5, -12414.2, 146.3, lua.table(offroad=False))
+    g = ns.Router.DebugGraph(0)
+    top = None
+    for k in range(1, int(g.count) + 1):
+        if math.hypot(g.n[2 * k - 1] - -12415.5, g.n[2 * k] - 208.0) < 0.2:
+            top = k
+    assert top is not None, "the walk's top end is a node of its own, where it was recorded"
+    at = [ei for ei in range(1, len(g.e) + 1) if top in (g.e[ei][1], g.e[ei][2])]
+    assert len(at) == 1 and g.nz[top] and g.nz[top] > 30
+
 @pytest.fixture(scope="module")
 def caves_world():
     # (route-check's: the caves', capitals' and buildings' grids and roads too)

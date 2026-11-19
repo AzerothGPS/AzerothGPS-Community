@@ -440,6 +440,10 @@ R.FLOOR_STACK_YD = 8
 -- yards: a track drawn with heights joins the land's road at its end only at about the floor of the road with one
 -- nearest the land road's spot within this (WithTracks' LandHeightOK: the land's height there)
 R.LAND_FLOOR_YD = 8
+-- (and none that near: not at an end higher than another end of its own walk by more than LAYER_Z and this much a yard
+-- between them, steeper than the ground is walked (the terrain grid closes past 50 degrees). Issue #676: Grom'gol's
+-- zeppelin tower, a recorded walk's top 30 yd up joined the walk's own way to its foot 14 yd off, on the ground)
+R.LAND_CLIMB = 1.2
 -- Of `heights` (the roads' at a spot), the one nearest `z`; nil when none.
 function R.NearestHeight(heights, z)
   local best, bd
@@ -615,6 +619,8 @@ function R.WithTracks(roads, tracks, cont)
   -- (each road's kind, edited (R.TRACK_KINDS): the map draws it; a raised one's (R.RAISED_KINDS) roads, the nodes
   -- along it (not its two ends: those are where it meets the land), and the tracks for their drops)
   local kindOf, raised, raisedNode, raisedEnd, raisedTracks = {}, {}, {}, {}, {}
+  -- (the roads of tracks drawn or recorded with their heights: RouteOne's walks round go to the roads on the ground)
+  local floored = {}
   local curAdd = false -- (a road being drawn on, not an erasure)
   local zs -- (a level with heights: each node's, copied below when there's anything to do)
   -- (on a continent, its buildings' and capitals' roads' floors, `roads.nz`: copied the same way, a drawn road's new
@@ -638,6 +644,7 @@ function R.WithTracks(roads, tracks, cont)
     if caveOf and caveOf[from] then caveOf[to] = true end
     if dropOf and dropOf[from] then dropOf[to] = dropOf[from] end
     walkOf[to] = walkOf[from]
+    floored[to] = floored[from]
     kindOf[to], raised[to] = kindOf[from], raised[from]
   end
   local city = ns.CityLevels and ns.CityLevels[cont]
@@ -663,14 +670,16 @@ function R.WithTracks(roads, tracks, cont)
     return t.continent == cont and t.pts and #t.pts >= 4 and (t.shipped or not shipped[t.time or -1])
       and t.op ~= "wall" and t.op ~= "unwall"
   end
-  -- (each walk's pieces' ends, by its time: a piece's end where another of its pieces ends is inside the walk)
+  -- (each walk's pieces' ends, by its time: a piece's end where another of its pieces ends is inside the walk; and
+  -- each end's height, with one a point: LandHeightOK)
   local walkEnds = {}
   for _, t in ipairs(tracks or {}) do
     if wanted(t) and t.op ~= "remove" and t.time and type(t.zs) == "table" then
       local l = walkEnds[t.time] or {}
       walkEnds[t.time] = l
-      l[#l + 1] = { t, t.pts[1], t.pts[2] }
-      l[#l + 1] = { t, t.pts[#t.pts - 1], t.pts[#t.pts] }
+      local tz = #t.zs == #t.pts / 2 and t.zs or {}
+      l[#l + 1] = { t, t.pts[1], t.pts[2], tz[1] }
+      l[#l + 1] = { t, t.pts[#t.pts - 1], t.pts[#t.pts], tz[#tz] }
     end
   end
   local function innerEnd(t, x, y)
@@ -815,7 +824,11 @@ function R.WithTracks(roads, tracks, cont)
       local h = od2 and od2 <= best and HeightOn(nzs, o, oal)
       if h then best, bh = od2, h end
     end
-    return not bh or math.abs(bh - fz) <= R.LAYER_Z
+    if bh then return math.abs(bh - fz) <= R.LAYER_Z end
+    for _, w in ipairs(curWalk and walkEnds[curWalk] or {}) do
+      if w[4] and fz - w[4] > R.LAYER_Z + math.sqrt((x - w[2]) ^ 2 + (y - w[3]) ^ 2) * R.LAND_CLIMB then return false end
+    end
+    return true
   end
   -- (a new node's height, on a level with heights: the track's floor there)
   local function heightAt(x, y)
@@ -1212,6 +1225,7 @@ function R.WithTracks(roads, tracks, cont)
                 or t.shipped and 2 or R.SOURCE_RECORDED)
               markCave(ed, line)
               if t.kind then kindOf[ed] = t.kind end
+              if tzs then floored[ed] = true end
               if isRaised then
                 raised[ed] = t
                 if s0 == 1 then raisedEnd[na] = true else raisedNode[na] = true end
@@ -1350,8 +1364,8 @@ function R.WithTracks(roads, tracks, cont)
     end
   end
   local info
-  if next(kindOf) or next(raisedNode) then
-    info = { kind = kindOf, raised = {}, raisedNode = raisedNode, raisedEnd = raisedEnd }
+  if next(kindOf) or next(raisedNode) or next(floored) then
+    info = { kind = kindOf, raised = {}, raisedNode = raisedNode, raisedEnd = raisedEnd, floored = floored }
     for ed in pairs(raised) do info.raised[ed] = true end
   end
   return n, e, zs or roads.z, nzs or roads.nz, inside, info
@@ -2309,13 +2323,15 @@ function BuildGraph(cont)
   end
   local drops, caveEdges, indoorEdges = {}, {}, {}
   local kinds, raisedEdges = {}, {} -- (the edited roads' kinds, R.TRACK_KINDS, and the raised ones: by edge number)
-  local tk, tr = trackInfo and trackInfo.kind, trackInfo and trackInfo.raised
+  local flooredEdges = {} -- (and those of tracks with their heights)
+  local tk, tr, tf = trackInfo and trackInfo.kind, trackInfo and trackInfo.raised, trackInfo and trackInfo.floored
   for ei, ed in ipairs(edges) do
     Breathe(ei, 500)
     drops[ei] = dropOf[ed]
     caveEdges[ei] = caveOf[ed]
     if tk and tk[ed] then kinds[ei] = tk[ed] end
     if tr and tr[ed] then raisedEdges[ei] = true end
+    if tf and tf[ed] then flooredEdges[ei] = true end
     -- (a building's own roads, both ends on its floors: not a door's join onto the land's road)
     if indoorOf[ed] and nodeZ[ed[1]] and nodeZ[ed[2]] then indoorEdges[ei] = true end
   end
@@ -2423,6 +2439,7 @@ function BuildGraph(cont)
     zonesOver = next(zonesOver) and zonesOver or nil,
     indoor = next(indoorEdges) and indoorEdges or nil,
     kind = next(kinds) and kinds or nil, raised = next(raisedEdges) and raisedEdges or nil,
+    floored = next(flooredEdges) and flooredEdges or nil,
     raisedEnd = next(raisedEdges) and trackInfo and trackInfo.raisedEnd or nil }
   -- (an underground city's floors over floors: the roads' heights near a spot, for the road and wall
   -- tools' floor (GPSFrame.OtherFloor, FloorText); not a dungeon's, where they can't be used)
@@ -5357,8 +5374,22 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
     goalVia(e[1], part(c.edge, c.along) + cost, Join({ { kind = ROAD, edge = c.edge, from = 0, to = c.along } }, leg))
     goalVia(e[2], part(c.edge, math.max(0, e[3] - c.along)) + cost, Join({ { kind = ROAD, edge = c.edge, from = e[3], to = c.along } }, leg))
   end
+  -- (the nearest WALK_AROUND_CANDIDATES roads on the ground: a track's with its heights (a floor, stairs) takes none, the
+  -- terrain walk being the ground's. Issue #676: by Grom'gol's flight master a recorded walk up the zeppelin tower, its
+  -- pieces 35 to 70 yd off, took them all, and the road 430 yd off whose walk round the hill is the way got none: 13
+  -- points by the roads, 540 yd, for a 431 yd walk)
+  local function walkSlots()
+    local used = 0
+    return function(c)
+      if walkAll then return true end
+      if used >= R.WALK_AROUND_CANDIDATES then return false end
+      if not (g.floored and g.floored[c.edge]) then used = used + 1 end
+      return true
+    end
+  end
   local tc = candidates(ts, tx, ty)
-  for i, c in ipairs(tc) do addGoal(c, i <= R.WALK_AROUND_CANDIDATES or walkAll) end
+  local goalSlot = walkSlots()
+  for _, c in ipairs(tc) do addGoal(c, goalSlot(c)) end
   if walkAll then
     local legs = {}
     for _, gl in ipairs(goals) do legs[#legs + 1] = gl.leg end
@@ -5390,7 +5421,8 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
     end
   end
   local sc = candidates(ss)
-  for i, c in ipairs(sc) do addStart(c, i <= R.WALK_AROUND_CANDIDATES or walkAll) end
+  local startSlot = walkSlots()
+  for _, c in ipairs(sc) do addStart(c, startSlot(c)) end
   if walkAll then
     local legs = {}
     for _, st in ipairs(starts) do legs[#legs + 1] = st.leg end

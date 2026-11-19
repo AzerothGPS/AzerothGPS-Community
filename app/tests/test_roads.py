@@ -488,6 +488,22 @@ def test_shipped_times_list_the_drawn_roads_in_the_overrides(tmp_path):
     assert shipped_times(tmp_path) == [5]
 
 
+def test_the_shipped_road_data_has_every_drawn_road_in_the_overrides():
+    # (an override merged without its Data/Roads.lua: #655's Stranglethorn walk reached overrides/ but a conflict merge
+    # took main's Roads.lua, so the game never had it and the next imports' rebuilds brought it in unseen, #676)
+    import re
+
+    from azerothgps.paths import ADDON_DIR, RESOURCES
+    from azerothgps.roads.tracks import shipped_times
+
+    text = (ADDON_DIR / "Data" / "Roads.lua").read_text(encoding="utf-8")
+    line = next(ln for ln in text.splitlines() if ln.startswith("ns.RoadTracksIn"))
+    shipped = {int(t) for t in re.findall(r"\[(\d+)\]=true", line)}
+    drawn = set(shipped_times(RESOURCES / "overrides"))
+    assert sorted(drawn - shipped) == [], "overrides/ has roads Data/Roads.lua doesn't: rebuild their continents"
+    assert sorted(shipped - drawn) == [], "Data/Roads.lua has roads overrides/ doesn't: rebuild their continents"
+
+
 def test_despeckle_closes_ridge_gaps_and_fills_pockets():
     from azerothgps.roads.terrain import MIN_OPEN, despeckle
 

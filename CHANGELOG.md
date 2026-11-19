@@ -11,6 +11,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - A road under a bridge stays apart from it: routes from under the bridge go round to its end.
 - Routes can jump off a bridge onto a road below when the fall is safe.
 - Roads: new roads and walls in Arathi Highlands.
+- Roads: the way up Grom'gol's zeppelin tower in Stranglethorn Vale.
 
 ## 1.3.9
 
