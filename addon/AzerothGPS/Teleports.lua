@@ -120,19 +120,26 @@ function T.Home()
   if not bind or bind == "" then return nil end
   -- the inn's building (bind locations are often an inn's own name), then a place name
   -- (towns, villages), then any point of interest, then a zone or city map's middle
-  local spot = ns.AreaSpots and ns.AreaSpots[bind]
-  if spot then return { cont = spot[1], x = spot[2], y = spot[3], name = bind } end
+  -- (the bind location is the client's language, "Gasthaus Zur Höhle des Löwen", the data's names the English ones:
+  -- the spots by Data/PlaceNames, the places and maps by their names in the game's language too)
+  for en in pairs(ns.PlaceEnglishNames(bind)) do
+    local spot = ns.AreaSpots and ns.AreaSpots[en]
+    if spot then return { cont = spot[1], x = spot[2], y = spot[3], name = bind } end
+  end
   for _, kind in ipairs({ 3, 2, 1 }) do
     for cont, list in pairs(ns.Pois or {}) do
       for _, p in ipairs(list) do
-        if p[1] == kind and (p[4] == bind or (kind == 1 and p[4]:find(bind, 1, true) == 1)) then
+        local shown = ns.PoiName and ns.PoiName(p) or p[4]
+        if p[1] == kind and (p[4] == bind or shown == bind
+            or (kind == 1 and (p[4]:find(bind, 1, true) == 1 or shown:find(bind, 1, true) == 1))) then
           return { cont = cont, x = p[2], y = p[3], name = bind }
         end
       end
     end
   end
   for id, m in pairs(ns.Maps or {}) do
-    if m.name == bind and m.bounds and m.continent and m.continent >= 0 then
+    if (m.name == bind or ns.ZoneName and ns.ZoneName(id, m.name) == bind) and m.bounds and m.continent
+        and m.continent >= 0 then
       local b = m.bounds
       return { cont = Geo.MapCont(id), x = (b[1] + b[3]) / 2, y = (b[2] + b[4]) / 2, name = bind }
     end

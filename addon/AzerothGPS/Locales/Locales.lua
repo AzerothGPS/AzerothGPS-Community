@@ -115,7 +115,11 @@ function ns.PlaceName(english)
     end
   end
   local id = n.byEnglish[english]
-  return id and ns.AreaName(id, english) or english
+  local name = id and ns.AreaName(id, english)
+  if name and name ~= english then return name end
+  -- (no place label of that name: a model's room, Gnomeregan's Train Depot, from Data/PlaceNames)
+  local shipped = ns.ShippedPlaceNames()[english]
+  return shipped and shipped[1] or english
 end
 -- A zone's or city's name from its English one alone (a dungeon's way in names its zone so: Data/Instances.lua's
 -- portals), by the uiMap of that name (Data/Maps.lua's zones and cities), else `english`.
@@ -217,6 +221,55 @@ function ns.ShippedNpcNames()
   end
   n.shippedNpcs, n.shippedTitles = names, titles
   return names, titles
+end
+-- The shipped places' names in the client's language (Data/PlaceNames/<locale>.lua: a model's rooms, Undercity's halls
+-- up top, the buildings' and towns' spots; reported 2026-11-19 from a German client: in Gnomeregan's Train Depot, which
+-- the game says is outdoors, the room was found by its name only, "Zugdepot" never matched "Train Depot", and Dun
+-- Morogh's terrain showed for the inside map). Only the client's own file sets ns.PlaceNamesLoc. Read at the first ask:
+-- { [English] = { names } } and { [name] = { [English] = true } }, only those that differ from the English.
+function ns.ShippedPlaceNames()
+  local n = ns.names
+  if n.shippedPlaces then return n.shippedPlaces, n.placesEnglish end
+  local names, english = {}, {}
+  local packed = ns.PlaceNamesLoc
+  local ok, loc = pcall(GetLocale)
+  if type(packed) == "string" and ok and loc == ns.PlaceNamesLocale then
+    for line in packed:gmatch("[^\n]+") do
+      local en, rest = line:match("^([^|]+)|(.+)$")
+      if en then
+        local list = {}
+        for name in rest:gmatch("[^|]+") do
+          list[#list + 1] = name
+          english[name] = english[name] or {}
+          english[name][en] = true
+        end
+        names[en] = list
+      end
+    end
+  end
+  n.shippedPlaces, n.placesEnglish = names, english
+  return names, english
+end
+-- Whether the game's `text` (GetMinimapZoneText, GetSubZoneText, GetBindLocation: the client's language) names the
+-- data's place `english` (the client's English name).
+function ns.IsPlaceNamed(english, text)
+  if not (english and text) then return false end
+  if english == text then return true end
+  if not ns.GameLocalized() then return false end
+  local _, byName = ns.ShippedPlaceNames()
+  local en = byName[text]
+  return en ~= nil and en[english] == true
+end
+-- The data's English names the game's `text` may be ({ [English] = true }; the text itself among them).
+function ns.PlaceEnglishNames(text)
+  local out = {}
+  if not text then return out end
+  out[text] = true
+  if ns.GameLocalized() then
+    local _, byName = ns.ShippedPlaceNames()
+    for en in pairs(byName[text] or {}) do out[en] = true end
+  end
+  return out
 end
 -- An NPC's name (its creature id): as the game showed it (UnitName by the creature id in its GUID: targeted, under the
 -- mouse, a window opened; per client language, account-wide, ns.db.npcNames[locale][id]), else the shipped one in the

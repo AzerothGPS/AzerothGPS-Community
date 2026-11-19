@@ -852,6 +852,27 @@ def cmd_npc_names(args) -> int:
     return 0
 
 
+def cmd_place_names(args) -> int:
+    """The shipped places' names in each client language (Data/PlaceNames/<locale>.lua, from WMOAreaTable and
+    AreaTable)."""
+    from .paths import data_dir
+    from .place_names import LOCALES, OUT_DIR, build, lua_text
+
+    names, rep = build(data_dir())
+    print(", ".join(f"{len(v) if isinstance(v, list) else v} {k}" for k, v in rep.items()), rep["not found"] or "")
+    total = 0
+    for loc in LOCALES:
+        text = lua_text(loc, names[loc])
+        size = len(text.encode("utf-8"))
+        total += size
+        print(f"  {loc}: {len(names[loc])} places, {size // 1024} KB")
+        if args.write:
+            OUT_DIR.mkdir(parents=True, exist_ok=True)
+            (OUT_DIR / f"{loc}.lua").write_text(text, encoding="utf-8", newline="\n")
+    print(f"  {total // 1024} KB in all" + ("" if args.write else " (nothing written: --write)"))
+    return 0
+
+
 def cmd_vendors(args) -> int:
     """What each shipped vendor sells, for the search (Data/VendorItems.lua)."""
     from .paths import data_dir
@@ -1345,6 +1366,11 @@ def main(argv: list[str] | None = None) -> int:
     sp = sub.add_parser("npc-names", help="the shipped NPCs' names in each client language (Data/NpcNames/, AzerothCore)")
     sp.add_argument("--write", action="store_true")
     sp.set_defaults(fn=cmd_npc_names)
+
+    sp = sub.add_parser("place-names", help="the shipped places' names in each client language (Data/PlaceNames/, "
+                        "WMOAreaTable and AreaTable)")
+    sp.add_argument("--write", action="store_true")
+    sp.set_defaults(fn=cmd_place_names)
 
     sp = sub.add_parser("npc-spots", help="NPC spots marked in game into overrides/npc_spots.json and Data/Npcs.lua")
     sp.add_argument("--import", dest="import_file", metavar="MARKS_JSON",
