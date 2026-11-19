@@ -267,9 +267,11 @@ def build(floors, walls, liquids, *, label: str, z0: float | None = None, nb: in
             sub = liq_z[rr0:rr1, cc0:cc1]
             sub[cov] = np.maximum(sub[cov], lz)
     under_liq = 0
+    drowned = np.zeros((H, W), bool)
     for b in range(NB):
         drown = bands[b] & (Z0 + b + 0.5 < liq_z - 0.5)
         under_liq += int(drown.sum())
+        drowned |= drown
         bands[b] &= ~drown
     liquid = liq_z > -1e3
     log(f"  {label}: {int(liquid.sum())} cells under liquid, {under_liq} floor bands under it left out")
@@ -287,7 +289,9 @@ def build(floors, walls, liquids, *, label: str, z0: float | None = None, nb: in
             sdr.polygon([cellxy(*q) for q in tri], fill=255)
     flat_mask = np.array(flat_img) > 0
     gaps = 0
-    for vr, vc in np.argwhere(walk & ~has & ~flat_mask):
+    # (not a floor left out under a liquid: filled from the floor beside it, Ironforge's Great Forge's lava pits,
+    # their floor 2.6 yd under the lava, took the ring's height cell by cell across, and its roads ran through them)
+    for vr, vc in np.argwhere(walk & ~has & ~flat_mask & ~drowned):
         nb_ = [top[r2, c2] for r2 in range(max(vr - 1, 0), min(vr + 2, H)) for c2 in range(max(vc - 1, 0), min(vc + 2, W))
                if has[r2, c2]]
         if nb_ and max(nb_) - min(nb_) < LEDGE:
