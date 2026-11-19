@@ -33,6 +33,10 @@ SWIM_DEPTH = 2.0
 # Alterac's coast to Silverpine, walked over 130 yd of it, issue #271). A cell is deep with DEEP_FRACTION of its quads.
 DEEP_FRACTION = 0.5
 DEEP_REACH_YD = 100.0
+# The client's deep mask leaves wide bands of open sea "shallow" (the Wetlands-Southshore strait: a 270 yd band
+# down Arathi's coast), where players still tire (200 yd out from the Wetlands, 2026-11-19). So the sea (its
+# LiquidTypes, `sea_types`) is closed too SEA_REACH_YD or more from any shore, deep mask or not.
+SEA_REACH_YD = 150.0
 # In Data/Terrain.lua such a cell is written as this value (the grid's `deep`), read as 2 by Passability.lua: the
 # seamless map's coastline (coast.py) keeps it the sea's
 DEEP_VALUE = 3
@@ -67,7 +71,7 @@ def chunk_tops(mcvt: np.ndarray) -> np.ndarray:
     return np.maximum.reduce([outer[:-1, :-1], outer[:-1, 1:], outer[1:, :-1], outer[1:, 1:], inner])
 
 
-def tile_grid(root: bytes, hills: bool = False, swim_types=None, deep_out=None):
+def tile_grid(root: bytes, hills: bool = False, swim_types=None, deep_out=None, sea_out=None):
     """(steep, water) as 128x128 quad grids for one ADT tile [row = south, col = east];
     with `hills`, also the quads that are a climb (steeper than HILL_SLOPE). `deep_out` (a 128x128 bool array, or
     None): set where the water is deep (fatigue). With `swim_types` (the
@@ -122,6 +126,8 @@ def tile_grid(root: bytes, hills: bool = False, swim_types=None, deep_out=None):
     if swim_types is not None:  # (the MH2O chunk comes before the MCNKs: judged once both are read)
         deep = surface - top >= SWIM_DEPTH
         steep &= ~deep
+        if sea_out is not None:  # (under the sea's surface)
+            sea_out |= surface > -np.inf
     if hills:
         return steep, water, hill
     return steep, water
@@ -156,15 +162,18 @@ def _continent_grid(cd: ClientData, continent: int, log=print) -> dict:
     land = np.zeros((H, W), bool)
     hill = np.zeros((H, W), bool)
     deep = np.zeros((H, W), bool)
+    sea = np.zeros((H, W), bool)
     swim = sea_types(cd)
     for (tx, ty) in tiles:
         try:
             dp = np.zeros((qpt, qpt), bool)
-            s, w, hl = tile_grid(cd.casc.read(wdt.tiles[(tx, ty)].root), hills=True, swim_types=swim, deep_out=dp)
+            se = np.zeros((qpt, qpt), bool)
+            s, w, hl = tile_grid(cd.casc.read(wdt.tiles[(tx, ty)].root), hills=True, swim_types=swim, deep_out=dp, sea_out=se)
         except Exception:
             continue
         r, c = (ty - ty0) * qpt, (tx - tx0) * qpt
         deep[r : r + qpt, c : c + qpt] = dp & w
+        sea[r : r + qpt, c : c + qpt] = se & w
         steep[r : r + qpt, c : c + qpt] = s
         water[r : r + qpt, c : c + qpt] = w
         hill[r : r + qpt, c : c + qpt] = hl
@@ -179,10 +188,15 @@ def _continent_grid(cd: ClientData, continent: int, log=print) -> dict:
 
     far = pool(deep) >= DEEP_FRACTION
     far &= ndimage.distance_transform_edt(far) * QUAD_YD * k > DEEP_REACH_YD
-    far &= cells == 1  # (water till now: what Data/Terrain.lua writes as DEEP_VALUE)
-    cells[far] = 2  # (far out in fatigue water: never swum)
+    open_sea = pool(sea) >= 0.5
+    open_sea &= ndimage.distance_transform_edt(pool(water) >= 0.5) * QUAD_YD * k > SEA_REACH_YD  # (from dry ground)
+    far |= open_sea
     cells[pool(land) < 0.5] = 2  # no terrain: void / off the map
     cells = despeckle(cells)
+    # (closed after the despeckle, which would otherwise turn the specks of sea they leave into land: the coast
+    # masks read DEEP_VALUE as sea)
+    far &= cells == 1  # (water till now: what Data/Terrain.lua writes as DEEP_VALUE)
+    cells[far] = 2  # (far out in fatigue water: never swum)
     # hilly: open ground that's a climb (the route may wind for a reason there)
     hilly = ndimage.binary_closing(pool(hill) >= HILL_FRACTION, iterations=2) & (cells == 0)
     lab, n = ndimage.label(hilly)

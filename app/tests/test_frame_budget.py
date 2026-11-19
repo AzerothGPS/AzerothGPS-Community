@@ -177,10 +177,11 @@ def test_a_walk_over_the_land_a_little_past_its_reach_when_the_roads_go_far_roun
     # apart: past OFFROAD_WALK_AROUND (3,000), so roads only, 12.4k yd round; 75 yd nearer, the walk over the land was
     # 4.1k. Searched up to DETOUR_WALK_MAX when the roads go DETOUR_WALK_FACTOR times as far as the line. (Since the
     # Swamp of Sorrows roads drawn in game, issue #328, that trip's roads are 6.8k and taken; this one, 3,300 yd from
-    # the same door, is 7.4k by the roads only and 3.4k with the walk)
+    # the same door, is 7.4k by the roads only and 3.4k with the walk. That spot was out at sea, closed since 1.3.10: now
+    # the water still swum by the shore there, 3,180 yd away, 7.1k by the roads only and 3.2k with the walk)
     lua, ns = game
     R = ns.Router
-    r = R.Route(0, -10451.0, -1527.0, -9322.3, 1574.0, lua.eval("{ offroad = false }"))
+    r = R.Route(0, -10451.0, -1527.0, -9480.0, 1500.0, lua.eval("{ offroad = false }"))
     assert r.length < 5000, r.length
 
 
