@@ -48,7 +48,7 @@ NEW = ["mapEditIdle", "toolShiftClick", "language", "layerCity", "showRoads", "s
        "showCoords",  # (asked 2026-11-17: hide the map's X, Y line)
        "replaceMinimapRoute",  # (asked 2026-11-17: the route off the minimap square)
        "navPanelWidth", "navPanelAlign", "navPanelDetached",  # (1.3.9: the route panel's width, side, own window)
-       "navPanelHideButtons", "navPanelAlpha"]  # (1.3.9: detached, its buttons hidden and its background's opacity)
+       "navPanelHideButtons", "navPanelAlpha", "navPanelLocked"]  # (1.3.9: detached, its buttons hidden and its background's opacity)
 # Where each setting's control is: the page a player would look on.
 HOME = {
     "General": "shown keyBlockedInCombat showCoords distanceUnits language quietChat searchCommonNpcs",
@@ -60,7 +60,7 @@ HOME = {
            "replaceMinimap replaceMinimapSize replaceMinimapCollapseOnMove replaceMinimapCollapseOnCombat useWorldMap "
            "replaceMinimapIdle replaceMinimapKeepSquare replaceMinimapRoute",
     "Window": "locked size width lockSize freeSize navPanelWidth navPanelAlign navPanelDetached navPanelHideButtons "
-              "navPanelAlpha windowFrame windowTint "
+              "navPanelAlpha navPanelLocked windowFrame windowTint "
               "windowClose windowButtons charm charmSwing arrivalEffect",
     "Layers": "iconSize roundIcons layerQuests layerQuestAreas layerQuestAreasMinimap poiTaxi poiPoi poiLabels layerCity layerInstances layerCaves layerHerbs "
               "layerOre showCustomPins otherAddonPins showParty iconYdQuests iconYdTaxi iconYdPoi iconYdCity iconYdInstances "
@@ -189,6 +189,7 @@ DEPENDENTS = [
     ("iconYdHerbs", "layerHerbs", False), ("iconYdOre", "layerOre", False), ("iconYdPins", "showCustomPins", False),
     # (1.3.9: the detached route panel's own looks)
     ("navPanelHideButtons", "navPanelDetached", False), ("navPanelAlpha", "navPanelDetached", False),
+    ("navPanelLocked", "navPanelDetached", False),
 ]
 # (the parents' values with every dependent on)
 ALL_ON = {"replaceMinimap": True, "fadeMoving": True, "combatHideMap": False, "combatHideArrow": False,

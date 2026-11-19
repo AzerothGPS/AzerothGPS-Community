@@ -12,7 +12,7 @@ from test_world_map_host import SETUP
 
 KEYS = ("useWorldMap", "replaceMinimap", "shown", "minimized", "windowFrame", "navPanelWidth", "navPanelAlign",
         "navPanelDetached", "navPanelPoint", "navPanelDetachedWidth", "navPanelHideButtons", "navPanelAlpha",
-        "navPanelDetachedHeight", "stepsAll", "stepsCollapsed")
+        "navPanelDetachedHeight", "stepsAll", "stepsCollapsed", "navPanelLocked")
 
 
 @pytest.fixture
@@ -372,10 +372,10 @@ def test_a_sized_panel_keeps_its_text_inside_it(rp):
     lines, more = fit(G.NAV_DETACHED_MIN_H)
     assert str(G.navText._text) == "Walk 4m 35s\nAll stops 9m" and lines == [""] and not G.stepsText._shown
     st.navPanelDetachedHeight = None
-    # (through the panel's own update: the route's text, the height kept, no line wrapped)
+    # (through the panel's own update: the route's text, the height kept)
     G.SizeNavDetached(300, 60)
     G.Update()
-    assert G.NavFixed() and p._h == 60 and G.navText._wrap is False and G.stepsText._wrap is False
+    assert G.NavFixed() and p._h == 60 and G.navText._wrap is not False and G.stepsText._wrap is not False
 
 
 def test_the_corner_grip_sizes_it_clamped_and_kept_over_a_reload(rp):
@@ -420,3 +420,157 @@ def test_the_corner_grip_sizes_it_clamped_and_kept_over_a_reload(rp):
         assert G.NavDetachedHeight() == G.NAV_DETACHED_MIN_H
     finally:
         lua.execute("GetCursorPosition = function() return 0, 0 end")
+
+
+def _rendered(fs):
+    # (what the client draws of a font string's text: with word wrap off, a string of several lines shows its first
+    # line alone, cut short; seen in game 2026-11-18, a sized panel with its title and step 1 only)
+    lines = str(fs._text).split("\n")
+    if not fs._shown:
+        return []
+    return lines[:1] if fs._wrap is False else lines
+
+
+def _visible(s):
+    # (a line's width in the stand-in: 6 a character, 12 an icon; colors take none)
+    import re
+    s = re.sub(r"\|T.*?\|t", "XX", s)
+    s = re.sub(r"\|c[0-9a-fA-F]{8}", "", s).replace("|r", "")
+    return len(s) * 6
+
+
+def test_a_sized_panel_draws_every_line_that_fits_and_cuts_only_long_ones(rp):
+    # (Kooki3z's test of 1.3.9, 2026-11-18: sized to about 480 x 270, the panel drew its title and step 1, each cut
+    # with "...", and nothing under them: the lines were in it, word wrap off made the client draw the first alone)
+    lua, ns = rp
+    G, st = ns.GPS, ns.settings.gps
+    _detach(lua, ns)
+    m = G.navMeasure
+    m.GetUnboundedStringWidth = lua.eval("""function(s)
+      local t = s._text:gsub("|T.-|t", "XX"):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
+      return #t * 6
+    end""")
+    title = "|cffffd100Board the flight to Camp Taurajo, The Barrens|r"
+    stops = "Next 3 stops: |TInterface\\Icons\\Ability_Mount_JungleTiger:0|t Cheetah 17m 11s"
+    long = "|cffb0b0b03. " + "Then to Hillsbrad Foothills (93, 39) (not routed yet) " * 3 + "|r"
+    steps = "\n".join(["|cffffffff1. Take the flight to Camp Taurajo, The Barrens (4m 10s)|r",
+                       "|cffb0b0b02. Walk to the flight master 1m 2s|r", long]
+                      + ["|cffb0b0b0%d. Then to Hillsbrad Foothills (93, 39) (not routed yet)|r" % i for i in range(4, 10)])
+    try:
+        G.SizeNavDetached(480, 270)
+        G.navText._text = title + "\n" + stops
+        G.FitNavPanel(steps, 9, 0)
+        assert G.navText._wrap is not False and G.stepsText._wrap is not False
+        status = _rendered(G.navText)
+        assert status == [title, stops]  # (both status lines, neither cut: they fit)
+        drawn = _rendered(G.stepsText)
+        # (270 high: 12 padding, 2 status lines at 12, 4 gap; 14 a step line: all 9 fit)
+        assert len(drawn) == 9 and G.navMore == 0
+        textR, stepsR = G.NavTextInsets()
+        room = 480 - 6 - stepsR
+        for got, want in zip(drawn, steps.split("\n")):
+            if _visible(want) <= room:
+                assert got == want  # (never cut when it fits)
+            else:
+                assert got.endswith("...|r") and _visible(got) <= room and got.startswith(want[:30])
+        # (smaller: as many whole steps as fit, the last line counting the rest)
+        G.SizeNavDetached(480, 12 + 24 + 4 - 2 + 14 * 5)
+        G.navText._text = title + "\n" + stops
+        G.FitNavPanel(steps, 9, 0)
+        drawn = _rendered(G.stepsText)
+        assert len(drawn) == 5 and drawn[-1] == "|cff808080... 5 more steps|r" and G.navMore == 5
+        assert _rendered(G.navText) == [title, stops]
+        # (a color or icon is never cut inside)
+        cut = G.FitLineWidth("|cffb0b0b0" + "|TInterface\\Icons\\X:0|t" * 30 + "|r", 100)
+        assert cut.endswith("...|r") and cut.count("|T") == cut.count("|t") and _visible(cut) <= 100
+    finally:
+        m.GetUnboundedStringWidth = None
+
+
+def test_the_route_panel_never_turns_word_wrap_off(rp):
+    # (the client's rule, above: a sized panel's lines are cut by width one by one instead)
+    lua, ns = rp
+    G = ns.GPS
+    _detach(lua, ns)
+    for h in (None, 60, 200):
+        if h:
+            G.SizeNavDetached(300, h)
+        G.navPanelSig = None
+        G.Update()
+        assert G.navText._wrap is not False and G.stepsText._wrap is not False
+        assert len(_rendered(G.navText)) == len(str(G.navText._text).split("\n"))
+
+
+def test_a_locked_panel_does_not_move_size_or_attach(rp):
+    lua, ns = rp
+    G, st = ns.GPS, ns.settings.gps
+    assert ns.DEFAULTS.gps.navPanelLocked is False
+    p = _detach(lua, ns, navPanelLocked=False)
+    lock, grip, edge = G.navLock, G.navGrip, G.navEdge
+    assert lock._shown and grip._shown and not lock.locked
+    # (its padlock button locks it)
+    lock._scripts.OnClick(lock, "LeftButton")
+    assert st.navPanelLocked is True and G.NavLocked() and lock.locked
+    assert not grip._shown
+    try:
+        lua.execute("AGPS_CUR = { 0, 0 } GetCursorPosition = function() return AGPS_CUR[1], AGPS_CUR[2] end")
+        st.navPanelDetachedWidth, st.navPanelDetachedHeight = 300, 200
+        p._scripts.OnDragStart(p)
+        assert not G.navMoving  # (no drag)
+        grip._scripts.OnMouseDown(grip, "LeftButton")
+        lua.execute("AGPS_CUR = { 100, -100 }")
+        grip._scripts.OnUpdate(grip, 0.01)
+        edge._scripts.OnMouseDown(edge, "LeftButton")
+        edge._scripts.OnUpdate(edge, 0.01)
+        assert (st.navPanelDetachedWidth, st.navPanelDetachedHeight) == (300, 200)  # (no sizing)
+        p._scripts.OnMouseUp(p, "RightButton")
+        assert G.navDetached and st.navPanelDetached is True  # (no right-click attach)
+        # (its buttons still work: Attach)
+        assert G.navDetach._shown
+        # (kept over a reload, and said on the mouse over while its buttons are hidden)
+        assert lua.eval("rawequal")(ns.settings, ns.db.settings) and ns.db.settings.gps.navPanelLocked is True
+        st.navPanelDetached = False
+        G.ApplySettings()
+        assert not G.NavLocked() and edge._shown  # (on the map: the lock doesn't apply, the width edge's back)
+        st.navPanelDetached = True
+        G.ApplySettings()
+        assert G.NavLocked() and not grip._shown
+        st.navPanelHideButtons = True
+        G.ApplySettings()
+        G.Update()
+        assert not lock._shown
+        tips = []
+        old = lua.eval("GameTooltip.AddLine")
+        lua.globals().AGPS_TIPS = lua.table()
+        lua.execute("GameTooltip.AddLine = function(self, t) AGPS_TIPS[#AGPS_TIPS + 1] = t end")
+        p._scripts.OnEnter(p)
+        tips = list(lua.globals().AGPS_TIPS.values())
+        lua.globals().GameTooltip.AddLine = old
+        assert tips == ["Locked. To unlock it: Options > Map window > Lock the panel."]
+        # (unlocked in the options: all of it again)
+        st.navPanelLocked = False
+        G.ApplySettings()
+        assert grip._shown and not edge._shown
+        p._scripts.OnDragStart(p)
+        assert G.navMoving
+        p._scripts.OnDragStop(p)
+    finally:
+        lua.execute("GetCursorPosition = function() return 0, 0 end")
+
+
+def test_the_width_edge_is_the_maps_alone(rp):
+    # (asked 2026-11-18: "remove the 'drag to change panel's width' on the popout directions window": detached, the
+    # corner grip sizes it; the edge and its tooltip only on the map)
+    lua, ns = rp
+    G, st = ns.GPS, ns.settings.gps
+    st.navPanelDetached = False
+    G.ApplySettings()
+    edge = G.navEdge
+    assert edge._shown
+    G.navDetach._scripts.OnClick(G.navDetach, "LeftButton")
+    assert G.navDetached and not edge._shown and G.navGrip._shown
+    w = st.navPanelDetachedWidth
+    edge._scripts.OnMouseDown(edge, "LeftButton")  # (and no drag from it, should a click reach it)
+    assert not edge.drag and st.navPanelDetachedWidth == w
+    G.navDetach._scripts.OnClick(G.navDetach, "LeftButton")
+    assert not G.navDetached and edge._shown and not G.navGrip._shown

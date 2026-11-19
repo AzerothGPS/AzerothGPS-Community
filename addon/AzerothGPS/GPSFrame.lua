@@ -7591,21 +7591,60 @@ function G.ApplyNavLook()
   if not navPanel then return end
   navPanel:SetBackdropColor(0, 0, 0, (G.navDetached and G.NavAlphaPct() or G.NAV_ALPHA_DEFAULT) / 100)
   local bare = G.NavBare()
-  if bare ~= G.navBareWas then
-    G.navBareWas = bare
-    -- (its text out to the right edge without the buttons there)
-    navText:SetPoint("TOPRIGHT", bare and -6 or -58, -6)
-    stepsText:SetPoint("RIGHT", bare and -6 or -32, 0)
+  local textR, stepsR = G.NavTextInsets()
+  local key = textR .. ":" .. stepsR
+  if key ~= G.navInsetWas then
+    G.navInsetWas = key
+    -- (its text out to the right edge without the buttons there; clear of the lock button with it)
+    navText:SetPoint("TOPRIGHT", -textR, -6)
+    stepsText:SetPoint("RIGHT", -stepsR, 0)
     G.navPanelSig = nil -- (laid out again: the buttons)
   end
-  -- (sized by its corner: a line too long for it cut short, not wrapped past its bottom)
-  local fixed = G.NavFixed()
-  navText:SetWordWrap(not fixed)
-  stepsText:SetWordWrap(not fixed)
+  -- (word wrap stays on: in the client a string of several lines with it off shows its first line alone, cut short;
+  -- seen in game 2026-11-18. A sized panel cuts its too-long lines itself, G.FitLineWidth.)
+  local locked = G.NavLocked()
   if G.navGrip then
-    G.navGrip:SetShown(G.navDetached == true)
+    G.navGrip:SetShown(G.navDetached == true and not locked)
     G.navGrip:SetAlpha((bare and not G.navHover) and 0 or 1) -- (buttons hidden: the grip only under the mouse)
   end
+  -- (detached, its corner grip sizes it: the width edge only on the map; asked 2026-11-18, "remove the 'drag to change
+  -- panel's width' on the popout directions window")
+  if G.navEdge then G.navEdge:SetShown(not G.navDetached) end
+  if G.navLock then
+    G.navLock:SetShown(G.navDetached == true and not bare)
+    G.SetLockGlyph(G.navLock, locked)
+  end
+end
+-- The detached panel locked (1.3.9, asked 2026-11-18, "be able to lock the detached route panel"): `navPanelLocked`,
+-- no dragging, no sizing (its grip and edge hidden), no right-click back to the map; its buttons still work, its lock
+-- button (shown with them) or the option unlocks it. Only while detached: on the map it never moves anyway.
+function G.NavLocked()
+  return G.navDetached == true and S().navPanelLocked == true
+end
+function G.SetNavLocked(on)
+  S().navPanelLocked = on and true or false
+  G.ApplyNavLook()
+  if ns.Options and ns.Options.Refresh then ns.Options.Refresh() end
+end
+-- How far in from the panel's right edge its text ends: the status line (clear of the X, Attach, the lock and a steps
+-- box) and the steps (clear of the use button); with its buttons hidden, the edge.
+G.NAV_LOCK_W = 18 -- (the lock button and its gap)
+function G.NavTextInsets()
+  if G.NavBare() then return 6, 6 end
+  return 58 + (G.navDetached and G.NAV_LOCK_W or 0), 32
+end
+-- A drawn padlock (no game art that may be missing): its body, and its shackle closed or open.
+function G.SetLockGlyph(b, locked)
+  local g = b.glyph
+  if not g then return end
+  g.shackleR:ClearAllPoints()
+  if locked then
+    g.shackleR:SetPoint("BOTTOMRIGHT", g.body, "TOPRIGHT", -1, 0)
+  else
+    g.shackleR:SetPoint("BOTTOMRIGHT", g.body, "TOPRIGHT", -1, 3) -- (lifted: open)
+  end
+  g.shackleR:SetSize(1, 3)
+  b.locked = locked
 end
 function G.NavHover(on)
   G.navHover = on or nil
@@ -7686,15 +7725,18 @@ end
 -- count, `rowsH` the quest rows' height. G.navMore: how many steps were left out (the tests).
 function G.FitNavPanel(steps, total, rowsH)
   local h = G.NavDetachedHeight()
+  local w = G.NavDetachedWidth()
+  local textR, stepsR = G.NavTextInsets()
   local room = h - G.NAV_PAD_H
   local lh = G.NavLineH(navText)
   local status = G.SplitLines(navText:GetText() or "")
   local fitS = math.max(1, math.floor(room / lh))
-  if #status > fitS then
-    for i = #status, fitS + 1, -1 do status[i] = nil end
-    navText:SetText(table.concat(status, "\n"))
-  end
-  room = room - #status * lh
+  for i = #status, fitS + 1, -1 do status[i] = nil end
+  for i, l in ipairs(status) do status[i] = G.FitLineWidth(l, w - 6 - textR) end
+  navText:SetText(table.concat(status, "\n"))
+  -- (as tall as the client lays it out, where it says: a line's height isn't always the font's)
+  local used = math.max(#status * lh, tonumber(navText:GetStringHeight()) or 0)
+  room = room - used
   if rowsH > 0 and rowsH > room then -- (no room for the quest rows)
     G.LayoutGroupRows(navPanel, navText, false)
     rowsH = 0
@@ -7702,14 +7744,69 @@ function G.FitNavPanel(steps, total, rowsH)
   G.navMore = 0
   if steps ~= "" then
     local sl = G.NavLineH(stepsText)
-    local fit = math.floor((room - rowsH - G.NAV_STEPS_GAP + G.NAV_STEPS_SPACING) / (sl + G.NAV_STEPS_SPACING))
+    local stepRoom = room - rowsH - G.NAV_STEPS_GAP
+    local fit = math.floor((stepRoom + G.NAV_STEPS_SPACING) / (sl + G.NAV_STEPS_SPACING))
+    local ww = w - 6 - stepsR
     local out
-    out, G.navMore = G.FitSteps(steps, fit, total)
-    stepsText:SetText(out)
+    repeat
+      out, G.navMore = G.FitSteps(steps, fit, total)
+      local lines = G.SplitLines(out)
+      for i, l in ipairs(lines) do lines[i] = G.FitLineWidth(l, ww) end
+      out = table.concat(lines, "\n")
+      stepsText:SetText(out)
+      fit = fit - 1
+      -- (laid out taller than the room by the client's own measure: one line fewer)
+    until fit < 0 or out == "" or (tonumber(stepsText:GetStringHeight()) or 0) <= stepRoom + 1
     stepsText:SetShown(out ~= "")
     if out == "" and rowsH > 0 then G.LayoutGroupRows(navPanel, navText, true) end
   end
   navPanel:SetHeight(h)
+end
+-- The pieces of a line of text: each escape sequence whole (a color, its end, an icon, a link, "||") and each
+-- character (UTF-8), so a line is cut between them, never inside one.
+function G.TextTokens(s)
+  local t, i, n = {}, 1, #s
+  while i <= n do
+    local c, j = s:sub(i, i), i
+    if c == "|" then
+      local nx = s:sub(i + 1, i + 1)
+      if nx == "c" then j = i + 9
+      elseif nx == "r" or nx == "|" then j = i + 1
+      elseif nx == "T" then j = (s:find("|t", i + 2, true) or n) + 1
+      elseif nx == "A" then j = (s:find("|a", i + 2, true) or n) + 1
+      elseif nx == "H" then -- (|Hdata|htext|h: the whole link)
+        local a = s:find("|h", i + 2, true)
+        j = a and ((s:find("|h", a + 2, true) or n) + 1) or n
+      end
+    else
+      local b = c:byte()
+      j = i + (b >= 0xF0 and 3 or b >= 0xE0 and 2 or b >= 0xC0 and 1 or 0)
+    end
+    t[#t + 1] = s:sub(i, j)
+    i = j + 1
+  end
+  return t
+end
+-- How wide `text` is in the panel's font, on one line (a hidden font string of its own: G.navMeasure).
+function G.TextWidth(text)
+  local m = G.navMeasure
+  if not m then return 0 end
+  m:SetText(text)
+  local w = m.GetUnboundedStringWidth and m:GetUnboundedStringWidth() or m:GetStringWidth()
+  return tonumber(w) or 0
+end
+G.NAV_ELLIPSIS = "..."
+-- `line` cut to `w` wide: as it is when it fits, else as much as fits and "..." (in its color, then ended).
+function G.FitLineWidth(line, w)
+  if line == "" or w <= 0 or G.TextWidth(line) <= w then return line end
+  local tok = G.TextTokens(line)
+  local function cut(k) return table.concat(tok, "", 1, k) .. G.NAV_ELLIPSIS .. "|r" end
+  local lo, hi = 0, #tok - 1 -- (the most pieces that fit with the dots)
+  while lo < hi do
+    local mid = math.floor((lo + hi + 1) / 2)
+    if G.TextWidth(cut(mid)) <= w then lo = mid else hi = mid - 1 end
+  end
+  return cut(lo)
 end
 function G.SetNavDetached(on)
   S().navPanelDetached = on and true or false
@@ -7783,6 +7880,10 @@ function G.UpdateNavPanel(px, py, cont, hidden, route, dest)
   local bare = G.NavBare()
   G.navCancel:SetShown(not bare)
   G.navDetach:SetShown(not bare)
+  G.navLock:SetShown(not bare and G.navDetached == true) -- (detached only: on the map it doesn't move)
+  local right = G.navLock:IsShown() and G.navLock or G.navDetach -- (the boxes left of these)
+  G.stepsToggle:ClearAllPoints()
+  G.stepsToggle:SetPoint("RIGHT", right, "LEFT", -2, 0)
   G.stepsToggle:SetShown(not bare and status ~= nil and (steps ~= "" or collapsed))
   G.stepsToggle.label:SetText(collapsed and "+" or "-")
   -- "+" for all of them: when there are more than the few shown
@@ -7795,7 +7896,7 @@ function G.UpdateNavPanel(px, py, cont, hidden, route, dest)
     if left then
       G.shareButton:SetPoint("RIGHT", left, "LEFT", -2, 0)
     else
-      G.shareButton:SetPoint("RIGHT", G.navDetach, "LEFT", -2, 0)
+      G.shareButton:SetPoint("RIGHT", right, "LEFT", -2, 0)
     end
   end
   local rowsH = G.LayoutGroupRows(navPanel, steps ~= "" and stepsText or navText, status ~= nil and not collapsed and not hidden)
@@ -15577,7 +15678,7 @@ function G.Init()
   navPanel:SetClampedToScreen(true)
   navPanel:RegisterForDrag("LeftButton")
   navPanel:SetScript("OnDragStart", function(self)
-    if G.navDetached then
+    if G.navDetached and not G.NavLocked() then
       G.navMoving = true
       self:StartMoving()
     end
@@ -15589,7 +15690,7 @@ function G.Init()
   end)
   -- (detached: a right-click puts it back on the map, the way back with its buttons hidden; said on the mouse over then)
   navPanel:SetScript("OnMouseUp", function(_, button)
-    if button == "RightButton" and G.navDetached then
+    if button == "RightButton" and G.navDetached and not G.NavLocked() then
       GameTooltip_Hide()
       G.SetNavDetached(false)
     end
@@ -15599,7 +15700,11 @@ function G.Init()
     if not G.NavBare() then return end
     GameTooltip:SetOwner(self, "ANCHOR_TOP")
     GameTooltip:SetText(L["Route panel"], 1, 1, 1)
-    GameTooltip:AddLine(L["Drag to move it. Right-click to put it back on the map."], nil, nil, nil, true)
+    if G.NavLocked() then
+      GameTooltip:AddLine(L["Locked. To unlock it: Options > Map window > Lock the panel."], nil, nil, nil, true)
+    else
+      GameTooltip:AddLine(L["Drag to move it. Right-click to put it back on the map."], nil, nil, nil, true)
+    end
     GameTooltip:Show()
   end)
   navPanel:SetScript("OnLeave", function()
@@ -15612,6 +15717,9 @@ function G.Init()
   navText:SetPoint("TOPRIGHT", -58, -6) -- (clear of the X and the Detach button, and a steps box beside them)
   navText:SetJustifyH("LEFT")
   G.navText = navText -- (the tests)
+  -- (a line's width in the panel's font, to cut a sized panel's long lines: G.TextWidth; never shown)
+  G.navMeasure = navPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+  G.navMeasure:Hide()
   -- The route's steps (several stops, zeppelins, boats): the first three, then "... more".
   stepsText = navPanel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   stepsText:SetPoint("TOPLEFT", navText, "BOTTOMLEFT", 0, -4)
@@ -15701,6 +15809,39 @@ function G.Init()
   end)
   detach:Show()
   G.navDetach = detach
+  -- (asked 2026-11-18) Lock: detached, kept where it is (no dragging or sizing); a drawn padlock, open or closed.
+  local lock = SmallBox(detach, "")
+  do
+    local body = lock:CreateTexture(nil, "ARTWORK")
+    body:SetSize(8, 6)
+    body:SetPoint("BOTTOM", 0, 3)
+    body:SetColorTexture(1, 0.82, 0, 0.9)
+    local top = lock:CreateTexture(nil, "ARTWORK")
+    top:SetSize(6, 1)
+    top:SetPoint("BOTTOM", body, "TOP", 0, 3)
+    top:SetColorTexture(1, 0.82, 0, 0.9)
+    local left = lock:CreateTexture(nil, "ARTWORK")
+    left:SetSize(1, 3)
+    left:SetPoint("BOTTOMLEFT", body, "TOPLEFT", 1, 0)
+    left:SetColorTexture(1, 0.82, 0, 0.9)
+    local right = lock:CreateTexture(nil, "ARTWORK")
+    right:SetColorTexture(1, 0.82, 0, 0.9)
+    lock.glyph = { body = body, top = top, shackleL = left, shackleR = right }
+    G.SetLockGlyph(lock, false)
+  end
+  lock:SetScript("OnClick", function() G.SetNavLocked(not G.NavLocked()) end)
+  lock:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_TOP")
+    if G.NavLocked() then
+      GameTooltip:SetText(L["Unlock Panel"], 1, 1, 1)
+      GameTooltip:AddLine(L["Lets you drag and resize this panel again."], nil, nil, nil, true)
+    else
+      GameTooltip:SetText(L["Lock Panel"], 1, 1, 1)
+      GameTooltip:AddLine(L["Keeps this panel where it is: no dragging or resizing."], nil, nil, nil, true)
+    end
+    GameTooltip:Show()
+  end)
+  G.navLock = lock
   -- (the panel's width, dragged by its free edge: the right one, the left one while it's on the right)
   local edge = CreateFrame("Button", nil, navPanel)
   edge:SetWidth(G.NAV_EDGE_W)
@@ -15709,7 +15850,7 @@ function G.Init()
   edgeHi:SetAllPoints()
   edgeHi:SetColorTexture(1, 0.82, 0, 0.35)
   edge:SetScript("OnMouseDown", function(self, button)
-    if button ~= "LeftButton" then return end
+    if button ~= "LeftButton" or G.navDetached then return end
     local x = GetCursorPosition()
     self.drag = { x = x / (navPanel:GetEffectiveScale() or 1), w = navPanel:GetWidth() or 0 }
   end)
@@ -15741,7 +15882,7 @@ function G.Init()
   grip:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
   grip:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
   grip:SetScript("OnMouseDown", function(self, button)
-    if button ~= "LeftButton" or not G.navDetached then return end
+    if button ~= "LeftButton" or not G.navDetached or G.NavLocked() then return end
     -- (kept by its top-left corner while it's sized: the corner dragged follows the mouse)
     G.SaveNavPoint()
     local l, t = navPanel:GetLeft(), navPanel:GetTop()
@@ -15776,7 +15917,7 @@ function G.Init()
   grip:Hide()
   G.navGrip = grip
   top:HookScript("OnSizeChanged", function() G.PlaceNavPanel() end) -- (a share of the map's width: kept as it's sized)
-  local toggle = SmallBox(detach, "-")
+  local toggle = SmallBox(detach, "-") -- (left of the lock while it shows: G.UpdateNavPanel)
   toggle:SetScript("OnClick", function()
     local st = S()
     if st.stepsCollapsed then st.stepsCollapsed = false -- "+": back to the next few
