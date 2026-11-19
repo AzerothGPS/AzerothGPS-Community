@@ -4960,8 +4960,17 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
     -- (and the walk itself keeps out of them: from an isle in Lordamere Lake to Light's Hope the walk swims the lake and
     -- goes on through the Plaguelands, no way round anything; the Hillsbrad coast's swim walks none of Arathi)
     if path then
+      -- (its dry yards only: with the open sea closed, 1.3.10, the swim round Arathi keeps to Arathi's own coast, in it)
       local through = 0
-      for i = 1, #path - 2, 2 do through = through + DangerLine(path[i], path[i + 1], path[i + 2], path[i + 3]) end
+      for i = 1, #path - 2, 2 do
+        local a, b, c, d = path[i], path[i + 1], path[i + 2], path[i + 3]
+        local z = DangerLine(a, b, c, d)
+        if z > 0 then
+          local sc, len = SegCost(cont, a, b, c, d), Dist(a, b, c, d)
+          if sc and len > 0 then z = z * math.max(0, 1 - (sc - len) / (Pass.SWIM_COST - 1) / len) end
+        end
+        through = through + z
+      end
       if through > straight * R.SWIM_DETOUR_THROUGH then return 0 end
     end
     local wet = 0

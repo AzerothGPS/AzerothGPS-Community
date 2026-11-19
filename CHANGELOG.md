@@ -24,7 +24,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 ### Fixed
 
 - Walks from Tarren Mill's flight master head south-east again, not round by the town.
-- Routes no longer swim far out into deep sea where fatigue sets in, such as from the Wetlands across to Southshore.
+- Routes no longer swim far out to sea where fatigue sets in, such as from the Wetlands across to Southshore; they keep near the shore.
 
 ## 1.3.9
 
