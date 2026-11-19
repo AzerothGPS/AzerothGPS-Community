@@ -50,6 +50,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Routes from inside Undercity now pick the best flight (Tarren Mill toward Hillsbrad and Arathi, not The Sepulcher and a long walk back).
 - The "Enemy territory" message shows once a trip, not again at each stop, pause or /reload, and walking near it off the road reroutes with less work.
 - A flight path you haven't learned no longer looks learned on the map while you fly, and only a flight master marks one learned.
+- Roads: new roads in Stranglethorn Vale.
 
 ## 1.3.8
 

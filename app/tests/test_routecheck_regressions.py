@@ -160,7 +160,8 @@ def test_a_walk_up_a_tower_by_the_stop_leaves_the_walk_round_to_the_further_road
     assert len(tower) == 3  # (shipped, stairs and all)
     r = ns.Router.Route(0, -12113.5, -161.5, -12414.2, 146.3, lua.table(offroad=False))
     pts, kinds = route_pts(r)
-    assert r.length < 450, (r.length, pts)
+    # (450 yd before Kooki3z's walk up the road to the tower, 2026-11-18 20.54, was drawn: the route now keeps to it, 543 yd)
+    assert r.length < 560, (r.length, pts)
     assert blocked_run(ns, 0, pts, kinds, (-12113.5, -161.5), (-12414.2, 146.3)) < BLOCKED_RUN_YD
 
 
