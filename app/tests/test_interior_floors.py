@@ -70,7 +70,7 @@ def test_the_shipped_floors_match_the_models_rooms():
 
 def test_the_survey_list_is_short_and_says_where_to_go():
     todo = F.load_todo()
-    assert 0 < len(todo) <= 80
+    assert len(todo) <= 80  # (empty once every room is surveyed)
     ids = [e["id"] for e in todo]
     assert len(ids) == len(set(ids))
     for e in todo:
@@ -116,8 +116,9 @@ def test_the_survey_goes_out_to_the_addon_that_loads_it_and_its_heights_come_bac
     # into the Lua: only that room changes; a model with no line yet gets one
     lua_text = '-- x\nlocal _, ns = ...\nns.InteriorFloors = {\n  [100] = { "1", "", "1.5", "" },\n}\n'
     out = F.patch_lua(lua_text, {**got, (200, 1): [3.0]}, {200: 3})
-    assert '  [100] = { "1", "", "7.3", "" },' in out
+    assert '  [100] = { "1", "", "1.5 7.3", "" },' in out  # (added: the room's other floors kept)
     assert '  [200] = { "", "3", "" },' in out
+    assert F._merged([0.1, 5, 8], [7.6]) == [0.1, 5, 7.6]  # (a floor near the measured one gives way to it)
 
 
 @pytest.fixture(scope="module")
