@@ -147,6 +147,10 @@ local function Save()
   local dropped = {}
   for i, e in ipairs(N.questDropped or {}) do dropped[i] = Copy(e) end
   cdb.questDropped = (#list > 0 and #dropped > 0) and dropped or nil
+  -- (the other faction's towns said in chat for this trip, N.CheckHostileRoute: not said again after a /reload)
+  local towns = {}
+  for name in pairs(N.hostileSaid or {}) do towns[#towns + 1] = name end
+  cdb.hostileSaid = (#list > 0 and #towns > 0) and towns or nil
 end
 N.SaveStops = Save
 
@@ -414,10 +418,13 @@ function N.HostileOnRoute(r)
   table.sort(out, function(a, b) return a[2] > b[2] end)
   return out[1] and out or nil
 end
--- Said once a route (its stops, the option, the faction), when it's settled (not while its searches or the ride check
--- run: a walk through Dun Algaz shown first, the flight round it after): a chat line, and a line in the directions
--- panel while the route lasts (N.HostileNote). Looked for in the background (Router.Background: the whole route
--- sampled every few yards, not in a frame).
+-- Looked for once a route (its stops, the option, the faction), when it's settled (not while its searches or the ride
+-- check run: a walk through Dun Algaz shown first, the flight round it after): a line in the directions panel while the
+-- route lasts (N.HostileNote), and a chat line once a trip for each town (N.hostileSaid, saved with the stops: issue
+-- #652, said again at every stop reached, death, pause and resume, /reload, the same stops set again; Kooki3z saw it
+-- over and over on a trip through Dun Algaz). Looked for in the background (Router.Background: the whole route sampled
+-- every few yards, not in a frame).
+N.hostileSaid = {} -- [town's name] = said in chat this trip
 local hostileChecked, hostileNames
 local hostileNoteRoute, hostileNoteHas -- (N.HostileNote: the route it was looked for on, and whether it passes guards)
 function N.CheckHostileRoute()
@@ -436,6 +443,12 @@ function N.CheckHostileRoute()
       if k <= 3 then names[k] = t[1] end
     end
     hostileNames = table.concat(names, ", ")
+    local new = false
+    for _, name in ipairs(names) do
+      if not N.hostileSaid[name] then new, N.hostileSaid[name] = true, true end
+    end
+    if not new then return end -- (all said already this trip: the directions and the map still show it)
+    Save()
     if ns.Print then
       ns.Print(Format(avoiding and L["|cffff4040Enemy territory:|r no way round it found, the route passes the other faction's guards at %s (red on the map)."]
         or L["|cffff4040Enemy territory:|r the route passes the other faction's guards at %s (red on the map)."], hostileNames))
@@ -498,6 +511,7 @@ N.trip = 0
 
 function N.SetStops(stops, fastest, force, keep)
   if Locked(force) then return false end
+  if not N.SameTrip(stops) then N.hostileSaid = {} end -- (another trip: its towns said again, N.CheckHostileRoute)
   if force ~= "red" then
     -- (the "risk it?" answers kept for the stops still in it: the same route set again, a quest route's update, a
     -- reorder, isn't asked again; a new stop is)
@@ -697,6 +711,7 @@ function N.Clear()
   N.paused, N.pauseWatch = nil, nil
   N.questDropped = {}
   N.redOk, N.skipLearn, N.noWalk, N.walkKept, N.riskOk, N.riskQuestion, N.riskAsking = {}, {}, {}, {}, {}, nil, nil
+  N.hostileSaid = {}
   N.trip = N.trip + 1
   N.ClearSkippedRides()
   Changed()
@@ -730,6 +745,10 @@ function N.Restore()
   for _, z in ipairs(#N.stops > 0 and cdb.redOk or {}) do N.redOk[z] = true end
   N.riskOk = {}
   for k, v in pairs(#N.stops > 0 and type(cdb.riskOk) == "table" and cdb.riskOk or {}) do N.riskOk[k] = v end
+  N.hostileSaid = {}
+  for _, name in ipairs(#N.stops > 0 and type(cdb.hostileSaid) == "table" and cdb.hostileSaid or {}) do
+    if type(name) == "string" then N.hostileSaid[name] = true end
+  end
   local G = ns.GPS
   if G and G.groupChoice then
     for id, v in pairs(#N.stops > 0 and type(cdb.groupChoice) == "table" and cdb.groupChoice or {}) do
@@ -1879,6 +1898,10 @@ local rideLast = {} -- [stop] = the last answer for it (from wherever: used whil
 local rideFinal = {} -- [stop] = rideLast's answer is a final one (a provisional one doesn't replace it)
 local ridePlanLast = {} -- [stop] = the last final plan with a ride kept for it (used from a square not checked yet)
 local ridePending = {} -- ["ride:" .. key] = a ride check queued and not done (N.CheckRedRoute waits for it)
+-- [key] = the spot a square's check is made from: its first (issue #652: checked from wherever the player stood at each
+-- recalculation, each check of a square still searched its walks from a new spot, came out provisional, and was made
+-- again at the next; walking by Dun Algaz, up to five checks a square, each planning the trip six times over)
+local rideSpot = {}
 function N.RideChecking() return next(ridePending) ~= nil end
 -- (for /agps debug route: what the ride checks remember, each answer and its plan's legs in short)
 function N.RideDebug()
@@ -1903,7 +1926,7 @@ function N.AnswerRisk(q, yes)
   if N.SaveStops then N.SaveStops() end -- (kept over a /reload while the route is on)
   if N.riskQuestion == q then N.riskQuestion = nil end
   for _, z in ipairs((yes and q.riskyRed or q.safeRed) or {}) do N.redOk[z.z] = true end
-  rideCheck, ridePlan, rideLast, rideFinal, ridePlanLast = {}, {}, {}, {}, {}
+  rideCheck, ridePlan, rideLast, rideFinal, ridePlanLast, rideSpot = {}, {}, {}, {}, {}, {}
   -- (the way answered meanwhile, while the check is worked out again: asked 2026-11-16, a "No" left the walk past Dun
   -- Algaz; the check, planning again past a long way round, ran for a while in the game and with nothing remembered
   -- the route was the walk all that time. No: the safe way; yes: the one past the guards)
@@ -2278,8 +2301,10 @@ local function RideInstead(cont, sx, sy, d, walk, tps, opts, sz)
   local won = rideCheck[key]
   if won == nil then
     ridePending["ride:" .. key] = true
+    local spot = rideSpot[key] or { sx, sy }
+    rideSpot[key] = spot
     ns.Router.Background("ride:" .. key, function()
-      return CompareRide(cont, sx, sy, d, walk, tps, opts, sz)
+      return CompareRide(cont, spot[1], spot[2], d, walk, tps, opts, sz)
     end, function(res)
       ridePending["ride:" .. key] = nil
       if not res then return end
@@ -3614,7 +3639,7 @@ function N.Invalidate(all, fresh)
   N.route = nil -- (kept stays, to compare the recalculation with)
   if all ~= false then later.done = {} end -- redone a few a frame; shown until replaced
   if fresh then pairCosts, pairCount = {}, 0 end
-  if fresh then kept, rideCheck, ridePlan, rideLast, N.noWalk, N.walkKept = nil, {}, {}, {}, {}, {} end
+  if fresh then kept, rideCheck, ridePlan, rideLast, N.noWalk, N.walkKept, rideSpot = nil, {}, {}, {}, {}, {}, {} end
   if all ~= false then legMemo, legMemoN = {}, 0 end
 end
 
