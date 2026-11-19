@@ -21,6 +21,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Over a building's inside map, its roads and walls show for editing, the rest faded.
 - With the road or wall tools on, the pointer shows a building's floor heights, and roads drawn there start at the floor's height.
 - Roads: new roads and walls in Arathi Highlands.
+- Quest Route can take only the quests you track: the ones Questie's tracker shows, or the ones ticked in the quest log without Questie (Options > Routing).
 - Roads: the way up Grom'gol's zeppelin tower in Stranglethorn Vale.
 - Walls: a wall moved in the Wetlands.
 - Swims on a route show as a wavy line on the map and the minimap; hover one to see why, right-click it to go round by land for that trip.

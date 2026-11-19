@@ -14612,11 +14612,13 @@ function G.QuestRoute()
     return
   end
   if not (ns.Layers and ns.Layers.QuestStops) then return end
-  local onlyZone = S().questZoneOnly
-  local stops, c = ns.Layers.QuestStops(onlyZone)
+  local onlyZone, onlyTracked = S().questZoneOnly, S().questTrackedOnly
+  local stops, c = ns.Layers.QuestStops(onlyZone, onlyTracked)
   if #stops == 0 then
     ns.Print(onlyZone and c.elsewhere > 0
       and Format(L["Quest Route: none of your quests are in this zone (%d elsewhere; Options > Routing: only this zone)."], c.elsewhere)
+      or onlyTracked and (c.untracked or 0) > 0
+      and Format(L["Quest Route: none of your tracked quests have a location (%d not tracked; Options > Routing: only tracked quests)."], c.untracked)
       or L["Quest Route: no quest locations found in your quest log."])
     return
   end

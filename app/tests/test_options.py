@@ -52,7 +52,8 @@ NEW = ["allowSwim", "mapEditIdle", "toolShiftClick", "language", "layerCity", "s
        "navPanelWidth", "navPanelAlign", "navPanelDetached",  # (1.3.9: the route panel's width, side, own window)
        "navPanelHideButtons", "navPanelAlpha", "navPanelLocked", "navPanelWrap",  # (1.3.9: detached, its buttons hidden and its background's opacity)
        "dirLocked",  # (1.3.9: the directions text's own lock, apart from the arrow's)
-       "importKeepOrder"]  # (1.3.9: imports routed in the order listed; the Import and Share window's box too)
+       "importKeepOrder",  # (1.3.9: imports routed in the order listed; the Import and Share window's box too)
+       "questTrackedOnly"]  # (1.3.10: the quest route from the tracked quests only, Questie's tracker's or the game's)
 # Where each setting's control is: the page a player would look on.
 HOME = {
     "General": "shown keyBlockedInCombat showCoords distanceUnits language quietChat searchCommonNpcs",
@@ -72,7 +73,7 @@ HOME = {
     "Opacity": "alpha fadeMoving movingAlpha combatHideMap combatAlpha combatHideArrow arrowCombatAlpha "
                "clickThroughMoving clickThroughCombat",
     "Routing": "useFlights flightMapRing useHearthstone useTeleports avoidHighZones avoidHostile allowSwim roadTolerance fastestOrder "
-               "cityKeepOrder importKeepOrder questZoneOnly questAutoReroute questPickRoute navCloseClears acceptWay acceptMapPins acceptShared",
+               "cityKeepOrder importKeepOrder questZoneOnly questTrackedOnly questAutoReroute questPickRoute navCloseClears acceptWay acceptMapPins acceptShared",
     "Directions": "arrow arrowLocked arrowPx arrowBg dirShown dirLocked dirStopsOnly arrowSnap arrowSide dirTextScale dirBg "
                   "questing",
     "Performance": "hz rerouteSeconds stopsAhead autoPauseRouting autoPauseSeconds stutterPause gentleBackground arrowHz",
