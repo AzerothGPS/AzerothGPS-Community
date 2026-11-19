@@ -527,6 +527,7 @@ function ns.PackSaved(db)
       if type(t) == "table" then
         if type(t.pts) == "table" then t.pk, t.pts = ns.PackNumbers(t.pts), nil end
         if type(t.zs) == "table" then t.zk, t.zs = ns.PackNumbers(t.zs), nil end
+        if type(t.gz) == "table" then t.gk, t.gz = ns.PackNumbers(t.gz), nil end -- (a drawn road's ground heights)
       end
     end
   end
@@ -537,6 +538,7 @@ function ns.UnpackSaved(db)
       if type(t) == "table" then
         if type(t.pk) == "string" then t.pts, t.pk = ns.UnpackNumbers(t.pk), nil end
         if type(t.zk) == "string" then t.zs, t.zk = ns.UnpackNumbers(t.zk), nil end
+        if type(t.gk) == "string" then t.gz, t.gk = ns.UnpackNumbers(t.gk), nil end
       end
     end
   end

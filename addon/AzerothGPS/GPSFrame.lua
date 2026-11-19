@@ -12537,6 +12537,7 @@ end
 local function ToolsOff()
   if not G.roadMode and not G.wallMode and ns.Record and ns.Record.pending then ns.Record.Apply() end
   if not G.roadMode and not G.wallMode then G.editFloor, G.eraserMode = nil, nil end -- (the floor picked: all again next time)
+  if not G.roadMode and not G.wallMode and ns.Ground then ns.Ground.Release() end -- (the ground's tiles let go)
 end
 
 function G.SetRoadMode(on)
@@ -12980,9 +12981,12 @@ function G.FinishRoad(line, erase, wall)
   -- (a height per point where a floor was picked while drawing: G.StrokeHeights)
   local zs = not wall and G.StrokeHeights(line.zs, #pts / 2) or nil
   if zs then z = zs[1] end
+  -- (a new road with no floor picked: the ground's height at each point from the map's data, Ground.lua (1.3.10,
+  -- issue #685), false in a building or a cave; kept as `gz`, the import's start, not a floor the routes follow)
+  local gz = op == "add" and not zs and ns.Ground and ns.Ground.RoadHeights(level, pts) or nil
   local i = ns.Record.Save({ op = op, drawn = true, continent = level,
     zone = info and info.name or "?", time = time(), pts = pts, area = area, z = z, indoors = indoors, down = down,
-    zs = zs })
+    zs = zs, gz = gz })
   if ns.Record.practice then -- (the tutorial's practice: Record.Save kept it in memory only)
     ns.Print(L["Practice: nothing was saved."])
     elapsed = 1
@@ -13617,6 +13621,16 @@ function G.RoadHoverInfo(level, x, y, reach, z)
   end
   return { title = title, lines = lines }
 end
+-- The ground's height at (x, y) of `level` as the tools' hover says it (Ground.lua, the map's terrain data: issue #685):
+-- "Ground: 123 yd" (and the water's surface over it), or "No ground data" over a hole, off the map or with none.
+function G.GroundText(level, x, y)
+  local GD = ns.Ground
+  local h = GD and level and GD.At(level, x, y)
+  if not h then return L["No ground data"] end
+  local w = GD.At(level, x, y, true)
+  if w and w > h + 0.5 then return Format(L["Ground: %d yd (water %d yd)"], math.floor(h + 0.5), math.floor(w + 0.5)) end
+  return Format(L["Ground: %d yd"], math.floor(h + 0.5))
+end
 function G.RoadHover(dt)
   G.roadHoverWait = (G.roadHoverWait or 0) - dt
   if G.roadHoverWait > 0 then return end
@@ -13632,6 +13646,13 @@ function G.RoadHover(dt)
     local x, y = G.ScreenToWorld(view.x, view.y, mx / sc - ccx, my / sc - ccy, view.rot, view.s)
     local level = G.PinLevel(x, y)
     info = level and G.RoadHoverInfo(level, x, y, G.ROAD_HOVER_PX / view.s, G.editFloor and G.editFloor.z)
+    -- (and the ground's height there from the map's data, 1.3.10: "Ground: 123 yd", or "No ground data")
+    local ground = G.GroundText(level, x, y)
+    if info then
+      info.lines[#info.lines + 1] = ground
+    else
+      info = { title = ground, lines = {} }
+    end
   end
   if not info then
     if owned and G.roadTip then GameTooltip:Hide() end

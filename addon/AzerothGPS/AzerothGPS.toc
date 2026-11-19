@@ -34,6 +34,7 @@ Data\Terrain.lua
 Data\Buildings.lua
 Data\Bridges.lua
 Data\TerrainHPA.lua
+Data\Heights.lua
 Data\Transports.lua
 Data\Flights.lua
 Data\Cities.lua
@@ -80,6 +81,7 @@ Looks.lua
 Taxi.lua
 Teleports.lua
 Record.lua
+Ground.lua
 Pins.lua
 Feedback.lua
 Searches.lua

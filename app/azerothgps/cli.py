@@ -422,6 +422,28 @@ def cmd_bridges(args) -> int:
     return 0
 
 
+def cmd_heights(args) -> int:
+    """The ground's height per map tile (Data/Heights.lua; 1.3.10, issue #685): 8 yd when both continents fit in
+    heights.MAX_BYTES, else 16 yd (--step forces one)."""
+    from . import heights as HT
+
+    cd = _client(args)
+    steps = (args.step,) if args.step else (2, 4)
+    for step in steps:
+        t = time.time()
+        tiles = {c: HT.continent_tiles(cd, c, step) for c in HT.CONTINENTS}
+        text = HT.heights_lua(tiles, step, cd.casc.version)
+        size = len(text.encode("utf-8"))
+        print(f"{128 // step} cells a tile ({HT.adt.TILE_YD * step / 128:.1f} yd): {size / 1048576:.2f} MB, "
+              f"{sum(len(v) for v in tiles.values())} tiles ({time.time() - t:.0f} s)")
+        if size <= HT.MAX_BYTES or step == steps[-1]:
+            break
+    if args.write:
+        HT.FILE.write_text(text, encoding="utf-8", newline="\n")
+        print(f"wrote {HT.FILE} ({HT.FILE.stat().st_size // 1024} KB)")
+    return 0
+
+
 def cmd_coast(args) -> int:
     """The seamless map's coastline masks (issue #73): a report; --render X Y R a picture (data/debug/coast/),
     --write Data/Coast.lua and Media/Coast/."""
@@ -1092,6 +1114,12 @@ def main(argv: list[str] | None = None) -> int:
     client_args(sp)
     sp.add_argument("--write", action="store_true", help="write Data/Bridges.lua")
     sp.set_defaults(fn=cmd_bridges)
+
+    sp = sub.add_parser("heights", help="the ground's height per map tile for the road and wall tools (Data/Heights.lua)")
+    client_args(sp)
+    sp.add_argument("--write", action="store_true", help="write Data/Heights.lua")
+    sp.add_argument("--step", type=int, choices=(2, 4), help="the grid: every 2 (8 yd) or 4 (16 yd) of a tile's 128 quads")
+    sp.set_defaults(fn=cmd_heights)
 
     sp = sub.add_parser("coast", help="the seamless map's coastline masks (Data/Coast.lua, Media/Coast/)")
     sp.add_argument("--write", action="store_true", help="write Data/Coast.lua and Media/Coast/*.tga")

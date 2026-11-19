@@ -54,6 +54,7 @@ def read_tracks(wtf_account_dir: Path) -> list[dict]:
                 **heights,
                 **recorded_of(t, len(pts) // 2),
                 **edit_of(t, len(pts) // 2),
+                **ground_of(t, len(pts) // 2),
             })
     return tracks
 
@@ -186,6 +187,17 @@ def heights_of(t: dict, n: int) -> dict:
     return out
 
 
+def ground_of(t: dict, n: int) -> dict:
+    """A drawn road's ground heights from the map's data (Ground.lua, 1.3.10, issue #685): {"gz": [a height or None per
+    point]} when it has a list of `n` with at least one height; {} otherwise. Taken in as the road's starting heights
+    (`gz` on its feature), never as a floor (`zs`): a land road stays a land road."""
+    raw = _lua_list(t.get("gz"))
+    if len(raw) != n:
+        return {}
+    gz = [round(float(v), 1) if _num(v) else None for v in raw]
+    return {"gz": gz} if any(v is not None for v in gz) else {}
+
+
 def floor_tracks(overrides_dir: Path) -> dict[int, list[dict]]:
     """The drawn roads with their heights (1.1.6's road tools: a height per point, stairs), per continent: the data
     ships them as they were drawn (Data/Roads.lua's ns.FloorTracks) and the addon puts them on its roads as it does a
@@ -243,6 +255,13 @@ def parse_shared(text: str) -> list[dict]:
             heights = {"zs": zs, **({"stair": True} if parts[1] == "stair" else {})}
         elif parts[1] == "stair":
             continue
+        if "gz" in fl:  # (a drawn road's ground heights from the map's data, "-" for none: 1.3.10)
+            try:
+                gz = [None if v == "-" else float(v) for v in fl["gz"].split(",")]
+            except ValueError:
+                gz = []
+            if len(gz) == len(coords) and any(v is not None for v in gz):
+                heights["gz"] = gz
         op = {"area": "remove", "unwallarea": "unwall", "stair": "add"}.get(parts[1], parts[1])
         out.append({"continent": cont, "op": op, "area": parts[1] in ("area", "unwallarea"),
                     "zone": "shared", "time": t, "coords": coords, **floor, **heights})
@@ -268,7 +287,8 @@ def import_shared(text: str, overrides_dir: Path, per_continent: dict | None = N
                 "type": "Feature",
                 "properties": {"op": t["op"], "source": "recorded", "zone": t["zone"], "time": t["time"], "trim": True,
                                **({"area": True} if t["area"] else {}), **floor_of(t),
-                               **{k: t[k] for k in ("zs", "stair") if k in t}},
+                               **{k: t[k] for k in ("zs", "stair") if k in t},
+                               **({"gz": t["gz"]} if t.get("gz") and "zs" not in t and t["op"] == "add" else {})},
                 "geometry": {"type": "LineString", "coordinates": t["coords"]},
             })
             new += 1
@@ -431,7 +451,8 @@ def import_tracks(wtf_account_dir: Path, overrides_dir: Path, per_continent: dic
                     "type": "Feature",
                     "properties": {"op": t["op"], "source": "recorded", "zone": t["zone"], "time": t["time"],
                                    "trim": True, **({"area": True} if t.get("area") else {}), **floor_of(t),
-                                   **{k: t[k] for k in ("zs", "stair") if k in t}},
+                                   **{k: t[k] for k in ("zs", "stair") if k in t},
+                                   **({"gz": t["gz"]} if t.get("gz") and "zs" not in t and t["op"] == "add" else {})},
                     "geometry": {"type": "LineString", "coordinates": t["coords"]},
                 })
             if per_continent is not None:

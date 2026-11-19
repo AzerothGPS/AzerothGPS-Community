@@ -132,7 +132,7 @@ end
 -- `imported` (a player's import in the Import and Share window, asked 2026-10-06): marked `imported`, not `shared`,
 -- and the road watcher leaves them out: the player's own data, never the addon's.
 -- Each { op = "add"|"remove"|"wall"|"unwall", continent, time, pts, area, z, indoors, down, zs (a height per point),
--- stair }. How many added, how many were here already or in the data.
+-- stair, gz (the ground's heights from the map's data) }. How many added, how many were here already or in the data.
 function R.AddShared(list, imported)
   local t = Tracks()
   local have = {}
@@ -145,7 +145,8 @@ function R.AddShared(list, imported)
       t[#t + 1] = { op = s.op, drawn = true, shared = not imported or nil, imported = imported or nil,
         continent = s.continent, zone = s.zone or (imported and "imported" or "shared"), time = s.time, pts = s.pts,
         area = s.area or nil, z = s.z, indoors = s.indoors, down = s.down,
-        zs = type(s.zs) == "table" and #s.zs == #s.pts / 2 and s.zs or nil, stair = s.stair or nil }
+        zs = type(s.zs) == "table" and #s.zs == #s.pts / 2 and s.zs or nil, stair = s.stair or nil,
+        gz = type(s.gz) == "table" and #s.gz == #s.pts / 2 and s.gz or nil }
       R.thisSession[t[#t]] = true
       have[s.time] = true
       n = n + 1

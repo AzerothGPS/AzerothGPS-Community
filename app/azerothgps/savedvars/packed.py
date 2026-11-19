@@ -26,4 +26,6 @@ def unpacked(rec):
         out["pts"] = unpack_numbers(out.pop("pk"))
     if isinstance(out.get("zk"), str) and not out.get("zs"):
         out["zs"] = unpack_numbers(out.pop("zk"))
+    if isinstance(out.get("gk"), str) and not out.get("gz"):  # (a drawn road's ground heights: 1.3.10, issue #685)
+        out["gz"] = unpack_numbers(out.pop("gk"))
     return out
