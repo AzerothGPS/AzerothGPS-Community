@@ -2221,7 +2221,9 @@ local function RideInstead(cont, sx, sy, d, walk, tps, opts, sz)
     won = rideCheck[key]
     if won == nil then won = rideLast[stopKey] end
   else
-    N.lastRideCheck = (N.lastRideCheck or "") .. " [remembered]"
+    -- (once: added on every recalculation, the 2026-11-18 capture's said it 60 times over)
+    local said = N.lastRideCheck or ""
+    if said:sub(-13) ~= " [remembered]" then N.lastRideCheck = said .. " [remembered]" end
   end
   if not won then return nil, nil, won end
   -- (the ride that won the check is the one taken: planned again past a long way round, or from the check's spot)
@@ -3047,6 +3049,17 @@ function N.StopLevel(cont, x, y)
 end
 
 local Apply, Rejoin
+-- The jobs of a reroute off the route (N.Route): while one is queued, the pump's bigger slices (GPS.PumpBudget), so the
+-- route from where the player went lands in a few frames, not the 1 ms a frame of a route being kept up.
+local hurried
+function N.Rerouting()
+  local R = ns.Router
+  for _, key in ipairs(hurried or {}) do
+    if R.Queued and R.Queued(key) then return true end
+  end
+  hurried = nil
+  return false
+end
 -- The route from (px, py) worked out: the stretch to the next stop and those after it (a few more
 -- each call), assembled; nil when there's no way.
 local function Compute(px, py, cont, d, offroad)
@@ -3309,20 +3322,21 @@ function N.Route(px, py, cont)
   -- the player is long (off it: rejoined, a short way back onto it ahead), and any route the player
   -- is still on, `old` shown meanwhile (a finished search's recalculation routed the whole plan in
   -- the frame when the walk from the player was short: the 50 to 170 ms frames of the overnight trip
-  -- sweeps, 2026-10-07). Off the route with no walk to rejoin: at once (the player went another way,
-  -- and a stale route shown while slices run would point them back).
+  -- sweeps, 2026-10-07). Off the route too (asked 2026-11-18, "long routes going off course is causing lag spikes for
+  -- each route": off the route with a short walk from the player, the whole plan, a trip across continents and its
+  -- rides, was worked out in the frame, 20 to 40 ms each time, again every REROUTE_SECONDS while off it; with a long
+  -- walk, the way back on routed in the frame): first in the queue with the bigger slices (N.Rerouting), the route as
+  -- it was shown for those few frames, then the one from where the player went.
   local long = old and old.fullFirst and old.cum and (old.cum[#old.cum] - (old.consumed or 0)) >= N.REJOIN_MIN_YD
-  if ns.Router.WARM and not ns.Router.SYNC_WALKS -- (as in game; tests: at once)
-      and (not old or long or Follow(old, px, py)) then
-    if old and not Follow(old, px, py) then
-      local rj = Rejoin(old, px, py, cont, offroad)
-      if rj then Apply(rj, nil, px, py, cont, offroad, now) end
-    elseif old and N.route == nil then
+  if ns.Router.WARM and not ns.Router.SYNC_WALKS then -- (as in game; tests: at once)
+    local off = old and not Follow(old, px, py)
+    if old and N.route == nil then
       -- (still on it, the route dropped for a finished search's recalculation: shown meanwhile, not
       -- "Working out the route..." with no route every few seconds while riding past searched ground)
       N.route = old
     end
-    ns.Router.Background("route:" .. version .. ":" .. tostring(offroad), function()
+    local key = "route:" .. version .. ":" .. tostring(offroad)
+    ns.Router.Background(key, function()
       return Compute(px, py, cont, d, offroad)
     end, function(res)
       -- (still this route's stops: in, unless the one shown is clearly shorter; from where the
@@ -3331,7 +3345,22 @@ function N.Route(px, py, cont)
       local cur = N.route or kept
       if cur and not (cur.version == version and cur.cont == res.cont) then cur = nil end
       Apply(res, cur, N.playerX or px, N.playerY or py, res.cont, offroad, GetTime(), true)
-    end)
+    end, off)
+    if off then
+      hurried = { key }
+      if long then
+        -- (a short way back onto the long walk, ahead of the route worked out again: queued after it, run before it)
+        local v, rkey = version, "rejoin:" .. version .. ":" .. tostring(offroad)
+        hurried[2] = rkey
+        ns.Router.Background(rkey, function()
+          return Rejoin(old, px, py, cont, offroad) or false
+        end, function(rj)
+          if rj and v == version and (N.route == old or N.route == nil) then
+            Apply(rj, nil, N.playerX or px, N.playerY or py, cont, offroad, GetTime(), true)
+          end
+        end, true)
+      end
+    end
     -- (queued now, or already: what's shown meanwhile, never worked out in the frame as well)
     N.warming = N.route == nil or nil
     return N.route

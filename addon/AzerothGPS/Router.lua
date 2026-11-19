@@ -2546,16 +2546,33 @@ function R.HasWork() return walkJobs[1] ~= nil end
 -- Other work in the background, pumped with the searches: fn() (it may route: a route's search
 -- pauses every ROUTE_BREATHE nodes when run here), then done(result) with what it returned. One
 -- job per key at a time. (Tests, SYNC_WALKS: at once.) False when that key's job is queued already.
+-- `first`: ahead of the searches and the other jobs (after a road network being built), and that key's job already
+-- queued moved there: a reroute off the route, the player waiting on it (it ran in the frame, a hitch every time).
 R.ROUTE_BREATHE = 10
-function R.Background(key, fn, done)
-  if walkQueued[key] then return false end
+local function FrontAt()
+  local at = 1
+  while walkJobs[at] and walkJobs[at].warm do at = at + 1 end
+  return at
+end
+function R.Background(key, fn, done, first)
+  if walkQueued[key] then
+    for i, j in ipairs(first and walkJobs or {}) do
+      if j.key == key then
+        local job = table.remove(walkJobs, i)
+        table.insert(walkJobs, FrontAt(), job)
+        break
+      end
+    end
+    return false
+  end
   if R.SYNC_WALKS then
     local result = fn()
     if done then done(result) end
     return true
   end
   walkQueued[key] = true
-  walkJobs[#walkJobs + 1] = { key = key, bg = true, done = done, co = coroutine.create(fn) }
+  local job = { key = key, bg = true, done = done, co = coroutine.create(fn) }
+  if first then table.insert(walkJobs, FrontAt(), job) else walkJobs[#walkJobs + 1] = job end
   return true
 end
 -- Building a road network in the background: it gets more of each frame than searches do.
