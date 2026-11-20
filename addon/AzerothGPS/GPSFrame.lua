@@ -6955,8 +6955,45 @@ end
 -- The world map opened, closed or resized: the map into it, or back.
 -- (Its own record of what it last saw, `st.seen`: G.ApplySettings sets `st.on` too, as it sees the world map open. Each
 -- call is in the debug log, kept from login; an error in setting it up is logged, not lost in the game's OnShow.)
+-- Escape kept from closing the world map with the GPS map in it (Options > Map, "Escape closes the map" off; asked
+-- 2026-11-20). The map in its own window never closes on Escape; in the world map, the game's own Escape closes it. A
+-- keyboard frame, shown only while the GPS map is in the open world map, eats Escape and passes every other key on.
+-- Not in combat (the game won't let its keys be changed then): hidden as a fight starts, Escape closes the map as usual.
+function G.EscCatcherWanted()
+  local st = ns.settings and ns.settings.gps
+  if G.clone or not st or st.escClosesMap ~= false then return false end
+  if InCombatLockdown and InCombatLockdown() then return false end
+  return G.WorldMapHosted()
+end
+function G.UpdateEscCatcher()
+  if G.clone then return end
+  local want = G.EscCatcherWanted()
+  local c = G.escCatcher
+  if not want then
+    if c then c:Hide() end
+    return
+  end
+  if not c then
+    c = CreateFrame("Frame", nil, UIParent)
+    if c.EnableKeyboard then c:EnableKeyboard(true) end
+    c:SetScript("OnKeyDown", function(self, key)
+      local eat = key == "ESCAPE" and not (InCombatLockdown and InCombatLockdown())
+      if self.SetPropagateKeyboardInput then pcall(self.SetPropagateKeyboardInput, self, not eat) end
+    end)
+    c:RegisterEvent("PLAYER_REGEN_DISABLED")
+    c:RegisterEvent("PLAYER_REGEN_ENABLED")
+    c:SetScript("OnEvent", function(self, event)
+      if event == "PLAYER_REGEN_DISABLED" then self:Hide() else G.UpdateEscCatcher() end
+    end)
+    c:Hide()
+    G.escCatcher = c
+  end
+  if c.SetPropagateKeyboardInput then pcall(c.SetPropagateKeyboardInput, c, true) end
+  c:Show()
+end
 function G.WorldMapChanged()
   if not frame then return end
+  pcall(G.UpdateEscCatcher)
   local on = G.WorldMapHosted()
   local w, h = 0, 0
   if on then w, h = G.WorldMapSize() end
@@ -10752,6 +10789,7 @@ end
 
 function G.ApplySettings()
   G.ApplySeamPlayer() -- (the OpenMap stages the player set, Options > Map)
+  pcall(G.UpdateEscCatcher) -- (Escape closes the map, Options > Map)
   G.ApplyArrowLook() -- (Icon size: the player's arrow grows with it)
   if not frame then return end
   local st = S()

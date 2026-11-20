@@ -17,6 +17,7 @@ ns.DEFAULTS = {
     minimapShape = "auto", -- the game's minimap: "auto" (GPS.MinimapSquare), "round", "square"
     replaceMinimap = false, -- the GPS map as the game's minimap (1.2.0, asked 2026-11-08; GPSFrame's G.MinimapMode)
     useWorldMap = false, -- the GPS map in the game's world map window, not one of its own (1.2.0, asked 2026-11-10)
+    escClosesMap = true, -- Escape closes the world map with the GPS map in it, as the game's own does (off: asked 2026-11-20)
     replaceMinimapKeepSquare = true, -- the square kept as it is while the map is grown out of it, both shown (asked
     -- 2026-11-15; off: the game's minimap given back meanwhile; GPSFrame's G.SquareKeptOut)
     replaceMinimapIdle = 5, -- s of quiet before the map grown out of the square goes back (0: never; asked 2026-11-11)

@@ -1860,6 +1860,11 @@ local function BuildWindow()
     function() return GPS().useWorldMap == true end, function(v) GPS().useWorldMap = v and true or false end,
     -- (gray with the game's controller UI on: GPSFrame's G.WorldMapWanted)
     function() return not (ns.GPS and ns.GPS.ControllerUI and ns.GPS.ControllerUI()) end)
+  -- (asked 2026-11-20: "Esc by default closes the map, add an option for disabling this")
+  Key("escClosesMap")
+  check(L["Escape closes the map"], L["In the game's world map, Escape closes it with the GPS map, as the game's own map does. Off: Escape leaves it open; close it with its key or button. In combat, Escape always closes it. The GPS map in its own window never closes on Escape."],
+    function() return GPS().escClosesMap ~= false end, function(v) GPS().escClosesMap = v and true or false end,
+    function() return GPS().useWorldMap == true end, INDENT)
   O.worldMapPictures = pictures({ "window", L["GPS map window"] }, { "worldMap", L["In the world map"] },
     function() return GPS().useWorldMap == true end, function(v) GPS().useWorldMap = v and true or false end,
     function() return not (ns.GPS and ns.GPS.ControllerUI and ns.GPS.ControllerUI()) end)

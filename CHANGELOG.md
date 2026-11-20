@@ -4,6 +4,10 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 ## 1.3.12 (in progress)
 
+### New
+
+- Options > Map: Escape closes the map can be turned off, to keep the GPS map in the world map open.
+
 ## 1.3.11
 
 ### Fixed
