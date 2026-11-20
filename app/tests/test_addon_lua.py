@@ -5179,6 +5179,62 @@ def test_farming_loop_goes_round(nav_env):
     assert not ns.Nav.loop
 
 
+def _scatter(n, seed, size=600.0):
+    """n points spread over a square, the same each run (a small LCG)."""
+    out, s = [], seed
+    for _ in range(n):
+        s = (s * 1103515245 + 12345) % 2 ** 31
+        x = s / 2 ** 31 * size
+        s = (s * 1103515245 + 12345) % 2 ** 31
+        out.append((x, s / 2 ** 31 * size))
+    return out
+
+
+def _loop_nodes(lua, pts):
+    return lua.eval("{ " + ", ".join(f"{{ x = {x}, y = {y}, cont = 0, name = 'Silverleaf' }}" for x, y in pts) + " }")
+
+
+def test_a_farming_loop_starts_at_the_node_nearest_the_player(nav_env):
+    # (Kooki3z, 2026-11-19, a loop drawn round the Headland in Hillsbrad: the first stop ~1k yd away across the loop with
+    # nodes all round the player. The loop's shortening (2-opt) reverses stretches of it, the first stop with them)
+    lua, ns = nav_env
+    N = ns.Nav
+    bad = []
+    for seed in range(1, 40):
+        pts = _scatter(25, seed)
+        px, py = pts[seed % 25][0] + 7, pts[seed % 25][1] - 5  # (the player beside one of them)
+        order = N.LoopOrder(_loop_nodes(lua, pts), px, py)
+        first = pts[order[1] - 1]
+        nearest = min(pts, key=lambda p: (p[0] - px) ** 2 + (p[1] - py) ** 2)
+        if first != nearest:
+            bad.append(seed)
+        # (still a loop through every one, once)
+        assert sorted(order[k] for k in range(1, 26)) == list(range(1, 26))
+    assert not bad, f"loops not starting at the nearest node: seeds {bad}"
+
+
+def test_a_farming_loop_of_too_many_nodes_takes_the_nearest(nav_env):
+    # ("the nearest 60 at most": a loop over more than MAX_LOOP_STOPS took the first 60 of the whole loop, wherever they
+    # were, and jumped back across the area from the 60th to the 1st)
+    lua, ns = nav_env
+    N = ns.Nav
+    pts = _scatter(150, 7, size=2000.0)
+    px, py = 1000.0, 1000.0
+    try:
+        N.SetLoop(_loop_nodes(lua, pts), px, py)
+        n = len(N.stops)
+        assert n == N.MAX_LOOP_STOPS
+        d = sorted(((x - px) ** 2 + (y - py) ** 2) ** 0.5 for x, y in pts)
+        cut = d[n - 1]
+        for k in range(1, n + 1):
+            s = N.stops[k]
+            assert ((s.x - px) ** 2 + (s.y - py) ** 2) ** 0.5 <= cut + 1e-6
+        s1 = N.stops[1]
+        assert ((s1.x - px) ** 2 + (s1.y - py) ** 2) ** 0.5 == pytest.approx(d[0])
+    finally:
+        N.Clear()
+
+
 def test_shared_map_pin_becomes_a_stop(importer):
     # A map pin link from chat ("worldmap:<map>:<x>:<y>", 1/10000 of the map): a stop at
     # that spot, named after the zone and coordinates; added to a route, or a new one.

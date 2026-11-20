@@ -962,17 +962,40 @@ function N.LoopOrder(pts, px, py)
       end
     end
   end
-  return order
+  -- (the shortening reverses stretches of the loop, its first stop with them: Kooki3z, 2026-11-19, a loop round
+  -- Hillsbrad's Headland started ~1k yd away with nodes all round. The loop the same length from any of its stops: it
+  -- starts again at the one nearest the player, going the way whose next stop is nearer)
+  local k0, bd = 1, nil
+  local here = { x = px, y = py }
+  for k = 1, n do
+    local dk = d(here, pts[order[k]])
+    if not bd or dk < bd then k0, bd = k, dk end
+  end
+  local fwd = d(pts[order[k0]], pts[order[k0 % n + 1]]) <= d(pts[order[k0]], pts[order[(k0 - 2) % n + 1]])
+  local out = {}
+  for j = 0, n - 1 do
+    out[j + 1] = order[fwd and ((k0 - 1 + j) % n + 1) or ((k0 - 1 - j) % n + 1)]
+  end
+  return out
 end
 
 -- A farming loop through `nodes` ({ x, y, cont, name }): visited round and round, each
--- reached one moving to the end. Starts at the node nearest the player.
+-- reached one moving to the end. Starts at the node nearest the player. More than MAX_LOOP_STOPS: the nearest that
+-- many, looped (the first MAX_LOOP_STOPS of a loop through all of them went anywhere in the area and jumped back).
 function N.SetLoop(nodes, px, py)
   if Locked() then return false end
-  local order = N.LoopOrder(nodes, px or nodes[1].x, py or nodes[1].y)
+  px, py = px or nodes[1].x, py or nodes[1].y
+  if #nodes > N.MAX_LOOP_STOPS then
+    local near = {}
+    for i = 1, #nodes do near[i] = nodes[i] end
+    local function d2(a) return (a.x - px) ^ 2 + (a.y - py) ^ 2 end
+    table.sort(near, function(a, b) return d2(a) < d2(b) end)
+    nodes = {}
+    for i = 1, N.MAX_LOOP_STOPS do nodes[i] = near[i] end
+  end
+  local order = N.LoopOrder(nodes, px, py)
   N.stops = {}
   for k, i in ipairs(order) do
-    if k > N.MAX_LOOP_STOPS then break end
     local c = Copy(nodes[i])
     c.icon = N.MarkerFor(k)
     N.stops[k] = c
