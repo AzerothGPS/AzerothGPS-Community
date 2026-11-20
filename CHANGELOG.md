@@ -29,6 +29,8 @@ Each version's section is its release notes (GitHub and CurseForge).
 - New option, Routing > Allow swimming: off, routes go round by land wherever there's a way.
 - With GatherMate2 installed, Import From GatherMate2 in the map menu's herbs and ore group adds its herbs and mines to yours, and every one GatherMate2_Data lists when that's installed; it glows when there's new data to import.
 - Options > Map icons: Remove Unconfirmed Herbs and Ore takes out imported ones you haven't gathered, after asking.
+- Herbs and veins your skill is too low for say so in red when you point at them, "Requires Mining 125".
+- Find Herbs and Ore: Available shows only the herbs and veins your skill can gather, and follows your skill as it goes up.
 
 ### Fixed
 
@@ -36,6 +38,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - On a client in another language than English, places are found by the name the game gives them: Gnomeregan's Train Depot shows its inside map, not Dun Morogh's terrain; up top in the Ruins of Lordaeron counts as up top; the hearthstone's inn is found; rooms' labels on inside maps are in your language. (thanks, DarkByteZero)
 - On a client in another language than English, the herbs and veins you gather are saved: their names are learned from the tooltip's profession line in your language ("Bergbau", "Kräuterkunde"). (thanks, DarkByteZero)
 - A farming area's route starts at the node nearest you, and with more than 60 nodes it takes the 60 nearest.
+- With Find Herbs and Ore open, the map opened from the minimap no longer closes by itself, and its search box no longer sits on the text above it.
 - Walks from Tarren Mill's flight master head south-east again, not round by the town.
 - Routes no longer swim far out to sea where fatigue sets in, such as from the Wetlands across to Southshore; they keep near the shore.
 - A swim you removed, or left out with Allow swimming off, no longer comes back along the shore when the route is worked out again.

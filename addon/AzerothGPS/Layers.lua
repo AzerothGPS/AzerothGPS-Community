@@ -290,8 +290,10 @@ end
 function Lay.NodesInPolygon(cont, poly, kinds, names)
   local out = {}
   local db = DB()
+  local avail = Lay.AvailableOnly() -- (Find Herbs and Ore's Available on: only those the character's skill gathers)
   for _, n in ipairs(db and db[cont] or {}) do
-    if (not kinds or kinds[n[4]]) and (not names or names[n[3]]) and Lay.IsNode(n) and Lay.InPolygon(n[1], n[2], poly) then
+    if (not kinds or kinds[n[4]]) and (not names or names[n[3]]) and Lay.IsNode(n)
+        and (not avail or Lay.CanGather(n[3], n[4])) and Lay.InPolygon(n[1], n[2], poly) then
       out[#out + 1] = { x = n[1], y = n[2], cont = cont, name = n[3], tex = Lay.NodeIcon(n[4], n[3]) }
     end
   end
@@ -327,6 +329,82 @@ local function Professions()
 end
 Lay.Professions = Professions
 
+-- The skill each herb and vein needs (asked 2026-11-19: "for nodes that require a certain skill level ... if the player
+-- doesn't have the required skill level then say in red in the tooltip like 'Requires Mining 125'"). Classic's. One
+-- not here (WoW Forever's own, learned by tooltip): 1.
+Lay.NODE_SKILL = {
+  ["Peacebloom"] = 1, ["Silverleaf"] = 1, ["Stunted Silverleaf"] = 1, ["Earthroot"] = 15, ["Mageroyal"] = 50,
+  ["Briarthorn"] = 70, ["Stranglekelp"] = 85, ["Bruiseweed"] = 100, ["Wild Steelbloom"] = 115, ["Grave Moss"] = 120,
+  ["Kingsblood"] = 125, ["Liferoot"] = 150, ["Fadeleaf"] = 160, ["Goldthorn"] = 170, ["Khadgar's Whisker"] = 185,
+  ["Wintersbite"] = 195, ["Firebloom"] = 205, ["Purple Lotus"] = 210, ["Arthas' Tears"] = 220, ["Sungrass"] = 230,
+  ["Blindweed"] = 235, ["Ghost Mushroom"] = 245, ["Gromsblood"] = 250, ["Golden Sansam"] = 260, ["Dreamfoil"] = 270,
+  ["Mountain Silversage"] = 280, ["Plaguebloom"] = 285, ["Icecap"] = 290, ["Black Lotus"] = 300,
+  ["Copper Vein"] = 1, ["Poor Copper Vein"] = 1, ["Tin Vein"] = 65, ["Incendicite Mineral Vein"] = 65,
+  ["Silver Vein"] = 75, ["Ooze Covered Silver Vein"] = 75, ["Lesser Bloodstone Deposit"] = 75, ["Iron Deposit"] = 125,
+  ["Indurium Mineral Vein"] = 150, ["Gold Vein"] = 155, ["Ooze Covered Gold Vein"] = 155, ["Mithril Deposit"] = 175,
+  ["Ooze Covered Mithril Deposit"] = 175, ["Truesilver Deposit"] = 230, ["Ooze Covered Truesilver Deposit"] = 230,
+  ["Dark Iron Deposit"] = 230, ["Small Thorium Vein"] = 245, ["Ooze Covered Thorium Vein"] = 245,
+  ["Rich Thorium Vein"] = 275, ["Ooze Covered Rich Thorium Vein"] = 275, ["Hakkari Thorium Vein"] = 275,
+  ["Small Obsidian Chunk"] = 305, ["Large Obsidian Chunk"] = 310,
+}
+
+-- The character's Herbalism and Mining skill: { herb = rank, ore = rank } (0 without the profession). Kept until the
+-- skills change (SKILL_LINES_CHANGED, CHAT_MSG_SKILL: L.OnSkillChanged).
+local rankCache
+function Lay.SkillRanks()
+  if rankCache then return rankCache end
+  local ranks = { herb = 0, ore = 0 }
+  pcall(function()
+    local want = {}
+    for kind, spell in pairs(Lay.GATHER_SPELLS) do
+      want[Lay.PROFESSION[kind]] = kind
+      local sname = SpellName(spell)
+      if sname then want[sname] = kind end
+    end
+    for i = 1, GetNumSkillLines() do
+      local name, isHeader, _, rank = GetSkillLineInfo(i)
+      if not isHeader and want[name] then ranks[want[name]] = math.max(ranks[want[name]], tonumber(rank) or 0) end
+    end
+  end)
+  rankCache = ranks
+  return ranks
+end
+
+-- The skill a node needs (1 when not known), and whether the character has it.
+function Lay.NodeSkill(name) return Lay.NODE_SKILL[name] or 1 end
+function Lay.CanGather(name, kind)
+  return (Lay.SkillRanks()[kind] or 0) >= Lay.NodeSkill(name)
+end
+
+-- The tooltip's red line for one the character can't gather yet ("Requires Mining 125"), or nil.
+function Lay.SkillNote(name, kind)
+  if Lay.CanGather(name, kind) then return nil end
+  local need = Lay.NodeSkill(name)
+  return "|cffff3030" .. Format(kind == "ore" and L["Requires Mining %d"] or L["Requires Herbalism %d"], need) .. "|r"
+end
+
+-- Find Herbs and Ore's Available (asked 2026-11-19: "filter for only icons they have the skill to actually mine or
+-- gather the herb", kept up to date as the skill goes up): `gps.nodeAvailable`.
+function Lay.AvailableOnly(st)
+  st = st or (ns.settings and ns.settings.gps)
+  return (st and st.nodeAvailable == true) and true or false
+end
+function Lay.SetAvailableOnly(on)
+  ns.settings.gps.nodeAvailable = on and true or false
+  Lay.version = Lay.version + 1
+  if Lay.finder and Lay.finder:IsShown() and Lay.finder.Refresh then Lay.finder.Refresh() end
+  if ns.GPS and ns.GPS.RefreshQuick then pcall(ns.GPS.RefreshQuick) end
+  if ns.GPS and ns.GPS.Redraw then pcall(ns.GPS.Redraw) end
+end
+
+-- A skill went up (or a profession learned or dropped): the ranks read again, the map drawn again (Available's list,
+-- the red lines).
+function Lay.OnSkillChanged()
+  rankCache, profCache = nil, nil
+  Lay.version = Lay.version + 1
+  if Lay.finder and Lay.finder:IsShown() and Lay.finder.Refresh then Lay.finder.Refresh() end
+end
+
 -- The node kinds shown on the map (the Herbs and Ore layers), which a farming area uses too.
 function Lay.VisibleKinds(st)
   st = st or ns.settings.gps
@@ -348,7 +426,9 @@ function Lay.NodeShown(name, kind, st, kinds, filter)
   kinds = kinds or Lay.VisibleKinds(st)
   if not kinds[kind] then return false end
   filter = filter or Lay.NodeFilter(st)
-  return not filter or filter[name] == true
+  if filter and filter[name] ~= true then return false end
+  if Lay.AvailableOnly(st) and not Lay.CanGather(name, kind) then return false end -- (Available: their skill's only)
+  return true
 end
 
 -- Pick a herb or vein to show (`on`), or put it back; `name` nil with `on` false: none picked, every one shown. A pick
@@ -1516,12 +1596,14 @@ function Lay.Marks(cont, cx, cy, reach, mapIDs, level, questsOnly, shown)
         -- (the item gathering it gives, else the gathering spell's: game icons, drawn at their exact size)
         local icon = Lay.NodeIcon(n[4], n[3])
         local ore = n[4] == "ore"
+        local need = Lay.SkillNote(n[3], n[4]) -- (red: "Requires Mining 125", the character's skill too low)
+        local function note(text) return need and (text .. "\n" .. need) or text end
         if n[6] then
           put(n[1], n[2], icon or "Interface\\Icons\\INV_Misc_QuestionMark", n[3],
-            ore and L["Mining node (imported, not confirmed yet: gather it to confirm)"]
-              or L["Herb (imported, not confirmed yet: gather it to confirm)"], 16, 0.55, 0.55, 0.55, nil, nil, nil, nil, nil, true)
+            note(ore and L["Mining node (imported, not confirmed yet: gather it to confirm)"]
+              or L["Herb (imported, not confirmed yet: gather it to confirm)"]), 16, 0.55, 0.55, 0.55, nil, nil, nil, nil, nil, true)
         else
-          put(n[1], n[2], icon or "Interface\\Icons\\INV_Misc_QuestionMark", n[3], ore and L["Mining node"] or L["Herb"], 16, nil, nil, nil, nil, nil, nil, nil,
+          put(n[1], n[2], icon or "Interface\\Icons\\INV_Misc_QuestionMark", n[3], note(ore and L["Mining node"] or L["Herb"]), 16, nil, nil, nil, nil, nil, nil, nil,
             nil, true)
         end
       end
@@ -2680,6 +2762,8 @@ function Lay.Init()
     C_Timer.After(0.3, function() Lay.OnGossipPoi(true) end)
   end
   f:RegisterEvent("UI_ERROR_MESSAGE")
+  pcall(f.RegisterEvent, f, "SKILL_LINES_CHANGED") -- (Herbalism or Mining up: L.OnSkillChanged)
+  pcall(f.RegisterEvent, f, "CHAT_MSG_SKILL")
   pcall(f.RegisterEvent, f, "LOOT_OPENED") -- (what a node gave: its icon, L.OnLootOpened)
   pcall(f.RegisterEvent, f, "LOOT_READY")
   f:SetScript("OnUpdate", OnUpdate)
@@ -2724,6 +2808,8 @@ function Lay.Init()
       end
     elseif event == "LOOT_OPENED" or event == "LOOT_READY" then
       pcall(Lay.OnLootOpened, GetTime())
+    elseif event == "SKILL_LINES_CHANGED" or event == "CHAT_MSG_SKILL" then
+      Lay.OnSkillChanged()
     elseif event == "UI_ERROR_MESSAGE" then -- (errorType, message)
       local px, py, cont = Geo.RealPlayerWorld() -- (where the player really gathers, simulated or not)
       Lay.OnGatherError(a, GetTime(), px, py, cont)
@@ -2783,6 +2869,7 @@ end
 
 Lay.FINDER_ROWS = 12
 Lay.FINDER_ROW_H = 20
+Lay.FINDER_GAP = 8 -- room between the hint, the search box and the list
 
 -- What the finder's last line says: "Showing all herbs and ore" or the names picked.
 function Lay.FilterText()
@@ -2811,18 +2898,22 @@ function Lay.ShowNodeFinder()
     Lay.finder = f
     local hint = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     hint:SetPoint("TOPLEFT", 14, f.top - 4)
-    hint:SetPoint("RIGHT", -14, 0)
+    hint:SetWidth(W - 28)
     hint:SetJustifyH("LEFT")
     hint:SetText(L["Type a name, then click herbs or veins to show only those on the map."])
+    -- (under the hint by its own height, two lines in English, with room: asked 2026-11-19, the box was on the hint's
+    -- second line)
+    local hintH = math.max(12, math.ceil(tonumber(hint:GetStringHeight()) or 0))
+    local boxTop = f.top - 4 - hintH - Lay.FINDER_GAP
     local box = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
     box:SetSize(W - 34, 20)
-    box:SetPoint("TOPLEFT", 20, f.top - 22)
+    box:SetPoint("TOPLEFT", 20, boxTop)
     box:SetAutoFocus(false)
     box:SetMaxLetters(40)
-    f.box = box
+    f.box, f.hint = box, hint
     local rows, list, offset = {}, {}, 0
     f.rows = rows
-    local listTop = f.top - 48
+    local listTop = boxTop - 20 - Lay.FINDER_GAP
     for i = 1, Lay.FINDER_ROWS do
       local r = CreateFrame("Button", nil, f)
       r:SetSize(W - 28, Lay.FINDER_ROW_H)
@@ -2859,6 +2950,30 @@ function Lay.ShowNodeFinder()
     all:SetText(L["Show All"])
     all:SetScript("OnClick", function() Lay.SetNodeFilter(nil, false) end)
     f.showAll = all
+    -- Available (asked 2026-11-19): only the herbs and veins the character's skill gathers, on the map and in a farming
+    -- area; "on" in green or "off" in red beside it.
+    local avail = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    avail:SetSize(90, 22)
+    avail:SetPoint("BOTTOMLEFT", 12, 10)
+    avail:SetText(L["Available"])
+    local tw = avail.GetTextWidth and avail:GetTextWidth()
+    if tw and tw + 24 > 90 then avail:SetWidth(tw + 24) end -- (a longer language's word)
+    local state = f:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    state:SetPoint("LEFT", avail, "RIGHT", 6, 0)
+    f.available, f.availableState = avail, state
+    avail:SetScript("OnClick", function(self)
+      Lay.SetAvailableOnly(not Lay.AvailableOnly())
+      if GameTooltip:GetOwner() == self then self:GetScript("OnEnter")(self) end
+    end)
+    avail:SetScript("OnEnter", function(self)
+      GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+      GameTooltip:SetText(L["Available"], 1, 1, 1)
+      GameTooltip:AddLine(L["On: only the herbs and veins your Herbalism and Mining skill can gather show on the map, and a farming area uses only those. It follows your skill as it goes up. Off: every one shows, those your skill is too low for say so when you point at them."], nil, nil, nil, true)
+      local r = Lay.SkillRanks()
+      GameTooltip:AddLine(Format(L["Your skill: Herbalism %d, Mining %d"], r.herb or 0, r.ore or 0), 0.8, 0.8, 0.8)
+      GameTooltip:Show()
+    end)
+    avail:SetScript("OnLeave", GameTooltip_Hide)
     f:SetHeight(-listTop + Lay.FINDER_ROWS * Lay.FINDER_ROW_H + 74)
     function f.Refresh()
       list = Lay.NodeNames(box:GetText())
@@ -2886,6 +3001,8 @@ function Lay.ShowNodeFinder()
         math.min(#list, offset + Lay.FINDER_ROWS), #list) or ""
       status:SetText((#list == 0 and L["|cff9d9d9dNo herb or vein by that name.|r\n"] or "") .. Lay.FilterText() .. more)
       all:SetEnabled(Lay.NodeFilter() ~= nil)
+      local on = Lay.AvailableOnly()
+      state:SetText(on and ("|cff40ff40" .. L["on"] .. "|r") or ("|cffff4040" .. L["off"] .. "|r"))
     end
     f:EnableMouseWheel(true)
     f:SetScript("OnMouseWheel", function(_, delta)
