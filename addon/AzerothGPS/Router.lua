@@ -289,11 +289,28 @@ end
 -- The tracks to put on (Router.WithTracks): those an edit replaced left out (`replaces`: the time of the one edited;
 -- `rpart`: one piece of it, a recorded walk's or a split edit's, by its `part`; none: all of it), each edit with a
 -- stairs stretch as its pieces.
+-- A lift as one straight ride, its first point to its last (and their heights): a recorded one kept every point walked,
+-- 2 yd apart, with heights ramped between, so it went on as a chain of short steep roads whose top ones went as a
+-- dead-end stub, and its top never met the bridge at the tower (Kooki3z 2026-11-20, Freewind Post: the route rode
+-- the lift up and hopped through the air to the other tower).
+function R.LiftOnePiece(t)
+  local p = t.pts
+  if t.kind ~= "lift" or type(p) ~= "table" or #p <= 4 then return t end
+  local c = {}
+  for k, v in pairs(t) do c[k] = v end
+  local n = #p
+  c.pts = { p[1], p[2], p[n - 1], p[n] }
+  if type(t.zs) == "table" then c.zs = { t.zs[1], t.zs[#t.zs] } end
+  if type(t.gz) == "table" then c.gz = { t.gz[1], t.gz[#t.gz] } end
+  c.stairs, c.rec = nil, nil
+  return c
+end
 function R.ExpandTracks(tracks)
   local gone = R.ReplacedSet(tracks)
   local any = next(gone) ~= nil
   local out = {}
   for _, t in ipairs(tracks or {}) do
+    t = R.LiftOnePiece(t)
     if not (any and R.Replaced(gone, t)) then
       if t.stairs and not t.recorded then
         for _, p in ipairs(R.TrackPieces(t)) do out[#out + 1] = p end
@@ -1121,7 +1138,9 @@ function R.WithTracks(roads, tracks, cont)
           if fl then fl.at = z end
           for _, ed in ipairs(near(x - over, x + over, y - over, y + over)) do
             local bb = EdgeBox(ed)
-            if not sameWalk(ed) and math.max(bb[1] - x, 0, x - bb[2]) ^ 2 + math.max(bb[3] - y, 0, y - bb[4]) ^ 2 < best then
+            -- (never along a lift or crossing it: a ride up or down, not a road a stairs or a walk at its foot replaces;
+            -- Freewind Post's stairs ran on in line with the lift at its foot and cut it out, 2026-11-20)
+            if not sameWalk(ed) and not (kindOf[ed] == "lift" or ed[4] == R.SOURCE_LIFT) and math.max(bb[1] - x, 0, x - bb[2]) ^ 2 + math.max(bb[3] - y, 0, y - bb[4]) ^ 2 < best then
               local d2, along, _, _, vx, vy = Closest(ed, x, y)
               if d2 and d2 < best and onFloor(ed, x, y, along, over) then best, bvx, bvy = d2, vx, vy end
             end
