@@ -5526,6 +5526,22 @@ def test_our_icons_on_the_games_minimap_are_named_on_hover(game):
         lua.execute("GameTooltip._owner = Minimap GameTooltip._shown = true")
         assert hover(sx, sy) is None
         lua.execute("GameTooltip._owner = nil GameTooltip._shown = false")
+        # (a screenshot 2026-11-20: the blip's tooltip owned by a frame in the Minimap, not the Minimap: two tooltips on
+        # top of each other.) Ours goes into the game's as a line of its own, once.
+        lua.execute("""
+          AGPS_TIPLINES = {} AGPS_AL, AGPS_NL = GameTooltip.AddLine, GameTooltip.NumLines
+          GameTooltip.NumLines = function() return 0 end -- (the game's tooltip: the blip's name only)
+          GameTooltip.AddLine = function(_, t) AGPS_TIPLINES[#AGPS_TIPLINES + 1] = t end
+          GameTooltip._owner = CreateFrame("Frame", nil, Minimap) GameTooltip._shown = true
+        """)
+        G.mergedTip = None  # (the tooltip hidden between: a new one)
+        try:
+            assert hover(sx, sy) is None and not G.minimapTip._shown
+            assert hover(sx, sy) is None
+            assert list(lua.eval("AGPS_TIPLINES").values()) == ["Mine"]
+        finally:
+            lua.execute("GameTooltip.AddLine, GameTooltip.NumLines = AGPS_AL, AGPS_NL GameTooltip._owner = nil GameTooltip._shown = false")
+        assert hover(sx, sy) == "Mine" and G.minimapTip._shown
         # only while the mouse is over the Minimap: its OnEnter starts the watch, its OnLeave stops it and hides the tip
         w = G.minimapTipWatch
         assert w and not w._shown
