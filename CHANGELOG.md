@@ -2,7 +2,7 @@
 
 Each version's section is its release notes (GitHub and CurseForge).
 
-## 1.3.10 (in progress)
+## 1.3.10
 
 ### New
 
@@ -27,7 +27,9 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Edit Wall: make a wall you drew a cliff, with the ground's height on each side. Routes go round it from below and jump down when the drop is safe.
 - Over a building's inside map, its roads and walls show for editing, the rest faded.
 - With the road or wall tools on, the pointer shows a building's floor heights, and roads drawn there start at the floor's height.
-- Roads: new roads and walls in Arathi Highlands.
+- Roads: new roads and walls in Arathi Highlands, and new roads in Loch Modan.
+- Roads: new road to Tarren Mill's flight master.
+- Roads: more new roads in Stranglethorn Vale.
 - Quest Route can take only the quests you track: the ones Questie's tracker shows, or the ones ticked in the quest log without Questie (Options > Routing). (thanks, DarkByteZero)
 - Roads: the way up Grom'gol's zeppelin tower in Stranglethorn Vale.
 - Walls: a wall moved in the Wetlands.
@@ -82,8 +84,6 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Imported routes now visit their stops in the order listed, on by default; untick "Route in the listed order" in Import and Share (or Options > Routing) for the fastest order.
 - Roads: new roads in Stonetalon Mountains.
 - Roads: a new road in Stranglethorn Vale.
-- Roads: new roads in Arathi Highlands and Loch Modan.
-- Roads: new road to Tarren Mill's flight master.
 - Extra large map icons (Options > Map icons > Icon size); stops, your arrow and minimap icons grow with it too.
 - While routing is paused, the Pause Routing button glows, and a glowing Resume button shows by the logo on the GPS minimap (Options > Map to turn it off). On a controller, Start pauses and resumes.
 - The mouse wheel zooms toward the spot under the cursor, on the map window and in the world map.
@@ -102,7 +102,6 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Routes from inside Undercity now pick the best flight (Tarren Mill toward Hillsbrad and Arathi, not The Sepulcher and a long walk back).
 - The "Enemy territory" message shows once a trip, not again at each stop, pause or /reload, and walking near it off the road reroutes with less work.
 - A flight path you haven't learned no longer looks learned on the map while you fly, and only a flight master marks one learned.
-- Roads: new roads in Stranglethorn Vale.
 
 ## 1.3.8
 
