@@ -1153,6 +1153,8 @@ function R.WithTracks(roads, tracks, cont)
           cd[q] = nearest(dx[q], dy[q], dz[q])
         end
         local q = 2
+        -- (a bridge with no height known: over whatever it crosses, never joined to it there; only at its ends)
+        if t.kind == "bridge" and not tzs then q = M end
         while q < M do
           if cd[q] <= crossYd then
             local c1, bestQ = q, q
@@ -1184,7 +1186,9 @@ function R.WithTracks(roads, tracks, cont)
         splits[#splits + 1] = M
         -- the pieces between them, each joined at both ends
         local mine = {} -- (this track's roads)
-        local isRaised = R.RAISED_KINDS[t.kind or ""] and fl and fl.zs and true or false
+        -- (a bridge with no height known is raised too: kept off the roads under it, no drops off it; Kooki3z
+        -- 2026-11-20, Thousand Needles' rope bridges between the mesas, no floors near them to take a height from)
+        local isRaised = R.RAISED_KINDS[t.kind or ""] and ((fl and fl.zs) or t.kind == "bridge") and true or false
         if isRaised then raisedTracks[#raisedTracks + 1] = { t = t, mine = mine } end
         local joined = {}
         local s0 = 1

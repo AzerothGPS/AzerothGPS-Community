@@ -39,10 +39,10 @@ def test_a_drawn_road_edited_into_a_bridge_and_a_floor_with_stairs(game):
         bridge = [b for b in win.kinds.values() if b.kind == "bridge"][0]
         click(lua, bridge)
         assert G.roadEdit.kind == "bridge"
-        # no height: not saved, the window says so
-        win.height.box.SetText(win.height.box, "")
-        click(lua, win.save)
-        assert len(ns.db.tracks) == 1 and win._shown
+        # (the kind picked: lit, never grayed out; every kind clickable, Kooki3z 2026-11-20)
+        kinds = list(win.kinds.values())
+        assert all(b._enabled is not False for b in kinds)
+        assert [b.kind for b in kinds if b.picked] == ["bridge"]
         win.height.box.SetText(win.height.box, "20")
         click(lua, win.save)
         assert not win._shown and len(ns.db.tracks) == 2
@@ -102,4 +102,45 @@ def test_a_drawn_road_edited_into_a_bridge_and_a_floor_with_stairs(game):
     finally:
         ns.db.tracks = saved
         G.roadMode, G.editRoadMode, G.roadEdit = None, None, None
+        R.Reset()
+
+
+def test_a_bridge_with_no_height_known_saves_and_stays_off_the_roads_under_it(game):
+    # (Kooki3z 2026-11-20: Thousand Needles' rope bridges, no floors near to take a height from; "Give it a height." kept
+    # it from saving, and the window closed threw the bridge away)
+    lua, ns = game
+    G, R = ns.GPS, ns.Router
+    saved = ns.db.tracks
+    try:
+        ns.db.tracks = lua.table()
+        R.Reset()
+        G.roadMode = True
+        G.FinishRoad(lua.table(pts=lua.table(2600.0, 900.0, 2615.0, 900.0, 2630.0, 900.0, 2645.0, 900.0), cont=0),
+                     False, False)
+        first = ns.db.tracks[1]
+        G.SetEditRoadMode(True)
+        assert G.EditRoadClick(0, 2615.0, 902.0)
+        win = lua.globals().AzerothGPSRoadEdit
+        click(lua, [b for b in win.kinds.values() if b.kind == "bridge"][0])
+        win.height.box.SetText(win.height.box, "")
+        click(lua, win.save)
+        assert not win._shown and len(ns.db.tracks) == 2
+        ed = ns.db.tracks[2]
+        assert ed.kind == "bridge" and ed.zs is None and ed.replaces == first.time
+        R.NearestEdges(0, 2615.0, 900.0)
+        g = R.DebugGraph(0)
+        mine = [ei for ei in range(1, len(g.e) + 1) if g.e[ei][4] == R.SOURCE_RECORDED
+                and 2599 <= g.e[ei][5] <= 2646 and abs(g.e[ei][6] - 900) < 1]
+        assert mine and all(g.kind[ei] == "bridge" and g.raised[ei] for ei in mine)
+        # (a floor still needs its height)
+        assert G.EditRoadClick(0, 2615.0, 901.0)
+        click(lua, [b for b in win.kinds.values() if b.kind == "floor"][0])
+        win.height.box.SetText(win.height.box, "")
+        click(lua, win.save)
+        assert win._shown and len(ns.db.tracks) == 2
+        win.Hide(win)
+    finally:
+        G.SetEditRoadMode(False)
+        G.roadMode = None
+        ns.db.tracks = saved
         R.Reset()

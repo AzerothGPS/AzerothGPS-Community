@@ -449,7 +449,7 @@ function R.EditTrack(sel, edit)
   if not known then return nil, "kind" end
   local function r1(v) return math.floor(v * 10 + 0.5) / 10 end
   local zs = R.EditHeights(t.pts, kind, edit.z, t.zs, edit.stairs, edit.z1, edit.z2, edit.base)
-  if not zs and kind ~= "ground" then return nil, "height" end
+  if not zs and kind ~= "ground" and kind ~= "bridge" then return nil, "height" end -- (a bridge: raised with or without)
   if zs then for k = 1, #zs do zs[k] = r1(zs[k]) end end
   local pts = {}
   for k = 1, #t.pts do pts[k] = t.pts[k] end

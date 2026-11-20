@@ -13,6 +13,10 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 - Minimap: a node's name no longer draws on top of the game's own tooltip; both show in one.
 
+### Fixed
+
+- Road tools: a bridge saves without a height, and Edit Road's buttons show the road's kind lit instead of grayed out.
+
 ## 1.3.11
 
 ### Fixed

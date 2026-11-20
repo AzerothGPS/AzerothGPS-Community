@@ -14415,11 +14415,25 @@ function G.EditHeightsAt(re, i)
   end
   return hs
 end
+-- The kind buttons with `kind` the one picked: lit (its highlight held), the rest plain; all clickable. (Kooki3z
+-- 2026-11-20: the picked one grayed out read as "can't be picked": "can't seem to make the bottom bridge a bridge".)
+function G.ShowKindPicked(buttons, kind)
+  for _, b in ipairs(buttons) do
+    b:SetEnabled(true)
+    local on = b.kind == kind
+    b.picked = on
+    if on then
+      if b.LockHighlight then b:LockHighlight() end
+    elseif b.UnlockHighlight then
+      b:UnlockHighlight()
+    end
+  end
+end
 -- The window filled for the road picked (G.roadEdit): the kind buttons lit, the heights near it.
 function G.FillRoadEdit()
   local f, re = G.roadEditWindow, G.roadEdit
   if not (f and re and re.sel) then return end
-  for _, b in ipairs(f.kinds) do b:SetEnabled(b.kind ~= re.kind) end
+  G.ShowKindPicked(f.kinds, re.kind)
   local function fill(row, hs, pick)
     for k, b in ipairs(row.buttons) do
       local h = hs[k]
@@ -14610,7 +14624,7 @@ end
 function G.FillWallEdit(ground)
   local f, we = G.wallEditWindow, G.wallEdit
   if not (f and we and we.sel) then return end
-  for _, b in ipairs(f.kinds) do b:SetEnabled(b.kind ~= we.kind) end
+  G.ShowKindPicked(f.kinds, we.kind)
   local t = we.sel.t
   local i, j = G.WallSection(we)
   local zl, zr
@@ -14843,7 +14857,7 @@ function G.AskSetHeights()
       G.KindSwatch(b, kind)
       b:SetScript("OnClick", function()
         f.kind = kind
-        for _, o in ipairs(f.kinds) do o:SetEnabled(o.kind ~= kind) end
+        G.ShowKindPicked(f.kinds, kind)
       end)
       f.kinds[k] = b
     end
@@ -14874,7 +14888,7 @@ function G.AskSetHeights()
   f.startBox:SetText(fmt(base[i]))
   f.endBox:SetText(fmt(base[j]))
   f.kind = re.kind == "stairs" and "stairs" or re.kind == "ramp" and "ramp" or "stairs"
-  for _, o in ipairs(f.kinds) do o:SetEnabled(o.kind ~= f.kind) end
+  G.ShowKindPicked(f.kinds, f.kind)
   f.note:SetText(L["The stretch from the foot to the top picked (none picked: the whole road). Start and end come from the road or the map's ground; type over them. The points between are spread evenly."])
   f:Show()
   return f
