@@ -5802,14 +5802,14 @@ def test_find_herbs_and_ore_shows_only_the_ones_picked(game):
         poly = lua.eval("{ 1900, 200, 2300, 200, 2300, 400, 1900, 400 }")
         inside = L.NodesInPolygon(0, poly, L.VisibleKinds(), L.NodeFilter())
         assert sorted(str(n.name) for n in inside.values()) == ["Copper Vein", "Peacebloom", "Peacebloom"]
-        # the picked ones listed first; the Herbs layer off hides a picked herb
+        # (by skill needed, then name: both picked need 1, first); the Herbs layer off hides a picked herb
         f.box.SetText(f.box, "")
         f.box._scripts.OnTextChanged(f.box)
         assert [bool(f.rows[i].entry.picked) for i in (1, 2, 3)] == [True, True, False]
         st.layerHerbs = False
         assert shown() == ["Copper Vein"]
         st.layerHerbs = True
-        f.rows[1]._scripts.OnClick(f.rows[1])  # (Copper Vein, put back: picked ones sorted first, by name)
+        f.rows[1]._scripts.OnClick(f.rows[1])  # (Copper Vein, put back)
         assert shown() == ["Peacebloom", "Peacebloom"]
         # Show All: every one again
         f.showAll._scripts.OnClick(f.showAll)

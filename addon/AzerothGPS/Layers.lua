@@ -488,8 +488,8 @@ function Lay.SetNodeFilter(name, on)
 end
 
 -- Every herb and vein name there is (KNOWN_NODES, the learned ones, any saved), for Find Herbs and Ore: matching
--- `query` (any case; "" or nil: all), { { name, kind, count = nodes known, picked, checked, icon }, ... }: picked
--- first, then those with nodes known, then names starting with the query, then by name. Available on (asked
+-- `query` (any case; "" or nil: all), { { name, kind, count = nodes known, picked, checked, icon, skill }, ... }:
+-- by the skill each needs, lowest first, then by name. Available on (asked
 -- 2026-11-19: "auto filter the list to show what would be selected"): only those the skill gathers, each `checked`
 -- (shown on the map) unless others are picked.
 -- `onlyKind`: "herb" or "ore" for those only (the finder's round buttons, Lay.finderKind).
@@ -515,10 +515,10 @@ function Lay.NodeNames(query, onlyKind)
         checked = picked or (avail and none), icon = Lay.NodeIcon(kind, name), starts = i == 1 }
     end
   end
+  -- (by the skill each needs, lowest first, asked 2026-11-19; then by name)
+  for _, e in ipairs(out) do e.skill = Lay.NodeSkill(e.name) end
   table.sort(out, function(a, b)
-    if a.picked ~= b.picked then return a.picked end
-    if (a.count > 0) ~= (b.count > 0) then return a.count > 0 end
-    if a.starts ~= b.starts then return a.starts end
+    if a.skill ~= b.skill then return a.skill < b.skill end
     return a.name < b.name
   end)
   return out
