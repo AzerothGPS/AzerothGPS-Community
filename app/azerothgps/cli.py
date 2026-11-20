@@ -339,6 +339,14 @@ def cmd_media(args) -> int:
     return 0
 
 
+def cmd_setup_art(args) -> int:
+    from .setupart import make
+
+    files = make(ADDON_DIR / "Media", Path(args.src), Path(args.preview) if args.preview else None)
+    print(f"wrote {len(files)} setup pictures in {ADDON_DIR / 'Media' / 'Setup'} (new files: a full relog)")
+    return 0
+
+
 def cmd_padicons(args) -> int:
     from . import padicons
 
@@ -1195,6 +1203,11 @@ def main(argv: list[str] | None = None) -> int:
 
     sp = sub.add_parser("media", help="the addon's own art from assets/: the logo's round portrait in sizes (Media/)")
     sp.set_defaults(fn=cmd_media)
+
+    sp = sub.add_parser("setup-art", help="the first-run setup's card pictures from the screenshots (Media/Setup/)")
+    sp.add_argument("--src", default=str(Path.home() / "Downloads"), help="the folder with the screenshots")
+    sp.add_argument("--preview", metavar="DIR", help="also the pictures as PNGs to look at, in DIR")
+    sp.set_defaults(fn=cmd_setup_art)
 
     sp = sub.add_parser("padicons", help="the controller's button icons and Options > Controller's diagram (Media/Pad/)")
     sp.add_argument("--preview", metavar="DIR", help="also pictures of them to look at, in DIR")
