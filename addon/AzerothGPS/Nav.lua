@@ -482,31 +482,58 @@ local function SetSwim(r)
 end
 N.SetSwim = SetSwim
 
--- What makes water as fast as land for this character (asked for 1.3.10): water walking or levitation on, known or in
--- the bags, or Aquatic Form (a druid swims about as fast as running in it). What the addon can read: the auras
--- (N.AuraOn), the spells known (IsPlayerSpell / IsSpellKnown) and the bags (GetItemCount). { spell, item, name, icon,
--- active } or nil; the auras checked at most every second, the spells and bags every 10 s.
+-- What makes water as fast as land for this character (asked for 1.3.10): water walking or levitation on, castable or
+-- in the bags, or Aquatic Form (a druid swims about as fast as running in it). What the addon can read: the auras
+-- (N.AuraOn), the spells known (IsPlayerSpell / IsSpellKnown) and the bags (GetItemCount). A spell with a reagent counts
+-- only with the reagent in the bags (asked 2026-11-19; the client's SpellReagents: Water Walking takes a Fish Oil,
+-- Levitate a Light Feather, Aquatic Form none). Items: the client's on-use items whose spell walks on water (ItemEffect,
+-- aura 104), the Elixir of Water Walking first; `aura`: walking on water while it's on (cast by another, a quest's).
+-- { spell, item, reagent, count, name, icon, active } or nil; the auras checked at most every second, the spells and
+-- bags every 10 s, and at once (at most every WATER_RECHECK s) when the bags or spells change (N.WaterChanged).
 N.WATER_FAST = {
-  { spell = 546 },   -- Water Walking (shaman)
-  { spell = 1706 },  -- Levitate (priest)
+  { spell = 546, reagent = 17058, reagentName = "Fish Oil" }, -- Water Walking (shaman)
+  { spell = 1706, reagent = 17056, reagentName = "Light Feather" }, -- Levitate (priest)
   { spell = 1066 },  -- Aquatic Form (druid)
   { spell = 11319, item = 8827 }, -- Elixir of Water Walking
+  { spell = 1299351, item = 276274 }, -- (WoW Forever's own water walking items)
+  { spell = 461120, item = 227923 },
+  { spell = 1265304, item = 259890 },
+  { spell = 10665, aura = true }, { spell = 27986, aura = true }, { spell = 461329, aura = true },
+  { spell = 1221095, aura = true }, { spell = 1270422, aura = true }, { spell = 1310296, aura = true },
 }
+local function ItemNameOf(id)
+  local ok, n = pcall(function()
+    return (C_Item and C_Item.GetItemNameByID and C_Item.GetItemNameByID(id)) or (GetItemInfo and GetItemInfo(id))
+  end)
+  return ok and type(n) == "string" and n ~= "" and n or nil
+end
+local function ItemCountOf(id)
+  local count = (C_Item and C_Item.GetItemCount) or GetItemCount
+  if not count then return 0 end
+  local ok, n = pcall(count, id)
+  if not ok or type(n) ~= "number" or (ns.IsSecret and ns.IsSecret(n)) then return 0 end
+  return n
+end
 local waterHave, waterHaveAt, waterNow, waterNowAt
 function N.WaterFast()
   local now = GetTime()
   if waterNowAt and now - waterNowAt < 1 and now >= waterNowAt then return waterNow or nil end
   if not waterHaveAt or now - waterHaveAt >= 10 or now < waterHaveAt then
     waterHave, waterHaveAt = {}, now
-    local count = (C_Item and C_Item.GetItemCount) or GetItemCount
     for _, w in ipairs(N.WATER_FAST) do
       local have = false
-      if w.item then
-        local ok, n = false, nil
-        if count then ok, n = pcall(count, w.item) end
-        have = ok and type(n) == "number" and not (ns.IsSecret and ns.IsSecret(n)) and n > 0
+      w.count = nil
+      if w.aura then
+        have = false
+      elseif w.item then
+        local n = ItemCountOf(w.item)
+        have, w.count = n > 0, n
       else
-        have = N.KnownSpell(w.spell)
+        have = N.KnownSpell(w.spell) and true or false
+        if have and w.reagent then
+          local n = ItemCountOf(w.reagent)
+          have, w.count = n > 0, n
+        end
       end
       if have then waterHave[#waterHave + 1] = w end
     end
@@ -518,14 +545,35 @@ function N.WaterFast()
   best = best or waterHave[1]
   if best then
     best.active = on or false
-    best.name = (best.item and ns.ItemName and ns.ItemName(best.item)) or (ns.SpellName and ns.SpellName(best.spell))
-      or best.name or L["Water walking"]
+    local name = (best.item and ItemNameOf(best.item)) or (ns.SpellName and ns.SpellName(best.spell)) or L["Water walking"]
+    -- (a spell with its reagent: how many are left, "Water Walking (Fish Oil: 5)")
+    if best.reagent and best.count and not on then
+      name = string.format("%s (%s: %d)", name, ItemNameOf(best.reagent) or best.reagentName, math.floor(best.count))
+    end
+    best.name = name
     best.icon = (ns.SpellIcon and ns.SpellIcon(best.spell)) or best.icon
   end
   waterNow, waterNowAt = best or false, now
   return best
 end
 function N.ForgetWaterFast() waterHaveAt, waterNowAt = nil, nil end -- (the tests: checked again at once)
+-- The bags or the spells known changed (BAG_UPDATE, SPELLS_CHANGED): looked at again, at most every WATER_RECHECK s,
+-- and the routes worked out again when water's speed for them changed (N.SyncSwim): a Fish Oil used up or bought.
+N.WATER_RECHECK = 2
+local waterCheckedAt, waterDirty = -math.huge, false
+function N.WaterChanged()
+  local now = GetTime()
+  if now - waterCheckedAt < N.WATER_RECHECK and now >= waterCheckedAt then
+    if not waterDirty and C_Timer and C_Timer.After then
+      C_Timer.After(N.WATER_RECHECK, function() if waterDirty then N.WaterChanged() end end)
+    end
+    waterDirty = true
+    return false
+  end
+  waterCheckedAt, waterDirty = now, false
+  N.ForgetWaterFast()
+  return N.SyncSwim()
+end
 -- Seconds for `yards` on foot (`swim` of them swum) and `ride` seconds of rides at `speed` (walking, mounted, the
 -- player's now): the swum yards at the swim speed (a mount is left at the water's edge), unless water's as fast
 -- as land for them (N.WaterFast).
@@ -548,6 +596,12 @@ function N.SyncSwim()
   local P = ns.Passability
   if not (P and P.SetAvoidSwim) then return false end
   local changed = P.SetAvoidSwim(not N.SwimAllowed())
+  -- (water as fast as land, N.WaterFast: priced as land, a hair over; swimming left out still goes round)
+  if waterDirty and GetTime() - waterCheckedAt >= N.WATER_RECHECK then
+    waterCheckedAt, waterDirty = GetTime(), false
+    N.ForgetWaterFast()
+  end
+  if P.SetWaterFast and P.SetWaterFast(N.WaterFast() ~= nil) then changed = true end
   if P.SetSwimBans and P.SetSwimBans(N.ActiveSwimBans()) then changed = true end
   if not changed then return false end
   if ns.Router and ns.Router.WallsChanged then ns.Router.WallsChanged() end -- (the walks worked out again)
@@ -6050,6 +6104,16 @@ function N.SafeDrop()
   local m = UnitHealthMax and UnitHealthMax("player")
   if not h or not m or (ns.IsSecret and (ns.IsSecret(h) or ns.IsSecret(m))) or m <= 0 then return N.FALL_FREE end
   return N.FALL_FREE + math.max(0, h / m - N.FALL_KEEP) / N.FALL_PER_YD
+end
+
+do -- the bags or spells changed: water's speed looked at again (N.WaterChanged)
+  local ok, f = pcall(CreateFrame, "Frame")
+  if ok and f then
+    for _, e in ipairs({ "BAG_UPDATE", "BAG_UPDATE_DELAYED", "SPELLS_CHANGED", "LEARNED_SPELL_IN_TAB" }) do
+      pcall(f.RegisterEvent, f, e)
+    end
+    f:SetScript("OnEvent", function() N.WaterChanged() end)
+  end
 end
 
 do -- a service's window opening (see N.SERVICES)
