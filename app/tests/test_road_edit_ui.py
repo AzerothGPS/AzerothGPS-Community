@@ -144,3 +144,88 @@ def test_a_bridge_with_no_height_known_saves_and_stays_off_the_roads_under_it(ga
         G.roadMode = None
         ns.db.tracks = saved
         R.Reset()
+
+
+def test_a_lift_goes_up_toward_its_top_by_its_heights_and_flip_lift_swaps_them(game):
+    # (Kooki3z 2026-11-20: a lift drawn from its foot up said "Take the lift down"; "Need a way to be able to flip which
+    # side of the lift says take lift up or down")
+    lua, ns = game
+    G, R = ns.GPS, ns.Router
+    # by its ends' heights: toward the higher end up, either way it was drawn
+    g = lua.eval("{ e = { { 1, 2, 30, 5, 0,0, 30,0 } }, nz = { 10, 50 } }")
+    assert R.LiftKind(g, 1, True) == R.KIND_LIFT_UP and R.LiftKind(g, 1, False) == R.KIND_LIFT_DOWN
+    g.nz = lua.eval("{ 50, 10 }")
+    assert R.LiftKind(g, 1, True) == R.KIND_LIFT_DOWN and R.LiftKind(g, 1, False) == R.KIND_LIFT_UP
+    # no heights (the data's lifts, laid from the top): forward is down, as before
+    g.nz = None
+    assert R.LiftKind(g, 1, True) == R.KIND_LIFT_DOWN and R.LiftKind(g, 1, False) == R.KIND_LIFT_UP
+    # Edit Road on a lift: Flip Lift in Pick Foot's place, swapping Foot and Top
+    saved = ns.db.tracks
+    try:
+        ns.db.tracks = lua.table()
+        R.Reset()
+        G.roadMode = True
+        G.FinishRoad(lua.table(pts=lua.table(2600.0, 1500.0, 2615.0, 1500.0, 2630.0, 1500.0), cont=0), False, False)
+        G.SetEditRoadMode(True)
+        assert G.EditRoadClick(0, 2615.0, 1501.0)
+        win = lua.globals().AzerothGPSRoadEdit
+        assert not win.flip._shown and win.pickFoot._shown
+        click(lua, [b for b in win.kinds.values() if b.kind == "lift"][0])
+        assert win.flip._shown and not win.pickFoot._shown and not win.pickTop._shown
+        win.height.box.SetText(win.height.box, "10")
+        win.topRow.box.SetText(win.topRow.box, "50")
+        click(lua, win.flip)
+        assert str(win.height.box.GetText(win.height.box)) == "50" and str(win.topRow.box.GetText(win.topRow.box)) == "10"
+        click(lua, win.save)
+        ed = ns.db.tracks[2]
+        assert ed.kind == "lift" and list(ed.zs.values())[0] == 50 and list(ed.zs.values())[-1] == 10
+        # (the routes: its first node the higher, so along it is down)
+        R.NearestEdges(0, 2615.0, 1500.0)
+        gr = R.DebugGraph(0)
+        mine = [ei for ei in range(1, len(gr.e) + 1) if gr.e[ei][4] == R.SOURCE_LIFT
+                and 2599 <= gr.e[ei][5] <= 2631 and abs(gr.e[ei][6] - 1500) < 1]
+        assert mine
+        e = gr.e[mine[0]]
+        fwd_up = R.LiftKind(gr, mine[0], True) == R.KIND_LIFT_UP
+        hz = gr.z or gr.nz
+        assert fwd_up == (hz[e[2]] > hz[e[1]])
+    finally:
+        G.SetEditRoadMode(False)
+        G.roadMode = None
+        ns.db.tracks = saved
+        R.Reset()
+
+
+def test_a_lift_with_no_heights_is_a_lift_ride_from_its_first_end_and_flips(game):
+    # (Kooki3z 2026-11-20: "recorded lifts don't say take the lift": a lift with no heights was a plain road)
+    lua, ns = game
+    G, R, Rec = ns.GPS, ns.Router, ns.Record
+    g = lua.eval("{ e = { { 1, 2, 30, 5, 0,0, 30,0 } }, kind = { 'lift' } }")
+    assert R.LiftKind(g, 1, True) == R.KIND_LIFT_UP and R.LiftKind(g, 1, False) == R.KIND_LIFT_DOWN
+    saved = ns.db.tracks
+    try:
+        ns.db.tracks = lua.table()
+        R.Reset()
+        Rec.Save(lua.table(op="add", drawn=True, recorded=True, continent=0, time=7777, kind="lift",
+                           pts=lua.table(2600.0, 2300.0, 2604.0, 2300.0, 2608.0, 2300.0)))
+        R.NearestEdges(0, 2604.0, 2300.0)
+        gr = R.DebugGraph(0)
+        mine = [ei for ei in range(1, len(gr.e) + 1) if 2599 <= gr.e[ei][5] <= 2609 and abs(gr.e[ei][6] - 2300) < 1]
+        assert mine and all(gr.e[ei][4] == R.SOURCE_LIFT for ei in mine)
+        # Flip Lift with no heights: saved turned round
+        G.roadMode = True
+        G.SetEditRoadMode(True)
+        assert G.EditRoadClick(0, 2604.0, 2300.5)
+        win = lua.globals().AzerothGPSRoadEdit
+        assert G.roadEdit.kind == "lift" and win.flip._shown
+        win.height.box.SetText(win.height.box, "")
+        win.topRow.box.SetText(win.topRow.box, "")
+        win.flip._scripts.OnClick(win.flip)
+        win.save._scripts.OnClick(win.save)
+        ed = ns.db.tracks[len(ns.db.tracks)]
+        assert ed.kind == "lift" and ed.replaces == 7777 and (ed.pts[1], ed.pts[2]) == (2608.0, 2300.0)
+    finally:
+        G.SetEditRoadMode(False)
+        G.roadMode = None
+        ns.db.tracks = saved
+        R.Reset()

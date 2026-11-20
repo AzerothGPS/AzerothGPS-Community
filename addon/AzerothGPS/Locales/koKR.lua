@@ -2011,3 +2011,5 @@ L["deleted that road section: routes leave it out now."] = "도로 구간을 삭
 L["deleted that wall section: routes go through there now."] = "벽 구간을 삭제했습니다: 이제 경로가 이곳을 지나갑니다."
 L["Escape closes the map"] = "Esc 키로 지도 닫기"
 L["In the game's world map, Escape closes it with the GPS map, as the game's own map does. Off: Escape leaves it open; close it with its key or button. In combat, Escape always closes it. The GPS map in its own window never closes on Escape."] = "게임의 세계 지도에서는 게임 지도처럼 Esc 키가 GPS 지도와 함께 닫습니다. 끄면 Esc 키로 닫히지 않으며, 지도 키나 버튼으로 닫습니다. 전투 중에는 Esc 키가 항상 닫습니다. 자체 창의 GPS 지도는 Esc 키로 닫히지 않습니다."
+L["Flip Lift"] = "승강기 뒤집기"
+L["Foot and top swapped: the lift's other end is its top now. Save Road to keep it."] = "아래와 위가 바뀌었습니다: 이제 승강기의 다른 끝이 위입니다. 유지하려면 길 저장을 누르세요."
