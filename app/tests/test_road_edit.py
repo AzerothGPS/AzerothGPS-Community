@@ -226,3 +226,29 @@ def test_a_bridge_with_no_height_keeps_apart_from_the_roads_under_it(nav_env):
     mine = [ed for ed in edges_of(e) if ed[4] == R.SOURCE_RECORDED]
     assert mine and not any(ends_at(n, ed, 0, 0, 3) for ed in edges_of(e))
     assert info and len(list(info.raised.keys())) == len(mine)
+
+
+def test_bridges_ends_join_only_what_touches_them(nav_env):
+    # (Kooki3z 2026-11-20: Freewind Post's two rope bridges, their ends 16 yd apart, were joined; "why are the ends of
+    # the bridges being connected? I didn't do this")
+    lua, ns = nav_env
+    R = ns.Router
+    roads = lua.eval("{ n = {}, nz = {}, e = {} }")
+    a = bridge(lua, time=1)
+    b = lua.table(op="add", continent=CONT, time=2, drawn=True, kind="bridge",
+                  pts=flat(lua, -60, 16, -40, 16, 40, 16, 60, 16), zs=flat(lua, 15, 15, 15, 15))
+    # a land road ending 10 yd off the first bridge's west end
+    c = lua.table(op="add", continent=CONT, time=3, drawn=True, pts=flat(lua, -150, -10, -70, -10))
+    n, e = R.WithTracks(roads, lua.table(a, b, c), CONT)[:2]
+    edges = edges_of(e)
+
+    def joins(p, q):
+        return any(ends_at(n, ed, *p, 1) and ends_at(n, ed, *q, 1) for ed in edges)
+
+    assert not joins((-60, 0), (-60, 16)) and not joins((60, 0), (60, 16))
+    assert not any(ends_at(n, ed, -70, -10, 1) and ends_at(n, ed, -60, 0, 1) for ed in edges)
+    # (a land road's end 2 yd off it: joined, as ever)
+    d = lua.table(op="add", continent=CONT, time=4, drawn=True, pts=flat(lua, -150, 2, -62, 2))
+    n, e = R.WithTracks(roads, lua.table(a, d), CONT)[:2]
+    assert any(ends_at(n, ed, -60, 0, 3) for ed in edges_of(e) if ed[4] == R.SOURCE_RECORDED and ends_at(n, ed, -150, 2, 1)) \
+        or any(ends_at(n, ed, -60, 0, 3) for ed in edges_of(e))

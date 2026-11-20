@@ -179,6 +179,11 @@ local graphs = {}
 
 R.TRACK_SNAP = 25 -- yards: a drawn road's end joins an existing road this close
 R.TRACK_SNAP_CITY = 8 -- ... in a city down below (levels over each other)
+-- ... and a bridge's, a floor's or a lift's (an edited road's kind: R.RAISED_KINDS, "lift") only this close, either way:
+-- its own ends, and another road's end onto it (Kooki3z 2026-11-20, Freewind Post's two rope bridges: their ends 16 yd
+-- apart were joined, and a bridge's end at a lift's tower to the other tower's road across the gap, "why are the ends of
+-- the bridges being connected? I didn't do this")
+R.TRACK_SNAP_RAISED = 4
 R.TRACK_REMOVE_YD = 12 -- an erased ("false road") track removes road this close to it
 -- A drawn road is truth: where it runs along an existing road (this close, about parallel,
 -- for a while) it replaces that stretch, and the road's cut ends join it. Where it crosses
@@ -911,7 +916,9 @@ function R.WithTracks(roads, tracks, cont)
       -- back onto the piece before it, and was lost; issue #65)
       if (only and only[ed]) or (not only and not (fl and fl.zs and sameWalk(ed))) then
         local d2, along, qx, qy = Closest(ed, x, y)
-        if d2 and (not best or d2 < best) and onFloor(ed, x, y, along, reach) then
+        local tight = raised[ed] or kindOf[ed] == "lift" -- (a bridge, a floor, a lift: only R.TRACK_SNAP_RAISED)
+        if d2 and (not best or d2 < best) and not (tight and d2 > R.TRACK_SNAP_RAISED ^ 2)
+            and onFloor(ed, x, y, along, reach) then
           best, bi, bAlong, bx, by = d2, where[ed], along, qx, qy
         end
       end
@@ -1208,6 +1215,7 @@ function R.WithTracks(roads, tracks, cont)
         -- 2026-11-20, Thousand Needles' rope bridges between the mesas, no floors near them to take a height from)
         local isRaised = R.RAISED_KINDS[t.kind or ""] and ((fl and fl.zs) or t.kind == "bridge") and true or false
         if isRaised then raisedTracks[#raisedTracks + 1] = { t = t, mine = mine } end
+        local endSnap = (isRaised or t.kind == "lift") and math.min(snap, R.TRACK_SNAP_RAISED) or snap
         local joined = {}
         local s0 = 1
         local lastNb, lastX, lastY -- (the node the piece before ended at)
@@ -1228,7 +1236,7 @@ function R.WithTracks(roads, tracks, cont)
             elseif s0 == 1 and innerEnd(t, line[1], line[2]) then
               na, ax, ay = attach(line[1], line[2], R.TRACK_WALK_JOIN, ownWalk(line[1], line[2]))
             else
-              na, ax, ay = attach(line[1], line[2], s0 == 1 and snap or crossYd + 1)
+              na, ax, ay = attach(line[1], line[2], s0 == 1 and endSnap or crossYd + 1)
             end
             if na then line[1], line[2] = ax, ay
             else na = newNode(line[1], line[2], heightAt(line[1], line[2]), floorAt(line[1], line[2])) end
@@ -1237,7 +1245,7 @@ function R.WithTracks(roads, tracks, cont)
             if s1 == M and innerEnd(t, line[#line - 1], line[#line]) then
               nb, bx, by = attach(line[#line - 1], line[#line], R.TRACK_WALK_JOIN, ownWalk(line[#line - 1], line[#line]))
             else
-              nb, bx, by = attach(line[#line - 1], line[#line], s1 == M and snap or crossYd + 1)
+              nb, bx, by = attach(line[#line - 1], line[#line], s1 == M and endSnap or crossYd + 1)
             end
             if nb then line[#line - 1], line[#line] = bx, by
             else nb = newNode(line[#line - 1], line[#line], heightAt(line[#line - 1], line[#line]),
