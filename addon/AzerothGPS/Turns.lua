@@ -428,6 +428,13 @@ function T.Maneuvers(path, stopLabel, horizon)
   local DROP = R and R.KIND_DROP or 4
   local DOWN, UP = R and R.KIND_LIFT_DOWN or 5, R and R.KIND_LIFT_UP or 6
   local function roadish(k) return k == 0 or k == DROP or k == DOWN or k == UP end
+  -- (on a lift now, the path starting on it: still "Take the lift", to where it ends, then what comes after; Kooki3z
+  -- 2026-11-20, "while on the lift part of the path, it should still say take the lift then cross the bridge")
+  if (kinds[1] == UP or kinds[1] == DOWN) and #cum >= 2 then
+    local k = 1
+    while kinds[k + 1] == kinds[1] and k + 1 < #cum do k = k + 1 end
+    out[#out + 1] = Words({ dist = 0, stop = cum[k + 1], kind = "lift" }, kinds[1] == UP and "lift_up" or "lift_down")
+  end
   for i = 2, #cum - 1 do
     local s = cum[i]
     if horizon and s > horizon then break end

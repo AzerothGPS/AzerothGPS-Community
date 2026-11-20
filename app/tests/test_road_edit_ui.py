@@ -231,6 +231,20 @@ def test_a_lift_with_no_heights_is_a_lift_ride_from_its_first_end_and_flips(game
         R.Reset()
 
 
+def test_on_a_lift_it_still_says_take_the_lift_then_whats_next(game):
+    # (Kooki3z 2026-11-20: "while on the lift part of the path, it should still say take the lift then cross the bridge")
+    lua, ns = game
+    R, T = ns.Router, ns.Turns
+    UP = R.KIND_LIFT_UP
+    # the path from where the player is: halfway up a lift (10 yd), then 40 yd of road
+    pts = lua.table(2600.0, 2400.0, 2605.0, 2400.0, 2610.0, 2400.0, 2650.0, 2400.0)
+    path = T.Path(lua.table(parts=lua.table(lua.table(pts=pts, kinds=lua.table(UP, UP, 0), cont=0, stop=1))))
+    ms = T.Maneuvers(path, "the stop")
+    said = [(str(ms[i].kind), str(ms[i].text)) for i in range(1, len(ms) + 1)]
+    assert said and said[0][0] == "lift" and "lift up" in said[0][1].lower(), said
+    assert abs(ms[1].stop - 10) < 0.5
+
+
 def test_a_road_end_picked_glows_and_a_road_drawn_from_it_goes_on_as_it_is(game):
     # (Kooki3z 2026-11-20: "click on the end of a road/bridge/lift/etc, this draws a glowing circle around it ... when
     # shift + left click is used on it, extend whatever that is at its defined height"; and the hover says its kind)
