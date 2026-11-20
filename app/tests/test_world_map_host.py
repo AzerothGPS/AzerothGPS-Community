@@ -898,3 +898,44 @@ def test_in_a_dungeon_the_map_shows_in_the_world_map_with_the_square_the_games_m
     finally:
         lua.execute("IsInInstance = AGPS_III AGPS_III = nil")
         st.replaceMinimapKeepSquare = keep
+
+
+def test_escape_can_be_kept_from_closing_the_world_map(wm):
+    # (asked 2026-11-20: "Esc by default closes the map, add an option for disabling this". Off: a keyboard frame, shown
+    # only while the GPS map is in the open world map, eats Escape and passes every other key; never in combat)
+    lua, ns = wm
+    G, st = ns.GPS, ns.settings.gps
+    was = st.escClosesMap
+    assert ns.DEFAULTS.gps.escClosesMap is True
+    lua.execute("""
+      AGPS_PROP = {}
+      AGPS_REAL_ICL = InCombatLockdown
+    """)
+    try:
+        st.useWorldMap = True
+        G.ApplySettings()
+        lua.globals().AzerothGPS_ToggleMap()
+        assert G.WorldMapHosted()
+        c = G.escCatcher
+        assert c is None or not c._shown  # (on by default: the game's Escape as it is)
+        st.escClosesMap = False
+        G.ApplySettings()
+        c = G.escCatcher
+        assert c is not None and c._shown
+        c.SetPropagateKeyboardInput = lua.eval("function(s, v) AGPS_PROP[#AGPS_PROP + 1] = v end")
+        c._scripts.OnKeyDown(c, "ESCAPE")
+        c._scripts.OnKeyDown(c, "W")
+        assert list(lua.eval("AGPS_PROP").values()) == [False, True]  # (Escape eaten, W passed on)
+        # a fight: hidden, Escape closes it as usual; back after
+        lua.execute("InCombatLockdown = function() return true end")
+        c._scripts.OnEvent(c, "PLAYER_REGEN_DISABLED")
+        assert not c._shown
+        lua.execute("InCombatLockdown = AGPS_REAL_ICL")
+        c._scripts.OnEvent(c, "PLAYER_REGEN_ENABLED")
+        assert c._shown
+        # the world map closed: gone
+        lua.globals().AzerothGPS_ToggleMap()
+        assert not G.WorldMapHosted() and not c._shown
+    finally:
+        lua.execute("InCombatLockdown = AGPS_REAL_ICL")
+        st.escClosesMap = was

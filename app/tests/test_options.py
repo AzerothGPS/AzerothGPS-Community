@@ -33,7 +33,7 @@ replaceMinimapCollapseOnCombat replaceMinimapSize windowTint windowButtons windo
 charmSwing devTools recordHint pinning copyRoads copyWalls copyRoutes copyPins""".split()
 # (askToSave, "Remind me to save": removed with the map's Save and Dismiss buttons, asked 2026-11-17)
 # Settings that were a slash command only (or the Quick buttons page's "On" column only) and have a control now.
-NEW = ["allowSwim", "mapEditIdle", "language", "layerCity", "showRoads", "showWalls", "useWorldMap", "replaceMinimapIdle", "questAutoReroute", "quietChat",
+NEW = ["allowSwim", "mapEditIdle", "language", "layerCity", "showRoads", "showWalls", "useWorldMap", "escClosesMap", "replaceMinimapIdle", "questAutoReroute", "quietChat",
        "questPickRoute", "seamTerrainYd", "seamContinentAt", "seamWorldAt", "seamTerrainBlend",
        "seamContinentBlend", "seamWorldBlend", "interiorZoomYd", "roundIcons", "interiorHoldSec", "iconSize",
        # (asked 2026-11-14: how far out each kind of icon shows, GPSFrame's G.IconShown)
@@ -62,7 +62,7 @@ HOME = {
     # (asked 2026-11-10: "4 different map pages... maybe reduce to 2": the map itself, its icons, and its window)
     "Map": "style seamExploredOnly seamTerrainYd seamTerrainBlend seamContinentAt seamContinentBlend seamWorldAt "
            "seamWorldBlend interiorZoomYd interiorHoldSec routeColor rotate approachZoom reopenFollow terrainZoomOut interiors "
-           "useWorldMap",
+           "useWorldMap escClosesMap",
     # (2026-11-19: a Minimap page again, the GPS map in its place and the game's own)
     "Minimap": "replaceMinimap replaceMinimapSize replaceMinimapCollapseOnMove replaceMinimapCollapseOnCombat "
                "replaceMinimapIdle replaceMinimapKeepSquare replaceMinimapRoute replaceMinimapResume "
