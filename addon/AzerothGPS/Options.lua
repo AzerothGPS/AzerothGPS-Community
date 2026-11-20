@@ -1999,64 +1999,13 @@ local function BuildWindow()
   -- options": GPSFrame's G.ICON_SIZES and G.RoundIcon)
   header(L["Icon size and shape"])
   Key("iconSize")
-  -- (radio buttons under a picture of each size, asked 2026-11-19: "radio button with picture preview of the icon
-  -- size, use peacebloom icons": the herb's own icon as the map draws it, G.ICON_PX times G.ICON_SIZES)
-  do
-    local sizes = { { "small", L["Small"] }, { "medium", L["Medium"] }, { "large", L["Large"] },
-      { "xlarge", L["Extra large"] } }
-    local title = page:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    title:SetText(L["Icon size"])
-    place(title, 18, 4)
-    local icon = "Interface\\Icons\\INV_Misc_Flower_02"
-    if ns.Layers and ns.Layers.NodeIcon then
-      local ok, got = pcall(ns.Layers.NodeIcon, "herb", "Peacebloom")
-      if ok and got then icon = got end
-    end
-    local G = ns.GPS
-    local base, scales = G and G.ICON_PX or 16, G and G.ICON_SIZES or { small = 1, medium = 1.25, large = 1.5, xlarge = 2 }
-    local cellW, artH = 96, 36
-    local row = CreateFrame("Frame", nil, page)
-    row:SetSize(cellW * #sizes, artH + 20)
-    row.cells = {}
-    local function Pick(v)
-      if (GPS().iconSize or "medium") == v then return end
-      GPS().iconSize = v
-      Apply()
-    end
-    for n, sz in ipairs(sizes) do
-      local c = CreateFrame("Button", nil, row)
-      c:SetSize(cellW, artH + 20)
-      c:SetPoint("TOPLEFT", (n - 1) * cellW, 0)
-      local px = base * (scales[sz[1]] or 1)
-      c.icon = c:CreateTexture(nil, "ARTWORK")
-      c.icon:SetSize(px, px)
-      c.icon:SetPoint("CENTER", c, "TOP", 0, -artH / 2)
-      c.icon:SetTexture(icon)
-      local ok, b = pcall(CreateFrame, "CheckButton", nil, c, "UIRadioButtonTemplate")
-      if not ok then b = CreateFrame("CheckButton", nil, c, "UICheckButtonTemplate") end
-      b:SetSize(16, 16)
-      b:SetPoint("TOPLEFT", 4, -artH - 2)
-      b.text = b.text or b:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-      b.text:ClearAllPoints()
-      b.text:SetPoint("LEFT", b, "RIGHT", 3, 0)
-      b.text:SetText(sz[2])
-      AddText(group, sz[2])
-      b:SetScript("OnClick", function(self)
-        self:SetChecked(true)
-        Pick(sz[1])
-      end)
-      c:SetScript("OnClick", function() Pick(sz[1]) end)
-      c.value, c.radio = sz[1], b
-      row.cells[n] = c
-    end
-    controls[#controls + 1] = function()
-      local v = GPS().iconSize or "medium"
-      for _, c in ipairs(row.cells) do c.radio:SetChecked(c.value == v) end
-    end
-    place(row, artH + 26, 4)
-    O.iconSizeRow = row
-    Track(row)
-  end
+  -- (a dropdown again: the radio buttons under pictures, 2026-11-19, were taken back the same day, Kooki3z)
+  Dropdown(L["Icon size"], {
+    { value = "small", text = L["Small"] },
+    { value = "medium", text = L["Medium"] },
+    { value = "large", text = L["Large"] },
+    { value = "xlarge", text = L["Extra large"] }, -- (asked 2026-11-18 for 1.3.9: twice Small, G.ICON_SIZES)
+  }, function() return GPS().iconSize or "medium" end, function(v) GPS().iconSize = v end)
   Key("roundIcons")
   check(L["Round icons"], L["The map's and minimap's icons are round, in a gold ring, or a class trainer's in its class's color. Off: square, as the game's."],
     function() return GPS().roundIcons ~= false end, function(v) GPS().roundIcons = v end)

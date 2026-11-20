@@ -890,17 +890,9 @@ def test_the_minimap_and_world_map_options_show_pictures_that_pick_them(game):
     assert O.worldMapPictures and str(O.worldMapPictures.cards[2].label._text) == "In the world map"
 
 
-def test_icon_size_is_radio_buttons_under_a_picture_of_each_size(game):
-    # (asked 2026-11-19: "radio button with picture preview of the icon size, use peacebloom icons")
+def test_icon_size_is_a_dropdown_again(game):
+    # (the radio buttons under pictures were taken back, 2026-11-19: a dropdown, as in 1.3.9)
     lua, ns = game
-    O, st = ns.Options, ns.settings.gps
-    row, was = O.iconSizeRow, st.iconSize
-    cells = list(row.cells.values())
-    assert [str(c.value) for c in cells] == ["small", "medium", "large", "xlarge"]
-    try:
-        cells[3]._scripts["OnClick"](cells[3])
-        assert st.iconSize == "xlarge"
-        cells[0].radio._scripts["OnClick"](cells[0].radio)
-        assert st.iconSize == "small"
-    finally:
-        st.iconSize = was
+    assert getattr(ns.Options, "iconSizeRow", None) is None
+    src = (ADDON / "Options.lua").read_text(encoding="utf-8")
+    assert 'Dropdown(L["Icon size"]' in src

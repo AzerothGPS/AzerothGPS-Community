@@ -10,7 +10,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Options: a Minimap page for the GPS map as your minimap and the game's own minimap.
 - Options: Keys and buttons has the map's keys with its quick buttons; Map window is now GPS Map, Opacity and combat is Opacity.
 - Options: pictures show the map in its window or the world map, and the game's minimap or the GPS one; click a picture to pick it.
-- Options: icon size is picked under a picture of each size; map redraws, rerouting and stops ahead are picked from a few choices.
+- Options: map redraws, rerouting and stops ahead are picked from a few choices.
 - Options > Help: What's new lists the biggest changes of 1.3.
 - A one-time setup after this update: pick your minimap (with a live preview and its size) and where the map opens, from big cards with in-game pictures. Works with a controller.
 - Run it again any time: Options > Help > Run Setup Again, or /agps setup.
@@ -66,7 +66,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - With several stops, the way to your next stop is drawn over the rest of the route, not hidden under a later stop's way back over the same road. (thanks, DarkByteZero)
 - /way lines take the zone in your game's language too ("/way Silberwald 63.4 64.3" on a German client), not only the English name. (thanks, DarkByteZero)
 - Clear Route leaves the map where you were looking instead of jumping back to your position.
-- OpenMap zoomed in: the sea along the coast shows the terrain, not the blurry world map art (such as off Menethil Harbor).
+- The seamless map zoomed in: the sea along the coast shows the terrain, not the blurry world map art (such as off Menethil Harbor).
 
 ## 1.3.9
 
