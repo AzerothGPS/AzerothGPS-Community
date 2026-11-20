@@ -212,3 +212,17 @@ def test_a_route_off_a_bridge_jumps_down_only_when_the_fall_is_safe(nav_env, max
     finally:
         ns.Roads[CONT], ns.db.tracks = saved
         R.Reset()
+
+
+def test_a_bridge_with_no_height_keeps_apart_from_the_roads_under_it(nav_env):
+    # (Kooki3z 2026-11-20: a bridge between mesas with no height known is raised all the same)
+    lua, ns = nav_env
+    R = ns.Router
+    roads = land(lua)
+    b = bridge(lua)
+    b.zs = None
+    out = R.WithTracks(roads, lua.table(b), CONT)
+    n, e, info = out[0], out[1], out[5]
+    mine = [ed for ed in edges_of(e) if ed[4] == R.SOURCE_RECORDED]
+    assert mine and not any(ends_at(n, ed, 0, 0, 3) for ed in edges_of(e))
+    assert info and len(list(info.raised.keys())) == len(mine)
