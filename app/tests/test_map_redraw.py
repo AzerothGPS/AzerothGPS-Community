@@ -4900,7 +4900,7 @@ def test_drawing_a_road_suggests_record_first(game):
     st = ns.settings.gps
     frame = lua.globals().AzerothGPSFrame
     keep = st.recordHint
-    st.toolShiftClick = False  # (plain drags draw here; Shift-click drawing is on by default)
+    lua.execute("AGPS_SHIFT_KEEP = IsShiftKeyDown IsShiftKeyDown = function() return true end")  # (Shift draws)
     shown = []
     real_show = R.ShowWindow
     R.ShowWindow = lambda *a: shown.append(True)
@@ -4941,7 +4941,7 @@ def test_drawing_a_road_suggests_record_first(game):
         assert G.lasso is not None and G.lasso.erase
     finally:
         R.ShowWindow = real_show
-        st.toolShiftClick = True
+        lua.execute("IsShiftKeyDown = AGPS_SHIFT_KEEP")
         st.recordHint = keep
         ns.db.recordHintSnoozed = None
         G.SetRoadMode(False)

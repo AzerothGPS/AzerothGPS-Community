@@ -33,7 +33,7 @@ replaceMinimapCollapseOnCombat replaceMinimapSize windowTint windowButtons windo
 charmSwing devTools recordHint pinning copyRoads copyWalls copyRoutes copyPins""".split()
 # (askToSave, "Remind me to save": removed with the map's Save and Dismiss buttons, asked 2026-11-17)
 # Settings that were a slash command only (or the Quick buttons page's "On" column only) and have a control now.
-NEW = ["allowSwim", "mapEditIdle", "toolShiftClick", "language", "layerCity", "showRoads", "showWalls", "useWorldMap", "replaceMinimapIdle", "questAutoReroute", "quietChat",
+NEW = ["allowSwim", "mapEditIdle", "language", "layerCity", "showRoads", "showWalls", "useWorldMap", "replaceMinimapIdle", "questAutoReroute", "quietChat",
        "questPickRoute", "seamTerrainYd", "seamContinentAt", "seamWorldAt", "seamTerrainBlend",
        "seamContinentBlend", "seamWorldBlend", "interiorZoomYd", "roundIcons", "interiorHoldSec", "iconSize",
        # (asked 2026-11-14: how far out each kind of icon shows, GPSFrame's G.IconShown)
@@ -77,7 +77,7 @@ HOME = {
     "Directions": "arrow arrowLocked arrowPx arrowBg dirShown dirLocked dirStopsOnly arrowSnap arrowSide dirTextScale dirBg "
                   "questing",
     "Performance": "hz rerouteSeconds stopsAhead autoPauseRouting autoPauseSeconds stutterPause gentleBackground arrowHz",
-    "Tools": "devTools mapEditIdle recordHint showRoads showWalls toolShiftClick pinning",
+    "Tools": "devTools mapEditIdle recordHint showRoads showWalls pinning",
     "Help": "copyRoads copyWalls copyRoutes copyPins",
 }
 # The room a page has in the window before it scrolls (the window 560 tall, less its title, footer and margins).

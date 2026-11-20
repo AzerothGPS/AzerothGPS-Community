@@ -32,6 +32,9 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Herbs and veins your skill is too low for say so in red when you point at them, "Requires Mining 125".
 - Find Herbs and Ore: Available shows only the herbs and veins your skill can gather, on the map and in its list, and follows your skill as it goes up. Show All turns it off.
 - Find Herbs and Ore: the list goes by the skill needed, lowest first; names your skill is too low for show that number in red, and its herb and ore buttons (top right) list only herbs or only ore.
+- The road and wall tools' hints are now a list on the map's left, one action a row with a small picture of its mouse button or key; the pointer's tooltip keeps clear of it.
+- With the road or wall tools on, click a road or wall to change its kind and heights; the map's own lines show their details.
+- The road and wall tools always draw with Shift held (Shift + left-drag draws, Shift + right-drag erases); a plain drag pans the map. The Shift-click drawing option is gone.
 
 ### Fixed
 

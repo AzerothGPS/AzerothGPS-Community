@@ -231,13 +231,13 @@ drawn, erased or recorded is practice.
    Click Map Editing on the map, then Road Tools. Open, Map Editing shows the roads and walls.
    Noticed by: the road tools are on.
 3. **Draw a road** (the player does it)
-   Left-drag along where a road should be. Right-drag over a road erases it.
+   Hold Shift and left-drag along where a road should be. Shift + right-drag over a road erases it. A plain drag pans the map.
    Noticed by: a practice road stroke (drawn or erased) was made. The chat says "Practice: nothing was saved."
 4. **Magic Eraser** (the player does it; a practice road is put across the player's spot if the last step was skipped)
-   Click Magic Eraser, then drag its circle over the road you drew: the map's own roads are back there. Ctrl + mouse wheel sizes it.
+   Click Magic Eraser, then Shift + drag its circle over the road you drew: the map's own roads are back there. Ctrl + mouse wheel sizes it.
    Noticed by: a practice road was taken out.
 5. **Draw a wall** (the player does it)
-   Wall Tools do the same for walls and cliffs that routes should go around. Click Wall Tools, then left-drag one.
+   Wall Tools do the same for walls and cliffs that routes should go around. Click Wall Tools, then Shift + left-drag one.
    Noticed by: a practice wall stroke was made.
 6. **Record a walk** (the player does it)
    Click Record on the map, then Record in its window, and walk a few steps.

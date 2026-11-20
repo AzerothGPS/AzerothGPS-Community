@@ -30,8 +30,8 @@ local HELP = {
   L["/agps roads on|off       (show the extracted road network)"],
   L["/agps dev                 (the Map Editing button on the map)"],
   L["/agps walls on|off        (show the walls routes go around)"],
-  L["/agps draw [undo|list|delete <n>]  (road tools on/off: left-drag draws, right-drag erases, middle-drag pans)"],
-  L["/agps draw eraser|zone|continent|shift  (magic eraser, restore the zone or continent, Shift-click drawing)"],
+  L["/agps draw [undo|list|delete <n>]  (road tools on/off: Shift + left-drag draws, Shift + right-drag erases, a plain drag pans)"],
+  L["/agps draw eraser|zone|continent  (magic eraser, restore the zone or continent)"],
   L["/agps minimap on|off     (minimap button)"],
   L["/agps replace on|off|small|medium|large|ground|mask|status  (the GPS map as the minimap)"],
   L["/agps tutorial [section|exit]  (the tutorial, or one of its sections: Options > Help lists them)"],
@@ -247,8 +247,6 @@ Command = function(msg)
       ns.GPS.RestoreZone()
     elseif b == "continent" then
       ns.GPS.RestoreContinent()
-    elseif b == "shift" then
-      ns.GPS.ToggleShiftClick()
     else
       ns.GPS.ToggleRoadMode()
     end

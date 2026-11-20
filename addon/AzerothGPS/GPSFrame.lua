@@ -2804,7 +2804,7 @@ function G.FloorText()
   else
     what = f.down and L["down under"] or L["up top"]
   end
-  return Format(L["|cffffd100Editing: %s|r  |cff9d9d9d(Shift + mouse wheel picks a floor; other floors faint)|r"], what)
+  return Format(L["Editing: %s"], what)
 end
 
 local function S() return ns.settings.gps end
@@ -12729,6 +12729,7 @@ function G.StartDrawing(kind)
   if drawHint then
     drawHint:SetText(G.DrawHintText())
     drawHint:Show()
+    G.HideToolLegend()
   end
   G.PadMarksRefresh()
   elapsed = 1
@@ -12737,7 +12738,7 @@ end
 function G.StopDrawing()
   G.drawMode, G.lasso = false, nil
   if drawHint then
-    if G.roadMode or G.wallMode then G.RoadHint() else drawHint:Hide() end
+    if G.roadMode or G.wallMode then G.RoadHint() else drawHint:Hide() G.HideToolLegend() end
   end
   G.PadMarksRefresh()
   elapsed = 1
@@ -12821,34 +12822,264 @@ function G.PadDrawFinish()
   return true
 end
 
--- The road tools: on until toggled off. On the map, left-drag draws a road, right-drag
--- erases one (in red), middle-drag pans.
-function G.RoadHint()
-  local text
+-- The road and wall tools' legend (asked 2026-11-19 for 1.3.10: the hint at the map's top was "a wall of colored text"
+-- and the hover tooltip covered it): on the map's left, where the controller's box is (G.PadBoxRoom), one action a
+-- row, each with pixel icons for its input (Media\Tools\, toolicons.py: the mouse's buttons and wheel, Shift and Ctrl)
+-- and a short label; the tool's name over them and the floor being edited under them. Drawing and erasing take Shift
+-- (asked 2026-11-19: Shift-click drawing always, its option gone); a plain drag pans the map and a plain click on a
+-- road or wall opens its details (G.ToolClick).
+-- The legend's rows now: header, { { icons = { name, ... }, text }, ... }, state line (or nil).
+function G.ToolLegendRows()
+  local rows = {}
+  local function row(text, ...) rows[#rows + 1] = { icons = { ... }, text = text } end
+  local header
+  local re, we = G.roadEdit, G.wallEdit
   if G.eraserMode then
-    text = Format(L["|cffe080ffMagic eraser (%d yd): drag over your changes to put the map's own back|r  ·  |cff9d9d9dCtrl + wheel: size  ·  Middle-drag: pan|r"], G.EraserYd())
-  elseif G.wallMode and G.editWallMode then
-    local pick = G.wallEdit and G.wallEdit.pick
-    text = pick and L["|cffffd100Edit Wall: click the section's end on the wall|r  ·  |cff9d9d9dMiddle-drag: pan|r"]
-      or L["|cffffd100Edit Wall: click a wall you drew on the map|r  ·  |cff9d9d9dthe Edit Wall button again: done|r"]
+    header = Format(L["Magic Eraser: %d yd"], G.EraserYd())
+    row(L["Drag over your changes: the map's own back"], "Shift", "MouseLeft")
+    row(L["Circle size"], "Ctrl", "MouseWheel")
   elseif G.wallMode then
-    text = L["|cffd02020Left-drag: draw a wall|r  ·  |cffb0b0b0Right-drag: erase walls (circle an area to erase them all)|r  ·  |cff9d9d9dMiddle-drag: pan|r"]
-  elseif G.editRoadMode then
-    local pick = G.roadEdit and G.roadEdit.pick
-    text = pick == "foot" and L["|cffffd100Edit Road: click the stairs' foot on the road|r  ·  |cff9d9d9dMiddle-drag: pan|r"]
-      or pick == "top" and L["|cffffd100Edit Road: click the stairs' top on the road|r  ·  |cff9d9d9dMiddle-drag: pan|r"]
-      or L["|cffffd100Edit Road: click a drawn or recorded road on the map|r  ·  |cff9d9d9dthe Edit Road button again: done|r"]
+    local pick = we and we.pick and we.sel
+    header = G.editWallMode and L["Edit Wall"] or L["Wall Tools"]
+    if pick then
+      row(L["Click the section's end on the wall"], "MouseLeft")
+    else
+      row(L["Click a wall: edit it"], "MouseLeft")
+      if not G.editWallMode then
+        row(L["Draw a wall"], "Shift", "MouseLeft")
+        row(L["Erase walls (circle an area to erase all)"], "Shift", "MouseRight")
+      end
+    end
   elseif G.stairMode then
-    text = G.stairMode.x and L["|cffffd100Stairs: now click their top|r  ·  |cff9d9d9dMiddle-drag: pan|r"]
-      or L["|cffffd100Stairs: click their foot on the map|r  ·  |cff9d9d9dthe Stairs button again: done|r"]
+    header = L["Stairs"]
+    row(G.stairMode.x and L["Click the stairs' top"] or L["Click the stairs' foot"], "MouseLeft")
   else
-    text = L["Left-drag: draw a road  ·  |cffff4040Right-drag: erase (circle an area to erase it all)|r  ·  |cff9d9d9dMiddle-drag: pan|r"]
+    local pick = re and re.sel and re.pick
+    header = G.editRoadMode and L["Edit Road"] or L["Road Tools"]
+    if pick then
+      row(pick == "foot" and L["Click the stairs' foot on the road"] or L["Click the stairs' top on the road"], "MouseLeft")
+    else
+      row(L["Click a road: edit it"], "MouseLeft")
+      if not G.editRoadMode then
+        row(L["Draw a road"], "Shift", "MouseLeft")
+        row(L["Erase (circle an area to erase all)"], "Shift", "MouseRight")
+      end
+    end
   end
-  if S().toolShiftClick then text = text .. "\n" .. L["|cff9d9d9dShift-click drawing: hold Shift to draw or erase; a plain drag pans the map|r"] end
-  -- (where floors lie over each other: which one the player is on, the one their edits change)
+  row(L["Drag: pan the map"], "MouseLeft")
+  -- (where floors lie over each other: which one is edited, Shift + wheel steps it)
+  local state = G.FloorText()
+  if state then row(L["Pick a floor"], "Shift", "MouseWheel") end
+  return header, rows, state
+end
+-- The icons: each drawn at each of TOOL_ICON_PX pixels high (toolicons.py's ICON_PX), a keycap TOOL_ICON_WIDE times as
+-- wide, in the top-left corner of a square power-of-two canvas; shown TOOL_ICON_UNITS high, the size drawn nearest its
+-- pixels on the screen, pixel for pixel (no filter above LINEAR: the client crashes on it).
+G.TOOL_ICON_DIR = "Interface\\AddOns\\AzerothGPS\\Media\\Tools\\"
+G.TOOL_ICON_PX = { 12, 14, 16, 18, 20, 24, 28, 32, 40 }
+G.TOOL_ICON_WIDE = { Shift = 2, Ctrl = 2 }
+G.TOOL_ICON_UNITS = 14
+G.TOOL_LEGEND_PAD, G.TOOL_LEGEND_GAP, G.TOOL_LEGEND_ROW_GAP = 6, 5, 3
+G.TOOL_LEGEND_MAX_W, G.TOOL_LEGEND_MIN_W = 230, 150
+G.TOOL_LEGEND_TINT = 0.55
+function G.ToolIconFile(name, px)
+  return G.TOOL_ICON_DIR .. name .. "_" .. px
+end
+-- Texture `t` showing icon `name` pixel for pixel at about TOOL_ICON_UNITS high on a frame of effective scale
+-- `effScale`: its width and height in units (nil when the client doesn't know the file yet: new files need a relog).
+function G.FitToolIcon(t, name, effScale)
+  local ppu = ns.PixelsPerUnit(effScale or 1)
+  local px = G.NearestSize(G.TOOL_ICON_PX, G.TOOL_ICON_UNITS * ppu)
+  local file = G.ToolIconFile(name, px)
+  if not G.ArtFileKnown(file) then return nil end
+  local wide = G.TOOL_ICON_WIDE[name] or 1
+  local pot = 1
+  while pot < px * wide do pot = pot * 2 end
+  t:SetTexture(file)
+  t:SetTexCoord(0, px * wide / pot, 0, px / pot)
+  G.SnapTexture(t)
+  t.agpsArtPx = px
+  local w, h = px * wide / ppu, px / ppu
+  t:SetSize(w, h)
+  return w, h
+end
+-- The inputs' names, where an icon can't be shown yet (before a relog).
+G.TOOL_INPUT_NAMES = { MouseLeft = L["Left-click"], MouseRight = L["Right-click"],
+  MouseWheel = L["Mouse wheel"], Shift = L["Shift"], Ctrl = L["Ctrl"] }
+-- The legend shown (built once), its rows as G.ToolLegendRows says; placed in the controller box's room.
+function G.ShowToolLegend()
+  local top = drawHint and drawHint:GetParent()
+  if not top then return end
+  local lg = G.toolLegend
+  if not lg then
+    lg = CreateFrame("Frame", nil, top)
+    lg.bg = lg:CreateTexture(nil, "BACKGROUND")
+    lg.bg:SetAllPoints()
+    lg.bg:SetColorTexture(0, 0, 0, G.TOOL_LEGEND_TINT)
+    lg.header = lg:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    lg.header:SetJustifyH("LEFT")
+    lg.state = lg:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    lg.state:SetJustifyH("LEFT")
+    lg.rows = {}
+    G.toolLegend = lg
+  end
+  local header, rows, state = G.ToolLegendRows()
+  lg.shownHeader, lg.shownRows, lg.shownState = header, rows, state
+  local eff = lg.GetEffectiveScale and lg:GetEffectiveScale() or 1
+  for i, r in ipairs(rows) do
+    local fr = lg.rows[i]
+    if not fr then
+      fr = { icons = {} }
+      fr.text = lg:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+      fr.text:SetJustifyH("LEFT")
+      fr.text:SetWordWrap(true)
+      lg.rows[i] = fr
+    end
+    fr.iconW = 0
+    local missing = {}
+    for k = 1, math.max(#r.icons, #fr.icons) do
+      local name = r.icons[k]
+      local t = fr.icons[k]
+      if name and not t then
+        t = lg:CreateTexture(nil, "ARTWORK")
+        fr.icons[k] = t
+      end
+      if t then
+        local w = name and G.FitToolIcon(t, name, eff)
+        t.name = w and name or nil
+        if w then
+          fr.iconW = fr.iconW + (fr.iconW > 0 and 2 or 0) + w
+        else
+          t:Hide()
+          if name then missing[#missing + 1] = G.TOOL_INPUT_NAMES[name] or name end
+        end
+      end
+    end
+    -- (an icon the client doesn't know yet, before a relog: its input as text instead)
+    fr.label = #missing > 0 and (table.concat(missing, " + ") .. ": " .. r.text) or r.text
+    fr.text:SetText(fr.label)
+    fr.text:Show()
+  end
+  for i = #rows + 1, #lg.rows do
+    lg.rows[i].text:Hide()
+    for _, t in ipairs(lg.rows[i].icons) do
+      t:Hide()
+      t.name = nil
+    end
+  end
+  lg.header:SetText(header or "")
+  lg.state:SetText(state or "")
+  lg.state:SetShown(state ~= nil)
+  lg:Show()
+  G.PlaceToolLegend()
+  local P = ns.Pad
+  if P and P.marksOn and P.ShowMarks then P.ShowMarks(true) end -- (the controller's box gives way: its bottom line)
+end
+function G.HideToolLegend()
+  local lg = G.toolLegend
+  if not (lg and lg:IsShown()) then return end
+  lg:Hide()
+  local P = ns.Pad
+  if P and P.marksOn and P.ShowMarks then P.ShowMarks(true) end
+end
+function G.ToolLegendShown()
+  return G.toolLegend and G.toolLegend:IsShown() and true or false
+end
+-- The legend laid out in the room on the map's left (under the directions and the corner logo, over the map menu's
+-- buttons): its width the icons' and the longest label's (TOOL_LEGEND_MIN_W .. MAX_W), labels wrapped past that; the
+-- rows that don't fit left out.
+function G.PlaceToolLegend()
+  local lg = G.toolLegend
+  if not (lg and lg:IsShown() and G.PadBoxRoom) then return end
+  local parent, x, y, _, h = G.PadBoxRoom()
+  if not parent then return end
+  local pad, gap = G.TOOL_LEGEND_PAD, G.TOOL_LEGEND_GAP
+  local rows = lg.shownRows or {}
+  local iconCol, textW = 0, 0
+  for i = 1, #rows do
+    local fr = lg.rows[i]
+    iconCol = math.max(iconCol, fr.iconW or 0)
+    local sw = fr.text.GetUnboundedStringWidth and fr.text:GetUnboundedStringWidth() or fr.text:GetStringWidth()
+    textW = math.max(textW, sw or 0)
+  end
+  local maxW = math.min(G.TOOL_LEGEND_MAX_W, math.max(G.TOOL_LEGEND_MIN_W, (parent:GetWidth() or 400) * 0.4))
+  local w = math.floor(math.max(G.TOOL_LEGEND_MIN_W, math.min(maxW, pad * 2 + iconCol + gap + textW + 2)))
+  local labelW = w - pad * 2 - iconCol - gap
+  local cy = pad
+  lg.header:ClearAllPoints()
+  lg.header:SetPoint("TOPLEFT", lg, "TOPLEFT", pad, -cy)
+  lg.header:SetWidth(w - pad * 2)
+  cy = cy + (lg.header:GetStringHeight() or 12) + G.TOOL_LEGEND_ROW_GAP + 1
+  local room = h and math.max(0, h) or math.huge
+  lg.fit = 0
+  for i = 1, #rows do
+    local fr = lg.rows[i]
+    fr.text:SetWidth(labelW)
+    local th = fr.text:GetStringHeight() or 12
+    local rh = math.max(G.TOOL_ICON_UNITS, th)
+    local fits = cy + rh + pad <= room
+    local ix = pad
+    for _, t in ipairs(fr.icons) do
+      if t.name and fits then
+        t:ClearAllPoints()
+        -- (on whole units from the row's top, at the row's middle)
+        t:SetPoint("TOPLEFT", lg, "TOPLEFT", ix, -math.floor(cy + (rh - t:GetHeight()) / 2 + 0.5))
+        t:Show()
+        ix = ix + t:GetWidth() + 2
+      else
+        t:Hide()
+      end
+    end
+    fr.text:ClearAllPoints()
+    fr.text:SetPoint("TOPLEFT", lg, "TOPLEFT", pad + iconCol + gap, -math.floor(cy + (rh - th) / 2 + 0.5))
+    fr.text:SetShown(fits)
+    if fits then
+      lg.fit = i
+      cy = cy + rh + G.TOOL_LEGEND_ROW_GAP
+    end
+  end
+  if lg.state:IsShown() then
+    lg.state:ClearAllPoints()
+    lg.state:SetPoint("TOPLEFT", lg, "TOPLEFT", pad, -cy)
+    lg.state:SetWidth(w - pad * 2)
+    cy = cy + (lg.state:GetStringHeight() or 12) + G.TOOL_LEGEND_ROW_GAP
+  end
+  if lg:GetParent() ~= parent then lg:SetParent(parent) end
+  lg:SetFrameLevel((parent:GetFrameLevel() or 1) + 20)
+  lg:ClearAllPoints()
+  lg:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+  lg:SetSize(w, math.floor(cy - G.TOOL_LEGEND_ROW_GAP + pad))
+end
+-- The tools' hover tooltip kept off the legend (asked 2026-11-19: it covered the hint): with the legend shown, the
+-- tooltip's bottom left where ANCHOR_CURSOR would put it (the cursor at (mx, my), screen pixels, TOOL_TIP_OFF units
+-- past it), but never left of the legend's right edge (`lr`, screen pixels) plus TOOL_TIP_GAP: its offsets from the
+-- legend's top right (`lt`: its top, screen pixels) in the tooltip's units (`ts`: its effective scale).
+G.TOOL_TIP_GAP, G.TOOL_TIP_OFF = 8, 12
+function G.TipBesideLegend(mx, my, lr, lt, ts)
+  ts = ts or 1
+  local x = math.max(G.TOOL_TIP_GAP, (mx - lr) / ts + G.TOOL_TIP_OFF)
+  local y = (my - lt) / ts + G.TOOL_TIP_OFF
+  return x, y
+end
+function G.KeepTipOffLegend()
+  local lg = G.toolLegend
+  if not (lg and lg:IsShown()) then return false end
+  local lr, lt = lg:GetRight(), lg:GetTop()
+  if type(lr) ~= "number" or type(lt) ~= "number" then return false end
+  local ls = lg:GetEffectiveScale() or 1
+  local ts = GameTooltip.GetEffectiveScale and GameTooltip:GetEffectiveScale() or 1
+  local mx, my = GetCursorPosition()
+  local x, y = G.TipBesideLegend(mx, my, lr * ls, lt * ls, ts)
+  GameTooltip:ClearAllPoints()
+  GameTooltip:SetPoint("BOTTOMLEFT", lg, "TOPRIGHT", x, y)
+  return true
+end
+-- The tools' hint: the legend (the line at the map's top is only for drawing an area now, G.drawMode).
+function G.RoadHint()
   G.floorLine = G.FloorText()
-  drawHint:SetText(G.floorLine and text .. "\n" .. G.floorLine or text)
-  drawHint:Show()
+  if G.drawMode then return end
+  drawHint:Hide()
+  G.ShowToolLegend()
 end
 -- The hint's floor line kept up to date as the player moves (a redraw, every FLOOR_HINT_SECONDS).
 G.FLOOR_HINT_SECONDS = 0.5
@@ -12859,7 +13090,7 @@ function G.RefreshFloorHint()
   if now - floorHintAt < G.FLOOR_HINT_SECONDS then return end
   floorHintAt = now
   G.PlaceDrawHint()
-  if G.FloorText() ~= G.floorLine then G.RoadHint() end
+  if G.FloorText() ~= G.floorLine then G.RoadHint() else G.PlaceToolLegend() end
 end
 -- The hint under the top panel (the directions, a quest area's objectives): at DRAW_HINT_Y, or lower when that panel
 -- reaches further down (reported 2026-11-14: a quest's four lines hid the tools' hint).
@@ -12898,7 +13129,7 @@ function G.SetRoadMode(on)
   G.lasso, drag = nil, nil
   if G.drawMode then G.drawMode = false end
   if drawHint then
-    if G.roadMode or G.wallMode then G.RoadHint() else drawHint:Hide() end
+    if G.roadMode or G.wallMode then G.RoadHint() else drawHint:Hide() G.HideToolLegend() end
   end
   if G.RefreshQuick then G.RefreshQuick() end
   if not on then G.MapEditAuto(false) end
@@ -12918,7 +13149,7 @@ function G.SetWallMode(on)
   G.lasso, drag = nil, nil
   if G.drawMode then G.drawMode = false end
   if drawHint then
-    if G.roadMode or G.wallMode then G.RoadHint() else drawHint:Hide() end
+    if G.roadMode or G.wallMode then G.RoadHint() else drawHint:Hide() G.HideToolLegend() end
   end
   if G.RefreshQuick then G.RefreshQuick() end
   if not on then G.MapEditAuto(false) end
@@ -12989,13 +13220,13 @@ end
 
 function G.ToggleWallMode()
   if G.SetWallMode(not G.wallMode) == false then return end
-  ns.Print(G.wallMode and L["wall tools on: left-drag draws a wall, right-drag erases walls, middle-drag pans (toggle off when done)"]
+  ns.Print(G.wallMode and L["wall tools on: Shift + left-drag draws a wall, Shift + right-drag erases walls, a plain drag pans, a click on a wall edits it (toggle off when done)"]
     or L["wall tools off"])
 end
 
 function G.ToggleRoadMode()
   if G.SetRoadMode(not G.roadMode) == false then return end
-  ns.Print(G.roadMode and L["road tools on: left-drag draws a road, right-drag erases one, middle-drag pans (toggle off when done)"]
+  ns.Print(G.roadMode and L["road tools on: Shift + left-drag draws a road, Shift + right-drag erases one, a plain drag pans, a click on a road edits it (toggle off when done)"]
     or L["road tools off"])
 end
 
@@ -13188,19 +13419,12 @@ function G.RestoreContinent()
     end)
 end
 
--- Shift-click drawing (asked 2026-11-14): with it on, the tools draw and erase only with Shift held (Shift + left-drag,
--- Shift + right-drag); a plain click or drag is the map's own (left-drag pans, as with the tools off). Whether a click
--- with `button` goes to the map, not the tools.
+-- Shift-click drawing (asked 2026-11-14; always since 2026-11-19, its option gone and a saved one ignored): the tools
+-- draw and erase only with Shift held (Shift + left-drag, Shift + right-drag); a plain click or drag is the map's own
+-- (left-drag pans, as with the tools off), and a plain click on a road or wall opens its details (G.ToolClick). Whether
+-- a click with `button` goes to the map, not the tools.
 function G.ToolsPassClick(button)
-  return S().toolShiftClick and button ~= "MiddleButton" and not (IsShiftKeyDown and IsShiftKeyDown()) or false
-end
-function G.ToggleShiftClick()
-  S().toolShiftClick = not S().toolShiftClick -- (off kept as false: on is the default)
-  if drawHint and (G.roadMode or G.wallMode) then G.RoadHint() end
-  if G.RefreshQuick then G.RefreshQuick() end
-  if ns.Options and ns.Options.Refresh then pcall(ns.Options.Refresh) end
-  ns.Print(S().toolShiftClick and L["shift-click drawing on: Shift + left-drag draws, Shift + right-drag erases, a plain drag pans the map"]
-    or L["shift-click drawing off"])
+  return button ~= "MiddleButton" and not (IsShiftKeyDown and IsShiftKeyDown()) or false
 end
 
 -- The area is drawn: a loop through the known nodes inside it (of this character's
@@ -13520,11 +13744,131 @@ function G.SetEditRoadMode(on)
   if G.RefreshQuick then G.RefreshQuick() end
   elapsed = 1
 end
+-- A plain left click on a road or wall with the tools on (asked 2026-11-19 for 1.3.10: "Left-click a road or wall to
+-- edit its details"): the line under the pointer (within LINE_CLICK_PX on the screen) opened in Edit Road or Edit Wall,
+-- the windows those buttons open: its kind and heights, saved as an edit the same way (Record.EditTrack,
+-- Record.EditWall). A drag still pans (Shift + drag draws), and a click on no line is the map's own click as before.
+-- With Edit Road or Edit Wall on, or a foot, top or section's end being picked, the click is theirs; with Stairs, the
+-- stairs'. A line that can't be edited (the map's own roads with no heights of their own, the map's own walls: no
+-- track to replace) opens its window read-only, its details and why.
+G.LINE_CLICK_PX = 8
+-- The world spot under the pointer on the map's canvas: x, y (nil off it).
+function G.ToolCursor()
+  if not (canvas and view.x and view.s) then return nil end
+  local ccx, ccy = canvas:GetCenter()
+  if not ccx then return nil end
+  local mx, my = GetCursorPosition()
+  local sc = canvas:GetEffectiveScale()
+  return G.ScreenToWorld(view.x, view.y, mx / sc - ccx, my / sc - ccy, view.rot, view.s)
+end
+function G.ToolClickAtCursor()
+  local x, y = G.ToolCursor()
+  if not x then return false end
+  return G.ToolClick(G.PinLevel(x, y), x, y, G.LINE_CLICK_PX / (view.s or 1))
+end
+-- The click at (x, y) of `level`, `reach` yards round it: true when it was a line's (or a pick's).
+function G.ToolClick(level, x, y, reach)
+  if not (level and x) then return false end
+  local Rec = ns.Record
+  if G.wallMode then
+    local we = G.wallEdit
+    if G.editWallMode or (we and we.pick and we.sel) then return G.EditWallClick(level, x, y) end
+    local sel = Rec.WallAt(level, x, y, math.max(reach or 0, 1))
+    if sel then
+      G.AskWallEdit(level, sel)
+      return true
+    end
+    return G.ShowWallDetails(level, x, y, reach)
+  end
+  if not G.roadMode then return false end
+  local re = G.roadEdit
+  if G.editRoadMode or (re and re.pick and re.sel) then return G.EditRoadClick(level, x, y) end
+  if G.stairMode then return G.StairClick(level, x, y) end
+  local sel = Rec.TrackAt(level, x, y, math.max(reach or 0, 1))
+  if sel then
+    G.AskRoadEdit(level, sel)
+    return true
+  end
+  return G.ShowRoadDetails(level, x, y, reach)
+end
+-- A window read-only (`why`: the reason, shown with the details) or editable again: its kind buttons, height boxes,
+-- picks and Save.
+function G.EditWindowReadOnly(f, readOnly)
+  f.readOnly = readOnly and true or nil
+  local function set(b, on)
+    if b and b.SetEnabled then b:SetEnabled(on) end
+  end
+  for _, b in ipairs(f.kinds or {}) do
+    if readOnly then set(b, false) end
+  end
+  for _, row in ipairs({ f.height, f.topRow }) do
+    set(row.box, not readOnly)
+    for _, b in ipairs(row.buttons) do set(b, not readOnly) end
+  end
+  set(f.left, not readOnly)
+  set(f.right, not readOnly)
+  for _, k in ipairs({ "pickFoot", "pickTop", "setHeights", "pickA", "pickB" }) do
+    if f[k] then f[k]:SetShown(not readOnly) end
+  end
+  set(f.save, not readOnly)
+end
+-- The map's own road under the pointer (no heights of its own to edit: Record.TrackAt has none there): Edit Road
+-- read-only, its kind and height and why. True when there was one.
+function G.ShowRoadDetails(level, x, y, reach)
+  local R = ns.Router
+  local info = G.RoadHoverInfo(level, x, y, reach or G.LINE_CLICK_PX / (view.s or 1), G.editFloor and G.editFloor.z)
+  if not info then return false end
+  local c = R.NearestEdges(level, x, y, G.editFloor and G.editFloor.z)[1]
+  local g = R.DebugGraph(level)
+  local e = c and g and g.e[c.edge]
+  local pts = {}
+  for k = 5, e and #e or 0 do pts[#pts + 1] = e[k] end
+  if #pts < 4 then pts = { x, y, x, y } end
+  local kind = info.title == L["Lift"] and "lift" or info.title == L["Stairs"] and "stairs"
+    or (g and g.kind and c and g.kind[c.edge]) or "ground"
+  local f = G.AskRoadEdit(level, { t = { pts = pts, kind = kind }, readOnly = true })
+  G.EditWindowReadOnly(f, true)
+  f.note:SetText(info.title .. ": " .. table.concat(info.lines, "  ") .. "\n" .. L["The map's own road: it can't be changed here. To change it, erase it (Shift + right-drag) and draw it again."])
+  return true
+end
+-- The map's own wall under the pointer (the player's own are Record.WallAt's): Edit Wall read-only, plain or a cliff
+-- with its sides, and why. True when there was one.
+function G.ShowWallDetails(level, x, y, reach)
+  local P = ns.Passability
+  if not (P and P.WallLines) then return false end
+  reach = reach or G.LINE_CLICK_PX / (view.s or 1)
+  local best, bw, bp
+  for _, w in ipairs(P.WallLines(level)) do
+    for k = 1, #w - 3, 2 do
+      local ax, ay, bx, by = w[k], w[k + 1], w[k + 2], w[k + 3]
+      local vx, vy = bx - ax, by - ay
+      local L2 = vx * vx + vy * vy
+      local fr = L2 > 0 and math.max(0, math.min(1, ((x - ax) * vx + (y - ay) * vy) / L2)) or 0
+      local d = math.sqrt((ax + vx * fr - x) ^ 2 + (ay + vy * fr - y) ^ 2)
+      if d <= reach and (not best or d < best) then best, bw, bp = d, w, (k + 1) / 2 end
+    end
+  end
+  if not bw then return false end
+  local pts = {}
+  for k = 1, #bw do pts[k] = bw[k] end
+  local f = G.AskWallEdit(level, { t = { pts = pts }, i = bp, readOnly = true })
+  local zl, zr
+  if bw.kind == "cliff" and P.CliffSides then zl, zr = P.CliffSides(bw, bp) end
+  G.wallEdit.kind = zl and "cliff" or "wall"
+  G.FillWallEdit()
+  f.left:SetText(zl and string.format("%.1f", zl) or "")
+  f.right:SetText(zr and string.format("%.1f", zr) or "")
+  G.EditWindowReadOnly(f, true)
+  f.note:SetText((zl and Format(L["Cliff: left %d yd, right %d yd (%s)"], math.floor(zl + 0.5), math.floor(zr + 0.5),
+    P.CliffSection(bw, bp) == "open" and L["level: open"] or P.CliffSection(bw, bp) == "down" and L["a safe jump down"]
+    or L["too high: blocked"]) or L["Wall"]) .. "\n" .. L["The map's own wall: it can't be changed here. To change it, erase it (Shift + right-drag) and draw your own."])
+  return true
+end
 -- A click on the map with Edit Road at (x, y) of `level`: the stairs' foot or top when picking one, else the road there
 -- picked and its window opened. Whether it was taken.
 function G.EditRoadClick(level, x, y)
-  if not (G.editRoadMode and level and x) then return false end
   local re = G.roadEdit
+  if not ((G.editRoadMode or (re and re.pick and re.sel)) and level and x) then return false end
   local Rec = ns.Record
   if re and re.pick and re.sel and re.level == level then
     re[re.pick] = Rec.NearestPoint(re.sel.t, x, y)
@@ -13673,6 +14017,7 @@ function G.AskRoadEdit(level, sel)
   f.height.box:SetText("")
   f.topRow.box:SetText("")
   f.note:SetText(L["Pick what it is and its height (the floors near it), or type one. Stairs on part of it: Pick Foot and Pick Top, then click each on the road."])
+  G.EditWindowReadOnly(f, false) -- (a map's own road shown before: G.ShowRoadDetails)
   G.FillRoadEdit()
   f:Show()
   elapsed = 1
@@ -13702,8 +14047,8 @@ end
 -- A click with Edit Wall at (x, y) of `level`: a section's end when picking one, else the wall there picked. Taken or
 -- not.
 function G.EditWallClick(level, x, y)
-  if not (G.editWallMode and level and x) then return false end
   local we = G.wallEdit
+  if not ((G.editWallMode or (we and we.pick and we.sel)) and level and x) then return false end
   local Rec = ns.Record
   if we and we.pick and we.sel and we.level == level then
     we[we.pick] = Rec.NearestPoint(we.sel.t, x, y)
@@ -13823,6 +14168,7 @@ function G.AskWallEdit(level, sel)
   end
   G.wallEdit = { level = level, sel = sel, kind = "cliff" }
   f.note:SetText(L["The ground's height on each side, filled in from the map: type over them. Level sides: open. Low to high: blocked. High to low: a jump down when it's safe, else blocked both ways."])
+  G.EditWindowReadOnly(f, false) -- (a map's own wall shown before: G.ShowWallDetails)
   G.FillWallEdit()
   f:Show()
   elapsed = 1
@@ -13831,7 +14177,7 @@ end
 -- Save Wall: the wall picked saved as edited (Record.EditWall). Its number, or nil (and the window says why).
 function G.SaveWallEdit()
   local f, we = G.wallEditWindow, G.wallEdit
-  if not (f and we and we.sel) then return nil end
+  if not (f and we and we.sel) or we.sel.readOnly then return nil end
   local i, j = G.WallSection(we)
   local idx, why = ns.Record.EditWall(we.sel, { kind = we.kind, i = i, j = j, zl = tonumber(f.left:GetText()),
     zr = tonumber(f.right:GetText()) })
@@ -14033,7 +14379,7 @@ end
 -- Save Road: the road picked saved as edited (Record.EditTrack). Its number, or nil (and the window says why).
 function G.SaveRoadEdit()
   local f, re = G.roadEditWindow, G.roadEdit
-  if not (re and re.sel) then return nil end
+  if not (re and re.sel) or re.sel.readOnly then return nil end
   local z = f and tonumber(f.height.box:GetText())
   local z2 = f and tonumber(f.topRow.box:GetText())
   local edit = { kind = re.kind, z = z, z1 = z, z2 = z2 }
@@ -14396,11 +14742,15 @@ function G.RoadHover(dt)
     return
   end
   local key = info.title .. "\n" .. table.concat(info.lines, "\n")
-  if owned and G.roadTip == key then return end
+  if owned and G.roadTip == key then
+    G.KeepTipOffLegend() -- (following the pointer, beside the legend)
+    return
+  end
   G.roadTip = key
-  GameTooltip:SetOwner(frame, "ANCHOR_CURSOR")
+  GameTooltip:SetOwner(frame, G.ToolLegendShown() and "ANCHOR_NONE" or "ANCHOR_CURSOR")
   GameTooltip:SetText(info.title, 1, 1, 1)
   for _, l in ipairs(info.lines) do GameTooltip:AddLine(l, nil, nil, nil, true) end
+  G.KeepTipOffLegend()
   GameTooltip:Show()
 end
 
@@ -15683,9 +16033,9 @@ function G.Init()
     -- a click on the map closes the map menu and the search panel
     if G.mapMenu then G.mapMenu:Hide() end
     if G.searchPanel then G.searchPanel:Hide() end
-    -- (Shift-click drawing on: a click or drag without Shift goes on to the map's own, below)
+    -- (Shift-click drawing: a click or drag without Shift goes on to the map's own, below; a click on a road or wall
+    -- there opens it, G.ToolClick)
     if (G.roadMode or G.wallMode) and not G.drawMode and not G.Held() and not G.ToolsPassClick(button) then
-      if button == "LeftButton" and not S().toolShiftClick and G.PinClickDown() then return end -- (Shift: a pin, on the floor picked)
       if G.eraserMode and (button == "LeftButton" or button == "RightButton") then -- (the magic eraser)
         local mx, my = GetCursorPosition()
         local sc = canvas:GetEffectiveScale()
@@ -15791,7 +16141,7 @@ function G.Init()
         drag = nil
         return
       end
-      if not S().toolShiftClick then return end -- (Shift-click drawing: the map's own click or drag, below)
+      -- (Shift-click drawing: a plain click or drag is the map's own, below)
     end
     if G.drawMode then
       if button == "LeftButton" and G.lasso then G.FinishDrawing() end
@@ -15801,6 +16151,11 @@ function G.Init()
       f:StopMovingOrSizing()
       f.moving = false
       SavePosition()
+    end
+    if button == "LeftButton" and drag and not drag.moved and (G.roadMode or G.wallMode) and not G.drawMode
+        and not G.Held() and G.ToolClickAtCursor() then
+      drag = nil -- (a click on a road or wall with the tools on: its details, not the map's click)
+      return
     end
     if button == "LeftButton" and drag and not drag.moved then
       local mx, my = GetCursorPosition()
@@ -16485,14 +16840,14 @@ function G.Init()
     { id = "instances", key = "layerInstances", icon = INSTANCE_ICON, label = L["Dungeons and Raids"], defaultOn = true,
       tip = L["Their entrances on the map (every map style). Click one for its map, with its bosses in the usual order; right-click goes back out."] },
     { id = "roadTools", icon = "Interface\\Icons\\INV_Misc_Note_02", label = L["Road Tools"], dev = true,
-      tip = L["Click to turn on, click again when done. On the map: left-drag along a road the routes miss to add it (joined to the roads it meets; where it runs along one, that road stays), right-drag over a road that isn't there to erase it (red), middle-drag to pan. Routes use your changes at once. (Shown with the road tools option, or /agps dev)"],
+      tip = L["Click to turn on, click again when done. On the map: left-drag along a road the routes miss to add it (joined to the roads it meets; where it runs along one, that road stays), right-drag over a road that isn't there to erase it (red), middle-drag to pan. Routes use your changes at once. (Shown with the road tools option, or /agps dev)"] .. " " .. L["Hold Shift to draw or erase; a plain drag pans the map and a click on a line opens its details."],
       isOn = function() return G.roadMode end,
       action = function()
         if G.mapMenu then G.mapMenu:Hide() end
         G.ToggleRoadMode()
       end },
     { id = "wallTools", icon = "Interface\\Icons\\Ability_Warrior_ShieldWall", label = L["Wall Tools"], wallDev = true,
-      tip = L["Click to turn on, click again when done. On the map: left-drag along a wall, fence or cliff edge the routes try to walk through (blood red): routes go around it like a mountain, and roads it crosses are cut there (leave a gap for a gate; flight paths still cross it). Right-drag over walls to erase them (circle an area for all in it), middle-drag to pan. (Shown with the wall tools option)"],
+      tip = L["Click to turn on, click again when done. On the map: left-drag along a wall, fence or cliff edge the routes try to walk through (blood red): routes go around it like a mountain, and roads it crosses are cut there (leave a gap for a gate; flight paths still cross it). Right-drag over walls to erase them (circle an area for all in it), middle-drag to pan. (Shown with the wall tools option)"] .. " " .. L["Hold Shift to draw or erase; a plain drag pans the map and a click on a line opens its details."],
       isOn = function() return G.wallMode end,
       action = function()
         if G.mapMenu then G.mapMenu:Hide() end
@@ -16504,7 +16859,7 @@ function G.Init()
         if G.mapMenu then G.mapMenu:Hide() end
         ns.Record.Undo()
       end },
-    -- (asked 2026-11-14: the magic eraser, Restore Zone, Restore Continent and Shift-click drawing, for either tools)
+    -- (asked 2026-11-14: the magic eraser, Restore Zone and Restore Continent, for either tools)
     { id = "magicEraser", icon = "Interface\\Icons\\Spell_Holy_DispelMagic", label = L["Magic Eraser"], dev = true, wallDev = true,
       tip = L["Drag a circle over your own roads or walls (the tools on) to put the map's own back there: a stroke running on past it is cut at its edge. Ctrl + mouse wheel sizes the circle, up to a few zones across. Undo puts back what it took. Click again when done. (Shown with the road or wall tools)"],
       isOn = function() return G.eraserMode and true or false end,
@@ -16523,13 +16878,6 @@ function G.Init()
       action = function()
         if G.mapMenu then G.mapMenu:Hide() end
         G.RestoreContinent()
-      end },
-    { id = "shiftClick", icon = "Interface\\Icons\\INV_Misc_Gear_01", label = L["Shift-Click Drawing"], dev = true, wallDev = true,
-      tip = L["On: the tools draw and erase only with Shift held (Shift + left-drag, Shift + right-drag), and a plain click or drag is the map's own: left-drag pans it, as with the tools off. (Shown with the road or wall tools)"],
-      isOn = function() return S().toolShiftClick and true or false end,
-      action = function()
-        if G.mapMenu then G.mapMenu:Hide() end
-        G.ToggleShiftClick()
       end },
     { id = "roadStairs", icon = "Interface\\Icons\\Ability_Hunter_Pathfinding", label = L["Stairs"], dev = true,
       tip = L["Draw stairs between two floors: click this, then click the stairs' foot on the map, then their top, and pick each end's height (the floors near it, or type one). Routes take them as stairs at once, and Undo takes them back. Click it again when done. (Shown with the road tools)"],
@@ -16611,7 +16959,7 @@ function G.Init()
     -- (asked 2026-11-14: the road and wall tools as one button, "map editing tools"; opened, the roads and walls show,
     -- closed, they're hidden; it stays open until the map goes unused for the time set: G.SetMapEditOpen)
     { id = "mapEdit", label = L["Map Editing"], icon = "Interface\\Icons\\INV_Misc_Note_02", edit = true, keep = true,
-      members = { "roadTools", "wallTools", "roadUndo", "magicEraser", "restoreZone", "restoreContinent", "shiftClick",
+      members = { "roadTools", "wallTools", "roadUndo", "magicEraser", "restoreZone", "restoreContinent",
         "roadStairs", "roadRecord", "roadEdit", "wallEdit" },
       tip = L["The map editing tools: roads, walls, the magic eraser and restoring, Undo, Stairs and Record. While it's open the roads and walls show on the map; it closes by itself after the map goes unused a while (Options > Tools), hiding them and turning the tools off."] },
   }

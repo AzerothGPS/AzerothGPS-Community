@@ -171,8 +171,6 @@ ns.DEFAULTS = {
     -- help improve AzerothGPS (opt-in: off unless the player turns them on)
     devTools = false, -- the Map Editing button on the map (the road and wall tools; one option since 2026-11-14)
     mapEditIdle = 2, -- minutes the opened Map Editing menu stays open with the map unused (GPS.ToolsIdleSeconds)
-    toolShiftClick = true, -- the road and wall tools draw only with Shift held; plain drags pan (GPS.ToolsPassClick; on by
-    -- default since 2026-11-14, asked)
     pinning = true, -- Shift + left-click on the map: "Create Pin" (Pins.lua)
     recordHint = true, -- drawing a road by hand: suggest Record instead (GPS.AskRecordHint; asked 2026-10-09)
     showCustomPins = true, -- the pins on the map (the player's and the shared ones)
@@ -679,9 +677,9 @@ local function InitDB()
   -- settings let go)
   if gps and not db.seamlessDefault60 and gps.seamlessZoom == false then gps.seamlessZoom = nil end
   db.seamlessDefault60 = true
-  -- (Shift-click drawing on by default, asked 2026-11-14: a 1.2.9 test build's stored "off", the old default, once)
-  if gps and not db.shiftClickDefault129 and gps.toolShiftClick == false then gps.toolShiftClick = nil end
-  db.shiftClickDefault129 = true
+  -- (Shift-click drawing always since 2026-11-19, its option gone: a stored value let go, never read)
+  if gps then gps.toolShiftClick = nil end
+  db.shiftClickDefault129 = nil
   -- (the keys kept from showing the map in combat, on by default, asked 2026-11-14: the old default's stored "off", once)
   if gps and not db.keyCombatDefault129 and gps.keyBlockedInCombat == false then gps.keyBlockedInCombat = nil end
   db.keyCombatDefault129 = true

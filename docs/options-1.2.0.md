@@ -252,7 +252,7 @@ arrow every frame (`arrowHz`).
 | Walls | Wall tools button on the map | `wallTools` |
 | Walls | Wall Tools On/Off (button) | |
 | Walls | Show the walls on the map (**new**; `/agps walls` before) | `showWalls` |
-| Both tools | Shift-click drawing (1.3.0) | `toolShiftClick` |
+| Both tools | Shift-click drawing (1.3.0; removed 1.3.10: always on) | `toolShiftClick` |
 | Pins | Pinning | `pinning` |
 | Your changes | Take Back the Last, List Your Changes (buttons) | |
 

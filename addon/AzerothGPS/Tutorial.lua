@@ -1035,7 +1035,7 @@ function T.BuildSections()
         end,
         target = T.Quick("roadTools"), done = function() return GPS().roadMode and true or false end },
       { title = L["Draw a road"],
-        text = L["Left-drag along where a road should be. Right-drag over a road erases it."],
+        text = L["Hold Shift and left-drag along where a road should be. Shift + right-drag over a road erases it. A plain drag pans the map."],
         enter = function(run)
           T.ToolsShown(true)
           if GPS().eraserMode then GPS().SetEraserMode(false) end
@@ -1045,7 +1045,7 @@ function T.BuildSections()
         target = T.MapFrame, done = function(run) return T.PracticeCount(false) > run.mark.n end },
       -- (1.3.0: the magic eraser, asked 2026-11-14; a practice road put down by the player if the last step was skipped)
       { title = L["Magic Eraser"],
-        text = L["Click Magic Eraser, then drag its circle over the road you drew: the map's own roads are back there. Ctrl + mouse wheel sizes it."],
+        text = L["Click Magic Eraser, then Shift + drag its circle over the road you drew: the map's own roads are back there. Ctrl + mouse wheel sizes it."],
         enter = function(run)
           T.ToolsShown(true)
           if not GPS().roadMode then GPS().SetRoadMode(true) end
@@ -1055,7 +1055,7 @@ function T.BuildSections()
         target = function() return GPS().eraserMode and T.MapFrame() or T.QuickButton("magicEraser") end,
         done = function(run) return T.PracticeCount(false) < run.mark.n end },
       { title = L["Draw a wall"],
-        text = L["Wall Tools do the same for walls and cliffs that routes should go around. Click Wall Tools, then left-drag one."],
+        text = L["Wall Tools do the same for walls and cliffs that routes should go around. Click Wall Tools, then Shift + left-drag one."],
         enter = function(run)
           T.ToolsShown(true)
           if GPS().eraserMode then GPS().SetEraserMode(false) end
