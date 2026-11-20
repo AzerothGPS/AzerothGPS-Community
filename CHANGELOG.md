@@ -35,6 +35,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - The road and wall tools' hints are now a list on the map's left, one action a row with a small picture of its mouse button or key; the pointer's tooltip keeps clear of it.
 - With the road or wall tools on, click a road or wall to change its kind and heights; the map's own lines show their details.
 - The road and wall tools always draw with Shift held (Shift + left-drag draws, Shift + right-drag erases); a plain drag pans the map. The Shift-click drawing option is gone.
+- Over a building with the road or wall tools on, its floors stay listed by the tools' hints; Shift + mouse wheel picks one and shows that floor's inside map, remembered for that building.
 
 ### Fixed
 
