@@ -736,3 +736,18 @@ def test_fit_steps_with_line_costs(rp):
     assert out == STEPS and more == 0
     out, more = G.FitSteps(STEPS, 2, 10, two)  # (step 1 alone is 2: only the count)
     assert out == "|cff808080... 10 more steps|r" and more == 10
+
+
+def test_the_detached_panels_corner_grip_stays_over_the_panel(rp):
+    # (Kooki3z 2026-11-20: the detached panel's resize corner "stopped working": the grip kept the level it was made
+    # at and sat under the detached panel, whose own mouse took the drag)
+    lua, ns = rp
+    G, st = ns.GPS, ns.settings.gps
+    G.navGrip.SetFrameLevel(G.navGrip, 1)  # (made while the panel sat low on the map)
+    st.navPanelDetached = False
+    G.ApplySettings()
+    p = _detach(lua, ns)
+    assert G.navGrip._level > p._level
+    st.navPanelDetached = False
+    G.ApplySettings()
+    assert G.navGrip._level > G.navPanel._level
