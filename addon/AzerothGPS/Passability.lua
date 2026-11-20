@@ -115,8 +115,18 @@ P.Buildings = Buildings
 -- Cell value at (row, col) of grid g (2 outside the grid, on a wall, and in a building; a wall
 -- eraser opens a building's cells too, as the terrain's).
 local CellBase
+-- Water banned from routes for the trip (a swim removed on the map: Nav.SkipSwim, P.SetSwimBans): closed like a wall.
+-- [g][row] = { first col, last col, ... }.
+local banRows = {}
 local function Cell(g, row, col)
   if row < 1 or row > g.h or col < 1 or col > g.w then return 2 end
+  local br = banRows[g]
+  local bl = br and br[row]
+  if bl then
+    for i = 1, #bl - 1, 2 do
+      if col >= bl[i] and col <= bl[i + 1] then return 2 end
+    end
+  end
   local wc = wallCells[g]
   if wc and wc[row * 65536 + col] then return 2 end
   return CellBase(g, row, col)
@@ -394,12 +404,31 @@ local function Drawn(cont)
 end
 
 local hpaBlocks, hpaDirty = {}, {} -- (the search by blocks, below: blocks decoded, and those worked out here)
+local wallDirty, banDirty = {}, {} -- (those of the player's walls, and of the banned water: hpaDirty is both)
+local function MergeDirty()
+  hpaBlocks, hpaDirty = {}, {}
+  for _, src in ipairs({ wallDirty, banDirty }) do
+    for cont, d in pairs(src) do
+      local m = hpaDirty[cont] or {}
+      for b in pairs(d) do m[b] = true end
+      hpaDirty[cont] = m
+    end
+  end
+end
+-- (the block of cell (r, c) and its four neighbors, marked in d)
+local function MarkBlock(H, d, r, c)
+  local br, bc = math.floor((r - 1) / H.K), math.floor((c - 1) / H.K)
+  for _, o in ipairs({ { 0, 0 }, { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } }) do
+    local nr, nc = br + o[1], bc + o[2]
+    if nr >= 0 and nr < H.ny and nc >= 0 and nc < H.nx then d[nr * H.nx + nc] = true end
+  end
+end
 
 -- Build the walls' cells and segments again (after drawing or erasing one).
 function P.RefreshWalls()
   wallCells, wallSegs, openCells = {}, {}, {}
   wallsBuilt = true
-  hpaBlocks, hpaDirty = {}, {}
+  wallDirty = {}
   if P.ClearSegMemo then P.ClearSegMemo() end -- (walls feed SegmentCost: its memo starts over)
   for cont in pairs(WallConts()) do
     local g = ns.Terrain and ns.Terrain[cont]
@@ -413,21 +442,15 @@ function P.RefreshWalls()
     if H and Drawn(cont) then
       local sc, _, so = WallGrid(g, ns.Walls and ns.Walls[cont] or {}, ns.WallOpens and ns.WallOpens[cont] or {})
       local d = {}
-      local function mark(key)
-        local r, c = math.floor(key / 65536), key % 65536
-        local br, bc = math.floor((r - 1) / H.K), math.floor((c - 1) / H.K)
-        for _, o in ipairs({ { 0, 0 }, { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 } }) do
-          local nr, nc = br + o[1], bc + o[2]
-          if nr >= 0 and nr < H.ny and nc >= 0 and nc < H.nx then d[nr * H.nx + nc] = true end
-        end
-      end
+      local function mark(key) MarkBlock(H, d, math.floor(key / 65536), key % 65536) end
       for k in pairs(cells) do if not sc[k] then mark(k) end end
       for k in pairs(sc) do if not cells[k] then mark(k) end end
       for k in pairs(open) do if not so[k] then mark(k) end end
       for k in pairs(so) do if not open[k] then mark(k) end end
-      if next(d) then hpaDirty[cont] = d end
+      if next(d) then wallDirty[cont] = d end
     end
   end
+  MergeDirty()
 end
 local function EnsureWalls() if not wallsBuilt then P.RefreshWalls() end end
 
@@ -770,6 +793,172 @@ function P.WaterSpans(cont, x1, y1, x2, y2)
   return v
 end
 
+-- A swim removed from the trip (asked 2026-11-19: "a removed swim's water section must be ignored for the remainder of
+-- the time that route is active"): the water it's in, banned (P.SetSwimBans). The grid's water cells joined to the
+-- swim's (`pts`, a flat point list on `cont`), side by side, within SWIM_BAN_REACH_YD of the swim's box and at most
+-- SWIM_BAN_MAX_CELLS of them, nearest first: a bay or a lake whole, a short swim at sea not the sea. Flooded by runs
+-- of a row (the grid's own, decoded once), not cell by cell: a few milliseconds. { cont, rows = { row, first col,
+-- count, ... }, n = cells }, or nil (no water under it).
+P.SWIM_BAN_REACH_YD = 1500
+P.SWIM_BAN_MAX_CELLS = 40000
+local function RowRuns(g, row)
+  local rc = cache[g]
+  if not rc then
+    rc = {}
+    cache[g] = rc
+  end
+  local runs = rc[row]
+  if not runs then
+    runs = DecodeRow(Rows(g)[row], g.short, g.long, g.deep)
+    rc[row] = runs
+  end
+  return runs
+end
+function P.SwimSection(cont, pts)
+  local g = ns.Terrain and ns.Terrain[cont]
+  if not (g and not g.slack and not g.overlay and pts and #pts >= 4) then return nil end
+  local x0, x1, y0, y1 = math.huge, -math.huge, math.huge, -math.huge
+  for i = 1, #pts - 1, 2 do
+    x0, x1 = math.min(x0, pts[i]), math.max(x1, pts[i])
+    y0, y1 = math.min(y0, pts[i + 1]), math.max(y1, pts[i + 1])
+  end
+  local pad = P.SWIM_BAN_REACH_YD
+  local cA, rA = ToCell(g, x1 + pad, y1 + pad)
+  local cB, rB = ToCell(g, x0 - pad, y0 - pad)
+  local cmin, cmax = math.max(1, math.min(cA, cB)), math.min(g.w, math.max(cA, cB))
+  local rmin, rmax = math.max(1, math.min(rA, rB)), math.min(g.h, math.max(rA, rB))
+  -- (each water run of a row over [a, b], clipped to the box: fn(first, last))
+  local function EachWater(r, a, b, fn)
+    local runs = RowRuns(g, r)
+    a, b = math.max(a, cmin), math.min(b, cmax)
+    if a > b then return end
+    local lo, hi = 1, #runs / 2
+    while lo < hi do
+      local mid = math.floor((lo + hi) / 2)
+      if runs[mid * 2 - 1] < a then lo = mid + 1 else hi = mid end
+    end
+    for k = lo, #runs / 2 do
+      local first = k > 1 and runs[k * 2 - 3] + 1 or 1
+      if first > b then break end
+      if runs[k * 2] == 1 then fn(math.max(first, cmin), math.min(runs[k * 2 - 1], cmax)) end
+    end
+  end
+  local seen, queue, n, out = {}, {}, 0, {}
+  local full = false
+  local function Add(r, a, b)
+    if full or seen[r * 65536 + a] then return end
+    if n + (b - a + 1) > P.SWIM_BAN_MAX_CELLS then
+      full = true
+      return
+    end
+    seen[r * 65536 + a] = true
+    n = n + (b - a + 1)
+    queue[#queue + 1], queue[#queue + 2], queue[#queue + 3] = r, a, b
+    out[#out + 1], out[#out + 2], out[#out + 3] = r, a, b - a + 1
+  end
+  -- (the swim's own water: every half cell along it)
+  for i = 1, #pts - 3, 2 do
+    local ax, ay, bx, by = pts[i], pts[i + 1], pts[i + 2], pts[i + 3]
+    local m = math.max(1, math.ceil(math.sqrt((bx - ax) ^ 2 + (by - ay) ^ 2) / (g.cell / 2)))
+    for k = 0, m do
+      local c, r = ToCell(g, ax + (bx - ax) * k / m, ay + (by - ay) * k / m)
+      if r >= rmin and r <= rmax then EachWater(r, c, c, function(a, b) Add(r, a, b) end) end
+    end
+  end
+  -- (then outward, row by row: the water runs beside each one found, side by side)
+  local q = 1
+  while q <= #queue and not full do
+    local r, a, b = queue[q], queue[q + 1], queue[q + 2]
+    q = q + 3
+    for _, nr in ipairs({ r - 1, r + 1 }) do
+      if nr >= rmin and nr <= rmax then EachWater(nr, a, b, function(a2, b2) Add(nr, a2, b2) end) end
+    end
+  end
+  if n == 0 then return nil end
+  return { cont = cont, rows = out, n = n }
+end
+
+-- The water banned now (Nav.SyncSwim: the trip's removed swims, `bans` = { { cont, rows }, ... }, P.SwimSection's):
+-- closed as a wall is, in the walks' searches, the blocks' (those it's in worked out here, and their neighbors) and the
+-- straight checks. Whether it changed (the walks then start over: Router.WallsChanged).
+local banKey = ""
+function P.SetSwimBans(bans)
+  local parts = {}
+  for _, b in ipairs(bans or {}) do
+    local rows = b.rows
+    parts[#parts + 1] = b.cont .. ":" .. #rows .. ":" .. (rows[1] or 0) .. ":" .. (rows[2] or 0) .. ":" .. (rows[#rows] or 0)
+  end
+  local key = table.concat(parts, "/")
+  if key == banKey then return false end
+  banKey = key
+  EnsureWalls()
+  banRows, banDirty = {}, {}
+  for _, b in ipairs(bans or {}) do
+    local g = ns.Terrain and ns.Terrain[b.cont]
+    if g then
+      local br = banRows[g] or {}
+      banRows[g] = br
+      local H = ns.TerrainHPA and ns.TerrainHPA[b.cont]
+      if H and not (H.w == g.w and H.h == g.h) then H = nil end
+      local d = H and (banDirty[b.cont] or {})
+      local rows = b.rows
+      for i = 1, #rows - 2, 3 do
+        local r, a, cnt = rows[i], rows[i + 1], rows[i + 2]
+        local l = br[r] or {}
+        br[r] = l
+        l[#l + 1], l[#l + 2] = a, a + cnt - 1
+        if d then
+          for c = a, a + cnt - 1 + H.K, H.K do MarkBlock(H, d, r, math.min(c, a + cnt - 1)) end
+        end
+      end
+      if d then banDirty[b.cont] = d end
+    end
+  end
+  MergeDirty()
+  wetMemo, wetMemoN = {}, 0
+  if P.ClearSegMemo then P.ClearSegMemo() end
+  return true
+end
+-- Whether world (x, y) on `cont` is in the water of `ban` (P.SwimSection's), banned or not. (By row, made once a ban:
+-- not on the ban itself, which is saved.)
+local banIndex = setmetatable({}, { __mode = "k" })
+function P.InSwimSection(ban, cont, x, y)
+  local g = ns.Terrain and ns.Terrain[cont]
+  if not (g and ban and ban.cont == cont and ban.rows) then return false end
+  local ix = banIndex[ban.rows]
+  if not ix then
+    ix = {}
+    local rows = ban.rows
+    for i = 1, #rows - 2, 3 do
+      local l = ix[rows[i]] or {}
+      ix[rows[i]] = l
+      l[#l + 1], l[#l + 2] = rows[i + 1], rows[i + 1] + rows[i + 2] - 1
+    end
+    banIndex[ban.rows] = ix
+  end
+  local c, r = ToCell(g, x, y)
+  local l = ix[r]
+  for i = 1, l and #l - 1 or 0, 2 do
+    if c >= l[i] and c <= l[i + 1] then return true end
+  end
+  return false
+end
+-- The world box of `ban`'s water: x0, x1, y0, y1 (nil when its continent has no grid).
+function P.SwimSectionBox(ban)
+  local g = ns.Terrain and ns.Terrain[ban.cont]
+  if not g then return nil end
+  local x0, x1, y0, y1 = math.huge, -math.huge, math.huge, -math.huge
+  local rows = ban.rows
+  for i = 1, #rows - 2, 3 do
+    for _, c in ipairs({ rows[i + 1], rows[i + 1] + rows[i + 2] - 1 }) do
+      local x, y = CellCentre(g, c, rows[i])
+      x0, x1, y0, y1 = math.min(x0, x), math.max(x1, x), math.min(y0, y), math.max(y1, y)
+    end
+  end
+  if x0 > x1 then return nil end
+  return x0, x1, y0, y1
+end
+
 -- Binary heap keyed on f.
 local function Push(h, node, f)
   h[#h + 1] = { node, f }
@@ -1016,7 +1205,9 @@ local function DecodeBlock(H, b)
 end
 
 -- The same worked out from the grid as it is now (the player's walls in), as hpa.py does.
-local function BuildBlock(g, cont, H, b)
+-- (`pause`: in a background search, a pause every so often: a removed swim's bay changes dozens of blocks, 150 ms
+-- in one go)
+local function BuildBlock(g, cont, H, b, pause)
   local K = H.K
   local br, bc = math.floor(b / H.nx), b % H.nx
   local r0, c0 = br * K, bc * K
@@ -1071,7 +1262,7 @@ local function BuildBlock(g, cont, H, b)
     return v == 1 and P.SWIM_COST or 1
   end
   for i = 1, bl.n do
-    local dist = Spread(step, bl.c[i], bl.r[i])
+    local dist = Spread(step, bl.c[i], bl.r[i], nil, pause)
     for j = 1, bl.n do
       if j ~= i then bl.cost[(i - 1) * bl.n + j] = dist[bl.r[j] * 65536 + bl.c[j]] or false end
     end
@@ -1093,7 +1284,7 @@ local function ByBlocks(g, H, cont, c1, r1, c2, r2, step, box, hostile, pause)
   local function Block(b)
     local bl = blocks[b]
     if not bl then
-      bl = (dirty and dirty[b]) and BuildBlock(g, cont, H, b) or DecodeBlock(H, b)
+      bl = (dirty and dirty[b]) and BuildBlock(g, cont, H, b, pause) or DecodeBlock(H, b)
       blocks[b] = bl
     end
     return bl

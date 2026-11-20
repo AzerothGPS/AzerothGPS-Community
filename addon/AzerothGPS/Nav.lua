@@ -145,6 +145,7 @@ local function Save()
   for key in pairs(N.skipRides or {}) do rides[#rides + 1] = key end
   cdb.skipRides = (#list > 0 and #rides > 0) and rides or nil
   cdb.noSwim = (#list > 0 and N.noSwim) or nil -- (a swim removed from this trip: N.SkipSwim)
+  cdb.swimBans = (#list > 0 and N.noSwim and N.swimBans and #N.swimBans > 0) and N.swimBans or nil -- (its water)
   local dropped = {}
   for i, e in ipairs(N.questDropped or {}) do dropped[i] = Copy(e) end
   cdb.questDropped = (#list > 0 and #dropped > 0) and dropped or nil
@@ -546,18 +547,149 @@ end
 function N.SyncSwim()
   local P = ns.Passability
   if not (P and P.SetAvoidSwim) then return false end
-  if not P.SetAvoidSwim(not N.SwimAllowed()) then return false end
+  local changed = P.SetAvoidSwim(not N.SwimAllowed())
+  if P.SetSwimBans and P.SetSwimBans(N.ActiveSwimBans()) then changed = true end
+  if not changed then return false end
   if ns.Router and ns.Router.WallsChanged then ns.Router.WallsChanged() end -- (the walks worked out again)
   N.Invalidate(true, true)
   return true
 end
--- A swim right-clicked on the map, "Remove?": this trip goes round by land wherever there's a way (an isle is still
--- swum to), rerouting and after a /reload (saved with the stops); a new trip swims again.
+-- A swim right-clicked on the map, "Remove?": this trip goes round by land wherever there's a way, rerouting and after
+-- a /reload (saved with the stops); a new trip swims again. Its water (the bay, the lake: Passability.SwimSection) is
+-- banned for the trip, as a wall is (asked 2026-11-19: "ignored for the remainder of the time that route is active",
+-- not merely dearer: weighed 10 times a yard, a swim along the coast in the same water came back), N.swimBans; each
+-- swim removed adds its own. Water costs AVOID_SWIM_COST a yard elsewhere too (N.noSwim, P.avoidSwim). `cont`, `pts`:
+-- the swim's points (N.SwimStretch); none, every swim on the route.
 N.noSwim = nil
-function N.SkipSwim()
+N.swimBans = {}
+function N.ActiveSwimBans()
+  local out = {}
+  for _, b in ipairs(N.noSwim and N.swimBans or {}) do
+    if not b.lifted then out[#out + 1] = b end
+  end
+  return out
+end
+-- The removed swim's water (N.swimBans) that (x, y) on `cont` is in (`liftedOnly`: one swum after all), or nil.
+function N.InSwimBan(cont, x, y, liftedOnly)
+  local P = ns.Passability
+  for _, b in ipairs(N.noSwim and N.swimBans or {}) do
+    if (b.lifted or not liftedOnly) and P.InSwimSection(b, cont, x, y) then return b end
+  end
+  return nil
+end
+function N.SkipSwim(cont, pts)
+  local P = ns.Passability
+  local list = {}
+  if cont and pts then
+    list[1] = { cont, pts }
+  else -- (every swim on the route)
+    for _, part in pairs(N.route and N.route.parts or {}) do
+      for i = 1, #(part.pts or {}) / 2 - 1 do
+        local sp = N.SwimSpans(part, i)
+        for j = 1, sp and #sp - 1 or 0, 2 do
+          local c, swim = N.SwimStretch(part, i, sp[j], sp[j + 1])
+          if c then list[#list + 1] = { c, swim } end
+        end
+      end
+    end
+  end
   N.noSwim = true
+  for _, e in ipairs(list) do
+    local c, swim = e[1], e[2]
+    local mx, my = (swim[1] + swim[#swim - 1]) / 2, (swim[2] + swim[#swim]) / 2
+    -- (a swim in water banned already, lifted or the same bay's: nothing more)
+    if not N.InSwimBan(c, swim[1], swim[2]) and not N.InSwimBan(c, mx, my) then
+      local sec = P and P.SwimSection and P.SwimSection(c, swim)
+      if sec then N.swimBans[#N.swimBans + 1] = sec end
+    end
+  end
   N.SaveStops()
   N.SyncSwim()
+end
+-- The whole swim through route part `part`'s piece i from t1 to t2 (0 to 1 along it): on through the pieces before
+-- and after while it's in the water. The part's continent and a flat point list, or nil.
+function N.SwimStretch(part, i, t1, t2)
+  local pts = part and part.pts
+  if not (pts and pts[2 * i + 2]) then return nil end
+  local function At(k, t)
+    local x1, y1, x2, y2 = pts[2 * k - 1], pts[2 * k], pts[2 * k + 1], pts[2 * k + 2]
+    return x1 + (x2 - x1) * t, y1 + (y2 - y1) * t
+  end
+  local ax, ay = At(i, t1)
+  local out = { ax, ay }
+  local k, t = i, t1
+  while t <= 1e-6 and k > 1 do -- (back while the piece before ends in the water)
+    local sp = N.SwimSpans(part, k - 1)
+    if not (sp and sp[#sp] >= 1 - 1e-6) then break end
+    k, t = k - 1, sp[#sp - 1]
+    local x, y = At(k, t)
+    table.insert(out, 1, y)
+    table.insert(out, 1, x)
+  end
+  local bx, by = At(i, t2)
+  out[#out + 1], out[#out + 2] = bx, by
+  k, t = i, t2
+  while t >= 1 - 1e-6 and pts[2 * k + 4] do -- (on while the piece after starts in it)
+    local sp = N.SwimSpans(part, k + 1)
+    if not (sp and sp[1] <= 1e-6) then break end
+    k, t = k + 1, sp[2]
+    local x, y = At(k, t)
+    out[#out + 1], out[#out + 2] = x, y
+  end
+  return part.cont, out
+end
+-- A walk with no way at all with that water banned (an isle in the bay, or a stop cut off by it): the bans near its
+-- ends (within SWIM_LIFT_YD of their water's box), else every one on its continent, lifted for the trip: that water is
+-- swum (at AVOID_SWIM_COST), and its swims say "No way round by land: this swim stays." (N.SwimStays). Whether any was.
+N.SWIM_LIFT_YD = 300
+function N.LiftSwimBans(cont, x1, y1, x2, y2)
+  local P = ns.Passability
+  local near, same = {}, {}
+  for _, b in ipairs(N.ActiveSwimBans()) do
+    if b.cont == cont then
+      same[#same + 1] = b
+      local bx0, bx1, by0, by1 = P.SwimSectionBox(b)
+      local m = N.SWIM_LIFT_YD
+      for _, e in ipairs({ { x1, y1 }, { x2, y2 } }) do
+        if bx0 and e[1] and e[1] >= bx0 - m and e[1] <= bx1 + m and e[2] >= by0 - m and e[2] <= by1 + m then
+          near[#near + 1] = b
+          break
+        end
+      end
+    end
+  end
+  local lift = #near > 0 and near or same
+  if #lift == 0 then return false end
+  for _, b in ipairs(lift) do b.lifted = true end
+  N.SaveStops()
+  N.SyncSwim()
+  return true
+end
+-- Yards of route `r`'s pieces off the roads (on `cont`) straight over banned water (N.ActiveSwimBans): a hop over it
+-- (Router's `blocked`), no walk round found.
+function N.SwimBanYards(cont, r)
+  local P, R = ns.Passability, ns.Router
+  if not (r and r.pts and r.kinds and P and R and N.noSwim and #N.swimBans > 0) then return 0 end
+  local yd, pts = 0, r.pts
+  for i, k in ipairs(r.kinds) do
+    local x1, y1, x2, y2 = pts[2 * i - 1], pts[2 * i], pts[2 * i + 1], pts[2 * i + 2]
+    if x2 and k == R.KIND_OFFROAD then
+      local len = math.sqrt((x2 - x1) ^ 2 + (y2 - y1) ^ 2)
+      local n = math.max(1, math.ceil(len / 6))
+      for j = 0, n - 1 do
+        local t = (j + 0.5) / n
+        local x, y = x1 + (x2 - x1) * t, y1 + (y2 - y1) * t
+        if P.At(cont, x, y) == 2 and N.InSwimBan(cont, x, y) and not N.InSwimBan(cont, x, y, true) then
+          yd = yd + len / n
+        end
+      end
+    end
+  end
+  return yd
+end
+-- Whether the swim at (x, y) on `cont` is one kept because there's no way round by land (N.LiftSwimBans).
+function N.SwimStays(cont, x, y)
+  return N.InSwimBan(cont, x, y, true) ~= nil
 end
 
 -- A name for where a town's guard stands (continent `c`, x, y): the nearest town (Data/Pois.lua kind 2), else place
@@ -715,7 +847,7 @@ N.trip = 0
 function N.SetStops(stops, fastest, force, keep)
   if Locked(force) then return false end
   if not N.SameTrip(stops) then -- (another trip: its towns said again, N.CheckHostileRoute; it swims again, N.SkipSwim)
-    N.hostileSaid, N.noSwim = {}, nil
+    N.hostileSaid, N.noSwim, N.swimBans = {}, nil, {}
   end
   if force ~= "red" then
     -- (the "risk it?" answers kept for the stops still in it: the same route set again, a quest route's update, a
@@ -916,7 +1048,7 @@ function N.Clear()
   N.paused, N.pauseWatch = nil, nil
   N.questDropped = {}
   N.redOk, N.skipLearn, N.noWalk, N.walkKept, N.riskOk, N.riskQuestion, N.riskAsking = {}, {}, {}, {}, {}, nil, nil
-  N.hostileSaid, N.noSwim = {}, nil
+  N.hostileSaid, N.noSwim, N.swimBans = {}, nil, {}
   N.trip = N.trip + 1
   N.ClearSkippedRides()
   Changed()
@@ -965,6 +1097,12 @@ function N.Restore()
   N.skipRides = {}
   for _, key in ipairs(#N.stops > 0 and cdb.skipRides or {}) do N.skipRides[key] = true end
   N.noSwim = (#N.stops > 0 and cdb.noSwim == true) or nil
+  N.swimBans = {}
+  for _, b in ipairs(N.noSwim and type(cdb.swimBans) == "table" and cdb.swimBans or {}) do
+    local ok = type(b) == "table" and type(b.cont) == "number" and type(b.rows) == "table" and #b.rows % 3 == 0
+    for _, v in ipairs(ok and b.rows or {}) do ok = ok and type(v) == "number" end
+    if ok then N.swimBans[#N.swimBans + 1] = { cont = b.cont, rows = b.rows, n = b.n, lifted = b.lifted == true or nil } end
+  end
   N.questDropped = {}
   for _, e in ipairs(#N.stops > 0 and cdb.questDropped or {}) do
     if type(e) == "table" and e.quest and e.x and e.y and e.cont then N.questDropped[#N.questDropped + 1] = Copy(e) end
@@ -2785,7 +2923,17 @@ local function Stretch(cont, sx, sy, d, walk, opts, sz)
   -- no roads or walk round: none, "No way there found", rather than that line drawn; a broken road
   -- network drew one over the mountains from Ironforge, 2026-10-01)
   for li, leg in ipairs(legs) do
-    if not leg.ride and routes[li] and routes[li].noWay then return nil end
+    local r = routes[li]
+    -- (no way with a removed swim's water banned, or only a hop over it: that water swum after all, N.LiftSwimBans;
+    -- planned again)
+    if not leg.ride and r and not r.pending and not opts.lifted and (r.noWay or (r.blocked and N.SwimBanYards(leg.cont, r) > 0))
+        and N.LiftSwimBans(leg.cont, leg.x1, leg.y1, leg.x2, leg.y2) then
+      local o = {}
+      for k, v in pairs(opts) do o[k] = v end
+      o.lifted = true
+      return Stretch(cont, sx, sy, d, walk, o, sz)
+    end
+    if not leg.ride and r and r.noWay then return nil end
   end
   local st = { parts = {}, legs = legs, first = 0, walk = 0, ride = 0, road = 0 }
   local rode = false

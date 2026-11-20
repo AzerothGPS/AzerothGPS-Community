@@ -38,6 +38,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Walks from Tarren Mill's flight master head south-east again, not round by the town.
 - Routes no longer swim far out to sea where fatigue sets in, such as from the Wetlands across to Southshore; they keep near the shore.
 - A swim you removed, or left out with Allow swimming off, no longer comes back along the shore when the route is worked out again.
+- Removing a swim now keeps the route out of that whole bay or lake for the trip; an island with no way by land is still swum to.
 - With several stops, the way to your next stop is drawn over the rest of the route, not hidden under a later stop's way back over the same road. (thanks, DarkByteZero)
 - /way lines take the zone in your game's language too ("/way Silberwald 63.4 64.3" on a German client), not only the English name. (thanks, DarkByteZero)
 
