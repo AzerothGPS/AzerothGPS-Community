@@ -33,6 +33,24 @@ R.KIND_DROP = 4 -- off a ledge onto the floor below (Nav's own kinds are 2 and 3
 -- a lift (Thunder Bluff's: a road from its top to its foot, Data/Capitals.lua's source 5, its length
 -- the wait and the ride), down it or up it: "Take the lift up" (Turns), as Undercity's lifts are rides
 R.SOURCE_LIFT, R.KIND_LIFT_DOWN, R.KIND_LIFT_UP = 5, 5, 6
+-- Up or down a lift road `ei` of graph `g`, taken along it (`forward`: from its first node to its second) or back: by its
+-- ends' heights when both are known and apart (a lift drawn and edited: its Foot and Top, Edit Road's Flip Lift swaps
+-- them); else as the data's lifts are laid, from the top to the foot (forward: down). (Kooki3z 2026-11-20: a lift drawn
+-- from its foot up said "Take the lift down": the edit's heights rise along it, the old rule took its start for the top.)
+R.LIFT_APART_Z = 2
+function R.LiftKind(g, ei, forward)
+  local e = g.e[ei]
+  local hz = g.z or g.nz
+  local za, zb = hz and hz[e[1]], hz and hz[e[2]]
+  if za and zb and math.abs(za - zb) >= R.LIFT_APART_Z then
+    local up = (zb > za) == forward
+    return up and R.KIND_LIFT_UP or R.KIND_LIFT_DOWN
+  end
+  -- (the player's own lift with no heights, drawn or recorded: from the end it starts at, its foot, as Edit Road's Foot
+  -- is its first point; Flip Lift turns it round. The data's lifts are laid from the top.)
+  if g.kind and g.kind[ei] == "lift" then return forward and R.KIND_LIFT_UP or R.KIND_LIFT_DOWN end
+  return forward and R.KIND_LIFT_DOWN or R.KIND_LIFT_UP
+end
 R.DROP_COST = 30 -- yards a drop counts extra: taken only when it saves real distance
 R.OFFROAD_LINKS = 24 -- offroad mode: straight links tried from start/destination to road nodes
 R.OFFROAD_LINK_MAX = 3000 -- yards
@@ -1230,7 +1248,7 @@ function R.WithTracks(roads, tracks, cont)
               -- (a stair drawn with the stairs tool: a stairs road, source 6, as the data's: "Take the stairs up", their icon)
               -- (a shipped one: as the data's drawn roads, source 2)
               -- (a lift edited so: a lift road, source 5, its length the ride: "Take the lift up", as Thunder Bluff's)
-              local ed = MakeEdge(na, nb, line, t.stair and R.SOURCE_STAIR or t.kind == "lift" and tzs and R.SOURCE_LIFT
+              local ed = MakeEdge(na, nb, line, t.stair and R.SOURCE_STAIR or t.kind == "lift" and R.SOURCE_LIFT
                 or t.shipped and 2 or R.SOURCE_RECORDED)
               markCave(ed, line)
               if t.kind then kindOf[ed] = t.kind end
@@ -4262,7 +4280,7 @@ local function Build(g, pieces)
     Breathe(pi, 12) -- (in a background job: a pause now and then)
     if p.edge then
       local kind = g.drops and g.drops[p.edge] and R.KIND_DROP or R.KIND_ROAD
-      if g.e[p.edge][4] == R.SOURCE_LIFT then kind = p.from <= p.to and R.KIND_LIFT_DOWN or R.KIND_LIFT_UP end
+      if g.e[p.edge][4] == R.SOURCE_LIFT then kind = R.LiftKind(g, p.edge, p.from <= p.to) end
       if g.e[p.edge][4] == R.SOURCE_SWIM then swum = swum + math.abs(p.to - p.from) end
       for _, q in ipairs(EdgePoints(g.e[p.edge], p.from, p.to)) do
         add(q[1], q[2], kind, zs and R.EdgeZ(g, p.edge, q[3]), fz and R.EdgeFloor(g, p.edge, q[3]))

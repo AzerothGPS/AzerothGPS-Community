@@ -14320,7 +14320,7 @@ function G.EditWindowReadOnly(f, readOnly)
   end
   set(f.left, not readOnly)
   set(f.right, not readOnly)
-  for _, k in ipairs({ "pickFoot", "pickTop", "setHeights", "pickA", "pickB" }) do
+  for _, k in ipairs({ "pickFoot", "pickTop", "setHeights", "pickA", "pickB", "flip" }) do
     if f[k] then f[k]:SetShown(not readOnly) end
   end
   set(f.save, not readOnly)
@@ -14454,6 +14454,21 @@ function G.FillRoadEdit()
   f.topRow.box:SetShown(two)
   for _, b in ipairs(f.topRow.buttons) do b:SetShown(two and b.height ~= nil) end
   f.height.label:SetText(two and L["Foot"] or L["Height"])
+  local lift = re.kind == "lift" and not f.readOnly
+  f.flip:SetShown(lift)
+  f.pickFoot:SetShown(not lift and not f.readOnly)
+  f.pickTop:SetShown(not lift and not f.readOnly)
+end
+-- Flip Lift: the Foot and Top typed swapped (Save Road keeps it): the other end is the top.
+function G.FlipLiftEdit()
+  local f = G.roadEditWindow
+  if not (f and G.roadEdit and G.roadEdit.kind == "lift") then return end
+  local a, b = f.height.box:GetText(), f.topRow.box:GetText()
+  f.height.box:SetText(b or "")
+  f.topRow.box:SetText(a or "")
+  -- (no heights: its way round is its points', so it's saved turned round)
+  if (a or "") == "" and (b or "") == "" then G.roadEdit.reverse = not G.roadEdit.reverse end
+  f.note:SetText(L["Foot and top swapped: the lift's other end is its top now. Save Road to keep it."])
 end
 -- A kind button's color (G.KIND_COLORS; ground and "heights only" have none): a strip along its bottom, the color the
 -- map draws that kind in with the road tools on.
@@ -14521,6 +14536,17 @@ function G.AskRoadEdit(level, sel)
       return b
     end
     f.pickFoot, f.pickTop = Pick(L["Pick Foot"], "foot", 14), Pick(L["Pick Top"], "top", 130)
+    -- (a lift: Flip Lift swaps its Foot and Top, so "Take the lift up" and "down" swap sides; in Pick Foot's and Pick
+    -- Top's place, which a lift has no use for. Kooki3z 2026-11-20: "flip which side of the lift says take lift up or
+    -- down")
+    local flip = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+    flip:SetSize(110, 22)
+    flip:SetPoint("TOPLEFT", 14, f.top - 106)
+    flip:SetText(L["Flip Lift"])
+    flip:SetWidth(math.max(110, (flip:GetTextWidth() or 0) + 24))
+    flip:SetScript("OnClick", function() G.FlipLiftEdit() end)
+    flip:Hide()
+    f.flip = flip
     -- (Set Heights: the stretch from the foot to the top picked, or the whole road; 1.3.10, issue #685)
     local sh = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
     sh:SetSize(110, 22)
@@ -14992,7 +15018,7 @@ function G.SaveRoadEdit()
   if not (re and re.sel) or re.sel.readOnly then return nil end
   local z = f and tonumber(f.height.box:GetText())
   local z2 = f and tonumber(f.topRow.box:GetText())
-  local edit = { kind = re.kind, z = z, z1 = z, z2 = z2 }
+  local edit = { kind = re.kind, z = z, z1 = z, z2 = z2, reverse = re.reverse }
   if re.foot and re.top and re.kind ~= "stairs" and re.kind ~= "lift" then
     local i, j = re.foot, re.top
     local a, b = z, z2

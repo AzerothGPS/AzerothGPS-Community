@@ -448,11 +448,22 @@ function R.EditTrack(sel, edit)
   for _, k in ipairs(ns.Router and ns.Router.TRACK_KINDS or {}) do known = known or k == kind end
   if not known then return nil, "kind" end
   local function r1(v) return math.floor(v * 10 + 0.5) / 10 end
-  local zs = R.EditHeights(t.pts, kind, edit.z, t.zs, edit.stairs, edit.z1, edit.z2, edit.base)
-  if not zs and kind ~= "ground" and kind ~= "bridge" then return nil, "height" end -- (a bridge: raised with or without)
+  -- (`reverse`: its points the other way round: a lift with no heights turned round, Flip Lift)
+  local src, old = t.pts, t.zs
+  if edit.reverse then
+    src, old = {}, type(t.zs) == "table" and {} or nil
+    local n = #t.pts / 2
+    for k = n, 1, -1 do
+      src[#src + 1], src[#src + 2] = t.pts[2 * k - 1], t.pts[2 * k]
+      if old then old[#old + 1] = t.zs[k] end
+    end
+  end
+  local zs = R.EditHeights(src, kind, edit.z, old, edit.stairs, edit.z1, edit.z2, edit.base)
+  -- (a bridge: raised with or without; a lift: a lift ride with or without, its way round by its points)
+  if not zs and kind ~= "ground" and kind ~= "bridge" and kind ~= "lift" then return nil, "height" end
   if zs then for k = 1, #zs do zs[k] = r1(zs[k]) end end
   local pts = {}
-  for k = 1, #t.pts do pts[k] = t.pts[k] end
+  for k = 1, #src do pts[k] = src[k] end
   local track = { op = "add", drawn = true, edit = true, continent = t.continent, zone = t.zone or "?", time = time(),
     pts = pts, zs = zs, z = zs and zs[1] or nil, kind = kind, replaces = t.time,
     rpart = sel.shipped and t.part or nil, -- (a piece of a walk or an edit the data has: that piece; else all of it)
