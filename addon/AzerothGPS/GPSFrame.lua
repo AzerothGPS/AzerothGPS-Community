@@ -8844,6 +8844,9 @@ function G.ApplyNavDetach()
       navPanel:SetFrameLevel((home:GetFrameLevel() or 0) + 1)
       navPanel:EnableMouse(false)
     end
+    -- (the corner grip over the panel at its new level: a child keeps the level it was given when the panel's changes,
+    -- and under the detached panel's own mouse it took no drag; Kooki3z 2026-11-20, the resize corner "stopped working")
+    if G.navGrip then G.navGrip:SetFrameLevel((navPanel:GetFrameLevel() or 0) + 8) end
     G.navPanelSig = nil -- (laid out again)
     -- (the use button: set again with the panel's strata, out of combat)
     -- (hidden till then: with nothing to use next, a nil key left the old one showing)
