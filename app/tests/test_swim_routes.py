@@ -620,3 +620,29 @@ def test_a_short_trip_through_a_marsh_crosses_its_channels_where_they_are_narrow
     # timed with its swim at the swim speed, the rest at running speed
     assert N.TripSecs(r.walkYards, r.swimYards, 0, 7) == pytest.approx(
         (r.walkYards - r.swimYards) / 7 + r.swimYards / N.SwimSpeed())
+
+
+# (reported 2026-11-19: from the Wetlands' western marsh to a stop in the water of the bay below Stromgarde, by
+# Arathi's shore, the route went round by Thandol Span and back down Arathi's coast, 4.9k yd; the swim there is 2.1k.
+# Road mode's preference for the roads, ROAD_DIRECT_PENALTY, multiplied the swim's own price too: a yard swum weighed
+# three on the roads)
+WEST_MARSH = (-3030.0, -1299.0)  # (the Wetlands 22, 32)
+BAY_STOP = (-1349.3, -914.1)  # (Hillsbrad 61.9, 82.0: the bay's north-east side, west of Faldir's Cove)
+
+
+def test_a_stop_in_the_bay_is_swum_to_straight_from_the_marsh(game, trip):
+    lua, ns = game
+    N = ns.Nav
+    r = trip(WEST_MARSH, BAY_STOP)
+    assert r.walkYards < 2600 and r.swimYards > 1500, (r.walkYards, r.swimYards)
+    # swimming off: round by land
+    off = trip(WEST_MARSH, BAY_STOP, allow=False)
+    assert off.walkYards > 4000 and off.swimYards < r.swimYards / 3, (off.walkYards, off.swimYards)
+    # the swim removed: round by land for that trip
+    trip(WEST_MARSH, BAY_STOP)
+    N.SkipSwim()
+    trip.settle()
+    gone = N.route
+    assert N.noSwim and gone.walkYards > 4000 and gone.swimYards < r.swimYards / 3, (gone.walkYards, gone.swimYards)
+
+

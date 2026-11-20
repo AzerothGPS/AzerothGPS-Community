@@ -50,6 +50,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - A swim you removed, or left out with Allow swimming off, no longer comes back along the shore when the route is worked out again.
 - Removing a swim now keeps the route out of that whole bay or lake for the trip; an island with no way by land is still swum to.
 - Routes walk round a pond or lake shore when that's quicker than swimming across; with Water Walking (and its Fish Oil), Levitate (and a Light Feather), an Elixir of Water Walking or Aquatic Form, they cross water as if it were land.
+- A short swim straight to your stop is no longer passed over for a long way round by road, such as from the Wetlands' marsh to the bay below Stromgarde.
 - With several stops, the way to your next stop is drawn over the rest of the route, not hidden under a later stop's way back over the same road. (thanks, DarkByteZero)
 - /way lines take the zone in your game's language too ("/way Silberwald 63.4 64.3" on a German client), not only the English name. (thanks, DarkByteZero)
 
