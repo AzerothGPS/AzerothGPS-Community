@@ -7596,6 +7596,8 @@ function G.MinimapIdle(now)
   if frame:IsMouseOver() or drag or G.lasso or G.drawMode or G.roadMode or G.wallMode or #pending > 0
       or (G.searchPanel and G.searchPanel:IsShown()) or (G.mapMenu and G.mapMenu:IsShown())
       or (ns.PopupOverShown and ns.PopupOverShown()) -- (a popup over it, the options: in use)
+      -- (Find Herbs and Ore open: in use, asked 2026-11-19; the popout map closed under it while picking)
+      or (ns.Layers and ns.Layers.finder and ns.Layers.finder:IsShown())
       or G.mmHold then -- (held out: the tutorial's steps on the whole map, Tutorial.lua)
     m.activeAt = now
   end
@@ -16444,16 +16446,17 @@ function G.Init()
       tip = L["Search your herbs and ore veins by name (Peacebloom, Copper Vein) and pick which to show on the map: the others are hidden until Show All. A farming area uses only those picked too."],
       isOn = function()
         local L = ns.Layers
-        return (L.NodeFilter() ~= nil or (L.finder and L.finder:IsShown())) and true or false
+        return (L.NodeFilter() ~= nil or L.AvailableOnly() or (L.finder and L.finder:IsShown())) and true or false
       end,
       action = function()
         if G.mapMenu then G.mapMenu:Hide() end
         ns.Layers.ToggleNodeFinder()
       end,
       -- (asked 2026-11-16: with a filter on it glows like the map editing tools, its group's button too, and says so)
-      glowWhen = function() return ns.Layers.NodeFilter() ~= nil end,
+      glowWhen = function() return ns.Layers.NodeFilter() ~= nil or ns.Layers.AvailableOnly() end,
       warn = function()
-        return ns.Layers.NodeFilter() ~= nil and L["A filter is on: only the herbs and ore you picked show on the map."] or nil
+        if ns.Layers.NodeFilter() ~= nil then return L["A filter is on: only the herbs and ore you picked show on the map."] end
+        return ns.Layers.AvailableOnly() and L["Available is on: only the herbs and ore your skill can gather show on the map."] or nil
       end },
     -- (1.3.10, asked 2026-11-19: GatherMate2's herbs and mines into the player's own; shown only with GatherMate2
     -- loaded; glows when it has some not imported, Layers' L.GM2Glow, checked once a startup; the progress on it)

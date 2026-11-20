@@ -79,6 +79,7 @@ ns.DEFAULTS = {
     layerHerbs = true, -- herbs you've gathered, hovered on the minimap, right-clicked or imported
     layerOre = true, -- ... and ore
     nodeFilter = {}, -- the herbs and veins picked in Find Herbs and Ore, { [name] = true }: only those shown (none: all)
+    nodeAvailable = false, -- Find Herbs and Ore's Available: only those the character's skill gathers shown
     layerCity = true, -- city locations guards pointed out (trainers, bank, ...)
     layerInstances = true, -- dungeon and raid entrances (click one for its map, with its bosses)
     showDungeonPaths = true, -- a dungeon's dotted way through on its map (the map menu's Show Routes; GPS.DungeonPathsOn)

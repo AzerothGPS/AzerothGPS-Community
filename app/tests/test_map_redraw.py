@@ -9520,6 +9520,37 @@ def test_the_opened_maps_wait_is_the_players_own_or_never(minimap):
         lua.execute("AzerothGPSFrame.IsMouseOver = AGPS_IMO AGPS_IMO = nil")
 
 
+def test_find_herbs_and_ore_open_keeps_the_opened_map_out(minimap):
+    # (asked 2026-11-19: "if this is open on the popout map, this is considered active and doesn't auto close")
+    lua, ns = minimap
+    G, st = ns.GPS, ns.settings.gps
+    st.replaceMinimap = True
+    G.ApplySettings()
+    lua.execute("AGPS_IMO = AzerothGPSFrame.IsMouseOver AzerothGPSFrame.IsMouseOver = function() return false end")
+
+    def quiet(seconds):
+        G.SetMinimapExpanded(True)
+        G.mmState.tween = None
+        now = lua.eval("GetTime()")
+        G.mmState.activeAt = now
+        G.MinimapIdle(now + seconds)
+        out = bool(G.mmState.expanded)
+        G.SetMinimapExpanded(False)
+        G.mmState.tween = None
+        return out
+
+    try:
+        assert not quiet(30)
+        f = ns.Layers.ShowNodeFinder()
+        assert f._shown and quiet(30)
+        f.Hide(f)
+        assert not quiet(30)
+    finally:
+        if ns.Layers.finder:
+            ns.Layers.finder.Hide(ns.Layers.finder)
+        lua.execute("AzerothGPSFrame.IsMouseOver = AGPS_IMO AGPS_IMO = nil")
+
+
 def test_the_square_is_taken_again_when_the_games_controller_ui_is_switched(minimap):
     # (asked 2026-11-11: "test with controller beta UI enabled ... addon should work with and without this mode"; the
     # game changes its Edit Mode layout with it, the minimap somewhere else at another size)
