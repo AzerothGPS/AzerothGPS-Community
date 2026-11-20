@@ -1,3 +1,16 @@
 {
- "npcs": {}
+ "npcs": {
+  "2104": [
+   {
+    "name": "Captain Stoutfist",
+    "level": 0,
+    "x": -3732.3,
+    "y": -797.6,
+    "z": 4.5,
+    "zone": "Wetlands",
+    "time": 1795144143,
+    "live": false
+   }
+  ]
+ }
 }
