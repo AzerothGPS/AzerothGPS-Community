@@ -22,11 +22,11 @@ POI_SIZES = (12, 13, 14, 16, 18, 20, 22)
 
 def test_the_option_has_extra_large_in_every_language():
     text = (ADDON / "Options.lua").read_text(encoding="utf-8")
-    assert '{ value = "xlarge", text = L["Extra large"] }' in text
-    block = text[text.index('Dropdown(L["Icon size"]'):]
-    block = block[:block.index("}, function()")]
-    order = re.findall(r'value = "(\w+)"', block)
-    assert order == ["small", "medium", "large", "xlarge"]  # (the next step up, last)
+    # (radio buttons under a picture of each size since 2026-11-19; a dropdown before)
+    block = text[text.index('local sizes = { { "small", L["Small"] }'):]
+    block = block[:block.index("local title")]
+    order = re.findall(r'\{ "(\w+)", L\[', block)
+    assert order == ["small", "medium", "large", "xlarge"] and '{ "xlarge", L["Extra large"] }' in block
     for loc in LOCALES:
         lines = (ADDON / "Locales" / f"{loc}.lua").read_text(encoding="utf-8")
         m = re.search(r'^L\["Extra large"\] = "([^"]+)"$', lines, re.M)

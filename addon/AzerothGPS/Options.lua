@@ -273,16 +273,17 @@ O.LANGUAGES = { { "enUS", "English" }, { "deDE", "Deutsch" }, { "esES", "Espa\19
   { "koKR", "Korean (koKR)" }, { "ptBR", "Portugu\195\170s (Brasil)" }, { "ruRU", "Russian (ruRU)" },
   { "zhCN", "Chinese, Simplified (zhCN)" }, { "zhTW", "Chinese, Traditional (zhTW)" } }
 -- Options > Help's "What's new" (the changelog's 1.2.0 section, in short)
-O.WHATS_NEW = {
-  L["- The GPS map can take the minimap's place: a square in its corner that opens to the whole map (Options > Map)."],
-  L["- RestedXP Route and Zygor Route: quick buttons that follow your guide, each step your next stop."],
-  L["- Other addons' world map icons show on the GPS map too."],
-  L["- AzerothGPS shows its text in your game's language (Options > General to pick another)."],
-  L["- The options are regrouped: one page for the map, one for its icons, and this Help page."],
-  L["- A short tutorial shows the main features on your own map: below, or /agps tutorial."],
+O.WHATS_NEW = { -- (the biggest of 1.3.0-1.3.10, 2026-11-19; 1.2.0's six lines before)
+  L["- A one-time setup picks your minimap, where the map opens and the icons' size: Run Setup Again below, or /agps setup."],
+  L["- Controller support: the map, its menu and Options work from a controller (Options > Controller)."],
+  L["- Search finds every NPC of your faction by name, title or service (repair, innkeeper, trainer), in your game's language."],
+  L["- Zoomed in, hover a building or cave to see its inside map, with the NPCs who offer something there."],
+  L["- The route panel can be narrower, sit left or right, or be detached into a window of its own (Options > Map window)."],
+  L["- Swims show as a wavy line on the route: right-click one to go round by land (Options > Routing > Allow swimming)."],
+  L["- Find Herbs and Ore lists what your skill can gather, and takes in GatherMate2's herbs and mines."],
 }
 -- A page's old id, still asked for by other code and addons (API.ShowOptions): the page it's on now.
-O.PAGE_ALIASES = { ["Help improve"] = "Help", Minimap = "Map" }
+O.PAGE_ALIASES = { ["Help improve"] = "Help" }
 O.CREDIT_TEXT = L["Thanks to |cffffd100jigrobbulus|r, creator of OpenMap, for making it open source, so its stitched world map could be built into AzerothGPS as the OpenMap map style. Click the address to select it, then Ctrl+C to copy it:"]
 O.SHARE_INFO = {
   L["|cffffd100What is kept|r"],
@@ -1289,7 +1290,10 @@ local function BuildWindow()
   local page, col
   -- (the page before gets its height, for scrolling)
   local function FinishPage()
-    if page and col and not page.agpsOwnHeight then page:SetHeight(math.max(10, -col.y + 16)) end
+    if page and col and not page.agpsOwnHeight then
+      page.agpsFullH = math.max(10, -col.y + 16) -- (with every section open: O.ApplyFolds)
+      page:SetHeight(page.agpsFullH)
+    end
   end
   -- (`id`: a built-in page's English name, what O.ShowPage asks for in every language; `name` as shown)
   local function Page(name, heading, id)
@@ -1357,11 +1361,15 @@ local function BuildWindow()
     end
     col.y = col.y - (h or 26)
   end
-  local function header(text, note)
+  -- (`folded`: the section starts collapsed. A built-in page's sections collapse and expand by the yellow +/- at their
+  -- title, asked 2026-11-19; kept account-wide in ns.db.optFold by page id and the section's number: O.ApplyFolds)
+  local function header(text, note, folded)
     if col.y < -44 then col.y = col.y - 10 end -- space above a new section
     StartGroup("header", text, note)
     local fs = page:CreateFontString(nil, "ARTWORK", "GameFontNormal")
     fs:SetText(text)
+    local p = pinfo
+    local foldable = p and page == p.child and not p.whole and trackPage and true or false
     place(fs, 18)
     local line = page:CreateTexture(nil, "ARTWORK")
     line:SetColorTexture(1, 0.82, 0, 0.25)
@@ -1371,6 +1379,20 @@ local function BuildWindow()
     if lastRow and lastRow.w == fs then
       lastRow.header = true
       also(line)
+      if foldable then
+        local row = lastRow
+        p.folds = (p.folds or 0) + 1
+        row.foldKey, row.foldDefault = trackPage .. ":" .. p.folds, folded and true or false
+        local b = CreateFrame("Button", nil, page)
+        b:SetSize(PAGE_W - 40, 18)
+        b:SetPoint("TOPLEFT", fs, "TOPLEFT", 0, 2)
+        b.sign = b:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
+        b.sign:SetPoint("RIGHT", -4, 0) -- (at the line's right end; no highlight on the row: asked 2026-11-19)
+        b.sign:SetText("-")
+        b:SetScript("OnClick", function() O.ToggleFold(p, row) end)
+        row.foldButton = b
+        also(b)
+      end
     end
     if note then -- (wrapped to the page: a long one ran off it, seen 2026-10-03)
       local nt = page:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
@@ -1395,6 +1417,65 @@ local function BuildWindow()
     AddText(group, tip)
     place(cb, 26, indent)
     return cb
+  end
+  -- Two pictures under an on/off option, what each choice looks like (asked 2026-11-19: "put pictures directly in the
+  -- options to visualize what the change would do"): the first-run setup's own (Setup.lua's S.ShowImage, its drawing
+  -- where the client hasn't the file yet), the one in use outlined gold; a click picks it. `off`, `on`: { art, caption }.
+  local function pictures(off, on, get, set, enabled)
+    local S = ns.Setup
+    if not (S and S.ArtSize and S.ShowImage) then return end
+    local aw, ah = S.ArtSize(2, 200)
+    local row = CreateFrame("Frame", nil, page)
+    row:SetSize(aw * 2 + 12, ah + 18)
+    row.cards = {}
+    for i, c in ipairs({ off, on }) do
+      local b = CreateFrame("Button", nil, row)
+      b:SetSize(aw, ah + 18)
+      b:SetPoint("TOPLEFT", (i - 1) * (aw + 12), 0)
+      b.art = CreateFrame("Frame", nil, b)
+      b.art:SetSize(aw, ah)
+      b.art:SetPoint("TOP")
+      b.art.k = aw / 100
+      local bg = b.art:CreateTexture(nil, "BACKGROUND")
+      bg:SetAllPoints()
+      bg:SetColorTexture(0.16, 0.17, 0.2, 1)
+      if S.ShowImage(b.art, c[1], 2) then bg:Hide() elseif S.ART and S.ART[c[1]] then S.ART[c[1]](b.art) end
+      b.label = b:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+      b.label:SetPoint("TOP", b.art, "BOTTOM", 0, -3)
+      b.label:SetText(c[2])
+      AddText(group, c[2])
+      b.lit = {}
+      for k, p in ipairs({ { "TOPLEFT", "TOPRIGHT" }, { "BOTTOMLEFT", "BOTTOMRIGHT" }, { "TOPLEFT", "BOTTOMLEFT" },
+        { "TOPRIGHT", "BOTTOMRIGHT" } }) do
+        local t = b.art:CreateTexture(nil, "OVERLAY")
+        t:SetPoint(p[1])
+        t:SetPoint(p[2])
+        if k <= 2 then t:SetHeight(2) else t:SetWidth(2) end
+        t:SetColorTexture(1, 0.82, 0, 1)
+        b.lit[k] = t
+      end
+      local hl = b:CreateTexture(nil, "HIGHLIGHT")
+      hl:SetAllPoints(b.art)
+      hl:SetColorTexture(1, 1, 1, 0.06)
+      b.value = i == 2
+      b:SetScript("OnClick", function(self)
+        if row.agpsOn == false or (get() and true or false) == self.value then return end
+        set(self.value)
+        Apply()
+      end)
+      row.cards[i] = b
+    end
+    controls[#controls + 1] = function()
+      local v = get() and true or false
+      local usable = not enabled or (enabled() and true or false)
+      row.agpsOn = usable
+      for _, b in ipairs(row.cards) do
+        for _, t in ipairs(b.lit) do t:SetShown(b.value == v) end
+        b:SetAlpha(usable and (b.value == v and 1 or 0.7) or 0.4)
+      end
+    end
+    place(row, ah + 26, INDENT + 4)
+    return row
   end
   local function slider(...)
     local s = Slider(page, ...)
@@ -1691,19 +1772,10 @@ local function BuildWindow()
   -- the setting the next control changes (O.settingControls: the tests check none is lost or doubled).
   ---------------------------------------------------------------- General
   Page(L["General"], nil, "General")
-  header(L["Map"])
+  header(L["Showing the map"])
   Key("shown")
-  check(L["Show the map"], L["The GPS map window. Also: left-click the minimap button, a key (at the end of this section), or /agps toggle."],
+  check(L["Show the GPS map"], L["The GPS map window. Also: left-click the minimap button, a key (at the end of this section), or /agps toggle."],
     function() return GPS().shown end, function(v) GPS().shown = v end)
-  place(KeyBind(page, L["Show/hide key"]))
-  -- (asked 2026-11-14: Quick Search, the map open and its search box ready: Core.lua's AzerothGPS_QuickSearch)
-  O.QUICK_SEARCH_BINDING = "AZEROTHGPS_SEARCH"
-  place(KeyBind(page, L["Quick search key"], O.QUICK_SEARCH_BINDING,
-    L["Click, then press a key (Shift, Ctrl or Alt with it if you like). It opens the map with its search box ready, so you can type a place at once. Escape cancels, right-click clears it. Also in the game's Key Bindings, under AddOns."]))
-  -- (issue #20: an accidental press mid-fight can't pop the map up)
-  Key("keyBlockedInCombat")
-  check(L["Key doesn't show the map in combat"], L["In combat, pressing the show/hide key doesn't show the map, so a press by mistake can't pop it up mid-fight. It can still hide the map, and a map already showing stays. The minimap button and /agps toggle work as usual."],
-    function() return GPS().keyBlockedInCombat ~= false end, function(v) GPS().keyBlockedInCombat = v end, nil, INDENT)
   -- (asked 2026-10-07: European distances. Nav.FormatDistance: the directions, the arrow window, the steps, the hints)
   -- (asked 2026-11-17: "add option to general to hide X,Y display on pop out map"; GPSFrame's G.PlaceInfo)
   Key("showCoords")
@@ -1781,12 +1853,15 @@ local function BuildWindow()
   Page(L["Map"], nil, "Map")
   -- (the world map first, asked 2026-11-12: "move the Show the GPS map in the game's world map to the top of the Map
   -- section")
-  header(L["World map"])
+  header(L["Where the map shows"])
   -- (asked 2026-11-10: the GPS map in the game's own world map window, GPSFrame's G.WorldMapHosted)
   Key("useWorldMap")
   check(L["Show the GPS map in the game's world map"], L["The GPS map shows in the game's own world map window (M) instead of a window of its own, with its route, buttons and map styles. The show/hide key, and the logo on the minimap square, open the world map."],
     function() return GPS().useWorldMap == true end, function(v) GPS().useWorldMap = v and true or false end,
     -- (gray with the game's controller UI on: GPSFrame's G.WorldMapWanted)
+    function() return not (ns.GPS and ns.GPS.ControllerUI and ns.GPS.ControllerUI()) end)
+  O.worldMapPictures = pictures({ "window", L["GPS map window"] }, { "worldMap", L["In the world map"] },
+    function() return GPS().useWorldMap == true end, function(v) GPS().useWorldMap = v and true or false end,
     function() return not (ns.GPS and ns.GPS.ControllerUI and ns.GPS.ControllerUI()) end)
   header(L["Map style"])
   -- (issue #75: the four map styles, as the Map Style buttons; the OpenMap style (issue #91, Seamless before) once the seamless map's option)
@@ -1801,6 +1876,33 @@ local function BuildWindow()
   check(L["Show only explored areas"], L["The OpenMap style's zone art shows only the areas this character has explored, as the game's own world map does; the rest is the zone's blank parchment. The terrain close in is never changed."],
     function() return GPS().seamExploredOnly == true end, function(v) ns.Atlas.SetExploredOnly(v) end,
     function() return (GPS().style or "seamless") == "seamless" end, INDENT)
+  note(L["OpenMap (the default): the ground seen from above, and the mouse wheel zooms on out past the land, through zones and continents to the whole world on a stitched world map, and back in to the roads. Right-click zooms out a few steps on the same spot, up to the whole world. Picked again after another style, it loads once the UI is reloaded (a prompt offers it); in the other styles nothing of it is loaded."])
+  note(L["Terrain: the ground alone, as far out as the land. World Map: the world map, fully explored. No Spoiler Map: the world map as your character has explored it."])
+  Key("routeColor")
+  Dropdown(L["Route color"], { { value = "blue", text = L["Blue"] },
+    { value = "rainbow", text = L["Rainbow"], tip = L["The colors of the rainbow along the route."] } },
+    function() return GPS().routeColor == "rainbow" and "rainbow" or "blue" end, function(v) GPS().routeColor = v end)
+  header(L["Following and zooming"])
+  Key("rotate")
+  check(L["Turn the map with me"], L["On: the map turns so that where you face is up (heading-up). Off: north stays up and the arrow turns. Not in the game's world map: north stays up there, as on the game's map."],
+    function() return GPS().rotate end, function(v) GPS().rotate = v end, OwnWindow)
+  Key("approachZoom")
+  check(L["Zoom in near a stop"], L["Within 50 yards of your next stop, the map zooms in smoothly so you can see exactly where it is, and back out to your zoom once you're there. Zooming yourself keeps your zoom for that stop."],
+    function() return GPS().approachZoom ~= false end, function(v) GPS().approachZoom = v end)
+  Key("reopenFollow")
+  check(L["Reopen following me"], L["With a route set: if you hid the map while looking around it (dragged or zoomed out to the world map), it opens again centered on you, following your position. Off: it opens where you left it (the button at the bottom right brings it back to you)."],
+    function() return GPS().reopenFollow end, function(v) GPS().reopenFollow = v end)
+  Key("terrainZoomOut")
+  check(L["Right-click opens the world map"], L["In the OpenMap style, right-click zooms out a few steps on the same spot (each right-click a few more, up to the whole world). In the Terrain style, it shows Azeroth: click a continent, then a spot on it, to come back to the terrain view there. Right-click again goes back."],
+    function() return GPS().terrainZoomOut ~= false end, function(v) GPS().terrainZoomOut = v end)
+  Key("interiors")
+  check(L["Building interiors"], L["Inside buildings and caves (e.g. Undercity), the terrain view shows the building's own map, like the minimap."],
+    function() return GPS().interiors end, function(v) GPS().interiors = v end)
+
+
+  -- (2026-11-18: the OpenMap stages and the inside maps' sliders, fine-tuning, under the everyday options: before, they
+  -- filled the page's first screen and the View section came after them)
+  header(L["Zoom levels"], nil, true)
   -- (asked 2026-11-14: "sliders for adjusting the distance the map transitions from terrain to zone to world map like
   -- we did in the dev addon", then: "zone map to world map doesn't change the distance the map fades between these 2.
   -- Also should be a third one for the fade to world view ... Also want a transition setting for each level":
@@ -1890,93 +1992,75 @@ local function BuildWindow()
       reset:SetEnabled(OpenMap() and moved)
     end
   end
-  note(L["OpenMap (the default): the ground seen from above, and the mouse wheel zooms on out past the land, through zones and continents to the whole world on a stitched world map, and back in to the roads. Right-click zooms out a few steps on the same spot, up to the whole world. Picked again after another style, it loads once the UI is reloaded (a prompt offers it); in the other styles nothing of it is loaded."])
-  note(L["Terrain: the ground alone, as far out as the land. World Map: the world map, fully explored. No Spoiler Map: the world map as your character has explored it."])
-  Key("routeColor")
-  Dropdown(L["Route color"], { { value = "blue", text = L["Blue"] },
-    { value = "rainbow", text = L["Rainbow"], tip = L["The colors of the rainbow along the route."] } },
-    function() return GPS().routeColor == "rainbow" and "rainbow" or "blue" end, function(v) GPS().routeColor = v end)
-  header(L["View"])
-  Key("rotate")
-  check(L["Turn the map with me"], L["On: the map turns so that where you face is up (heading-up). Off: north stays up and the arrow turns. Not in the game's world map: north stays up there, as on the game's map."],
-    function() return GPS().rotate end, function(v) GPS().rotate = v end, OwnWindow)
-  Key("approachZoom")
-  check(L["Zoom in near a stop"], L["Within 50 yards of your next stop, the map zooms in smoothly so you can see exactly where it is, and back out to your zoom once you're there. Zooming yourself keeps your zoom for that stop."],
-    function() return GPS().approachZoom ~= false end, function(v) GPS().approachZoom = v end)
-  Key("reopenFollow")
-  check(L["Reopen following me"], L["With a route set: if you hid the map while looking around it (dragged or zoomed out to the world map), it opens again centered on you, following your position. Off: it opens where you left it (the button at the bottom right brings it back to you)."],
-    function() return GPS().reopenFollow end, function(v) GPS().reopenFollow = v end)
-  Key("terrainZoomOut")
-  check(L["Right-click opens the world map"], L["In the OpenMap style, right-click zooms out a few steps on the same spot (each right-click a few more, up to the whole world). In the Terrain style, it shows Azeroth: click a continent, then a spot on it, to come back to the terrain view there. Right-click again goes back."],
-    function() return GPS().terrainZoomOut ~= false end, function(v) GPS().terrainZoomOut = v end)
-  Key("interiors")
-  check(L["Building interiors"], L["Inside buildings and caves (e.g. Undercity), the terrain view shows the building's own map, like the minimap."],
-    function() return GPS().interiors end, function(v) GPS().interiors = v end)
-
-  ---------------------------------------------------------------- Minimap
-  -- (everything about the game's minimap: the GPS map in its place, 1.2.0, asked 2026-11-08, GPSFrame's G.MinimapMode;
-  -- and what AzerothGPS puts on the game's own)
-  header(L["Minimap"])
-  local function Replacing() return GPS().replaceMinimap == true end
-  Key("replaceMinimap")
-  check(L["Replace the minimap with the GPS map"], L["The GPS map takes the minimap's place in its corner, a square with the minimap's own icons on it (herbs and ore you track, mailboxes, party members, quests). It follows the minimap's zoom and turn. Changed in combat, it waits until the fight ends."],
-    Replacing, function(v) GPS().replaceMinimap = v end)
-  Key("replaceMinimapSize")
-  Choice(L["Minimap size"], {
-    { value = "small", text = L["Small"] },
-    { value = "medium", text = L["Medium"] },
-    { value = "large", text = L["Large"] },
-  }, function() return GPS().replaceMinimapSize or "small" end, function(v) GPS().replaceMinimapSize = v end, Replacing, INDENT)
-  -- (asked 2026-11-17: "add option to not show the route on our minimap replacement"; GPSFrame's G.SquareHidesRoute)
-  Key("replaceMinimapRoute")
-  check(L["Route on the minimap square"], L["Your route's line on the GPS map in the minimap corner. Off: only the stops' markers there. The GPS map opened out of it, and the one in the world map, still show the route."],
-    function() return GPS().replaceMinimapRoute ~= false end, function(v) GPS().replaceMinimapRoute = v end, Replacing, INDENT)
-  -- (asked 2026-11-18 for 1.3.9: "(enabled by default) I'd like the unpause button to also show in the minimap glowing
-  -- here", by the logo; GPSFrame's G.PlaceMinimapResume)
-  Key("replaceMinimapResume")
-  check(L["Show a Resume button on the minimap square while paused"], L["While routing is paused, a glowing Resume Routing button shows next to the logo in the minimap square's corner. Click it to resume."],
-    function() return GPS().replaceMinimapResume ~= false end, function(v)
-      GPS().replaceMinimapResume = v and true or false
-      if ns.GPS and ns.GPS.RefreshMinimapResume then ns.GPS.RefreshMinimapResume() end
-    end, Replacing, INDENT)
-  -- (asked 2026-11-15: the square left as it is while the map is open out of it, both shown)
-  Key("replaceMinimapKeepSquare")
-  check(L["Keep the minimap while the map is open"], L["The opened GPS map grows out of the minimap corner while the minimap stays as it is, so both show. Off: the game's own minimap goes back to its usual place and shape while the GPS map is open."],
-    function() return GPS().replaceMinimapKeepSquare ~= false end, function(v) GPS().replaceMinimapKeepSquare = v end,
-    Replacing, INDENT)
-  -- (asked 2026-11-09: the map opened from the square goes back by itself as you move, or as a fight starts)
-  Key("replaceMinimapCollapseOnMove")
-  check(L["Back to the minimap when you move"], L["The opened GPS map goes back to the minimap corner as soon as you start moving."],
-    function() return GPS().replaceMinimapCollapseOnMove == true end, function(v) GPS().replaceMinimapCollapseOnMove = v end,
-    Replacing, INDENT)
-  Key("replaceMinimapCollapseOnCombat")
-  check(L["Back to the minimap when combat starts"], L["The opened GPS map goes back to the minimap corner as soon as a fight starts."],
-    function() return GPS().replaceMinimapCollapseOnCombat == true end, function(v) GPS().replaceMinimapCollapseOnCombat = v end,
-    Replacing, INDENT)
-  -- (asked 2026-11-11: how long the opened map waits, or never)
-  Key("replaceMinimapIdle")
-  slider(L["Back to the minimap after"], 0, 60, 1,
-    function(v) return v <= 0 and L["Never"] or Format(L["%d s"], v) end,
-    function() return tonumber(GPS().replaceMinimapIdle) or 5 end,
-    function(v) GPS().replaceMinimapIdle = math.floor(v + 0.5) end, Replacing,
-    L["How long the opened GPS map waits, with nothing done on it, before it goes back to the minimap corner. Never: it stays open until you send it back."])
   ---------------------------------------------------------------- Show on the map
   Page(L["Map icons"], nil, "Layers")
   -- (asked 2026-11-14: the icons' size, "render them in multiple sizes, current is small, make a medium, and large. put
   -- this under the map icon options", and round icons moved here, "put these in their own section above the other
   -- options": GPSFrame's G.ICON_SIZES and G.RoundIcon)
-  header(L["Icon look"])
+  header(L["Icon size and shape"])
   Key("iconSize")
-  Dropdown(L["Icon size"], {
-    { value = "small", text = L["Small"] },
-    { value = "medium", text = L["Medium"] },
-    { value = "large", text = L["Large"] },
-    { value = "xlarge", text = L["Extra large"] }, -- (asked 2026-11-18 for 1.3.9: twice Small, G.ICON_SIZES)
-  }, function() return GPS().iconSize or "medium" end, function(v) GPS().iconSize = v end)
+  -- (radio buttons under a picture of each size, asked 2026-11-19: "radio button with picture preview of the icon
+  -- size, use peacebloom icons": the herb's own icon as the map draws it, G.ICON_PX times G.ICON_SIZES)
+  do
+    local sizes = { { "small", L["Small"] }, { "medium", L["Medium"] }, { "large", L["Large"] },
+      { "xlarge", L["Extra large"] } }
+    local title = page:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+    title:SetText(L["Icon size"])
+    place(title, 18, 4)
+    local icon = "Interface\\Icons\\INV_Misc_Flower_02"
+    if ns.Layers and ns.Layers.NodeIcon then
+      local ok, got = pcall(ns.Layers.NodeIcon, "herb", "Peacebloom")
+      if ok and got then icon = got end
+    end
+    local G = ns.GPS
+    local base, scales = G and G.ICON_PX or 16, G and G.ICON_SIZES or { small = 1, medium = 1.25, large = 1.5, xlarge = 2 }
+    local cellW, artH = 96, 36
+    local row = CreateFrame("Frame", nil, page)
+    row:SetSize(cellW * #sizes, artH + 20)
+    row.cells = {}
+    local function Pick(v)
+      if (GPS().iconSize or "medium") == v then return end
+      GPS().iconSize = v
+      Apply()
+    end
+    for n, sz in ipairs(sizes) do
+      local c = CreateFrame("Button", nil, row)
+      c:SetSize(cellW, artH + 20)
+      c:SetPoint("TOPLEFT", (n - 1) * cellW, 0)
+      local px = base * (scales[sz[1]] or 1)
+      c.icon = c:CreateTexture(nil, "ARTWORK")
+      c.icon:SetSize(px, px)
+      c.icon:SetPoint("CENTER", c, "TOP", 0, -artH / 2)
+      c.icon:SetTexture(icon)
+      local ok, b = pcall(CreateFrame, "CheckButton", nil, c, "UIRadioButtonTemplate")
+      if not ok then b = CreateFrame("CheckButton", nil, c, "UICheckButtonTemplate") end
+      b:SetSize(16, 16)
+      b:SetPoint("TOPLEFT", 4, -artH - 2)
+      b.text = b.text or b:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+      b.text:ClearAllPoints()
+      b.text:SetPoint("LEFT", b, "RIGHT", 3, 0)
+      b.text:SetText(sz[2])
+      AddText(group, sz[2])
+      b:SetScript("OnClick", function(self)
+        self:SetChecked(true)
+        Pick(sz[1])
+      end)
+      c:SetScript("OnClick", function() Pick(sz[1]) end)
+      c.value, c.radio = sz[1], b
+      row.cells[n] = c
+    end
+    controls[#controls + 1] = function()
+      local v = GPS().iconSize or "medium"
+      for _, c in ipairs(row.cells) do c.radio:SetChecked(c.value == v) end
+    end
+    place(row, artH + 26, 4)
+    O.iconSizeRow = row
+    Track(row)
+  end
   Key("roundIcons")
   check(L["Round icons"], L["The map's and minimap's icons are round, in a gold ring, or a class trainer's in its class's color. Off: square, as the game's."],
     function() return GPS().roundIcons ~= false end, function(v) GPS().roundIcons = v end)
-  header(L["Shown on the map"])
+  header(L["What the map shows"])
   note(L["Map style and layers: the round button at the map's bottom-left."])
   note(L["Double-click one to add it as a stop."])
   Key("layerQuests")
@@ -2047,7 +2131,7 @@ local function BuildWindow()
     local G = ns.GPS
     local R = G.ICON_YD_RANGE
     local tip = L["Each kind's icons show while the map is zoomed in at least this close (the distance from its middle to its edge), on any map size and in the game's world map. Always: at every zoom."]
-    header(L["How far out icons show"], tip)
+    header(L["How far out icons show"], tip, true)
     local function Yd(v) return v >= G.ICON_YD_ALWAYS and L["Always"] or ns.Nav.FormatDistance(v) end
     local function iconSlider(kind, label, set, on)
       Key(G.ICON_YD_KEYS[kind])
@@ -2078,7 +2162,58 @@ local function BuildWindow()
   -- (asked 2026-11-12: these came before the GPS map could take the minimap's place, "clarify those are for the game's
   -- minimap not ours when it is shown": with it there, the route and icons are the square's own, and the game's
   -- minimap standing in (dungeons) gets the route and icons whatever these say; the button goes round the square)
-  header(L["On the game's minimap"], L["For the game's own minimap. With the GPS map in its place, only the minimap button is used: the GPS map shows your route and its icons itself."])
+  ---------------------------------------------------------------- Minimap
+  -- (everything about the game's minimap: the GPS map in its place, 1.2.0, asked 2026-11-08, GPSFrame's G.MinimapMode;
+  -- and what AzerothGPS puts on the game's own)
+  -- (a page of its own again, 2026-11-19: Map and Map icons were each over two screens with these on them)
+  Page(L["Minimap"], nil, "Minimap")
+  header(L["The GPS map as your minimap"])
+  local function Replacing() return GPS().replaceMinimap == true end
+  Key("replaceMinimap")
+  check(L["Replace the minimap with the GPS map"], L["The GPS map takes the minimap's place in its corner, a square with the minimap's own icons on it (herbs and ore you track, mailboxes, party members, quests). It follows the minimap's zoom and turn. Changed in combat, it waits until the fight ends."],
+    Replacing, function(v) GPS().replaceMinimap = v end)
+  O.minimapPictures = pictures({ "gameMinimap", L["The game's minimap"] }, { "gpsMinimap", L["GPS minimap"] },
+    Replacing, function(v) GPS().replaceMinimap = v end)
+  Key("replaceMinimapSize")
+  Choice(L["Minimap size"], {
+    { value = "small", text = L["Small"] },
+    { value = "medium", text = L["Medium"] },
+    { value = "large", text = L["Large"] },
+  }, function() return GPS().replaceMinimapSize or "small" end, function(v) GPS().replaceMinimapSize = v end, Replacing, INDENT)
+  -- (asked 2026-11-17: "add option to not show the route on our minimap replacement"; GPSFrame's G.SquareHidesRoute)
+  Key("replaceMinimapRoute")
+  check(L["Route on the minimap square"], L["Your route's line on the GPS map in the minimap corner. Off: only the stops' markers there. The GPS map opened out of it, and the one in the world map, still show the route."],
+    function() return GPS().replaceMinimapRoute ~= false end, function(v) GPS().replaceMinimapRoute = v end, Replacing, INDENT)
+  -- (asked 2026-11-18 for 1.3.9: "(enabled by default) I'd like the unpause button to also show in the minimap glowing
+  -- here", by the logo; GPSFrame's G.PlaceMinimapResume)
+  Key("replaceMinimapResume")
+  check(L["Show a Resume button on the minimap square while paused"], L["While routing is paused, a glowing Resume Routing button shows next to the logo in the minimap square's corner. Click it to resume."],
+    function() return GPS().replaceMinimapResume ~= false end, function(v)
+      GPS().replaceMinimapResume = v and true or false
+      if ns.GPS and ns.GPS.RefreshMinimapResume then ns.GPS.RefreshMinimapResume() end
+    end, Replacing, INDENT)
+  -- (asked 2026-11-15: the square left as it is while the map is open out of it, both shown)
+  Key("replaceMinimapKeepSquare")
+  check(L["Keep the minimap while the map is open"], L["The opened GPS map grows out of the minimap corner while the minimap stays as it is, so both show. Off: the game's own minimap goes back to its usual place and shape while the GPS map is open."],
+    function() return GPS().replaceMinimapKeepSquare ~= false end, function(v) GPS().replaceMinimapKeepSquare = v end,
+    Replacing, INDENT)
+  -- (asked 2026-11-09: the map opened from the square goes back by itself as you move, or as a fight starts)
+  Key("replaceMinimapCollapseOnMove")
+  check(L["Back to the minimap when you move"], L["The opened GPS map goes back to the minimap corner as soon as you start moving."],
+    function() return GPS().replaceMinimapCollapseOnMove == true end, function(v) GPS().replaceMinimapCollapseOnMove = v end,
+    Replacing, INDENT)
+  Key("replaceMinimapCollapseOnCombat")
+  check(L["Back to the minimap when combat starts"], L["The opened GPS map goes back to the minimap corner as soon as a fight starts."],
+    function() return GPS().replaceMinimapCollapseOnCombat == true end, function(v) GPS().replaceMinimapCollapseOnCombat = v end,
+    Replacing, INDENT)
+  -- (asked 2026-11-11: how long the opened map waits, or never)
+  Key("replaceMinimapIdle")
+  slider(L["Back to the minimap after"], 0, 60, 1,
+    function(v) return v <= 0 and L["Never"] or Format(L["%d s"], v) end,
+    function() return tonumber(GPS().replaceMinimapIdle) or 5 end,
+    function(v) GPS().replaceMinimapIdle = math.floor(v + 0.5) end, Replacing,
+    L["How long the opened GPS map waits, with nothing done on it, before it goes back to the minimap corner. Never: it stays open until you send it back."])
+  header(L["The game's own minimap"], L["For the game's own minimap. With the GPS map in its place, only the minimap button is used: the GPS map shows your route and its icons itself."])
   Key("minimap.hide")
   check(L["Minimap button"], L["The AzerothGPS button on the game's minimap. Without it, /agps opens this window."],
     function() return not ns.settings.minimap.hide end, function(v) ns.settings.minimap.hide = not v end)
@@ -2099,7 +2234,7 @@ local function BuildWindow()
 
   ---------------------------------------------------------------- Map window
   -- (where the window is, its size and frame, and its own looks, asked 2026-11-04: Looks.lua)
-  Page(L["Map window"], nil, "Window")
+  Page(L["GPS Map"], nil, "Window")
   local LK = ns.Looks
   local function Tints(first)
     local out = first
@@ -2238,7 +2373,7 @@ local function BuildWindow()
   check(L["Swings while you move"], L["Turning swings it out of the turn and the road jostles it; it twists on its string and settles when you stop. Off: it hangs still, facing you."],
     function() return GPS().charmSwing ~= false end, function(v) GPS().charmSwing = v end,
     function() return Framed() and Charmed() ~= "none" end, INDENT)
-  header(L["Arriving"], L["A little celebration over the map when you reach your trip's last stop."])
+  header(L["Arrival celebration"], L["A little celebration over the map when you reach your trip's last stop."])
   local effects = {}
   for _, e in ipairs(LK.EFFECTS) do effects[#effects + 1] = { value = e.key, text = e.name } end
   effects[#effects + 1] = { value = "none", text = L["None"] }
@@ -2251,7 +2386,7 @@ local function BuildWindow()
   end), 30, 4)
 
   ---------------------------------------------------------------- Opacity and combat
-  Page(L["Opacity and combat"], nil, "Opacity")
+  Page(L["Opacity"], nil, "Opacity")
   -- (asked 2026-11-12: "the opacity settings, turn with me, etc is for the GPS map only not if using the in game map":
   -- in the world map the map is that window's child, fading and hiding with it, GPSFrame's G.MapFades)
   header(L["Map"], L["For the GPS map's own window. In the game's world map, the map fades and hides with that window instead and always takes clicks (click-through still works for the direction arrow)."])
@@ -2291,7 +2426,7 @@ local function BuildWindow()
 
   ---------------------------------------------------------------- Routing
   Page(L["Routing"], nil, "Routing")
-  header(L["Routes"])
+  header(L["Ways to travel"])
   Key("useFlights")
   check(L["Use flight paths"], L["Routes take flights (connecting ones too) between the flight masters this character knows, when that's faster. The addon learns which ones you know from the flight map: open it once at any flight master."],
     function() return GPS().useFlights ~= false end, function(v)
@@ -2301,7 +2436,7 @@ local function BuildWindow()
   Key("flightMapRing")
   check(L["Ring the flight on the flight map"], L["When the route takes a flight, the flight master it flies to has a ring round it on the flight map, so you can click it straight away."],
     function() return GPS().flightMapRing ~= false end, function(v) GPS().flightMapRing = v end,
-    function() return GPS().useFlights ~= false end)
+    function() return GPS().useFlights ~= false end, INDENT)
   Key("useHearthstone")
   check(L["Use hearthstone"], L["Routes may start with your Hearthstone (or a shaman's Astral Recall) when it's in your bags, off cooldown, and faster. Home is your inn's town; the exact spot is learned after your first hearth. The directions say when; click the button beside them to use it."],
     function() return GPS().useHearthstone ~= false end, function(v)
@@ -2338,7 +2473,7 @@ local function BuildWindow()
       ns.Nav.OptionsChanged()
     end)
   note(L["Below 0, routes keep to the roads more and more; above 0, they cut straight across open ground more and more, at the top as if the roads weren't there."])
-  header(L["Stops"])
+  header(L["Trips with several stops"])
   Key("fastestOrder")
   check(L["Visit stops in the fastest order"], L["Routes with several stops visit them in the fastest order instead of the order you placed them. (Double-click the map to place stops.)"],
     function() return GPS().fastestOrder end, function(v)
@@ -2357,6 +2492,11 @@ local function BuildWindow()
       if ns.db then ns.db.importOrderTold = true end -- (chosen: Import.TellOrder not needed)
     end,
     function() return GPS().fastestOrder and true or false end, INDENT)
+  Key("navCloseClears")
+  check(L["X on the route panel cancels the route"], L["The X at the top right of the map's route panel (the steps) cancels the whole route. Off: it only closes the panel until the route changes, and the route goes on."],
+    function() return GPS().navCloseClears end, function(v) GPS().navCloseClears = v end)
+  -- (2026-11-18: the Quest Route button's own options under its name, apart from the stops' order)
+  header(L["Quest Route"])
   Key("questZoneOnly")
   check(L["Quest route: only this zone"], L["The Quest Route button takes only the quests whose objective or turn-in is in the zone you're in (a city counts as its zone). Off: every quest in your log, anywhere."],
     function() return GPS().questZoneOnly end, function(v) GPS().questZoneOnly = v end)
@@ -2369,9 +2509,6 @@ local function BuildWindow()
   Key("questPickRoute")
   check(L["Quest route: the quest you pick"], L["Pick a quest in your quest log or in the objective tracker (click it to focus it) and the route goes to that quest's objectives and turn-in. Off: only the Quest Route button makes a quest route."],
     function() return GPS().questPickRoute end, function(v) GPS().questPickRoute = v end)
-  Key("navCloseClears")
-  check(L["X on the route panel cancels the route"], L["The X at the top right of the map's route panel (the steps) cancels the whole route. Off: it only closes the panel until the route changes, and the route goes on."],
-    function() return GPS().navCloseClears end, function(v) GPS().navCloseClears = v end)
   header(L["Waypoints and sharing"])
   Key("acceptWay")
   check(L["Accept TomTom /way commands"], L["/way lines typed or pasted in chat add stops to the route (several pasted lines at once become several stops). With TomTom installed, its waypoint is set too. Questie's \"Set TomTom Target\" adds a stop the same way."],
@@ -2385,7 +2522,7 @@ local function BuildWindow()
   place(Button(page, L["Import and Share..."], 200, function() ns.Import.Toggle() end), 30, 4)
   -- (asked 2026-10-03) each zeppelin, boat and the tram, on by default: unticked, never in a route (also: right-click
   -- its dock on the map). Only your faction's (Nav.TransportUsable). Last on the page: the list is long.
-  header(L["Zeppelins, boats and the tram"], L["Unticked ones are never used in routes. Right-clicking a dock on the map does the same."])
+  header(L["Zeppelins, boats and the tram"], L["Unticked ones are never used in routes. Right-clicking a dock on the map does the same."], true)
   local function Town(name) return ((name or "?"):match("^[^,]+")) end
   for _, kind in ipairs({ { "zeppelin", L["Zeppelins"], L["Routes may take the zeppelin between %s and %s. Unticked: never."] },
     { "boat", L["Boats"], L["Routes may take the boat between %s and %s. Unticked: never."] },
@@ -2460,7 +2597,7 @@ local function BuildWindow()
     function() return math.floor((GPS().arrowBg or 0.55) * 100 + 0.5) end, function(v) GPS().arrowBg = v / 100 end, ArrowShown,
     L["How dark the panel behind the arrow is. At 0, the arrow alone."])
   -- (the arrow and the directions two panels, asked 2026-10-30)
-  header(L["Directions panel"])
+  header(L["Directions text"])
   Key("dirShown")
   -- (asked 2026-11-17, "hide the text separately and only show the arrow": this one, named for the text; gray while the
   -- arrow is hidden, so the two are never both hidden)
@@ -2498,7 +2635,7 @@ local function BuildWindow()
   slider(L["Directions background"], 0, 100, 5, "%d%%",
     function() return math.floor((GPS().dirBg or GPS().arrowBg or 0) * 100 + 0.5) end, function(v) GPS().dirBg = v / 100 end, DirOn,
     L["How dark the panel behind the directions is. At 0, the text alone."])
-  header(L["How it works"])
+  header(L["How it works"], nil, true)
   note(L["The arrow points along the route: |cff73ff73green|r straight ahead, |cffffffffwhite|r for a turn coming up, |cffff7359red|r when the route is behind you. On a flight it shows where you land and when."])
   note(L["The directions' lines: the next turn and its distance, the road or place you're heading toward, the stop with its distance and ETA, then the turn after that. With List the stops only, just the stops."])
   note(L["Each has its own lock: untick Lock arrow position or Lock directions text position, then drag that one; drag the directions' bottom-right corner to resize them. Made taller, they list the later stops too. Unlocked with no route, they show a placeholder so you can place them."])
@@ -2507,8 +2644,19 @@ local function BuildWindow()
   note(L["In a quest's area the arrow shows a ! and the directions the quest's objectives. A small Sprint icon pulsing in the directions' top-right corner means you picked up or finished a quest after making your quest route: click it (or the quest route button on the map) to make the route again with it or its turn-in."])
 
   ---------------------------------------------------------------- Quick buttons
-  Page(L["Quick buttons"], nil, "Quick buttons")
+  -- (2026-11-19: "Keys and buttons": the map's keys, once on General, with the buttons; the id as it was)
+  Page(L["Keys and buttons"], nil, "Quick buttons")
   pinfo.whole = true -- (laid out by hand: the search shows all of it or none)
+  header(L["Keys"])
+  place(KeyBind(page, L["Show/hide key"]))
+  -- (asked 2026-11-14: Quick Search, the map open and its search box ready: Core.lua's AzerothGPS_QuickSearch)
+  O.QUICK_SEARCH_BINDING = "AZEROTHGPS_SEARCH"
+  place(KeyBind(page, L["Quick search key"], O.QUICK_SEARCH_BINDING,
+    L["Click, then press a key (Shift, Ctrl or Alt with it if you like). It opens the map with its search box ready, so you can type a place at once. Escape cancels, right-click clears it. Also in the game's Key Bindings, under AddOns."]))
+  -- (issue #20: an accidental press mid-fight can't pop the map up)
+  Key("keyBlockedInCombat")
+  check(L["Key doesn't show the map in combat"], L["In combat, pressing the show/hide key doesn't show the map, so a press by mistake can't pop it up mid-fight. It can still hide the map, and a map already showing stays. The minimap button and /agps toggle work as usual."],
+    function() return GPS().keyBlockedInCombat ~= false end, function(v) GPS().keyBlockedInCombat = v end)
   header(L["Where each one goes"])
   note(L["Always shown: next to the map button, going up or to the right. In the menu: slides out past those when you click the map button (it closes after 20 seconds untouched). Hidden: not on the map (the setting still works). A group (map style, quests, herbs and ore) is one button: click it and its buttons slide out beside it. ^ and v set the order."])
   local fit = page:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
@@ -2802,7 +2950,7 @@ local function BuildWindow()
   O.padResetNote:SetPoint("LEFT", padReset, "RIGHT", 8, 0)
 
   Page(L["Performance"], nil, "Performance")
-  header(L["Lighter settings"], L["For a slower PC: the same routes, worked out and drawn less often."])
+  header(L["Presets"], L["For a slower PC: the same routes, worked out and drawn less often."])
   -- the addon's work over the last few seconds, while this page is open
   local usage = page:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
   place(usage, 20, 4)
@@ -2825,17 +2973,34 @@ local function BuildWindow()
   also(defBtn)
   AddText(group, L["Restore Defaults"])
   controls[#controls + 1] = function() lowBtn:SetEnabled(not O.IsLowEnd()) end
-  header(L["Map"])
+  header(L["Map redraws"])
+  local function Nearest(v, list)
+    local best = list[1]
+    for _, n in ipairs(list) do
+      if math.abs(n - v) < math.abs(best - v) then best = n end
+    end
+    return best
+  end
+  local function Steps(list, fmt)
+    local out = {}
+    for i, n in ipairs(list) do out[i] = { value = n, text = fmt and Format(fmt, n) or tostring(n) } end
+    return out
+  end
   Key("hz")
-  slider(L["Map redraws per second"], 5, 30, 1, "%d", function() return GPS().hz or 20 end, function(v) GPS().hz = v end)
+  O.HZ_STEPS = { 5, 10, 15, 20, 30 }
+  Choice(L["Map redraws per second"], Steps(O.HZ_STEPS), function() return Nearest(GPS().hz or 20, O.HZ_STEPS) end,
+    function(v) GPS().hz = v end)
   note(L["The setting that saves the most: at 10 the map needs about half the work it does at 20, and still follows you smoothly. Standing still, it only redraws when something changes."])
-  header(L["Routes"])
+  header(L["Working out routes"])
   Key("rerouteSeconds")
-  slider(L["Work out a route you've left at most every"], 2, 10, 1, L["%d s"], function() return GPS().rerouteSeconds or 2 end,
-    function(v) GPS().rerouteSeconds = v end)
+  O.REROUTE_STEPS = { 2, 4, 6, 10 }
+  Choice(L["Work out a route you've left at most every"], Steps(O.REROUTE_STEPS, L["%d s"]),
+    function() return Nearest(GPS().rerouteSeconds or 2, O.REROUTE_STEPS) end, function(v) GPS().rerouteSeconds = v end)
   note(L["Off the route (fighting, gathering, or going your own way), it's worked out again from where you are. Less often is less work; the route catches up with you a little later."])
   Key("stopsAhead")
-  slider(L["Stops routed and drawn ahead"], 1, 8, 1, "%d", function() return GPS().stopsAhead or 3 end, O.SetStopsAhead)
+  O.STOPS_STEPS = { 1, 2, 3, 5, 8 }
+  Choice(L["Stops routed and drawn ahead"], Steps(O.STOPS_STEPS),
+    function() return Nearest(GPS().stopsAhead or 3, O.STOPS_STEPS) end, O.SetStopsAhead)
   note(L["How many of the route's stops are worked out and drawn at a time; the next come in as you reach them. Every stop is still in the fastest order and on the map, and the ones further on are listed with an estimated distance until they're routed."])
   -- (asked 2026-11-16: routing paused when you're not following it; its own option, the low-end settings turn it on)
   Key("autoPauseRouting")
@@ -2858,7 +3023,7 @@ local function BuildWindow()
   check(L["Turn the arrow every frame"], L["On: the arrow turns with every frame, as smoothly as the game runs. Off: 20 times a second, less work at high frame rates."],
     function() return (GPS().arrowHz or 0) == 0 end, function(v) GPS().arrowHz = v and 0 or 20 end)
   header(L["Other settings to improve performance"])
-  note(L["Fewer icons on the map (Map > Show on the map, or the round button at the map's bottom-left): herbs, ore, quests and points of interest; quest areas' outlines off; and a smaller map."])
+  note(L["Fewer icons on the map (Map icons, or the round button at the map's bottom-left): herbs, ore, quests and points of interest; quest areas' outlines off; and a smaller map."])
 
   ---------------------------------------------------------------- Profiles
   -- (asked 2026-11-11: profiles, each character on the one picked for it; Core.lua's ns.UseProfile)
@@ -2939,7 +3104,7 @@ local function BuildWindow()
   Key("showWalls")
   check(L["Show the walls on the map"], L["Draws the walls routes go around on the map (blood red), with the wall tools off too. Also /agps walls."],
     function() return GPS().showWalls and true or false end, function(v) GPS().showWalls = v end)
-  header(L["Both tools"], L["The magic eraser, Restore Zone and Restore Continent put the map's own roads or walls back where you changed them (those of the tools on). Undo puts them back."])
+  header(L["Road and wall tools"], L["The magic eraser, Restore Zone and Restore Continent put the map's own roads or walls back where you changed them (those of the tools on). Undo puts them back."])
   -- (Shift-click drawing always since 2026-11-19, its option gone)
   note(L["Hold Shift to draw or erase; a plain drag pans the map and a click on a line opens its details."])
   header(L["Pins"], L["Your own marks on the map: a name and an icon."])
@@ -2966,7 +3131,7 @@ local function BuildWindow()
   -- rest, one frame hung under the host so sections can come, go and change height: LayoutHelp).
   Page(L["Help"], nil, "Help")
   pinfo.whole = true
-  header(L["What's new in 1.2.0"])
+  header(L["What's new in 1.3"])
   for _, line in ipairs(O.WHATS_NEW) do note(line) end
   help.page, help.top = page, col.y
   page.agpsOwnHeight = true -- (LayoutHelp sets it, not FinishPage)
@@ -3004,7 +3169,7 @@ local function BuildWindow()
     -- (the map's Search Places help, moved here from its button's tooltip: asked 2026-11-14, "too much text for a
     -- button hover"; not on General, which fits without scrolling)
     header(L["Search Places"])
-    note(L["Type 2+ letters, then pick a place to add it as a stop (Enter takes the first)."])
+    note(L["Type 2+ letters, then pick a place to add it as a stop (Up and Down choose one, Enter takes it or the first)."])
     note(L["Finds: towns and places, zones, landmarks, flight masters, boat and zeppelin docks, your faction's trainers and services in the capitals and starting towns, every NPC of your faction or neutral by name, title or what they do (\"class trainer\", \"profession trainer\", \"weapon trainer\", \"flight master\", \"vendor\", \"repair\", \"innkeeper\", \"banker\": the nearest first), and your pins."])
     note(L["Pin beside an NPC or a city place pins it for good. A zone's result is the middle of the zone."])
     header(L["Commands and links"])
@@ -3319,6 +3484,58 @@ local function BuildWindow()
       ShowResults(p and p.resY and -p.resY - 8 or 0)
     end
   end
+  -- Collapsed sections: a section's rows under its title hidden and everything after moved up (the rows the search
+  -- knows, their places as laid out in row.y). `open`: every section shown (while the search is on).
+  function O.Folded(row)
+    local saved = ns.db and ns.db.optFold and ns.db.optFold[row.foldKey]
+    if saved == nil then return row.foldDefault end
+    return saved
+  end
+  function O.ApplyFolds(p, open)
+    if not (p and p.folds) or p.whole then return end
+    local shift, folded = 0, false
+    local rows = p.rows
+    for i, row in ipairs(rows) do
+      if row.header then
+        folded = not open and row.foldKey ~= nil and O.Folded(row) or false
+        if row.foldButton then row.foldButton.sign:SetText(folded and "+" or "-") end
+      end
+      local hide = folded and not row.header
+      local y = row.y + shift
+      for k = 0, #(row.extras or {}) do
+        local w = k == 0 and row.w or row.extras[k]
+        if hide then
+          if not w.agpsFoldHid and (not w.IsShown or w:IsShown()) then
+            w.agpsFoldHid = true
+            w:Hide()
+          end
+        else
+          if w.agpsFoldHid then
+            w.agpsFoldHid = nil
+            w:Show()
+          end
+          if w.padY then w.padY = y end
+        end
+      end
+      if hide then
+        local nxt = rows[i + 1]
+        shift = shift + math.max(0, nxt and (row.y - nxt.y) or row.h)
+      else
+        row.w:SetPoint("TOPLEFT", row.x, y)
+      end
+    end
+    if p.child.agpsFullH then p.child:SetHeight(math.max(10, p.child.agpsFullH - shift)) end
+  end
+  function O.ApplyAllFolds(open)
+    for n = 1, #pages do O.ApplyFolds(search.pages[n], open) end
+  end
+  function O.ToggleFold(p, row)
+    if search.on or not ns.db then return end
+    ns.db.optFold = ns.db.optFold or {}
+    ns.db.optFold[row.foldKey] = not O.Folded(row)
+    O.ApplyFolds(p)
+    ShowPage(currentPage)
+  end
   function O.Search(text)
     local words = {}
     for w in tostring(text or ""):lower():gmatch("%S+") do
@@ -3327,6 +3544,7 @@ local function BuildWindow()
     end
     local on = #words > 0
     search.on = on or nil
+    if on then O.ApplyAllFolds(true) end -- (every section open: the search finds what's collapsed)
     local y, any, firstWhole = -12, false, nil
     for n = 1, #pages do
       local p = search.pages[n]
@@ -3399,6 +3617,7 @@ local function BuildWindow()
     resultsChild:SetHeight(math.max(10, search.height))
     if not on then
       results:Hide()
+      O.ApplyAllFolds()
       ShowPage(currentPage)
     elseif any then
       ShowResults(0)
@@ -3447,6 +3666,7 @@ local function BuildWindow()
       O.Search("")
     end
     for _, refresh in ipairs(controls) do refresh() end
+    O.ApplyAllFolds()
     ShowPage(currentPage)
   end)
   ShowPage(currentPage)

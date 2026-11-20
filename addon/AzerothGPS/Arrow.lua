@@ -354,7 +354,16 @@ local function UpdateText(px, py, cont)
     bang:Show()
     local speed = (cur and cur > 0.5) and cur or (mounted and mount or walk)
     local lines = N.QuestLines(N.areaQuests)
-    if m and not stopsOnly then lines[#lines + 1] = { string.format("%s  |cffffffff%s|r", m.text, N.FormatDistance(m.dist)), 1, 0.82, 0 } end
+    if use then
+      -- (the route's step 1 a hearthstone or teleport: its icon in the arrow's place here too, the arrow hidden; it
+      -- returned before the icon was shown and the arrow stuck pointing up with nothing to turn it, issue #733)
+      arrow:Hide()
+      useIcon:SetTexture(ns.GPS and ns.GPS.UseTexture and ns.GPS.UseTexture(use) or 134400)
+      useIcon:Show()
+      useGlow:Show()
+      lines[#lines + 1] = { Format(L["Use %s"], tostring(use[8])) .. (use[10] and use[10] ~= ""
+        and "  " .. Format(L["to %s"], use[10]) or ""), 1, 0.82, 0 }
+    elseif m and not stopsOnly then lines[#lines + 1] = { string.format("%s  |cffffffff%s|r", m.text, N.FormatDistance(m.dist)), 1, 0.82, 0 } end
     lines[#lines + 1] = { string.format("%s  |cffffffff%s|r  |cffffd100%s|r", StopLabel(d, #N.stops),
       N.FormatDistance(r.walkYards), N.FormatTime(N.TripSecs(r.walkYards, r.swimYards, r.rideSeconds, speed))), 1, 1, 1 }
     return RenderLines(lines)

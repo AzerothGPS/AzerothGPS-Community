@@ -362,7 +362,7 @@ def cmd_toolicons(args) -> int:
     from . import toolicons
 
     files = toolicons.write()
-    print(f"wrote {len(files)} road and wall tool icons in {toolicons.TOOLS_DIR} (new files: log out and back in)")
+    print(f"wrote {len(files)} tool and pin icons in {toolicons.TOOLS_DIR} (new files: log out and back in)")
     if args.preview:
         for p in toolicons.preview(Path(args.preview)):
             print(f"preview {p}")
@@ -591,6 +591,10 @@ def cmd_navmesh(args) -> int:
         r = subprocess.run(cmd)
         print(f"built {RM.tool()}" if r.returncode == 0 else "build failed (pip install ziglang?)")
         return r.returncode
+    if args.what == "compare":  # (the roads against the meshes built: navcompare.py)
+        from . import navcompare
+
+        return 0 if navcompare.run(only=args.only) else 1
     if not RM.tool().exists():
         print(f"no {RM.tool()}: agps navmesh build-tool first")
         return 1
@@ -1213,7 +1217,7 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--preview", metavar="DIR", help="also pictures of them to look at, in DIR")
     sp.set_defaults(fn=cmd_padicons)
 
-    sp = sub.add_parser("toolicons", help="the road and wall tools' legend icons (mouse buttons, Shift, Ctrl) and the map's stairs glyph (Media/Tools/)")
+    sp = sub.add_parser("toolicons", help="the road and wall tools' legend icons (mouse buttons, Shift, Ctrl), the map's stairs glyph and Search Places' pin (Media/Tools/)")
     sp.add_argument("--preview", metavar="DIR", help="also pictures of them to look at, in DIR")
     sp.set_defaults(fn=cmd_toolicons)
 
@@ -1282,7 +1286,9 @@ def main(argv: list[str] | None = None) -> int:
     sp = sub.add_parser("navmesh", help="the capitals' and Undercity's Recast meshes for the dev tools' route comparison "
                                         "(never shipped)")
     client_args(sp)
-    sp.add_argument("what", choices=["build-tool", "build"], help="build-tool: compile navbuild.exe; build: the meshes")
+    sp.add_argument("what", choices=["build-tool", "build", "compare"],
+                    help="build-tool: compile navbuild.exe; build: the meshes; compare: the roads against them "
+                         "(data/debug/navcompare/)")
     sp.add_argument("--only", nargs="+", help="only build the cities whose name contains one of these (the others' "
                                               "meshes already built are kept in NavMeshData.lua)")
     sp.add_argument("--rebuild", action="store_true", help="build the meshes again (else the ones in data/navmesh/)")

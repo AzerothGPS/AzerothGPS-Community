@@ -6,6 +6,12 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 ### New
 
+- Options: sections collapse and expand with the + or - at the right of their title; the search still finds what's collapsed.
+- Options: a Minimap page for the GPS map as your minimap and the game's own minimap.
+- Options: Keys and buttons has the map's keys with its quick buttons; Map window is now GPS Map, Opacity and combat is Opacity.
+- Options: pictures show the map in its window or the world map, and the game's minimap or the GPS one; click a picture to pick it.
+- Options: icon size is picked under a picture of each size; map redraws, rerouting and stops ahead are picked from a few choices.
+- Options > Help: What's new lists the biggest changes of 1.3.
 - A one-time setup after this update: pick your minimap (with a live preview and its size) and where the map opens, from big cards with in-game pictures. Works with a controller.
 - Run it again any time: Options > Help > Run Setup Again, or /agps setup.
 - On a new install, tips show where the route's directions go until your first route is done, instead of the tutorial popup.
@@ -29,6 +35,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Swims on a route show as a wavy line on the map and the minimap; hover one to see why, right-click it to go round by land for that trip.
 - Trip times count swimming at swimming speed, or as land with water walking, levitation or Aquatic Form.
 - New option, Routing > Allow swimming: off, routes go round by land wherever there's a way.
+- The route's directions list swims as their own steps (Walk, Swim, Walk), each with its own time, and the arrow says when to swim.
 - With GatherMate2 installed, Import From GatherMate2 in the map menu's herbs and ore group adds its herbs and mines to yours, and every one GatherMate2_Data lists when that's installed; it glows when there's new data to import.
 - Options > Map icons: Remove Unconfirmed Herbs and Ore takes out imported ones you haven't gathered, after asking.
 - Herbs and veins your skill is too low for say so in red when you point at them, "Requires Mining 125".
@@ -37,10 +44,14 @@ Each version's section is its release notes (GitHub and CurseForge).
 - The road and wall tools' hints are now a list on the map's left, one action a row with a small picture of its mouse button or key; the pointer's tooltip keeps clear of it.
 - With the road or wall tools on, click a road or wall to change its kind and heights; the map's own lines show their details.
 - The road and wall tools always draw with Shift held (Shift + left-drag draws, Shift + right-drag erases); a plain drag pans the map. The Shift-click drawing option is gone.
+- Edit Road and Edit Wall: Delete takes out the highlighted section, the map's own roads and walls too, after asking.
+- Search Places: Up and Down pick a result, Enter takes it.
+- Search Places: the Pin button is a map pin picture (log out and back in after updating to see it).
 - Over a building with the road or wall tools on, its floors stay listed by the tools' hints; Shift + mouse wheel picks one and shows that floor's inside map, remembered for that building.
 
 ### Fixed
 
+- In a quest's area, the arrow shows your Hearthstone to click when it's the route's next step, instead of pointing straight up.
 - Ironforge: routes go round the Great Forge's lava pits on the walkway, not through the lava. (thanks, DarkByteZero)
 - On a client in another language than English, places are found by the name the game gives them: Gnomeregan's Train Depot shows its inside map, not Dun Morogh's terrain; up top in the Ruins of Lordaeron counts as up top; the hearthstone's inn is found; rooms' labels on inside maps are in your language. (thanks, DarkByteZero)
 - On a client in another language than English, the herbs and veins you gather are saved: their names are learned from the tooltip's profession line in your language ("Bergbau", "Kräuterkunde"). (thanks, DarkByteZero)
@@ -54,6 +65,8 @@ Each version's section is its release notes (GitHub and CurseForge).
 - A short swim straight to your stop is no longer passed over for a long way round by road, such as from the Wetlands' marsh to the bay below Stromgarde.
 - With several stops, the way to your next stop is drawn over the rest of the route, not hidden under a later stop's way back over the same road. (thanks, DarkByteZero)
 - /way lines take the zone in your game's language too ("/way Silberwald 63.4 64.3" on a German client), not only the English name. (thanks, DarkByteZero)
+- Clear Route leaves the map where you were looking instead of jumping back to your position.
+- OpenMap zoomed in: the sea along the coast shows the terrain, not the blurry world map art (such as off Menethil Harbor).
 
 ## 1.3.9
 

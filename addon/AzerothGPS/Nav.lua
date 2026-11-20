@@ -482,6 +482,98 @@ local function SetSwim(r)
 end
 N.SetSwim = SetSwim
 
+-- A walk's steps split by what's done along it (asked for 1.3.10: "Walk 2.6k yd" over a coast's swims read as one walk):
+-- "Walk 800 yd", "Swim 1.2k yd", "Walk 600 yd", each timed at its own speed. A piece under SWIM_STEP_MIN_YD is folded
+-- into its neighbors (a bit of land between two swims: one swim; a puddle on a walk: the walk), the smallest first, so
+-- the list doesn't flicker into many steps.
+N.SWIM_STEP_MIN_YD = 40
+local swimRuns = setmetatable({}, { __mode = "k" }) -- [part] = { runs, length }
+-- Route part `part`'s swims as yards along it: { s0, s1, ... } (swims across a corner joined), and its length.
+function N.SwimRuns(part)
+  local v = swimRuns[part]
+  if v then return v[1], v[2] end
+  local runs, acc, pts = {}, 0, part and part.pts or {}
+  for i = 1, #pts / 2 - 1 do
+    local len = math.sqrt((pts[2 * i + 1] - pts[2 * i - 1]) ^ 2 + (pts[2 * i + 2] - pts[2 * i]) ^ 2)
+    local w = N.SwimSpans(part, i)
+    for j = 1, w and #w - 1 or 0, 2 do
+      local s0, s1 = acc + w[j] * len, acc + w[j + 1] * len
+      if #runs > 0 and s0 - runs[#runs] < 0.01 then runs[#runs] = s1 else runs[#runs + 1], runs[#runs + 2] = s0, s1 end
+    end
+    acc = acc + len
+  end
+  swimRuns[part] = { runs, acc }
+  return runs, acc
+end
+-- The stretch from `a` to `b` yards along a walk with swims `runs` (N.SwimRuns) as pieces, in order:
+-- { s0, s1, swim = true or false, sw = yards swum in it }, folded (SWIM_STEP_MIN_YD).
+function N.SwimPieces(runs, a, b)
+  local pieces = {}
+  local function add(s0, s1, swim)
+    if s1 <= s0 then return end
+    local last = pieces[#pieces]
+    if last and last.swim == swim then
+      last.s1, last.sw = s1, last.sw + (swim and s1 - s0 or 0)
+    else
+      pieces[#pieces + 1] = { s0 = s0, s1 = s1, swim = swim, sw = swim and s1 - s0 or 0 }
+    end
+  end
+  local t = a
+  for j = 1, #runs - 1, 2 do
+    local s0, s1 = math.max(runs[j], t), math.min(runs[j + 1], b)
+    if s1 > s0 then
+      add(t, s0, false)
+      add(s0, s1, true)
+      t = s1
+    end
+  end
+  add(t, b, false)
+  while #pieces > 1 do
+    local k, least
+    for j, p in ipairs(pieces) do
+      local yd = p.s1 - p.s0
+      if yd < N.SWIM_STEP_MIN_YD and (not least or yd < least) then k, least = j, yd end
+    end
+    if not k then break end
+    local p, prev, nxt = pieces[k], pieces[k - 1], pieces[k + 1]
+    if prev and nxt then -- (between two of the other kind: the three one)
+      prev.s1, prev.sw = nxt.s1, prev.sw + p.sw + nxt.sw
+      table.remove(pieces, k + 1)
+    elseif prev then
+      prev.s1, prev.sw = p.s1, prev.sw + p.sw
+    else
+      nxt.s0, nxt.sw = p.s0, nxt.sw + p.sw
+    end
+    table.remove(pieces, k)
+  end
+  return pieces
+end
+-- Walk leg `leg` of stretch `st` (its part: the one with that leg), `done` yards of it walked, as pieces in yards from
+-- where the player is (adding up to leg.yards - done), or nil when none of it is swum.
+function N.LegPieces(st, leg, done)
+  local part
+  for _, p in ipairs(st and st.parts or {}) do
+    if p.leg == leg then part = p break end
+  end
+  if not part then return nil end
+  local runs, len = N.SwimRuns(part)
+  if #runs == 0 or len <= 0 then return nil end
+  done = math.min(done or 0, len)
+  local yards = math.max(0, (leg.yards or len) - done)
+  local pieces = N.SwimPieces(runs, done, len)
+  local any = false
+  for _, p in ipairs(pieces) do
+    if p.swim then any = true end
+  end
+  if not any then return nil end
+  local k = len - done > 0 and yards / (len - done) or 0 -- (the leg's yards as the router counted them)
+  for _, p in ipairs(pieces) do
+    p.s0, p.s1, p.sw = (p.s0 - done) * k, (p.s1 - done) * k, p.sw * k
+    p.yd = p.s1 - p.s0
+  end
+  return pieces
+end
+
 -- What makes water as fast as land for this character (asked for 1.3.10): water walking or levitation on, castable or
 -- in the bags, or Aquatic Form (a druid swims about as fast as running in it). What the addon can read: the auras
 -- (N.AuraOn), the spells known (IsPlayerSpell / IsSpellKnown) and the bags (GetItemCount). A spell with a reagent counts
@@ -4788,20 +4880,49 @@ function N.Steps()
       steps[#steps + 1] = Format(L["|cffc08040Detour %s to learn the flight path at %s|r"], N.FormatDistance(h.off), h.name)
     end
   end
-  local function Detours(leg, yards)
+  -- (a walk with swims, N.LegPieces: its pieces from `a` to `b` yards, each its own step with its own time; the last
+  -- left out with `keepLast`, returned for the caller to word. A bit under STEP_MIN_YD cut off by a detour: its neighbor's)
+  local function SwimTime(p) return string.format("  |cffffd100%s|r", N.FormatTime(N.TripSecs(p.yd, p.sw, 0, speed))) end
+  local function PieceSteps(pieces, a, b, keepLast)
+    local list = {}
+    for _, p in ipairs(pieces) do
+      local s0, s1 = math.max(p.s0, a), math.min(p.s1, b)
+      if s1 > s0 then list[#list + 1] = { swim = p.swim, yd = s1 - s0, sw = p.sw * (s1 - s0) / (p.s1 - p.s0) } end
+    end
+    for j = #list, 1, -1 do
+      local q = list[j]
+      local into = #list > 1 and q.yd < N.STEP_MIN_YD and (list[j + 1] or list[j - 1])
+      if into then
+        into.yd, into.sw = into.yd + q.yd, into.sw + q.sw
+        table.remove(list, j)
+      end
+    end
+    local last = keepLast and table.remove(list) or nil
+    for _, q in ipairs(list) do
+      steps[#steps + 1] = Format(q.swim and L["Swim %s"] or L["Walk %s"], N.FormatDistance(q.yd)) .. SwimTime(q)
+    end
+    return last
+  end
+  local function Detours(leg, yards, pieces)
     local walked, after = 0, {}
     for _, h in ipairs(learn) do
       if h.leg == leg and h.along >= walked then
         if h.along > yards - N.STEP_MIN_YD then
           after[#after + 1] = h
         else
-          if h.along - walked >= N.STEP_MIN_YD then steps[#steps + 1] = Format(L["Walk %s"], N.FormatDistance(h.along - walked)) end
+          if h.along - walked >= N.STEP_MIN_YD then
+            if pieces then
+              PieceSteps(pieces, walked, h.along)
+            else
+              steps[#steps + 1] = Format(L["Walk %s"], N.FormatDistance(h.along - walked))
+            end
+          end
           Detour(h)
           walked = h.along
         end
       end
     end
-    return yards - walked, after
+    return yards - walked, after, walked
   end
   for i, st in ipairs(r.stretches) do
     local d = N.stops[i]
@@ -4826,17 +4947,25 @@ function N.Steps()
           end
         elseif (leg.yards or 0) - (k == 1 and done or 0) >= N.STEP_MIN_YD or k == #legs then
           local nxt = legs[k + 1]
-          local left, after = Detours(leg, math.max(0, (leg.yards or 0) - (k == 1 and done or 0)))
+          local yards = math.max(0, (leg.yards or 0) - (k == 1 and done or 0))
+          -- (swum in places: a step for each piece walked and swum, N.LegPieces)
+          local pieces = N.LegPieces(st, leg, k == 1 and done or 0)
+          local left, after, walked = Detours(leg, yards, pieces)
+          local last = pieces and PieceSteps(pieces, walked, yards, true)
+          if last then left = last.yd end
           local dist = N.FormatDistance(left)
+          local time = last and SwimTime(last) or (count > 1 and took or "")
           if nxt and nxt.ride then
             local t = nxt.ride
             local at = N.WALK_TO[t[11] or t[8]]
             local here = ns.RideEndName(t, nxt.from == 1 and 1 or 2)
-            steps[#steps + 1] = at and Format(at, dist, here)
-              or Format(L["Walk %s to the %s (%s)"], dist, t[11] or t[8], here)
+            steps[#steps + 1] = last and last.swim and Format(L["Swim %s to %s"], dist, here) .. time
+              or (at and Format(at, dist, here) or Format(L["Walk %s to the %s (%s)"], dist, t[11] or t[8], here))
+                .. (last and time or "")
           else
-            steps[#steps + 1] = Format(L["Walk %s to %s"], dist, StopLabel(i, d, count))
-              .. (count > 1 and took or "")
+            local to = StopLabel(i, d, count)
+            steps[#steps + 1] = (last and last.swim and Format(L["Swim %s to %s"], dist, to)
+              or Format(L["Walk %s to %s"], dist, to)) .. time
           end
           for _, h in ipairs(after) do Detour(h) end
         end

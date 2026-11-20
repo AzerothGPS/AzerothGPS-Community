@@ -12,9 +12,9 @@ import pytest
 ADDON = Path(__file__).resolve().parents[2] / "addon" / "AzerothGPS"
 
 # The pages, in the list's order: id (what O.ShowPage and API.ShowOptions take) and the name shown in English.
-PAGES = [("General", "General"), ("Map", "Map"), ("Layers", "Map icons"), ("Window", "Map window"),
-         ("Opacity", "Opacity and combat"), ("Routing", "Routing"),
-         ("Directions", "Directions"), ("Quick buttons", "Quick buttons"), ("Controller", "Controller"),
+PAGES = [("General", "General"), ("Map", "Map"), ("Layers", "Map icons"), ("Minimap", "Minimap"), ("Window", "GPS Map"),
+         ("Opacity", "Opacity"), ("Routing", "Routing"),
+         ("Directions", "Directions"), ("Quick buttons", "Keys and buttons"), ("Controller", "Controller"),
          ("Performance", "Performance"),
          ("Profiles", "Profiles"), ("Tools", "Tools"), ("Help", "Help")]
 # The ids before 1.2.0's reorganization: each still opens a page (other code and companion addons ask for them).
@@ -56,26 +56,30 @@ NEW = ["allowSwim", "mapEditIdle", "language", "layerCity", "showRoads", "showWa
        "questTrackedOnly"]  # (1.3.10: the quest route from the tracked quests only, Questie's tracker's or the game's)
 # Where each setting's control is: the page a player would look on.
 HOME = {
-    "General": "shown keyBlockedInCombat showCoords distanceUnits language quietChat searchCommonNpcs",
+    "General": "shown showCoords distanceUnits language quietChat searchCommonNpcs",
     # (asked 2026-11-16: "add a new Controller section and make a keybinding list for each map control")
     "Controller": "padControl padLegend",
     # (asked 2026-11-10: "4 different map pages... maybe reduce to 2": the map itself, its icons, and its window)
     "Map": "style seamExploredOnly seamTerrainYd seamTerrainBlend seamContinentAt seamContinentBlend seamWorldAt "
            "seamWorldBlend interiorZoomYd interiorHoldSec routeColor rotate approachZoom reopenFollow terrainZoomOut interiors "
-           "replaceMinimap replaceMinimapSize replaceMinimapCollapseOnMove replaceMinimapCollapseOnCombat useWorldMap "
-           "replaceMinimapIdle replaceMinimapKeepSquare replaceMinimapRoute replaceMinimapResume",
+           "useWorldMap",
+    # (2026-11-19: a Minimap page again, the GPS map in its place and the game's own)
+    "Minimap": "replaceMinimap replaceMinimapSize replaceMinimapCollapseOnMove replaceMinimapCollapseOnCombat "
+               "replaceMinimapIdle replaceMinimapKeepSquare replaceMinimapRoute replaceMinimapResume "
+               "minimap.hide minimapRoute minimapIcons minimapShape",
     "Window": "locked size width lockSize freeSize navPanelWidth navPanelAlign navPanelDetached navPanelHideButtons "
               "navPanelAlpha navPanelWrap navPanelLocked windowFrame windowTint "
               "windowClose windowButtons charm charmSwing arrivalEffect",
     "Layers": "iconSize roundIcons layerQuests layerQuestAreas layerQuestAreasMinimap poiTaxi poiPoi poiLabels layerCity layerInstances layerCaves layerHerbs "
               "layerOre showCustomPins otherAddonPins showParty iconYdQuests iconYdTaxi iconYdPoi iconYdCity iconYdInstances "
-              "iconYdCaves iconYdHerbs iconYdOre iconYdPins minimap.hide minimapRoute minimapIcons minimapShape",
+              "iconYdCaves iconYdHerbs iconYdOre iconYdPins",
     "Opacity": "alpha fadeMoving movingAlpha combatHideMap combatAlpha combatHideArrow arrowCombatAlpha "
                "clickThroughMoving clickThroughCombat",
     "Routing": "useFlights flightMapRing useHearthstone useTeleports avoidHighZones avoidHostile allowSwim roadTolerance fastestOrder "
                "cityKeepOrder importKeepOrder questZoneOnly questTrackedOnly questAutoReroute questPickRoute navCloseClears acceptWay acceptMapPins acceptShared",
     "Directions": "arrow arrowLocked arrowPx arrowBg dirShown dirLocked dirStopsOnly arrowSnap arrowSide dirTextScale dirBg "
                   "questing",
+    "Quick buttons": "keyBlockedInCombat",  # (2026-11-19: the keys with the buttons)
     "Performance": "hz rerouteSeconds stopsAhead autoPauseRouting autoPauseSeconds stutterPause gentleBackground arrowHz",
     "Tools": "devTools mapEditIdle recordHint showRoads showWalls pinning",
     "Help": "copyRoads copyWalls copyRoutes copyPins",
@@ -245,7 +249,7 @@ def test_dependent_options_sit_indented_under_their_parent(game):
     by_key = {c.key: c.control for c in _controls(ns)}
     x = lambda key: by_key[key]._pt[2]  # noqa: E731  (SetPoint("TOPLEFT", x, y))
     y = lambda key: by_key[key]._pt[3]  # noqa: E731
-    for child, parent in (("keyBlockedInCombat", "shown"), ("seamExploredOnly", "rotate"), ("seamTerrainYd", "rotate"),
+    for child, parent in (("seamExploredOnly", "rotate"), ("seamTerrainYd", "rotate"),
                           ("seamContinentAt", "rotate"), ("seamWorldAt", "rotate"), ("seamTerrainBlend", "rotate"),
                           ("seamContinentBlend", "rotate"), ("seamWorldBlend", "rotate"), ("interiorZoomYd", "rotate"),
                           ("interiorHoldSec", "rotate"),
@@ -301,7 +305,7 @@ def test_the_help_page_has_the_news_the_links_and_what_help_improve_had(game):
     O = ns.Options
     ws = lua.eval("AGPS_WIDGETS")
     texts = [str(w._text) for w in ws.values() if w._text]
-    for label in ("What's new in 1.2.0", "Commands and links", "Show Commands", "Help improve AzerothGPS",
+    for label in ("What's new in 1.3", "Commands and links", "Show Commands", "Help improve AzerothGPS",
                   "How to share...", "Copy Map Data...", "What Copy Map Data... includes", "Thanks"):
         assert label in texts, label
     news = [str(line) for line in O.WHATS_NEW.values()]
@@ -830,3 +834,73 @@ def test_arrow_side_hide_and_the_directions_text_alone(game):
         for k, v in saved.items():
             st[k] = v
         O.Refresh()
+
+
+def test_a_section_collapses_by_its_title_and_the_search_still_finds_it(game):
+    # (asked 2026-11-19: "a yellow +/- button ... that will collapse and expand the section")
+    lua, ns = game
+    O = ns.Options
+    p = lua.eval("AzerothGPSOptionsSearch and AGPS_NS.Options.search.pages")[O.pages["Opacity"].index]
+    rows = list(p.rows.values())
+    heads = [r for r in rows if r.header]
+    assert len(heads) == 3 and all(r.foldButton for r in heads)
+    full = p.child._h
+    first, second = heads[0], heads[1]
+    under = [r for r in rows[rows.index(first) + 1:rows.index(second)]]
+    assert under and all(r.w._shown for r in under) and str(first.foldButton.sign._text) == "-"
+    y2 = second.w._pt[3]
+    try:
+        first.foldButton._scripts["OnClick"](first.foldButton)
+        assert ns.db.optFold[first.foldKey] is True and str(first.foldButton.sign._text) == "+"
+        assert not any(r.w._shown for r in under)
+        assert second.w._pt[3] > y2 and p.child._h < full  # (what's after moved up, the page shorter)
+        O.Search("opacity")  # (the search opens every section)
+        assert all(r.w._shown for r in under)
+        O.Search("")
+        assert not any(r.w._shown for r in under)
+        first.foldButton._scripts["OnClick"](first.foldButton)
+        assert all(r.w._shown for r in under) and second.w._pt[3] == y2 and p.child._h == full
+    finally:
+        ns.db.optFold = None
+        O.Search("")
+    # (the fine-tuning sections start collapsed)
+    pm = O.search.pages[O.pages["Map"].index]
+    zoom = next(r for r in pm.rows.values() if r.header and str(r.w._text) == "Zoom levels")
+    assert str(zoom.foldButton.sign._text) == "+"
+
+
+def test_the_minimap_and_world_map_options_show_pictures_that_pick_them(game):
+    # (asked 2026-11-19: pictures in the options of what a choice does, the first-run setup's)
+    lua, ns = game
+    O = ns.Options
+    st = ns.settings.gps
+    was = st.replaceMinimap
+    row = O.minimapPictures
+    assert row and len(row.cards) == 2 and str(row.cards[1].label._text) == "The game's minimap"
+    try:
+        st.replaceMinimap = False
+        O.Refresh() if O.Refresh else None
+        row.cards[2]._scripts["OnClick"](row.cards[2])
+        assert st.replaceMinimap is True
+        assert row.cards[2].lit[1]._shown and not row.cards[1].lit[1]._shown
+        row.cards[1]._scripts["OnClick"](row.cards[1])
+        assert st.replaceMinimap is False and row.cards[1].lit[1]._shown
+    finally:
+        st.replaceMinimap = was
+    assert O.worldMapPictures and str(O.worldMapPictures.cards[2].label._text) == "In the world map"
+
+
+def test_icon_size_is_radio_buttons_under_a_picture_of_each_size(game):
+    # (asked 2026-11-19: "radio button with picture preview of the icon size, use peacebloom icons")
+    lua, ns = game
+    O, st = ns.Options, ns.settings.gps
+    row, was = O.iconSizeRow, st.iconSize
+    cells = list(row.cells.values())
+    assert [str(c.value) for c in cells] == ["small", "medium", "large", "xlarge"]
+    try:
+        cells[3]._scripts["OnClick"](cells[3])
+        assert st.iconSize == "xlarge"
+        cells[0].radio._scripts["OnClick"](cells[0].radio)
+        assert st.iconSize == "small"
+    finally:
+        st.iconSize = was

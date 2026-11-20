@@ -467,6 +467,55 @@ def test_a_route_starting_with_the_hearthstone_says_so_in_both_windows(game):
     N.Clear()
 
 
+def test_in_a_quest_area_the_arrow_still_shows_the_hearthstone_to_click(game):
+    # (issue #733, Hillsbrad, a RestedXP step: in a quest's area with the route's next step "Use your Hearthstone"
+    # (to Tarren Mill), the arrow stuck pointing straight up and the hearthstone's icon was hidden; its button's
+    # tooltip still said "Use your Hearthstone") the quest-area directions returned before the icon was shown,
+    # leaving the arrow up with nothing to turn it (no path while a teleport is step 1)
+    lua, ns = game
+    N, G, Lay = ns.Nav, ns.GPS, ns.Layers
+    N.SetStops(lua.eval("{ { x = -1441, y = -2332, cont = 0 } }"), False, "red")
+    lua.execute("AGPS_T = 1800")
+    G.Update()
+    lua.execute("AGPS_T = 1800.5")
+    G.Update()
+    if N.RedAsking():
+        G.confirmBox.yes._scripts.OnClick(G.confirmBox.yes)
+    real_use, real_at, real_obj = N.UseNow, Lay.QuestsAt, Lay.QuestObjectives
+    hearth = lua.eval("{ 0, 2254, 293, 0, -8900, -160, 10, 'your Hearthstone', '', 'Tarren Mill', 'your Hearthstone', use = true, item = 6948 }")
+    N.UseNow = lua.eval("function(t) return function() return t end end")(hearth)
+    # (the player in another open quest's area, not the stop's: Souvenirs of Death's, 21/30 skulls)
+    Lay.QuestsAt = lua.eval("""function(cont, x, y)
+      if math.abs(x - 2254) < 50 and math.abs(y - 293) < 50 then return { 546 } end
+      return {}
+    end""")
+    Lay.QuestObjectives = lua.eval("""function(id)
+      return 'Souvenirs of Death', { { text = 'Hillsbrad Human Skull: 21/30', finished = false } }
+    end""")
+    arrowWin = lua.globals().AzerothGPSArrow
+    try:
+        lua.execute("AGPS_T = 1830")
+        G.Update()
+        arrowWin._scripts.OnUpdate(arrowWin, 1)
+        assert list(N.areaQuests.values()) == [546] and not N.questing
+        btn = lua.globals().AzerothGPSArrowUseButton
+        assert btn._shown and btn._attr["item"] == "item:6948"
+        tex = G.UseTexture(hearth)
+        # (the hearthstone's icon in the arrow's place, glowing, the arrow itself hidden: not stuck pointing up)
+        assert _shown(lua, lambda w: w._tex == tex and w._parent is not None and w._parent._name == "AzerothGPSArrow")
+        assert not ns.Arrow.arrowTex._shown
+        texts = [str(w._text) for w in lua.eval("AGPS_WIDGETS").values() if w._kind == "FontString" or w._text]
+        # (the quest's objectives still listed, then what to do now: the hearthstone)
+        assert any("Souvenirs of Death" in t for t in texts) and any("Hillsbrad Human Skull: 21/30" in t for t in texts)
+        assert any("Use your Hearthstone" in t for t in texts)
+    finally:
+        N.UseNow, Lay.QuestsAt, Lay.QuestObjectives = real_use, real_at, real_obj
+        lua.execute("AGPS_T = 1900")
+        G.Update()
+        arrowWin._scripts.OnUpdate(arrowWin, 1)
+        N.Clear()
+
+
 def test_collapsed_steps_say_the_hearthstone_kept_for_after_a_stop(game):
     # (asked 2026-11-05) in Silverpine, home Brill: the hearthstone is kept for after the Sepulcher, and with the
     # steps collapsed only the trip's times showed: it looked not planned. Said under them.
@@ -530,9 +579,9 @@ def test_yes_no_questions_are_azerothgps_popups(game):
     G.Follow()
 
 
-def test_leaving_a_route_shows_the_citys_inside_map_again(game):
-    # (reported) in Ironforge, right-clicked out to pick a spot outside: the route made (or cleared), the
-    # map stayed on the outside; following the player again shows the city's inside map again
+def test_clear_route_leaves_the_view_where_it_is(game):
+    # (asked 2026-11-19) Clear Route doesn't move the map back to the player: the view stays where it was
+    # (following the player again, G.Follow, still shows the city's inside map: test above)
     lua, ns = game
     G, N = ns.GPS, ns.Nav
     G.outsideOf = "Ironforge"
@@ -544,7 +593,9 @@ def test_leaving_a_route_shows_the_citys_inside_map_again(game):
     G.outsideOf = "Ironforge"
     clear = next(w for w in lua.eval("AGPS_WIDGETS").values() if w._text == "Clear Route")
     clear._scripts.OnClick(clear)
-    assert len(N.stops) == 0 and G.outsideOf is None
+    assert len(N.stops) == 0 and G.outsideOf == "Ironforge"
+    G.Follow()
+    assert G.outsideOf is None
 
 
 def test_every_popup_window_is_made_with_ns_window():
@@ -1078,7 +1129,9 @@ def test_a_walk_lists_its_turns_numbered_down_to_the_arrival(game):
     # arrival
     lua, ns = game
     N, G, st = ns.Nav, ns.GPS, ns.settings.gps
-    lua.execute("AGPS_MAP = 1411; AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = -100, -5300, 1; AGPS_T = 900")
+    # (on Durotar's shore: from the water just off it the walk swims, and its pieces are listed as steps instead,
+    # test_swim_steps.py)
+    lua.execute("AGPS_MAP = 1411; AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = -56, -5139, 1; AGPS_T = 900")
     N.SetStops(lua.eval("{ { x = 1000, y = -4400, cont = 1, name = 'the Den' } }"), False, "red")
     try:
         for _ in range(40):
@@ -1137,8 +1190,8 @@ def test_the_options_pages_in_order(game):
     ns.Options.Show()
     # (asked later: the road and wall tools' pages one "Tools" page; 1.2.0, asked 2026-11-10: the pages by what a
     # player wants to do, Help improve part of Help: test_options.py)
-    order = ["General", "Map", "Map icons", "Map window", "Opacity and combat", "Routing",
-             "Directions", "Quick buttons", "Performance", "Tools", "Help"]
+    order = ["General", "Map", "Map icons", "GPS Map", "Opacity", "Routing",
+             "Directions", "Keys and buttons", "Performance", "Tools", "Help"]
     ws = lua.eval("AGPS_WIDGETS")
     ws = [ws[i] for i in range(1, len(ws) + 1)]  # (in the order made)
     # (the list on the left: a button per page, its name a font string on it)

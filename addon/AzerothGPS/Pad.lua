@@ -1173,7 +1173,7 @@ function Pad.Run(acts, down)
     return false
   end
   if has.clear then
-    return g.ClearRoute and g.ClearRoute(true) or false -- (as the map's Clear Route, the view left where it is)
+    return g.ClearRoute and g.ClearRoute() or false -- (as the map's Clear Route: the view left where it is)
   end
   if has.questRoute then -- (as the map menu's Quest Route)
     if g.QuestRoute then g.QuestRoute() end

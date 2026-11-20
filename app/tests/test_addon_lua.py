@@ -7303,7 +7303,7 @@ def test_stops_routed_and_drawn_ahead_is_an_option(nav_env):
     assert N.PlannedStops() == 5  # (at most PLAN_AHEAD, 8)
     addon = Path(__file__).parents[2] / "addon" / "AzerothGPS"
     assert "stopsAhead = 3" in (addon / "Core.lua").read_text(encoding="utf-8")
-    assert 'slider(L["Stops routed and drawn ahead"], 1, 8, 1' in (addon / "Options.lua").read_text(encoding="utf-8")
+    assert 'Choice(L["Stops routed and drawn ahead"]' in (addon / "Options.lua").read_text(encoding="utf-8")
 
 
 def test_the_stops_not_routed_yet_are_listed_too(nav_env):

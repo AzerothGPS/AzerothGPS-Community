@@ -300,14 +300,14 @@ def test_the_options_search_filters_the_settings_as_typed():
         # (typed: only what matches, on its page; the pages with none dim in the list)
         assert O.Search("replace the minimap") is True
         assert shown("replaceMinimap") and not shown("rotate")
-        assert page("Map").hit and not page("Routing").hit
+        assert page("Minimap").hit and not page("Routing").hit
         # (one list of every page's matches, whichever page was showing: asked 2026-11-11, "it should consider all
         # tabs ... shouldn't matter the tab when searching")
         assert s.results._shown is True and page("Map").scroll._shown is False
         assert O.CurrentPage() == 1
         assert O.Search("minimap") is True
         assert shown("replaceMinimap") and shown("shown") and shown("minimapRoute") and not shown("useFlights")
-        assert page("Map").resY is not None and page("General").resY > page("Map").resY
+        assert page("Minimap").resY is not None and page("General").resY > page("Minimap").resY
         # (however the term is written: asked 2026-11-11, "they may search mini-map, mini map, minimap. Do this for
         # all terms")
         for q in ("mini-map", "mini map", "Mini-Map", "minimap"):

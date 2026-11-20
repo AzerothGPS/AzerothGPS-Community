@@ -6,7 +6,9 @@ Icons (Media/Tools/<name>_<px>.tga): the mouse with its left button lit (gold), 
 its wheel rolled (ridged), and the Shift and Ctrl keys as keycaps twice as wide as high; and the stairs glyph the map
 draws along a stairs road with the road tools on (`Stairs<d>`: three treads narrowing and lightening toward the top, an
 arrow uphill; one file per STAIR_DIRS way it points, d = 0 up, then clockwise by 45 degrees, each drawn turned rather
-than turned in the game, which would filter it). Each drawn
+than turned in the game, which would filter it). And Search Places' Pin button
+(asked 2026-11-19: "a literal pixel-art map pin"): a push-pin, its round red head up right and its short silver needle
+pointing down left, and PinLit, the same with its head brighter (the mouse over it). Each drawn
 at each of ICON_PX pixels high, pixel for pixel (never scaled in the game: the client's LINEAR filter blurs a shrunk
 one, and nothing above LINEAR may be asked, it crashes WoW Forever), in the top-left corner of the smallest square
 power-of-two canvas that holds it, as the corner logo is (media.on_canvas); GPSFrame's G.ToolIconFile picks the size
@@ -33,6 +35,10 @@ ERASE = (220, 56, 48)  # (the right button: erasing, as the eraser's red stroke)
 KEY = (58, 58, 64)  # (a keycap: the controller icons' plastic)
 KEY_TOP = (92, 92, 100)
 TEXT = (255, 255, 255)
+PIN_HEAD = ((200, 34, 30), (142, 20, 18), (255, 132, 120))  # (its red, its shaded side, its shine)
+PIN_HEAD_LIT = ((246, 62, 52), (186, 34, 28), (255, 190, 180))
+PIN_RIM = (52, 8, 8)
+NEEDLE = ((214, 216, 224), (128, 130, 140))  # (silver: its lit and its shaded side)
 
 FONT3 = {
     "S": ("###", "#..", "###", "..#", "###"), "H": ("#.#", "#.#", "###", "#.#", "#.#"),
@@ -205,12 +211,39 @@ def grow_8(mask):
     return out
 
 
+def pin(n: int, lit: bool = False) -> np.ndarray:
+    """The map pin, n x n: a round head up right, a needle at 45 degrees from under it to the bottom-left corner."""
+    img = np.zeros((n, n, 4), np.uint8)
+    x, y = _grid(n, n)
+    cx = int(n * 0.62) + 0.5  # (on a pixel's middle, and the needle's line x + y = n through pixels' middles)
+    cy = n - cx
+    r = n * 0.31
+    # the needle: pixels on x + y = n (a second row on its shaded side when the pin is big), from the head to the tip
+    d = x + y - n
+    along = (x < cx) & (x >= 0.5 + (1 if n >= 16 else 0))
+    width = 2 if n >= 24 else 1
+    paint(img, along & (np.abs(d) < 0.01), NEEDLE[0])
+    if width == 2:
+        paint(img, along & (np.abs(d - 1) < 0.01), NEEDLE[1])
+    # the head over its top
+    face, shade, shine = PIN_HEAD_LIT if lit else PIN_HEAD
+    head = (x - cx) ** 2 + (y - cy) ** 2 <= r * r
+    paint(img, head, face)
+    paint(img, head & ((x - cx) + (y - cy) > r * 0.55), shade)
+    sr = max(0.75, r * 0.3)
+    paint(img, head & ((x - (cx - r * 0.38)) ** 2 + (y - (cy - r * 0.38)) ** 2 <= sr * sr), shine)
+    paint(img, edge(head), PIN_RIM)
+    return img
+
+
 ICONS = {
     "MouseLeft": lambda n: mouse(n, "left"),
     "MouseRight": lambda n: mouse(n, "right"),
     "MouseWheel": lambda n: mouse(n, "wheel"),
     "Shift": lambda n: key(n, "Shift"),
     "Ctrl": lambda n: key(n, "Ctrl"),
+    "Pin": lambda n: pin(n),
+    "PinLit": lambda n: pin(n, True),
 }
 for _d in range(STAIR_DIRS):
     ICONS[f"Stairs{_d}"] = (lambda d: lambda n: stairs(n, d))(_d)
