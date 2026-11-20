@@ -2763,6 +2763,26 @@ end
 local SEG_MEMO_MAX = 20000
 local segMemo, segMemoCount = {}, 0
 function R.ClearSegMemo() segMemo, segMemoCount = {}, 0 end
+-- Yards of a terrain walk (`path`, flat points; nil: the straight line) over the grid's water (P.WaterSpans).
+function R.WalkSwimYards(cont, path, x1, y1, x2, y2)
+  local P = ns.Passability
+  if not (P and P.WaterSpans) then return 0 end
+  local wet = 0
+  local function add(a, b, c, d)
+    local s = P.WaterSpans(cont, a, b, c, d)
+    if s then
+      local len = math.sqrt((c - a) ^ 2 + (d - b) ^ 2)
+      for i = 1, #s - 1, 2 do wet = wet + (s[i + 1] - s[i]) * len end
+    end
+  end
+  if path then
+    for i = 1, #path - 2, 2 do add(path[i], path[i + 1], path[i + 2], path[i + 3]) end
+  else
+    add(x1, y1, x2, y2)
+  end
+  return wet
+end
+
 local function SegCost(cont, x1, y1, x2, y2)
   local key = string.format("%d:%.1f:%.1f:%.1f:%.1f", cont, x1, y1, x2, y2)
   local c = segMemo[key]
@@ -5796,7 +5816,17 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
         end
         c = c + SwimDetour(path, sx, sy, tx, ty)
       end
-      if c and c * directFactor < best then
+      -- (the roads' preference is for the walk's dry yards only: a swim's yards already pay the swim's own price,
+      -- P.SwimCost, and no road goes over the water. Times the factor too, a yard swum weighed three on the roads:
+      -- from the Wetlands' western marsh to a stop in the bay below Stromgarde the roads round by Thandol Span,
+      -- 5.4k yd, beat the 2.1k yd swim straight there, 2026-11-19)
+      -- (measured only when the walk would lose without it, after a pause: the frame budget)
+      local wins = c and c * directFactor < best
+      if c and not wins and directFactor > 1 and c < best then
+        Breathe(1, 1)
+        wins = c * directFactor - (directFactor - 1) * R.WalkSwimYards(cont, path, sx, sy, tx, ty) * Pass.SwimCost() < best
+      end
+      if wins then
         local pieces = { { OFF, sx, sy, tx, ty } }
         if not path then path = SwimWalk(cont, sx, sy, tx, ty, opts and opts.transient) end
         if path then
