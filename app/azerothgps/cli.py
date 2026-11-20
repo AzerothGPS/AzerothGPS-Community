@@ -350,6 +350,17 @@ def cmd_padicons(args) -> int:
     return 0
 
 
+def cmd_toolicons(args) -> int:
+    from . import toolicons
+
+    files = toolicons.write()
+    print(f"wrote {len(files)} road and wall tool icons in {toolicons.TOOLS_DIR} (new files: log out and back in)")
+    if args.preview:
+        for p in toolicons.preview(Path(args.preview)):
+            print(f"preview {p}")
+    return 0
+
+
 def cmd_floors(args) -> int:
     """NPCs and quest objectives off the ground floor (upstairs, a cellar, a tower's top): a report for planning,
     data/debug/floors/report.md and floors.json (app/azerothgps/floors.py). Nothing goes into the addon."""
@@ -1188,6 +1199,10 @@ def main(argv: list[str] | None = None) -> int:
     sp = sub.add_parser("padicons", help="the controller's button icons and Options > Controller's diagram (Media/Pad/)")
     sp.add_argument("--preview", metavar="DIR", help="also pictures of them to look at, in DIR")
     sp.set_defaults(fn=cmd_padicons)
+
+    sp = sub.add_parser("toolicons", help="the road and wall tools' legend icons: mouse buttons, Shift, Ctrl (Media/Tools/)")
+    sp.add_argument("--preview", metavar="DIR", help="also pictures of them to look at, in DIR")
+    sp.set_defaults(fn=cmd_toolicons)
 
     sp = sub.add_parser("buildings", help="buildings as ground routes don't walk through (Data/Buildings.lua)")
     client_args(sp)

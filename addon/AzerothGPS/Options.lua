@@ -2923,7 +2923,7 @@ local function BuildWindow()
     function(v) GPS().mapEditIdle = math.floor(v + 0.5) end, nil,
     L["How long the opened Map Editing menu stays open with the map unused (no click, drag, zoom or stroke on it). Then it closes, the roads and walls are hidden again and the tools turn off."])
   header(L["Roads"], L["The road network the routes use."])
-  note(L["With the road tools on, on the map: left-drag along a road the routes miss, right-drag over a \"road\" that isn't there (red), middle-drag to pan. Routes use it right away. A drawn road joins the roads it meets; where it runs along one, that road stays."])
+  note(L["With the road tools on, on the map: left-drag along a road the routes miss, right-drag over a \"road\" that isn't there (red), middle-drag to pan. Routes use it right away. A drawn road joins the roads it meets; where it runs along one, that road stays."] .. " " .. L["Hold Shift to draw or erase; a plain drag pans the map and a click on a line opens its details."])
   place(Button(page, L["Road Tools On/Off"], 150, function() ns.GPS.ToggleRoadMode() end), 28, 4)
   Key("recordHint")
   check(L["Suggest Record when drawing roads"], L["Starting to draw a road by hand asks whether to Record it instead: walked, a road keeps the floors and stairs it goes over."],
@@ -2933,20 +2933,15 @@ local function BuildWindow()
   check(L["Show the roads on the map"], L["Draws the road network the routes use on the map, with the road tools off too. Also /agps roads."],
     function() return GPS().showRoads and true or false end, function(v) GPS().showRoads = v end)
   header(L["Walls"], L["What routes can't walk through: a town's wall, a fence, a cliff edge."])
-  note(L["With the wall tools on, on the map: left-drag along a wall the routes try to walk through, right-drag over a wall that isn't there, or a mountain edge that's really walkable (circle an area to open all of it), middle-drag to pan. Routes go around your walls right away, like a mountain, and a road a wall crosses is cut there: leave a gap for a gate. Flight paths still cross them. Shown in blood red: the edges of mountains and cliffs too steep to climb (the terrain data), buildings, and the walls drawn in (thicker)."])
+  note(L["With the wall tools on, on the map: left-drag along a wall the routes try to walk through, right-drag over a wall that isn't there, or a mountain edge that's really walkable (circle an area to open all of it), middle-drag to pan. Routes go around your walls right away, like a mountain, and a road a wall crosses is cut there: leave a gap for a gate. Flight paths still cross them. Shown in blood red: the edges of mountains and cliffs too steep to climb (the terrain data), buildings, and the walls drawn in (thicker)."] .. " " .. L["Hold Shift to draw or erase; a plain drag pans the map and a click on a line opens its details."])
   place(Button(page, L["Wall Tools On/Off"], 150, function() ns.GPS.ToggleWallMode() end), 28, 4)
   -- (1.2.0: /agps walls on|off's setting)
   Key("showWalls")
   check(L["Show the walls on the map"], L["Draws the walls routes go around on the map (blood red), with the wall tools off too. Also /agps walls."],
     function() return GPS().showWalls and true or false end, function(v) GPS().showWalls = v end)
   header(L["Both tools"], L["The magic eraser, Restore Zone and Restore Continent put the map's own roads or walls back where you changed them (those of the tools on). Undo puts them back."])
-  Key("toolShiftClick")
-  check(L["Shift-click drawing"], L["On: the tools draw and erase only with Shift held (Shift + left-drag, Shift + right-drag), and a plain click or drag is the map's own: left-drag pans it, as with the tools off. (Shown with the road or wall tools)"],
-    function() return GPS().toolShiftClick and true or false end, function(v)
-      GPS().toolShiftClick = v
-      if ns.GPS.RoadHint and (ns.GPS.roadMode or ns.GPS.wallMode) then ns.GPS.RoadHint() end
-      if ns.GPS.RefreshQuick then ns.GPS.RefreshQuick() end
-    end)
+  -- (Shift-click drawing always since 2026-11-19, its option gone)
+  note(L["Hold Shift to draw or erase; a plain drag pans the map and a click on a line opens its details."])
   header(L["Pins"], L["Your own marks on the map: a name and an icon."])
   note(L["Shift + left-click on the map, then |cffffd100Create Pin|r: name it, pick an icon (any the game has, as for a macro) and, where floors lie over each other (a dungeon, Undercity, a cave), its floor. Double-click a pin for a stop there; right-click it to remove it. Pins are shared with your map data (Copy Map Data..., Help improve)."])
   Key("pinning")

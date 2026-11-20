@@ -455,7 +455,9 @@ local box
 -- the box as it should be now (`on`: the controller's marks shown); true when it shows
 function Pad.UpdateBox(on)
   local g = G()
+  -- (the road or wall tools' legend in its room: the box gives way, the line at the bottom instead)
   local want = on and Pad.BoxOn() and g and g.PadBoxRoom and not (g.mapMenu and g.mapMenu:IsShown())
+    and not (g.ToolLegendShown and g.ToolLegendShown())
   local parent, x, y, w, h
   if want then parent, x, y, w, h = g.PadBoxRoom() end
   local fit = parent and h and math.floor((h - 2 * Pad.BOX_PAD) / Pad.BOX_LINE) or 0

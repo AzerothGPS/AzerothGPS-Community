@@ -1,7 +1,7 @@
 """The road and wall tools' restoring (asked 2026-11-14): the magic eraser takes the player's own changes of the tools
 on out under its circle (a stroke running on past it cut at its edge), Restore Zone those in the zone under the
-crosshair, Restore Continent all on the continent (asked twice); Undo puts them back. And Shift-click drawing: the tools
-draw only with Shift held, a plain drag pans the map."""
+crosshair, Restore Continent all on the continent (asked twice); Undo puts them back. And Shift-click drawing, always since 2026-11-19 (its option gone): the
+tools draw only with Shift held, a plain drag pans the map."""
 
 import pytest
 
@@ -29,20 +29,18 @@ def tools(game):
         if AGPS_ANSWER ~= false then onYes(false) end
       end
       AGPS_SHIFT_REAL, AGPS_CTRL_REAL = IsShiftKeyDown, IsControlKeyDown
-      AGPS_SHIFT, AGPS_CTRL, AGPS_ANSWER = false, false, nil
+      AGPS_SHIFT, AGPS_CTRL, AGPS_ANSWER = true, false, nil -- (Shift held: the tools draw)
       IsShiftKeyDown = function() return AGPS_SHIFT end
       IsControlKeyDown = function() return AGPS_CTRL end
       AGPS_NS.Record.restores = {}
     """)
-    assert st.toolShiftClick is True  # (on by default, asked 2026-11-14)
-    st.toolShiftClick = False  # (these tests draw with plain drags; the Shift test turns it on)
     try:
         yield lua, ns
     finally:
         G.SetEraserMode(False)
         G.SetRoadMode(False)
         G.SetWallMode(False)
-        st.toolShiftClick, st.eraserYd = True, None
+        st.eraserYd = None
         ns.db.tracks = lua.eval("{}")
         lua.execute("""AGPS_NS.GPS.Ask = AGPS_ASK_REAL
           IsShiftKeyDown, IsControlKeyDown = AGPS_SHIFT_REAL, AGPS_CTRL_REAL""")
@@ -222,24 +220,31 @@ def test_restore_continent_asks_twice(tools):
     assert len(ns.db.tracks) == 4
 
 
-def test_shift_click_drawing_leaves_a_plain_drag_to_the_map(tools):
+def test_shift_click_drawing_always_a_plain_drag_pans(tools):
+    # (asked 2026-11-19: the option gone, its behavior always; an old saved "off" changes nothing)
     lua, ns = tools
     G, st = ns.GPS, ns.settings.gps
     f = lua.eval("AzerothGPSFrame")
     G.SetRoadMode(True)
     st.recordHint = False
+    st.toolShiftClick = False  # (a saved value from before: ignored)
+    tracks = len(ns.db.tracks)
     try:
-        # off: a left-drag draws
-        f._scripts.OnMouseDown(f, "LeftButton")
-        assert G.lasso is not None
-        G.lasso = None
-        f._scripts.OnMouseUp(f, "LeftButton")
-        G.ToggleShiftClick()
-        assert st.toolShiftClick
-        # on: a plain left-drag pans (the map's own drag), no stroke
+        lua.execute("AGPS_SHIFT = false")
+        # a plain left-drag pans (the map's own drag), no stroke, nothing drawn
+        lua.execute("AGPS_CX, AGPS_CY = 300, 300 AGPS_OLDC = GetCursorPosition "
+                    "GetCursorPosition = function() return AGPS_CX, AGPS_CY end")
         f._scripts.OnMouseDown(f, "LeftButton")
         assert G.lasso is None
+        lua.execute("AGPS_CX, AGPS_CY = 380, 340 AGPS_T = AGPS_T + 0.1")
+        f._scripts.OnUpdate(f, 0.1)
         f._scripts.OnMouseUp(f, "LeftButton")
+        lua.execute("GetCursorPosition = AGPS_OLDC")
+        assert len(ns.db.tracks) == tracks and G.IsFree()  # (dragged: the map's free view)
+        # a plain right-drag erases nothing either
+        f._scripts.OnMouseDown(f, "RightButton")
+        assert G.lasso is None
+        f._scripts.OnMouseUp(f, "RightButton")
         # Shift + left-drag draws, Shift + right-drag erases
         lua.execute("AGPS_SHIFT = true")
         f._scripts.OnMouseDown(f, "LeftButton")
@@ -253,23 +258,26 @@ def test_shift_click_drawing_leaves_a_plain_drag_to_the_map(tools):
         G.SetEraserMode(True)
         f._scripts.OnMouseDown(f, "LeftButton")
         assert G.lasso is None
+        f._scripts.OnMouseUp(f, "LeftButton")
         lua.execute("AGPS_SHIFT = true")
         f._scripts.OnMouseDown(f, "LeftButton")
         assert G.lasso is not None and G.lasso.eraser
         f._scripts.OnMouseUp(f, "LeftButton")
-        G.ToggleShiftClick()
-        assert not st.toolShiftClick
+        assert G.ToggleShiftClick is None  # (no option, no toggle)
     finally:
         st.recordHint = True
+        st.toolShiftClick = None
         G.lasso = None
+        lua.execute("AGPS_SHIFT = true")
 
 
 def test_the_restoring_buttons_are_in_the_map_editing_menu(tools):
     lua, ns = tools
     G = ns.GPS
     ids = [str(m.id) for m in G.groupOf["mapEdit"].members.values()]
-    for i in ("magicEraser", "restoreZone", "restoreContinent", "shiftClick"):
+    for i in ("magicEraser", "restoreZone", "restoreContinent"):
         assert i in ids and ids.index(i) > ids.index("roadUndo")
+    assert "shiftClick" not in ids  # (Shift-click drawing always: no button, 2026-11-19)
 
 
 def test_the_eraser_shows_its_whole_circle_filled(tools):
