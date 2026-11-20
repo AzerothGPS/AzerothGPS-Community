@@ -31,7 +31,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Options > Map icons: Remove Unconfirmed Herbs and Ore takes out imported ones you haven't gathered, after asking.
 - Herbs and veins your skill is too low for say so in red when you point at them, "Requires Mining 125".
 - Find Herbs and Ore: Available shows only the herbs and veins your skill can gather, on the map and in its list, and follows your skill as it goes up. Show All turns it off.
-- Find Herbs and Ore: names your skill is too low for show the skill needed in red, and its herb and ore buttons (top right) list only herbs or only ore.
+- Find Herbs and Ore: the list goes by the skill needed, lowest first; names your skill is too low for show that number in red, and its herb and ore buttons (top right) list only herbs or only ore.
 
 ### Fixed
 

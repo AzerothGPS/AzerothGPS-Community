@@ -263,3 +263,18 @@ def test_the_herbs_and_ore_buttons_narrow_the_list(game):
         assert not ore.iconTex._desat and not herb.iconTex._desat
     finally:
         Lay.SetFinderKind(None)
+
+
+def test_the_list_goes_by_the_skill_needed_lowest_first(game):
+    # (asked 2026-11-19: "sort the herb and ore lists by skill level needed, lowest at the top")
+    lua, ns = game
+    Lay = ns.Layers
+    for kind in (None, "herb", "ore"):
+        es = list(Lay.NodeNames("", kind).values())
+        keys = [(int(e.skill), str(e.name)) for e in es]
+        assert keys == sorted(keys), kind
+    herbs = [str(e.name) for e in Lay.NodeNames("", "herb").values()]
+    assert herbs.index("Earthroot") < herbs.index("Mageroyal") < herbs.index("Kingsblood") < herbs.index("Black Lotus")
+    assert herbs[-1] == "Black Lotus"
+    ore = [str(e.name) for e in Lay.NodeNames("", "ore").values()]
+    assert ore.index("Copper Vein") < ore.index("Tin Vein") < ore.index("Iron Deposit") < ore.index("Rich Thorium Vein")
