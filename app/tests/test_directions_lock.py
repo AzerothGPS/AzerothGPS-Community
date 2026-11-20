@@ -71,9 +71,13 @@ def _size(lua, ns):
 
 def _mouse(lua, ns):
     # (the windows' clicks, from the next text update)
+    # (with no route they're placed with Options open: closed, the placeholder is hidden, 1.3.11)
     A = ns.Arrow
+    ns.Options.Show()
     A.Apply()
+    A.still = False
     A.frame._scripts.OnUpdate(A.frame, 1)
+    lua.execute("AzerothGPSOptions:Hide()")
     return A.frame._mouse, A.dir._mouse
 
 
@@ -235,3 +239,28 @@ def test_the_two_locks_are_kept_over_a_reload(arrow_locked, dir_locked):
     A = ns.Arrow
     assert A.Locked(A.frame) is arrow_locked and A.Locked(A.dir) is dir_locked
     assert A.grip._shown is (not dir_locked)
+
+
+def test_with_no_route_the_unlocked_placeholder_shows_only_while_options_is_open(arrow):
+    # (1.3.10, a player: "I did not find the option to turn off the arrow when I'm not following any routes". Unlocked,
+    # the default, its "No route" placeholder showed all the time; now only while Options (or the tutorial) is open,
+    # where it's placed and sized.)
+    lua, ns, st = arrow
+    A = ns.Arrow
+    st.arrowLocked, st.dirLocked = False, False
+    ns.Nav.Clear()
+    win = lua.globals().AzerothGPSArrow
+
+    def tick():
+        A.still = False
+        win._scripts.OnUpdate(win, 1)
+        return win._alpha, A.dir._alpha
+
+    if ns.Options.IsShown():
+        ns.Options.Toggle()
+    assert tick() == (0, 0)
+    ns.Options.Show()
+    a, d = tick()
+    assert a > 0 and d > 0
+    ns.Options.Toggle()
+    assert ns.Options.IsShown() is False and tick() == (0, 0)

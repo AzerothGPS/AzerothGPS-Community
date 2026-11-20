@@ -3755,6 +3755,7 @@ function O.Show()
   window = window or BuildWindow()
   window:Show()
 end
+function O.IsShown() return (window and window:IsShown()) and true or false end
 
 ---------------------------------------------------------------------------
 -- Minimap button

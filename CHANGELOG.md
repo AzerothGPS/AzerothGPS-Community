@@ -8,6 +8,8 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 - Ironforge routes keep out of the Great Forge's lava pits.
 - A trip with a flight tries other flight masters when the walk to the first one is much longer than it looks.
+- The map's tips: Next and Hide Tips can be clicked again.
+- With no route, the direction arrow and directions stay hidden unless Options is open.
 
 ## 1.3.10
 
