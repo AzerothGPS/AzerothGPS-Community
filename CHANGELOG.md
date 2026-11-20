@@ -4,6 +4,11 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 ## 1.3.11 (in progress)
 
+### Fixed
+
+- Ironforge routes keep out of the Great Forge's lava pits.
+- A trip with a flight tries other flight masters when the walk to the first one is much longer than it looks.
+
 ## 1.3.10
 
 ### New
