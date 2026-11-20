@@ -2011,5 +2011,7 @@ L["deleted that road section: routes leave it out now."] = "trecho de estrada ex
 L["deleted that wall section: routes go through there now."] = "trecho de muro excluído: as rotas passam por ali agora."
 L["Escape closes the map"] = "Esc fecha o mapa"
 L["In the game's world map, Escape closes it with the GPS map, as the game's own map does. Off: Escape leaves it open; close it with its key or button. In combat, Escape always closes it. The GPS map in its own window never closes on Escape."] = "No mapa-múndi do jogo, Esc o fecha junto com o mapa GPS, como o mapa do próprio jogo. Desligado: Esc o deixa aberto; feche-o com a tecla ou o botão dele. Em combate, Esc sempre o fecha. O mapa GPS na própria janela nunca fecha com Esc."
+L["road end picked (%s%s): Shift + drag from it to go on with it. Click it again to let it go."] = "ponta da estrada escolhida (%s%s): Shift + arrastar a partir dela para continuá-la. Clique de novo para soltá-la."
+L["went on with that %s (#%d, %s): its other end is picked, Shift + drag from it to go on."] = "%s continuado (#%d, %s): a outra ponta está escolhida, Shift + arrastar a partir dela para seguir."
 L["Flip Lift"] = "Inverter elevador"
 L["Foot and top swapped: the lift's other end is its top now. Save Road to keep it."] = "Base e topo trocados: a outra ponta do elevador agora é o topo. Salve a estrada para manter."

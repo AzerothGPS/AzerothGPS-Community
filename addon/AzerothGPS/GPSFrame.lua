@@ -1099,6 +1099,14 @@ function G.LayoutRoads(px, py, cont, rot, zoom, half, focus)
   if runs and #runs > 0 then
     G.AddRoadStairGlyphs(runs, fg, cont, px, py, rot, s, edge, erases, focus)
   end
+  -- (the road end picked: where its glow goes, G.PlaceRoadEndGlow)
+  G.roadEndScreen = nil
+  local en = tools and G.roadEnd
+  if en and en.level == cont then
+    local dx, dy = Geo.ScreenOffset(px, py, en.x, en.y)
+    dx, dy = Geo.Rotate(dx * s, dy * s, rot)
+    if math.abs(dx) <= edge and math.abs(dy) <= edge then G.roadEndScreen = { dx, dy } end
+  end
   -- (the tools on, zoomed in: the connection points)
   if tools and fg and zoom <= G.NODE_DOT_ZOOM then
     for _, d in ipairs(G.NodeDots(fg) or {}) do
@@ -4273,6 +4281,38 @@ local function DrawLines(n, thickness, colors, alpha)
   for i = nd + 1, dashesUsed do HideLine(dashes[i]) end
   linesUsed, dashesUsed = nl, nd
   G.PlaceStairGlyphs(n > 0 and G.stairGlyphN or 0) -- (no lines: none of the stairs' icons either)
+  G.PlaceRoadEndGlow()
+end
+-- The road end picked (G.roadEnd), glowing: the flight masters' circle over it, pulsing, hung off the marks' layer as the
+-- lines are.
+function G.PlaceRoadEndGlow()
+  local p = G.roadMode and G.roadEnd and G.roadEndScreen
+  local t = G.roadEndGlow
+  if not p then
+    if t then t:Hide() end
+    return
+  end
+  if not t then
+    if not (lineLayer and G.markLayer) then return end
+    t = lineLayer:CreateTexture(nil, "OVERLAY", nil, 3)
+    t:SetTexture(G.ROAD_END_GLOW)
+    if t.SetBlendMode then t:SetBlendMode("ADD") end
+    if t.CreateAnimationGroup then
+      local ag = t:CreateAnimationGroup()
+      local a = ag:CreateAnimation("Alpha")
+      a:SetFromAlpha(0.45)
+      a:SetToAlpha(1)
+      a:SetDuration(0.6)
+      ag:SetLooping("BOUNCE")
+      t.pulse = ag
+    end
+    G.roadEndGlow = t
+  end
+  t:SetSize(G.ROAD_END_GLOW_UNITS, G.ROAD_END_GLOW_UNITS)
+  t:ClearAllPoints()
+  t:SetPoint("CENTER", G.markLayer, "CENTER", p[1], p[2])
+  t:Show()
+  if t.pulse and not t.pulse:IsPlaying() then t.pulse:Play() end
 end
 -- The stairs' icons of this redraw (G.stairGlyphs, the first n) on textures kept from redraw to redraw, over the roads
 -- with them (hung off the marks' layer as the lines are, so a glide moves them too): the size drawn nearest
@@ -13635,7 +13675,7 @@ function G.SetRoadMode(on)
   if on and G.ToolsRefused() then return false end
   if on then G.MapEditAuto(true) end
   G.roadMode = on and true or false
-  if not G.roadMode then G.stairMode = nil end -- (the stairs tool goes with them)
+  if not G.roadMode then G.stairMode, G.roadEnd = nil, nil end -- (the stairs tool and a road end picked go with them)
   if not G.roadMode and G.SetEditRoadMode and G.editRoadMode then G.SetEditRoadMode(false) end -- (and Edit Road)
   ToolsOff()
   if G.roadMode then G.wallMode = false end -- (one set of tools at a time)
@@ -14055,6 +14095,21 @@ function G.FinishRoad(line, erase, wall)
       and not (ns.Passability and ns.Passability.InGrid and not ns.Passability.InGrid(shown, pts[1], pts[2])) then
     level = shown
   end
+  -- (from the road end picked, or to it: snapped onto it, going on as that road is at its height; G.RoadEndClick)
+  local en = G.roadEnd
+  local goOn, goKind, goZ
+  if en and not erase and not wall and en.level == level then
+    local snap = G.ROAD_END_SNAP_PX / (view.s or 1)
+    local n = #pts
+    local d1 = math.sqrt((pts[1] - en.x) ^ 2 + (pts[2] - en.y) ^ 2)
+    local dn = math.sqrt((pts[n - 1] - en.x) ^ 2 + (pts[n] - en.y) ^ 2)
+    if math.min(d1, dn) <= snap then
+      local function r1(v) return math.floor(v * 10 + 0.5) / 10 end
+      if d1 <= dn then pts[1], pts[2] = r1(en.x), r1(en.y) else pts[n - 1], pts[n] = r1(en.x), r1(en.y) end
+      goOn = d1 <= dn and "start" or "finish"
+      goKind, goZ = G.RoadEndGoesOn(en)
+    end
+  end
   local mapID = C_Map.GetBestMapForUnit("player")
   local info = mapID and C_Map.GetMapInfo(mapID)
   -- an erase drawn as a loop (ending back near its start): the roads inside it go
@@ -14065,13 +14120,27 @@ function G.FinishRoad(line, erase, wall)
   local z, indoors, down = G.EditFloor(level, pts)
   -- (a height per point where a floor was picked while drawing: G.StrokeHeights)
   local zs = not wall and G.StrokeHeights(line.zs, #pts / 2) or nil
+  if goOn and goZ then -- (going on from a road end: its height all along)
+    zs = {}
+    for k = 1, #pts / 2 do zs[k] = math.floor(goZ * 10 + 0.5) / 10 end
+  end
   if zs then z = zs[1] end
   -- (a new road with no floor picked: the ground's height at each point from the map's data, Ground.lua (1.3.10,
   -- issue #685), false in a building or a cave; kept as `gz`, the import's start, not a floor the routes follow)
   local gz = op == "add" and not zs and ns.Ground and ns.Ground.RoadHeights(level, pts) or nil
   local i = ns.Record.Save({ op = op, drawn = true, continent = level,
     zone = info and info.name or "?", time = time(), pts = pts, area = area, z = z, indoors = indoors, down = down,
-    zs = zs, gz = gz })
+    zs = zs, gz = gz, kind = goOn and goKind or nil })
+  if goOn and i and not ns.Record.practice then
+    -- (its other end picked next: the road goes on from there again)
+    local n = #pts
+    local fx, fy = goOn == "start" and pts[n - 1] or pts[1], goOn == "start" and pts[n] or pts[2]
+    G.roadEnd = { level = level, x = fx, y = fy, z = en.z, kind = goKind or en.kind }
+    ns.Print(Format(L["went on with that %s (#%d, %s): its other end is picked, Shift + drag from it to go on."],
+      G.EDIT_KIND_NAMES[goKind or "ground"] or L["Road"], i, ns.Nav.FormatDistance(len)))
+    elapsed = 1
+    return
+  end
   if ns.Record.practice then -- (the tutorial's practice: Record.Save kept it in memory only)
     ns.Print(L["Practice: nothing was saved."])
     elapsed = 1
@@ -14280,6 +14349,85 @@ function G.ToolClickAtCursor()
   return G.ToolClick(G.PinLevel(x, y), x, y, G.LINE_CLICK_PX / (view.s or 1))
 end
 -- The click at (x, y) of `level`, `reach` yards round it: true when it was a line's (or a pick's).
+-- Road ends (Kooki3z 2026-11-20: "click on the end of a road/bridge/lift/etc, this draws a glowing circle around it like
+-- what we use for flight path indicators, when shift + left click is used on it, extend whatever that is at its
+-- defined height for another section of that road"). With the road tools on, a click on the end of a road (a node only
+-- one road reaches) picks it (G.roadEnd), drawn with the flight masters' glowing circle, pulsing; a click on it again
+-- or anywhere else lets it go. A road then drawn (Shift + drag) starting or ending at it is snapped onto it and goes on
+-- as that road is, at its height there: a bridge a bridge, a floor a floor, stairs, a lift or a ramp a floor at the
+-- height they end at; a land road a land road. The far end of the new road is picked next, so it goes on again.
+G.ROAD_END_PICK_PX = 10 -- (pixels from an end that a click picks it)
+G.ROAD_END_SNAP_PX = 14 -- (pixels from the end picked that a drawn road's start or end is snapped onto it)
+G.ROAD_END_GLOW = "Interface\\TaxiFrame\\UI-Taxi-Icon-Yellow" -- (the flight masters' glowing circle)
+G.ROAD_END_GLOW_UNITS = 26
+G.ROAD_END_GO_ON = { bridge = "bridge", floor = "floor", ramp = "floor", stairs = "floor", lift = "floor" }
+G.roadEnds = setmetatable({}, { __mode = "k" })
+-- The ends of graph `g`'s roads: { x, y, node, edge } each (drops and gap links not counted), worked out once per graph.
+function G.RoadEnds(g)
+  local ends = G.roadEnds[g]
+  if ends then return ends end
+  local deg, at = {}, {}
+  for ei, e in ipairs(g.e) do
+    if not (g.drops and g.drops[ei]) and #e >= 6 then
+      deg[e[1]] = (deg[e[1]] or 0) + 1
+      deg[e[2]] = (deg[e[2]] or 0) + 1
+      at[e[1]] = at[e[1]] or { e[5], e[6], ei }
+      at[e[2]] = at[e[2]] or { e[#e - 1], e[#e], ei }
+    end
+  end
+  ends = {}
+  for nd, c in pairs(deg) do
+    if c == 1 then ends[#ends + 1] = { x = at[nd][1], y = at[nd][2], node = nd, edge = at[nd][3] } end
+  end
+  G.roadEnds[g] = ends
+  return ends
+end
+-- The road end nearest (x, y) on `level` within `reach` yards: { level, x, y, z (its height, or nil), kind }, or nil.
+function G.RoadEndAt(level, x, y, reach)
+  local R = ns.Router
+  if not (R and R.GraphReady and R.GraphReady(level)) then return nil end
+  local g = R.DebugGraph(level)
+  if not g then return nil end
+  local best, bd
+  for _, en in ipairs(G.RoadEnds(g)) do
+    local d = (en.x - x) ^ 2 + (en.y - y) ^ 2
+    if d <= reach * reach and (not bd or d < bd) then best, bd = en, d end
+  end
+  if not best then return nil end
+  local heights = g.z or g.nz
+  local src = g.e[best.edge][4]
+  local kind = g.kind and g.kind[best.edge]
+    or (src == R.SOURCE_STAIR and "stairs") or (src == R.SOURCE_LIFT and "lift") or "ground"
+  return { level = level, x = best.x, y = best.y, z = heights and heights[best.node] or nil, kind = kind }
+end
+-- What a road drawn on from end `en` is: its kind (nil: a land road) and its height (nil: none known).
+function G.RoadEndGoesOn(en)
+  local kind = G.ROAD_END_GO_ON[en.kind or ""]
+  if kind == "floor" and not en.z then kind = nil end -- (a floor needs its height)
+  return kind, en.z
+end
+-- A click with the road tools at (x, y): an end there picked (or let go when it's the one picked). True when taken.
+function G.RoadEndClick(level, x, y, reach)
+  local en = G.RoadEndAt(level, x, y, math.max(reach or 0, G.ROAD_END_PICK_PX / (view.s or 1)))
+  local was = G.roadEnd
+  if not en then
+    if was then
+      G.roadEnd = nil
+      elapsed = 1
+    end
+    return false
+  end
+  if was and was.level == en.level and math.abs(was.x - en.x) < 0.5 and math.abs(was.y - en.y) < 0.5 then
+    G.roadEnd = nil
+  else
+    G.roadEnd = en
+    local kind, z = G.RoadEndGoesOn(en)
+    ns.Print(Format(L["road end picked (%s%s): Shift + drag from it to go on with it. Click it again to let it go."],
+      G.EDIT_KIND_NAMES[kind or "ground"] or L["Road"], z and string.format(", %.1f", z) or ""))
+  end
+  elapsed = 1
+  return true
+end
 function G.ToolClick(level, x, y, reach)
   if not (level and x) then return false end
   local Rec = ns.Record
@@ -14297,6 +14445,7 @@ function G.ToolClick(level, x, y, reach)
   local re = G.roadEdit
   if G.editRoadMode or (re and re.pick and re.sel) then return G.EditRoadClick(level, x, y) end
   if G.stairMode then return G.StairClick(level, x, y) end
+  if G.RoadEndClick(level, x, y, reach) then return true end -- (a road's end: picked to go on with it)
   local sel = Rec.TrackAt(level, x, y, math.max(reach or 0, 1))
   if sel then
     G.AskRoadEdit(level, sel)
@@ -15317,7 +15466,12 @@ function G.RoadHoverInfo(level, x, y, reach, z)
   local here
   if g.z then here = R.EdgeZ(g, c.edge, c.along) else here = R.RoadFloor(g, c) end
   local src = e[4]
-  local title = src == R.SOURCE_LIFT and L["Lift"] or src == R.SOURCE_RECORDED and L["Drawn road"] or L["Road"]
+  -- (its kind names it: a stairs road "Stairs" even with no heights to tell, a bridge "Bridge"; Kooki3z 2026-11-20,
+  -- "stairs should say thats what it is not just Road")
+  local kind = g.kind and g.kind[c.edge]
+  local title = src == R.SOURCE_LIFT and L["Lift"] or (src == R.SOURCE_STAIR or kind == "stairs") and L["Stairs"]
+    or (kind and kind ~= "ground" and G.EDIT_KIND_NAMES and G.EDIT_KIND_NAMES[kind])
+    or src == R.SOURCE_RECORDED and L["Drawn road"] or L["Road"]
   local lines = {}
   if not here and src == R.SOURCE_RECORDED then -- (drawn or recorded, not in the data yet: the game gives no height;
     -- the import works out a recorded walk's floors and stairs, 2026-11-18: a walk up Grom'gol's tower looked flat)
@@ -15325,7 +15479,9 @@ function G.RoadHoverInfo(level, x, y, reach, z)
   elseif not here then
     lines[1] = L["On the ground (the game's data has no height for it)"]
   elseif za and zb and math.abs(za - zb) >= R.STAIR_MIN_Z then
-    if src ~= R.SOURCE_LIFT then title = L["Stairs"] end
+    -- (rising along it: stairs, unless its kind says what it is: a recorded bridge rising between its ends' ground is a
+    -- bridge, Kooki3z 2026-11-20 "recorded bridge, mouse over says stairs")
+    if src ~= R.SOURCE_LIFT and not (kind and kind ~= "ground" and kind ~= "stairs") then title = L["Stairs"] end
     lines[1] = Format(L["Height here: %.1f"], here)
     lines[2] = Format(L["Foot %.1f, top %.1f"], math.min(za, zb), math.max(za, zb))
   else

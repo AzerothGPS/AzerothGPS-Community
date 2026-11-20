@@ -229,3 +229,72 @@ def test_a_lift_with_no_heights_is_a_lift_ride_from_its_first_end_and_flips(game
         G.roadMode = None
         ns.db.tracks = saved
         R.Reset()
+
+
+def test_a_road_end_picked_glows_and_a_road_drawn_from_it_goes_on_as_it_is(game):
+    # (Kooki3z 2026-11-20: "click on the end of a road/bridge/lift/etc, this draws a glowing circle around it ... when
+    # shift + left click is used on it, extend whatever that is at its defined height"; and the hover says its kind)
+    lua, ns = game
+    G, R, Rec = ns.GPS, ns.Router, ns.Record
+    saved = ns.db.tracks
+    try:
+        ns.db.tracks = lua.table()
+        R.Reset()
+        G.roadMode = True
+        G.FinishRoad(lua.table(pts=lua.table(2600.0, 1100.0, 2615.0, 1100.0, 2630.0, 1100.0, 2645.0, 1100.0), cont=0),
+                     False, False)
+        first = ns.db.tracks[1]
+        sel = Rec.TrackAt(0, 2615.0, 1101.0)
+        assert sel and Rec.EditTrack(sel, lua.table(kind="bridge", z=20))
+        R.NearestEdges(0, 2645.0, 1100.0)
+        # the hover: a bridge says so
+        info = G.RoadHoverInfo(0, 2620.0, 1100.0, 5)
+        assert info and str(info.title) == "Bridge", info and info.title
+        # (a bridge rising between its ends, as a recorded one's heights from the ground: still a bridge, not Stairs;
+        # Kooki3z 2026-11-20, "recorded bridge, mouse over says stairs")
+        ns.Record.Save(lua.table(op="add", drawn=True, recorded=True, continent=0, time=4242, kind="bridge",
+                                 pts=lua.table(2600.0, 1150.0, 2620.0, 1150.0, 2640.0, 1150.0),
+                                 zs=lua.table(10, 15, 20)))
+        R.NearestEdges(0, 2620.0, 1150.0)
+        info = G.RoadHoverInfo(0, 2620.0, 1150.0, 5)
+        assert info and str(info.title) == "Bridge", info and info.title
+        # its end, picked by a click near it: kind and height
+        en = G.RoadEndAt(0, 2645.5, 1100.0, 3)
+        assert en and en.kind == "bridge" and abs(en.z - 20) < 0.01
+        assert G.ToolClick(0, 2645.5, 1100.5, 2) and G.roadEnd and abs(G.roadEnd.x - 2645) < 0.01
+        # (a click on it again lets it go; once more picks it)
+        assert G.ToolClick(0, 2645.0, 1100.0, 2) and G.roadEnd is None
+        assert G.ToolClick(0, 2645.0, 1100.0, 2) and G.roadEnd
+        # glowing where it is on the map
+        G.LayoutRoads(2645.0, 1100.0, 0, 0, 60, 200)
+        assert G.roadEndScreen is not None
+        G.PlaceRoadEndGlow()
+        if G.roadEndGlow:
+            assert G.roadEndGlow._shown and "UI-Taxi-Icon" in str(G.roadEndGlow._texture or G.ROAD_END_GLOW)
+        # a road drawn from it (starting a little off): snapped on, a bridge at 20 all along; its far end picked next
+        n0 = len(ns.db.tracks)
+        G.FinishRoad(lua.table(pts=lua.table(2646.0, 1100.5, 2670.0, 1100.0, 2690.0, 1100.0), cont=0), False, False)
+        assert len(ns.db.tracks) == n0 + 1
+        t = ns.db.tracks[n0 + 1]
+        assert t.kind == "bridge" and (t.pts[1], t.pts[2]) == (2645.0, 1100.0)
+        assert list(t.zs.values()) == [20, 20, 20]
+        assert G.roadEnd and abs(G.roadEnd.x - 2690) < 0.01
+        # the tools off: none picked
+        G.roadEnd = lua.table(level=0, x=2645.0, y=1100.0, z=20, kind="bridge")
+        G.SetRoadMode(False)
+        assert G.roadEnd is None
+        # a road drawn away from any end picked: a plain road
+        G.SetRoadMode(True)
+        G.FinishRoad(lua.table(pts=lua.table(2600.0, 1300.0, 2650.0, 1300.0), cont=0), False, False)
+        assert ns.db.tracks[len(ns.db.tracks)].kind is None
+        # stairs and lifts go on as a floor at their end's height; a floor needs one
+        assert tuple(G.RoadEndGoesOn(lua.table(kind="stairs", z=31.5))) == ("floor", 31.5)
+        assert tuple(G.RoadEndGoesOn(lua.table(kind="lift", z=80))) == ("floor", 80)
+        assert G.RoadEndGoesOn(lua.table(kind="floor"))[0] is None
+        assert G.RoadEndGoesOn(lua.table(kind="ground"))[0] is None
+    finally:
+        G.roadEnd = None
+        G.SetRoadMode(False)
+        G.roadMode = None
+        ns.db.tracks = saved
+        R.Reset()
