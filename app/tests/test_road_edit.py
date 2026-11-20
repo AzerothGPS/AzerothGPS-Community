@@ -228,6 +228,31 @@ def test_a_bridge_with_no_height_keeps_apart_from_the_roads_under_it(nav_env):
     assert info and len(list(info.raised.keys())) == len(mine)
 
 
+def test_a_recorded_lift_is_one_ride_and_its_top_meets_the_bridge(nav_env):
+    # (Kooki3z 2026-11-20, Freewind Post: a recorded lift, every 2 yd with ramped heights, went on as short steep roads
+    # whose top ones were dropped; its top never met the bridge at the tower)
+    lua, ns = nav_env
+    R = ns.Router
+    roads = lua.eval("{ n = {}, nz = {}, e = {} }")
+    br = lua.table(op="add", continent=CONT, time=1, drawn=True, kind="bridge",
+                   pts=flat(lua, -40, 0, -20, 0, 0, 0), zs=flat(lua, 86, 86, 86))
+    xs = [0, 2, 4, 6, 8, 10, 12, 14]
+    pts, zs = [], []
+    for k, x in enumerate(xs):
+        pts += [x, -0.5 * k]
+        zs.append(86 - (86 + 45) * k / (len(xs) - 1))
+    lift = lua.table(op="add", continent=CONT, time=2, drawn=True, recorded=True, kind="lift",
+                     pts=flat(lua, *pts), zs=flat(lua, *zs))
+    n, e = R.WithTracks(roads, lua.table(br, lift), CONT)[:2]
+    lifts = [ed for ed in edges_of(e) if ed[4] == R.SOURCE_LIFT]
+    assert len(lifts) == 1, len(lifts)
+    top = lifts[0]
+    # its top on the bridge's end: the same node
+    bridge_ends = {ed[k] for ed in edges_of(e) if ed[4] == R.SOURCE_RECORDED for k in (1, 2) if ends_at(n, ed, 0, 0, 0.6)}
+    assert top[1] in bridge_ends or top[2] in bridge_ends
+    assert not any(ed[4] == 3 for ed in edges_of(e))  # (no drop off the bridge onto it)
+
+
 def test_bridges_ends_join_only_what_touches_them(nav_env):
     # (Kooki3z 2026-11-20: Freewind Post's two rope bridges, their ends 16 yd apart, were joined; "why are the ends of
     # the bridges being connected? I didn't do this")
