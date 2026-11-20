@@ -8,6 +8,10 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 - Options > Map: Escape closes the map can be turned off, to keep the GPS map in the world map open.
 
+### Fixed
+
+- Minimap: a node's name no longer draws on top of the game's own tooltip; both show in one.
+
 ## 1.3.11
 
 ### Fixed

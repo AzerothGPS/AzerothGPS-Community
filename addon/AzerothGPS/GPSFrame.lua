@@ -6270,12 +6270,50 @@ function G.HideMinimapTip()
   if tip and tip:IsShown() then tip:Hide() end
   G.minimapTipText = nil
 end
+-- The game's own tooltip up over the minimap (a blip's): owned by the Minimap or anything in it or its cluster, or by
+-- no frame of its own while the pointer is on the Minimap. (A screenshot 2026-11-20: "Silver Vein" from the game and our
+-- "Tin Vein" drawn on top of each other: the blip's tooltip wasn't owned by the Minimap itself in this client.)
+function G.GameTipOverMinimap()
+  local gt = GameTooltip
+  if not (gt and gt:IsShown()) then return nil end
+  local owner = gt.GetOwner and gt:GetOwner()
+  local f, cluster = owner, rawget(_G, "MinimapCluster")
+  for _ = 1, 8 do
+    if not f then break end
+    if f == Minimap or (cluster and f == cluster) then return gt end
+    f = f.GetParent and f:GetParent()
+  end
+  if (owner == nil or owner == UIParent or owner == WorldFrame) and Minimap.IsMouseOver and Minimap:IsMouseOver() then
+    return gt
+  end
+  return nil
+end
+-- Our icon's name added to the game's tooltip as a line of its own, once (not when it already says it): one tooltip
+-- with both names, never two on top of each other.
+function G.MergeIntoGameTip(gt, text)
+  if G.mergedTipText == text and G.mergedTip == gt then return end
+  local n = gt.NumLines and gt:NumLines() or 0
+  for i = 1, n do
+    local fs = _G["GameTooltipTextLeft" .. i]
+    local ok, t = pcall(function() return fs and fs:GetText() end)
+    if ok and t ~= nil and ns.IsSecret and ns.IsSecret(t) then return end -- (hidden from addons: left as it is)
+    if ok and t == text then
+      G.mergedTip, G.mergedTipText = gt, text
+      return
+    end
+  end
+  gt:AddLine(text, 1, 1, 1)
+  gt:Show() -- (sized again for the new line)
+  G.mergedTip, G.mergedTipText = gt, text
+end
 -- Hit-test now: our tooltip by the cursor with the icon's name, or hidden. The text shown, or nil.
 function G.MinimapHover()
   local text = G.MinimapTipAt()
-  local gt = GameTooltip
-  if not text or (gt and gt:IsShown() and gt:GetOwner() == Minimap) then -- (off our icons, or a blip's own tooltip)
+  local gt = G.GameTipOverMinimap()
+  if not gt then G.mergedTip, G.mergedTipText = nil, nil end
+  if not text or gt then -- (off our icons, or a blip's own tooltip: ours put in it)
     G.HideMinimapTip()
+    if text and gt then pcall(G.MergeIntoGameTip, gt, text) end
     return nil
   end
   local tip = G.minimapTip
