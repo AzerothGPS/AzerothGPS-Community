@@ -7,6 +7,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 ### New
 
 - Options > Map: Escape closes the map can be turned off, to keep the GPS map in the world map open.
+- Roads: new roads in Dustwallow Marsh.
 
 ### Fixed
 
