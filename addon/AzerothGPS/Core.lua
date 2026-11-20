@@ -319,7 +319,7 @@ function AzerothGPS_QuickSearch()
   if ns.GPS and ns.GPS.QuickSearch then return ns.GPS.QuickSearch() end
 end
 -- (the road tools' Record: Stairs Start, then Stairs End, without reaching for the window)
-BINDING_NAME_AZEROTHGPS_RECORD_STAIRS = L["Record: Stairs Start/End"]
+BINDING_NAME_AZEROTHGPS_RECORD_STAIRS = L["Record: Stairs on/off"]
 function AzerothGPS_RecordStairs()
   if ns.Record and ns.Record.MarkStairs then ns.Record.MarkStairs() end
 end

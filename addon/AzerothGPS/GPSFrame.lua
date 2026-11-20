@@ -17745,7 +17745,7 @@ function G.Init()
         G.SetEditRoadMode(not G.editRoadMode)
       end },
     { id = "roadRecord", icon = "Interface\\Icons\\Ability_Rogue_Sprint", label = L["Record"], dev = true,
-      tip = L["Record a road by walking it: opens the Record window (Record, Pause, Stop, and Stairs Start and Stairs End at a staircase's foot and top, or their key). Each walk is saved as a drawn road with where you were indoors and the rooms' names, so its floors can be worked out. Undo takes the last walk back. (Shown with the road tools)"],
+      tip = L["Record a road by walking it: opens the Record window (Record, Pause, Stop & Save, and the road type, Stairs too, or its key). Each walk is saved as a drawn road with where you were indoors and the rooms' names, so its floors can be worked out. Undo takes the last walk back. (Shown with the road tools)"],
       isOn = function() return ns.Record and ns.Record.rec ~= nil end,
       action = function()
         if G.mapMenu then G.mapMenu:Hide() end

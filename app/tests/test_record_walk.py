@@ -1,5 +1,5 @@
 """The road tools' Record (1.1.6): a road walked in game saved as a drawn road, with what the game tells of where the
-player was (indoors, the minimap's zone text), its corners, the player's stairs marks, split and paused as it should be.
+player was (indoors, the minimap's zone text), its corners, its road type, split and paused as it should be.
 Run with the whole addon (gameharness), the player in Brill."""
 
 import math
@@ -184,25 +184,23 @@ def test_nothing_is_recorded_from_the_simulated_player_or_on_a_flight(rec):
     assert len(tracks(lua, ns)) == 0
 
 
-def test_stairs_marks_are_kept_with_the_walk(rec):
+def test_the_stairs_key_switches_to_stairs_and_back(rec):
+    # (Kooki3z 2026-11-20: "remove the Stairs Start button and just use the top stairs button": the key toggles the
+    # Stairs road type, back to the type before)
     lua, ns = rec
     R, w = ns.Record, Walker(*rec)
+    assert not R.MarkStairs()  # (not recording)
     R.StartRecording(True)
+    R.SetRecordKind("bridge")
     w.walk(6, 0)
-    assert R.MarkStairs()
-    foot = (w.x, w.y)
-    w.walk(8, 0)
     lua.eval("AzerothGPS_RecordStairs")()  # (the key binding's)
-    top = (w.x, w.y)
+    assert R.rec.kind == "stairs"
+    w.walk(8, 0)
+    assert R.MarkStairs() and R.rec.kind == "bridge"
     w.walk(6, 0)
-    assert R.MarkStairs()  # (stairs again: still open at Stop, closed at the walk's end)
-    w.walk(4, 0)
     R.StopRecording()
-    (t,) = tracks(lua, ns)
-    st = [t.stairs[i] for i in range(1, len(t.stairs) + 1)]
-    pts = points(t)
-    assert len(st) == 4 and st[0] < st[1] < st[2] < st[3] == len(pts)
-    assert math.dist(pts[st[0] - 1], foot) < 0.2 and math.dist(pts[st[1] - 1], top) < 0.2
+    R.SetRecordKind("ground")
+    assert [t.kind for t in tracks(lua, ns)] == ["bridge", "stairs", "bridge"]
 
 
 def test_a_long_walk_is_saved_in_pieces_that_join(rec):
@@ -272,14 +270,11 @@ def test_the_record_window_and_its_buttons(rec):
     lua, ns = rec
     R, w = ns.Record, Walker(*rec)
     f = R.ShowWindow()
-    assert str(f.rec.GetText(f.rec)) == "Record" and str(f.stairs.GetText(f.stairs)) == "Stairs Start"
+    assert str(f.rec.GetText(f.rec)) == "Record" and f.stairs is None  # (no Stairs button: the Stairs type)
     f.rec._scripts.OnClick(f.rec)  # (Record)
     w.walk(4, 0)
     R.RefreshWindow()
     assert str(f.rec.GetText(f.rec)) == "Pause" and "Recording" in str(f.status.GetText(f.status))
-    f.stairs._scripts.OnClick(f.stairs)
-    R.RefreshWindow()
-    assert str(f.stairs.GetText(f.stairs)) == "Stairs End"
     f.rec._scripts.OnClick(f.rec)  # (Pause)
     assert str(f.rec.GetText(f.rec)) == "Resume"
     f.stop._scripts.OnClick(f.stop)
@@ -328,3 +323,128 @@ def test_a_portals_short_hop_starts_a_new_walk(rec):
         assert R.PortalHop(0, X0 + 12, Y0, X0 + 21, Y0) and not R.PortalHop(1, X0 + 12, Y0, X0 + 21, Y0)
     finally:
         T[key] = None
+
+
+def test_the_road_type_recorded_switches_mid_walk_with_heights_from_the_map(rec):
+    # (Kooki3z 2026-11-20: "recorder should support all road types as well and just get the correct Z height
+    # automatically"; "I should be able to toggle the road type being recorded")
+    lua, ns = rec
+    R, w = ns.Record, Walker(*rec)
+    # the map's ground: rising 1 yd a yard east of the start (a lift's foot to the mesa's top, a bridge's ends)
+    lua.execute(f"AGPS_PH = AGPS_NS.Ground.PointHeight AGPS_NS.Ground.PointHeight = function(_, x) return x - {X0} end")
+    try:
+        f = R.ShowWindow()
+        assert [b.kind for b in f.kinds.values()] == ["ground", "floor", "bridge", "stairs", "lift"]
+        R.StartRecording(True)
+        w.walk(10, 0)
+        f.kinds[3]._scripts.OnClick(f.kinds[3])  # (Bridge)
+        assert R.rec.kind == "bridge" and [b.kind for b in f.kinds.values() if b.picked] == ["bridge"]
+        w.walk(12, 0)
+        assert R.SetRecordKind("lift")
+        w.walk(2, 0)  # (a lift moves little across: kept all the same)
+        assert R.SetRecordKind("ground")
+        w.walk(10, 0)
+        R.StopRecording()
+        ts = tracks(lua, ns)
+        assert [t.kind for t in ts] == [None, "bridge", "lift", None]
+        # each goes on from where the one before ended
+        for a, b in zip(ts, ts[1:]):
+            assert math.dist(points(a)[-1], points(b)[0]) < 0.2
+        # the bridge's ends 12 yd apart in height: level at the higher (one end over lower ground); the lift's foot and top
+        br, lift = ts[1], ts[2]
+        zs = list(br.zs.values())
+        assert all(abs(z - zs[-1]) < 0.01 for z in zs) and abs(zs[-1] - 22) < 0.6
+        # (the lift's ends on about the same ground, its top on a tower: no heights to guess; a lift ride all the same)
+        assert lift.zs is None and ts[0].zs is None and ts[3].zs is None
+        # the kind picked stays for the next recording
+        assert R.recKind == "ground"
+        R.SetRecordKind("floor")
+        R.StartRecording(True)
+        assert R.rec.kind == "floor"
+        R.StopRecording()
+        R.SetRecordKind("ground")
+        assert not R.SetRecordKind("nonsense")
+    finally:
+        lua.execute("AGPS_NS.Ground.PointHeight = AGPS_PH")
+        R.recKind = "ground"
+        if R.window:
+            R.window.Hide(R.window)
+
+
+def test_auto_heights_from_the_map(rec):
+    lua, ns = rec
+    R = ns.Record
+    lua.execute("AGPS_PH = AGPS_NS.Ground.PointHeight AGPS_NS.Ground.PointHeight = function(_, x) return AGPS_GH and AGPS_GH(x) end")
+    try:
+        pts = lua.table(0, 0, 10, 0, 20, 0)
+        lua.execute("AGPS_GH = function(x) return 100 + x / 5 end")
+        assert list(R.AutoHeights("bridge", 0, pts).values()) == [100, 102, 104]  # (a little apart: evenly between)
+        lua.execute("AGPS_GH = function(x) return 100 + x end")
+        assert list(R.AutoHeights("floor", 0, pts).values()) == [100, 100, 100]
+        assert R.AutoHeights("ground", 0, pts) is None
+        # one end known: level at it; none: nil (the import works it out)
+        lua.execute("AGPS_GH = function(x) if x == 0 then return 50 end return false end")
+        assert list(R.AutoHeights("bridge", 0, pts).values()) == [50, 50, 50]
+        assert R.AutoHeights("stairs", 0, pts) is None  # (stairs: which way unknown)
+        lua.execute("AGPS_GH = function() return false end")
+        assert R.AutoHeights("lift", 0, pts) is None
+        # stairs walked down (Kooki3z 2026-11-20: "stairs shouldn't need to start at the bottom"): falling heights
+        lua.execute("AGPS_GH = function(x) return 120 - x end")
+        assert list(R.AutoHeights("stairs", 0, pts).values()) == [120, 110, 100]
+        # both ends on the same floor (indoors): none to tell which way
+        lua.execute("AGPS_GH = function() return 30 end")
+        assert R.AutoHeights("stairs", 0, pts) is None
+        # a bridge from a mesa's top (87) to a lift's tower over the canyon floor (-36): level at the top
+        lua.execute("AGPS_GH = function(x) if x == 0 then return 87 end return -36 end")
+        assert list(R.AutoHeights("bridge", 0, pts).values()) == [87, 87, 87]
+        # a lift whose ends are both on about the same ground (its top on a tower): no heights to guess
+        lua.execute("AGPS_GH = function(x) return -36 + x / 10 end")
+        assert R.AutoHeights("lift", 0, pts) is None
+    finally:
+        lua.execute("AGPS_NS.Ground.PointHeight = AGPS_PH AGPS_GH = nil")
+
+
+def test_the_record_window_says_what_is_happening(rec):
+    # (Kooki3z 2026-11-20: "redo the recorder UI, its difficult to understand what is happening during the recording")
+    lua, ns = rec
+    R, w = ns.Record, Walker(*rec)
+    f = R.ShowWindow()
+    txt = lambda fs: str(fs.GetText(fs))
+    assert txt(f.status) == "Not recording" and "Road type: Ground" in txt(f.road)
+    assert "press Record" in txt(f.hint) and txt(f.saved) == "Nothing saved yet this time."
+    f.rec._scripts.OnClick(f.rec)
+    w.walk(12, 0)
+    R.RefreshWindow()
+    assert txt(f.status) == "Recording: Ground"
+    assert txt(f.road).startswith("This road: Ground, 12 yd") and "points" in txt(f.road) and "Brill" in txt(f.road)
+    w.walk(6, 0)
+    # switching type: the road so far saved, the last one named
+    R.SetRecordKind("bridge")
+    w.walk(10, 0)
+    R.RefreshWindow()
+    assert txt(f.status) == "Recording: Bridge" and txt(f.saved).startswith("Saved this time: 1. Last: Ground, 18 yd")
+    # paused by hand: yellow, and what to do
+    f.rec._scripts.OnClick(f.rec)
+    R.RefreshWindow()
+    assert txt(f.status) == "Paused." and "Resume" in txt(f.hint)
+    f.stop._scripts.OnClick(f.stop)
+    assert R.rec is None and txt(f.status) == "Not recording" and txt(f.saved).startswith("Saved this time: 2. Last: Bridge")
+    R.SetRecordKind("ground")
+    f.Hide(f)
+
+
+def test_a_walk_saved_after_an_erase_made_during_it_is_newer_than_the_erase(rec):
+    # (Kooki3z 2026-11-20: stairs deleted and recorded again while recording were older than the delete, and hidden
+    # under it: "things are hidden until clicked")
+    lua, ns = rec
+    R, w = ns.Record, Walker(*rec)
+    R.StartRecording(True)
+    w.walk(10, 0)
+    # an erase saved now, while the walk goes on (its time after the walk began)
+    t0 = R.rec.t0
+    ns.db.tracks[len(ns.db.tracks) + 1] = lua.table(op="remove", continent=0, time=t0 + 5,
+                                                     pts=lua.table(X0, Y0, X0 + 20, Y0))
+    w.walk(10, 0)
+    R.StopRecording()
+    walks = [t for t in tracks(lua, ns) if t.op == "add"]
+    assert walks and all(t.time > t0 + 5 for t in walks)

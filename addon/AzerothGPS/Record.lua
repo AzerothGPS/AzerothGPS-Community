@@ -965,6 +965,83 @@ R.REC_RESUME_YD = 3 -- moved this far while paused: a new walk on going on (else
 R.REC_MIN_YD = 8 -- a walk shorter than this isn't saved (as a stroke)
 R.REC_MAX_POINTS = 1000 -- a walk this long is saved, and the next goes on from its last point
 
+-- The road type being recorded (Kooki3z 2026-11-20: "recorder should support all road types as well and just get the
+-- correct Z height automatically"; "I should be able to toggle the road type being recorded"): the Record window's kind
+-- buttons, R.SetRecordKind. Changed while walking, the walk so far is saved as its own road of the kind it was, and the
+-- walk goes on from that point as the new kind. A walk of a kind (not ground) is saved with it, and with its heights
+-- worked out from the map (R.AutoHeights): the game gives no player height in WoW Forever.
+R.REC_KINDS = { "ground", "floor", "bridge", "stairs", "lift" }
+R.REC_KIND_MIN_YD = 1 -- (a walk of a kind this long at least is saved: a lift moves little across)
+-- A bridge's ends this far apart in height: one of them stands on something (a lift's tower) over lower ground, and the
+-- bridge is level at the higher (Kooki3z 2026-11-20: a recorded rope bridge from a mesa's top to a lift's tower came out
+-- sloping 87 to -36, the canyon floor under the tower). A lift's ends closer than LIFT_APART_Z: its top isn't on the map's
+-- ground (a tower), so no heights (Edit Road's Foot and Top set them).
+R.AUTO_BRIDGE_LEVEL_Z = 6
+R.AUTO_LIFT_APART_Z = 8
+R.recKind = "ground" -- (the kind picked, kept for the next recording too)
+-- A walk's heights from the map, the game giving no player height: a floor at the floor near its start (the floors the
+-- tools know, else the ground); a bridge, stairs or a lift from the ground's height where it starts to where it ends
+-- (where it meets the land: a lift's foot and the mesa's top, a bridge's two ends), evenly between. nil: none known (the
+-- road watcher's import works them out).
+function R.AutoHeights(kind, level, pts)
+  if not kind or kind == "ground" then return nil end
+  local GD, G, Rt = ns.Ground, ns.GPS, ns.Router
+  local n = #pts / 2
+  local function ground(k)
+    if not (GD and GD.PointHeight) then return nil end
+    local was = GD.force
+    GD.force = true -- (the map's ground data, the road tools open or not)
+    local ok, h = pcall(GD.PointHeight, level, pts[2 * k - 1], pts[2 * k])
+    GD.force = was
+    return ok and h or nil
+  end
+  local function floorNear(k)
+    if not (G and G.StairHeights) then return nil end
+    local ok, hs = pcall(G.StairHeights, level, pts[2 * k - 1], pts[2 * k])
+    return ok and type(hs) == "table" and hs[1] or nil
+  end
+  local function r1(v) return math.floor(v * 10 + 0.5) / 10 end
+  if kind == "floor" then
+    local h = floorNear(1) or ground(1) or floorNear(n) or ground(n)
+    if not h then return nil end
+    local out = {}
+    for k = 1, n do out[k] = r1(h) end
+    return out
+  end
+  local za, zb = ground(1) or floorNear(1), ground(n) or floorNear(n)
+  if not (za or zb) then return nil end
+  za, zb = za or zb, zb or za
+  if kind == "bridge" and math.abs(za - zb) > R.AUTO_BRIDGE_LEVEL_Z then za, zb = math.max(za, zb), math.max(za, zb) end
+  if kind == "lift" and math.abs(za - zb) < R.AUTO_LIFT_APART_Z then return nil end
+  -- (stairs walked up or down: which way from the heights where they begin and end, not the way walked; Kooki3z
+  -- 2026-11-20, "stairs shouldn't need to start at the bottom". Both ends on about the same floor, as indoors with no
+  -- ground under them: no heights to tell, the road watcher's import works the floors out)
+  if kind == "stairs" and math.abs(za - zb) < 1 then return nil end
+  local hs = Rt and Rt.RampHeights and Rt.RampHeights(pts, za, zb)
+  if not hs then return nil end
+  local out = {}
+  for k = 1, n do out[k] = r1(hs[k]) end
+  return out
+end
+-- The road type recorded from now on: the walk so far saved as its own road of the kind it was (R.FinishWalk), going
+-- on from that point. Not recording: the kind the next recording starts with.
+function R.SetRecordKind(kind)
+  local known = false
+  for _, k in ipairs(R.REC_KINDS) do known = known or k == kind end
+  if not known then return false end
+  local r = R.rec
+  if r and (r.kind or "ground") ~= kind then
+    if not r.paused and GetTime then R.RecordTick(GetTime(), true) end -- (a point where it changed)
+    if #r.pts / 2 >= 2 then R.FinishWalk(true) end
+    r.kind = kind
+    local G = ns.GPS
+    ns.Print(Format(L["recording: %s from here (the walk so far saved as its own road)"],
+      G and G.EDIT_KIND_NAMES and G.EDIT_KIND_NAMES[kind] or kind))
+  end
+  R.recKind = kind
+  R.RefreshWindow()
+  return true
+end
 local function NewWalk(r)
   r.pts, r.ind, r.ts, r.zs, r.zt, r.stairs, r.pk = {}, {}, {}, {}, {}, {}, {}
   r.yd, r.lastT, r.lastZt, r.lastPk, r.cand, r.t0, r.g0 = 0, nil, nil, false, nil, nil, nil
@@ -1020,6 +1097,16 @@ local function AddPoint(r, s)
   end
 end
 
+-- A walk's time (its key, and its place among the edits: an erase or a delete takes out roads older than it): when it
+-- began, or just after the newest erase or delete saved since (Kooki3z 2026-11-20: stairs deleted and recorded again
+-- while recording were older than the delete, hidden under it, "things are hidden until clicked").
+function R.WalkTime(t0)
+  t0 = t0 or time()
+  for _, o in ipairs(Tracks()) do
+    if (o.op == "remove" or o.op == "unwall") and tonumber(o.time) and o.time >= t0 then t0 = o.time + 1 end
+  end
+  return t0
+end
 -- The walk so far saved (two points and REC_MIN_YD at least) as a drawn road; `goOn`: the next walk starts at its
 -- last point (REC_MAX_POINTS, an open stairs mark carried on). Its number in the drawn roads, or nil.
 function R.FinishWalk(goOn)
@@ -1030,14 +1117,19 @@ function R.FinishWalk(goOn)
   local stairs = {}
   for _, v in ipairs(r.stairs) do stairs[#stairs + 1] = v end
   if r.stairOpen and n > r.stairOpen then stairs[#stairs + 1], stairs[#stairs + 2] = r.stairOpen, n end
-  if n >= 2 and r.yd >= R.REC_MIN_YD then
+  local kind = r.kind ~= "ground" and r.kind or nil
+  if n >= 2 and r.yd >= (kind and R.REC_KIND_MIN_YD or R.REC_MIN_YD) then
     local G = ns.GPS
     local zs = G and G.StrokeHeights and G.StrokeHeights(r.zs, n) or nil
+    -- (a kind: its heights from the map when no floor was picked, R.AutoHeights)
+    if kind and not zs then zs = R.AutoHeights(kind, r.level, r.pts) end
     saved = R.Save({ op = "add", drawn = true, recorded = true, continent = r.level, zone = r.zone or "?",
-      time = r.t0 or time(), pts = r.pts, zs = zs, z = zs and zs[1] or nil,
+      time = R.WalkTime(r.t0), pts = r.pts, zs = zs, z = zs and zs[1] or nil, kind = kind,
+      stair = kind == "stairs" and zs ~= nil or nil,
       rec = { ind = table.concat(r.ind), ts = table.concat(r.ts, ","), zt = r.zt, pk = #r.pk > 0 and r.pk or nil },
       stairs = #stairs > 0 and stairs or nil })
     r.saved = (r.saved or 0) + 1
+    R.lastPiece = { kind = kind or "ground", yd = r.yd } -- (the window's "Last:")
   end
   local last
   if n > 0 then
@@ -1135,7 +1227,7 @@ end
 -- Recording on: samples every REC_TICK (a frame of its own, shown only while recording).
 function R.StartRecording(quiet)
   if R.rec then return end
-  R.rec = { saved = 0 }
+  R.rec = { saved = 0, kind = R.recKind or "ground" }
   NewWalk(R.rec)
   if not R.recFrame and CreateFrame then
     local f = CreateFrame("Frame")
@@ -1152,7 +1244,7 @@ function R.StartRecording(quiet)
   end
   if R.recFrame then R.recFrame:Show() end
   R.RecordTick(GetTime())
-  if not quiet then ns.Print(L["recording: walk the road, then Stop (Stairs Start and Stairs End at a staircase's foot and top)"]) end
+  if not quiet then ns.Print(L["recording: walk the road, switching the road type as you go (Stairs too), then Stop & Save"]) end
   R.RefreshWindow()
   if ns.GPS and ns.GPS.RefreshQuick then ns.GPS.RefreshQuick() end
 end
@@ -1186,30 +1278,20 @@ function R.TogglePause()
   R.RefreshWindow()
 end
 
--- Stairs Start, then Stairs End: the stretch between is stairs (the watcher lets its height climb there). A point where
--- the player stands first, so the mark is there. Whether it was marked.
+-- The stairs key (its binding, AZEROTHGPS_RECORD_STAIRS): the Stairs road type on, and back to the type before off
+-- (Kooki3z 2026-11-20: "remove the Stairs Start button and just use the top stairs button"; the marks are gone, old
+-- walks with them still load). Whether it switched.
 function R.MarkStairs()
   local r = R.rec
   if not r then
     ns.Print(L["Record isn't on (the road tools' Record button)"])
     return false
   end
-  R.RecordTick(GetTime(), true)
-  local n = #r.pts / 2
-  if r.paused or n == 0 then
-    ns.Print(L["recording is paused: stairs not marked"])
-    return false
+  if r.kind == "stairs" then
+    return R.SetRecordKind(r.beforeStairs or "ground")
   end
-  if r.stairOpen then
-    if n > r.stairOpen then r.stairs[#r.stairs + 1], r.stairs[#r.stairs + 2] = r.stairOpen, n end
-    r.stairOpen = nil
-    ns.Print(L["stairs end marked"])
-  else
-    r.stairOpen = n
-    ns.Print(L["stairs start marked: Stairs End at their top"])
-  end
-  R.RefreshWindow()
-  return true
+  r.beforeStairs = r.kind or "ground"
+  return R.SetRecordKind("stairs")
 end
 
 -- A loading screen (PLAYER_ENTERING_WORLD): the walk so far is one walk. After a /reload, recording that was on goes on.
@@ -1236,67 +1318,121 @@ end
 
 -- The Record window (an ns.Window): what's recorded, and Record / Pause, Stop, Stairs Start / End and Undo.
 -- (the walks saved, a sentence of its own after the status)
-local function WalksSaved(n)
-  return n == 1 and L["1 walk saved."] or L["%d walks saved."]:format(n)
+-- The Record window (redone 2026-11-20, Kooki3z: "redo the recorder UI, its difficult to understand what is happening
+-- during the recording"): the state in color with a dot (gray not recording, red recording and the road type, yellow
+-- paused and why), the road type buttons, this road so far (type, length, points, indoors, the rooms' name), the stairs
+-- mark, what's saved this time and the last one, and what to do next.
+R.STATE_COLORS = { idle = { 0.6, 0.6, 0.6 }, rec = { 1, 0.2, 0.2 }, paused = { 1, 0.82, 0 } }
+local function KindName(kind)
+  local G = ns.GPS
+  return G and G.EDIT_KIND_NAMES and G.EDIT_KIND_NAMES[kind or "ground"] or kind or "ground"
 end
-function R.RecordStatus()
+-- The window's lines now: { state, color key, road, saved, hint }.
+function R.WindowLines()
   local r = R.rec
+  local out = {}
   if not r then
-    local done = R.lastSaved and (" " .. WalksSaved(R.lastSaved)) or ""
-    return L["Record, then walk the road."] .. done, L["Stairs Start at a staircase's foot, Stairs End at its top."]
-  end
-  local n = #r.pts / 2
-  local s
-  if r.paused then
-    -- (r.paused is R.PauseReason's id, said in the game's language here)
-    local why = { ["the simulated player is on"] = L["the simulated player is on"], dead = L["dead"],
-      ["in combat"] = L["in combat"], ["on a flight"] = L["on a flight"],
-      ["on a boat or zeppelin"] = L["on a boat or zeppelin"], ["no position here"] = L["no position here"] }
-    s = r.paused == "paused" and L["Paused."] or L["Paused: %s."]:format(why[r.paused] or r.paused)
+    out.state, out.color = L["Not recording"], "idle"
+    out.road = Format(L["Road type: %s"], KindName(R.recKind))
+    out.hint = L["Pick the road type, press Record, then walk along the road. A road is saved each time you switch type, and at Stop & Save."]
   else
-    local points = n == 1 and L["1 point"] or L["%d points"]:format(n)
-    local dist, zt = ns.Nav.FormatDistance(r.yd), r.lastZt and r.lastZt ~= "" and r.lastZt or nil
-    if r.ind[n] == "1" then
-      s = zt and Format(L["Recording: %s, %s, indoors, %s."], points, dist, zt)
-        or Format(L["Recording: %s, %s, indoors."], points, dist)
+    local n = #r.pts / 2
+    if r.paused then
+      local why = { ["the simulated player is on"] = L["the simulated player is on"], dead = L["dead"],
+        ["in combat"] = L["in combat"], ["on a flight"] = L["on a flight"],
+        ["on a boat or zeppelin"] = L["on a boat or zeppelin"], ["no position here"] = L["no position here"] }
+      out.state = r.paused == "paused" and L["Paused."] or L["Paused: %s."]:format(why[r.paused] or r.paused)
+      out.color = "paused"
+      out.hint = r.paused == "paused"
+        and L["Press Resume where you stopped. Moved more than 3 yd away, a new road starts there."]
+        or L["It waits by itself and goes on when it can."]
     else
-      s = zt and Format(L["Recording: %s, %s, %s."], points, dist, zt) or Format(L["Recording: %s, %s."], points, dist)
+      out.state, out.color = Format(L["Recording: %s"], KindName(r.kind)), "rec"
+      out.hint = L["Walk along the road. Switch the type as you step onto or off a bridge, a lift or stairs: the road so far is saved then."]
     end
+    local road = Format(L["This road: %s, %s, %s"], KindName(r.kind), ns.Nav.FormatDistance(r.yd or 0),
+      n == 1 and L["1 point"] or L["%d points"]:format(n))
+    if n > 0 and r.ind[n] == "1" then road = road .. ", " .. L["indoors"] end
+    if r.lastZt and r.lastZt ~= "" then road = road .. ", " .. r.lastZt end
+    out.road = road
   end
-  if (r.saved or 0) > 0 then s = s .. " " .. WalksSaved(r.saved) end
-  local key = GetBindingKey and GetBindingKey("AZEROTHGPS_RECORD_STAIRS")
-  local st = r.stairOpen and L["On the stairs: Stairs End at their top."] or L["Stairs Start at a staircase's foot, Stairs End at its top."]
-  return s, key and Format(L["%s (Key: %s)"], st, key) or st
+  local saved = r and r.saved or R.lastSaved or 0
+  if saved > 0 and R.lastPiece then
+    out.saved = Format(L["Saved this time: %d. Last: %s, %s."], saved, KindName(R.lastPiece.kind),
+      ns.Nav.FormatDistance(R.lastPiece.yd or 0))
+  else
+    out.saved = L["Nothing saved yet this time."]
+  end
+  return out
+end
+-- (kept for what reads it: the window's state line)
+function R.RecordStatus()
+  local w = R.WindowLines()
+  return w.state
 end
 
 function R.RefreshWindow()
   local f = R.window
   if not (f and f:IsShown()) then return end
-  local s, st = R.RecordStatus()
-  f.status:SetText(s)
-  f.stairsText:SetText(st)
+  local w = R.WindowLines()
+  local c = R.STATE_COLORS[w.color] or R.STATE_COLORS.idle
+  f.status:SetText(w.state)
+  f.status:SetTextColor(c[1], c[2], c[3])
+  f.dot:SetColorTexture(c[1], c[2], c[3], 1)
+  f.road:SetText(w.road)
+  f.saved:SetText(w.saved)
+  f.hint:SetText(w.hint)
   local r = R.rec
   f.rec:SetText(not r and L["Record"] or r.userPaused and L["Resume"] or L["Pause"])
   f.stop:SetEnabled(r ~= nil)
-  f.stairs:SetEnabled(r ~= nil)
-  f.stairs:SetText(r and r.stairOpen and L["Stairs End"] or L["Stairs Start"])
+  local kind = r and r.kind or R.recKind or "ground"
+  for _, b in ipairs(f.kinds or {}) do
+    b.picked = b.kind == kind
+    if b.picked then
+      if b.LockHighlight then b:LockHighlight() end
+    elseif b.UnlockHighlight then
+      b:UnlockHighlight()
+    end
+  end
 end
 
 function R.ShowWindow()
   local f = R.window
   if not f then
-    f = ns.Window("AzerothGPSRecord", 360, 150, L["Record"])
-    local function Text(font, y)
+    f = ns.Window("AzerothGPSRecord", 392, 240, L["Record"])
+    local function Text(font, x, y)
       local t = f:CreateFontString(nil, "ARTWORK", font)
-      t:SetPoint("TOPLEFT", 14, f.top - y)
+      t:SetPoint("TOPLEFT", x, f.top - y)
       t:SetPoint("RIGHT", -14, 0)
       t:SetJustifyH("LEFT")
       return t
     end
-    f.status = Text("GameFontHighlight", 10)
-    f.stairsText = Text("GameFontHighlightSmall", 32)
-    local note = Text("GameFontDisableSmall", 52)
-    note:SetText(L["Each walk is saved as a drawn road, with where you were indoors and the rooms' names, so its floors can be worked out."])
+    -- the state: a dot and a line in its color
+    local dot = f:CreateTexture(nil, "ARTWORK")
+    dot:SetSize(10, 10)
+    dot:SetPoint("TOPLEFT", 16, f.top - 13)
+    f.dot = dot
+    f.status = Text("GameFontNormalLarge", 34, 8)
+    -- the road type
+    local label = Text("GameFontNormalSmall", 14, 38)
+    label:SetText(L["Road type:"])
+    f.kinds = {}
+    local G = ns.GPS
+    for k, kind in ipairs(R.REC_KINDS) do
+      local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+      b:SetSize(68, 22)
+      b:SetPoint("TOPLEFT", 12 + (k - 1) * 72, f.top - 54)
+      b:SetText(KindName(kind))
+      b.kind = kind
+      if G and G.KindSwatch then G.KindSwatch(b, kind) end
+      b:SetScript("OnClick", function() R.SetRecordKind(kind) end)
+      f.kinds[k] = b
+    end
+    -- this road, the stairs, what's saved, what to do
+    f.road = Text("GameFontHighlight", 14, 90)
+    f.saved = Text("GameFontHighlightSmall", 14, 112)
+    f.saved:SetTextColor(0.45, 1, 0.45)
+    f.hint = Text("GameFontDisableSmall", 14, 136)
     local function Button(label, w, x, fn)
       local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
       b:SetSize(w, 22)
@@ -1305,13 +1441,18 @@ function R.ShowWindow()
       b:SetScript("OnClick", fn)
       return b
     end
-    f.rec = Button(L["Record"], 80, 12, function()
+    f.rec = Button(L["Record"], 88, 12, function()
       if R.rec then R.TogglePause() else R.StartRecording() end
       R.RefreshWindow()
     end)
-    f.stop = Button(L["Stop"], 64, 96, function() R.StopRecording() end)
-    f.stairs = Button(L["Stairs Start"], 100, 164, function() R.MarkStairs() end)
-    f.undo = Button(L["Undo"], 64, 268, function() R.Undo() end)
+    f.stop = Button(L["Stop & Save"], 104, 104, function()
+      R.StopRecording()
+      R.RefreshWindow()
+    end)
+    f.undo = Button(L["Undo"], 60, 212, function()
+      R.Undo()
+      R.RefreshWindow()
+    end)
     R.window = f
   end
   f:Show()
