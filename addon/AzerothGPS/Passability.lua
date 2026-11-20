@@ -12,7 +12,22 @@ P.SWIM_COST = 1.5 -- swimming is about 2/3 of run speed (the game's base swim sp
 -- (ByBlocks). Never set by itself: P.SetAvoidSwim.
 P.AVOID_SWIM_COST = 10
 P.avoidSwim = false
-function P.SwimCost() return P.avoidSwim and P.AVOID_SWIM_COST or P.SWIM_COST end
+-- (water as fast as land for the character, Nav.WaterFast: water walking with its reagent, an elixir, Aquatic Form:
+-- WATER_FAST_COST a yard, a hair over land's so ties stay on land; swimming left out, avoidSwim, still wins)
+P.WATER_FAST_COST = 1.02
+P.KEEP_DRY_MIN_YD = 10 -- (FindPath: a walk swimming this much is straightened again keeping to the path's water)
+P.waterFast = false
+function P.SwimCost()
+  if P.avoidSwim then return P.AVOID_SWIM_COST end
+  return P.waterFast and P.WATER_FAST_COST or P.SWIM_COST
+end
+function P.SetWaterFast(on)
+  on = on and true or false
+  if P.waterFast == on then return false end
+  P.waterFast = on
+  if P.ClearSegMemo then P.ClearSegMemo() end
+  return true
+end
 -- Whether it changed (then the remembered straight checks start over).
 function P.SetAvoidSwim(on)
   on = on and true or false
@@ -1565,18 +1580,22 @@ function P.FindPath(cont, x1, y1, x2, y2, road1, road2)
   -- not back into the other faction's guards' reach where the path went round it)
   -- (the path's yards in their reach so far, from its start: a shortcut may not add any)
   local hostileSoFar = { 0 }
-  -- (swimming left out, P.avoidSwim: nor across water the path went round)
-  local wetSoFar = P.avoidSwim and { 0 } or nil
+  -- (swimming left out, P.avoidSwim: nor across water the path went round. Else straightened both ways, the cheaper
+  -- kept at the swim cost: checked only for being open, a shortcut swam straight across a pond the walk went round,
+  -- 2026-11-19 south of Tarren Mill; kept from the water the path went round, a walk across a lake hugged the path's
+  -- stairs over the water where the open line was cheaper)
+  local wetSoFar = swimCost > 1 and { 0 } or nil
   for k = 2, #pts do
     local inside = hostile(cells[k][1], cells[k][2])
     local d = math.sqrt((pts[k][1] - pts[k - 1][1]) ^ 2 + (pts[k][2] - pts[k - 1][2]) ^ 2)
     hostileSoFar[k] = hostileSoFar[k - 1] + (inside and d or 0)
     if wetSoFar then wetSoFar[k] = wetSoFar[k - 1] + (Cell(g, cells[k][2], cells[k][1]) == 1 and d or 0) end
   end
+  local keepDry
   local function shortcut(i, j)
     local sc = P.SegmentCost(cont, pts[i][1], pts[i][2], pts[j][1], pts[j][2], 0)
     if not sc then return false end
-    if wetSoFar then
+    if keepDry then
       local len = math.sqrt((pts[j][1] - pts[i][1]) ^ 2 + (pts[j][2] - pts[i][2]) ^ 2)
       if (sc - len) / (swimCost - 1) > wetSoFar[j] - wetSoFar[i] + g.cell then return false end
     end
@@ -1586,34 +1605,53 @@ function P.FindPath(cont, x1, y1, x2, y2, road1, road2)
     end
     return true
   end
-  local out, total, i = { x1, y1 }, 0, 1
   local checks = 0
-  local function sees(j)
-    checks = checks + 1
-    if canYield and checks % 6 == 0 then coroutine.yield() end
-    return shortcut(i, j)
-  end
-  while i < #pts do
-    -- the farthest point still in sight: jumping ahead twice as far each time, then halving
-    -- back between the last one seen and the first one not (a line check each, not one per point)
-    local j, far, jump = i + 1, nil, 1
-    while j < #pts do
-      local k = math.min(#pts, j + jump)
-      if sees(k) then
-        j, jump = k, jump * 2
-      else
-        far = k
-        break
+  local function straighten()
+    local out, total, i = { x1, y1 }, 0, 1
+    local function sees(j)
+      checks = checks + 1
+      if canYield and checks % 6 == 0 then coroutine.yield() end
+      return shortcut(i, j)
+    end
+    while i < #pts do
+      -- the farthest point still in sight: jumping ahead twice as far each time, then halving
+      -- back between the last one seen and the first one not (a line check each, not one per point)
+      local j, far, jump = i + 1, nil, 1
+      while j < #pts do
+        local k = math.min(#pts, j + jump)
+        if sees(k) then
+          j, jump = k, jump * 2
+        else
+          far = k
+          break
+        end
       end
+      while far and far - j > 1 do
+        local mid = math.floor((j + far) / 2)
+        if sees(mid) then j = mid else far = mid end
+      end
+      local a, b = pts[i], pts[j]
+      total = total + (P.SegmentCost(cont, a[1], a[2], b[1], b[2]) or math.sqrt((b[1] - a[1]) ^ 2 + (b[2] - a[2]) ^ 2))
+      out[#out + 1], out[#out + 2] = b[1], b[2]
+      i = j
     end
-    while far and far - j > 1 do
-      local mid = math.floor((j + far) / 2)
-      if sees(mid) then j = mid else far = mid end
-    end
-    local a, b = pts[i], pts[j]
-    total = total + (P.SegmentCost(cont, a[1], a[2], b[1], b[2]) or math.sqrt((b[1] - a[1]) ^ 2 + (b[2] - a[2]) ^ 2))
-    out[#out + 1], out[#out + 2] = b[1], b[2]
-    i = j
+    return total, out
+  end
+  keepDry = P.avoidSwim and wetSoFar ~= nil
+  local total, out = straighten()
+  -- (the water the path went round kept to, when cutting it was dearer)
+  local function Yards(o)
+    local yd = 0
+    for k = 1, #o - 3, 2 do yd = yd + math.sqrt((o[k + 2] - o[k]) ^ 2 + (o[k + 3] - o[k + 1]) ^ 2) end
+    return yd
+  end
+  -- (only when the straightened walk swims, and kept to only when that swims KEEP_DRY_MIN_YD less: a few yards of a
+  -- stream is no way round, and a walk reshaped for them reached Bloodhoof's Hunter trainer over the tent's roof)
+  local wet = wetSoFar and not keepDry and (total - Yards(out)) / (swimCost - 1) or 0
+  if wet >= P.KEEP_DRY_MIN_YD then
+    keepDry = true
+    local t2, o2 = straighten()
+    if t2 < total and wet - (t2 - Yards(o2)) / (swimCost - 1) >= P.KEEP_DRY_MIN_YD then total, out = t2, o2 end
   end
   return total, out
 end

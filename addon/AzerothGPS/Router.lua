@@ -2784,7 +2784,13 @@ function R.WallsChanged()
   -- (the road nodes' straight links off the roads too: priced by SegmentCost, the walls and the swim cost in them;
   -- their background job just dropped with the others, so none is waited on)
   for _, g in pairs(graphs) do
-    if g then g.links, g.linkQueued, g.linkJob = nil, nil, nil end
+    if g then
+      g.links, g.linkQueued, g.linkJob = nil, nil, nil
+      -- (and the links across gaps between road pieces: priced once by SegmentCost too, so at the swim cost then)
+      for _, list in pairs(g.bridges or {}) do
+        for _, b in ipairs(list) do b.raw, b.open, b.shut, b.prov = nil, nil, nil, nil end
+      end
+    end
   end
   R.ClearSegMemo()
 end
@@ -2930,11 +2936,11 @@ local function Reuse(cont, x1, y1, tkey)
   return bestC, out
 end
 
-local function Walk(cont, x1, y1, x2, y2, transient, road1, road2, low)
+local function Walk(cont, x1, y1, x2, y2, transient, road1, road2, low, fresh)
   local key = string.format("%d:%.0f:%.0f:%.0f:%.0f%s%s", cont, x1, y1, x2, y2, road1 and "r" or "", road2 and "R" or "")
   local tkey = string.format("%d:%.0f:%.0f", cont, x2, y2)
   local w = walks[key]
-  if w == nil and transient then
+  if w == nil and transient and not fresh then -- (`fresh`: its own search, SwimWalk's: a reused walk can swim more)
     local c, path = Reuse(cont, x1, y1, tkey)
     if c then return c, path end
   end
@@ -2996,6 +3002,25 @@ end
 local function Dist(x1, y1, x2, y2)
   local dx, dy = x2 - x1, y2 - y1
   return math.sqrt(dx * dx + dy * dy)
+end
+
+-- A straight piece off the roads across water (SWIM_WALK_MIN_YD or more of it): its walk over the grid instead, when
+-- that's cheaper at the swim cost, else nil. A straight leg was only ever walked round when the ground blocked it, and
+-- water is open: every link, join and shortcut swam straight across a pond its walk goes round on land, 1.3x the
+-- yards, south of Tarren Mill (2026-11-19). Searched in the background in game: straight meanwhile, the route worked
+-- out again once it's in (Nav.SearchDone).
+R.SWIM_WALK_MIN_YD = 10
+local function SwimWalk(cont, x1, y1, x2, y2, transient)
+  local P = ns.Passability
+  if not (P and P.FindPath and P.SwimCost) then return nil end
+  local swimCost = P.SwimCost()
+  if swimCost <= 1 then return nil end
+  local sc = SegCost(cont, x1, y1, x2, y2)
+  if not sc then return nil end
+  if (sc - Dist(x1, y1, x2, y2)) / (swimCost - 1) < R.SWIM_WALK_MIN_YD then return nil end
+  local c, path = Walk(cont, x1, y1, x2, y2, transient, nil, nil, nil, true)
+  if c and path and c < sc - 1 then return path end
+  return nil
 end
 
 -- Yards of blocked ground on the straight line (x1, y1)-(x2, y2) (sampled every 4 yd).
@@ -4372,6 +4397,17 @@ function R.Smooth(cont, r)
           if chord >= 1 and not junction and (jog or dev <= R.SMOOTH_TOL) then
             -- (strictly: no leeway at its ends, which are mid-route)
             local walk = not ns.Passability or ns.Passability.SegmentCost(cont, x1, y1, x2, y2, 0)
+            -- (nor across water the route went round: a walk round a pond south of Tarren Mill was cut straight
+            -- across it, open ground being all it asked, 2026-11-19. Its cost at the swim cost, not its yards)
+            if type(walk) == "number" and walk > chord + 0.5 then
+              local cost = 0
+              for m = i, j - 1 do
+                local ax, ay = P(m)
+                local bx, by = P(m + 1)
+                cost = cost + (ns.Passability.SegmentCost(cont, ax, ay, bx, by, 0) or Dist(ax, ay, bx, by))
+              end
+              if walk > cost + 0.5 then walk = nil end
+            end
             if walk then
               local hs = 0
               for m = i, j - 1 do
@@ -5086,7 +5122,17 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
   -- (straight at once when it's open, unless through a zone too high for the player: then it's
   -- weighed against the ways round, below)
   local directSafe = direct and DangerLine(sx, sy, tx, ty) == 0
-  if not g or (offroad and directSafe) then return Straight(g, sx, sy, tx, ty) end
+  -- (straight there, or its walk round on land where the line swims and that's cheaper: SwimWalk)
+  local function StraightThere()
+    local path = g and not layered and not R.CapitalAt(cont, sx, sy) and not R.CapitalAt(cont, tx, ty)
+      and SwimWalk(cont, sx, sy, tx, ty, opts and opts.transient)
+    if not path then return Straight(g, sx, sy, tx, ty) end
+    local pieces = {}
+    for i = 1, #path - 2, 2 do pieces[#pieces + 1] = { R.KIND_OFFROAD, path[i], path[i + 1], path[i + 2], path[i + 3] } end
+    return Build(g, pieces)
+  end
+  if not g then return Straight(g, sx, sy, tx, ty) end
+  if offroad and directSafe then return StraightThere() end
   local ss = R.NearestEdges(cont, sx, sy, layered and sz or nil)
   Breathe(1, 1) -- (in a background job: a pause between the parts; in the frame: nothing)
   local ts = R.NearestEdges(cont, tx, ty, layered and tz or nil)
@@ -5206,7 +5252,7 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
   if not offroad and not roadsFirst and directSafe and Dist(sx, sy, tx, ty) <= s.dist + t.dist
       and not R.CapitalAt(cont, sx, sy) and not R.CapitalAt(cont, tx, ty)
       and (not tf or (sf and math.abs(sf - tf) <= R.SAME_FLOOR_Z)) then
-    return Straight(g, sx, sy, tx, ty)
+    return StraightThere()
   end
 
   local OFF, ROAD = R.KIND_OFFROAD, R.KIND_ROAD
@@ -5752,6 +5798,7 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
       end
       if c and c * directFactor < best then
         local pieces = { { OFF, sx, sy, tx, ty } }
+        if not path then path = SwimWalk(cont, sx, sy, tx, ty, opts and opts.transient) end
         if path then
           pieces = {}
           for i = 1, #path - 2, 2 do pieces[#pieces + 1] = { OFF, path[i], path[i + 1], path[i + 2], path[i + 3] } end
@@ -5842,6 +5889,10 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
           redo = true
         end
       end
+      -- (open but across water: its walk round on land when that's cheaper, SwimWalk)
+      if not path and not searching and not p.gap and p.kind == nil and p[1] == OFF and Pass and not layered then
+        path = SwimWalk(cont, p[2], p[3], p[4], p[5], opts and opts.transient and p[2] == sx and p[3] == sy or false)
+      end
       if path then
         for i = 1, #path - 2, 2 do pieces[#pieces + 1] = { OFF, path[i], path[i + 1], path[i + 2], path[i + 3] } end
       else
@@ -5893,7 +5944,7 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
   -- (not on floors over floors, nor in a capital: grids too coarse for walls between)
   if direct and directSafe and not layered and not R.CapitalAt(cont, sx, sy) and not R.CapitalAt(cont, tx, ty)
       and res.length - res.road >= Dist(sx, sy, tx, ty) then
-    res = Straight(g, sx, sy, tx, ty)
+    res = StraightThere() -- (or round the water it swims, SwimWalk)
     res.hops = 0
   end
   res.pending = pending or againPending

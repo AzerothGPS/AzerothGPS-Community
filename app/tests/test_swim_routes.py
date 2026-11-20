@@ -497,3 +497,126 @@ def test_banning_a_bay_stays_within_the_frame_budget(game, trip):
       return worst * 1000, n
     end""")(P)
     assert worst[0] < FRAME_MS, worst
+
+
+# (reported 2026-11-19 with a screenshot: in Hillsbrad at 62.0, 33.3, on the east shore of the pond south of Tarren
+# Mill, the route swam straight across it, then a line off the roads to the road toward Southshore, not round its south
+# shore on land. Water was priced at the swim cost everywhere, but a straight line over open ground was never walked
+# round, and water is open: the start's leg, the walk straight there, the walk's own straightening (Passability.
+# FindPath) and Router.Smooth's corners each crossed it at running cost)
+POND_SHORE = (0.620, 0.333)  # (Hillsbrad's map, uiMap 1424)
+
+
+@pytest.mark.parametrize("stop", [(0.58, 0.38), (0.55, 0.40), "maleb"])
+def test_a_pond_is_walked_round_when_that_is_cheaper_than_swimming_it(game, trip, stop):
+    lua, ns = game
+    P = ns.Passability
+    sx, sy, _ = ns.Layers.MapToWorld(1424, *POND_SHORE)
+    if stop == "maleb":
+        tx, ty = MALEB
+    else:
+        tx, ty, _ = ns.Layers.MapToWorld(1424, *stop)
+    r = trip((sx, sy), (tx, ty))
+    assert r is not None and not P.avoidSwim and P.SwimCost() == P.SWIM_COST
+    assert r.swimYards < 5, (round(r.swimYards), round(r.walkYards))
+    # (round its south shore: a few yards more than straight across, far less than the swim's extra cost)
+    first = r.parts[1].pts
+    assert len(first) > 4 and first[3] > -330, [round(v) for v in list(first.values())[:8]]
+    # the walk itself, searched from the shore: round the pond, not straightened back across it
+    cost, path = P.FindPath(0, sx, sy, -378.1, -774.0)
+    straight = P.SegmentCost(0, sx, sy, -378.1, -774.0)
+    assert cost < straight and len(path) > 4, (cost, straight)
+
+
+def _bags(lua, ns, spells=(), items=None):
+    """The character knows `spells` and has `items` ({ id: count }) in the bags; then the bags changed (BAG_UPDATE)."""
+    known = " or ".join(f"id == {s}" for s in spells) or "false"
+    counts = ", ".join(f"[{k}] = {v}" for k, v in (items or {}).items())
+    lua.execute(f"""
+      IsPlayerSpell = function(id) return {known} end
+      IsSpellKnown = IsPlayerSpell
+      AGPS_BAGS = {{ {counts} }}
+      GetItemCount = function(id) return AGPS_BAGS[id] or 0 end
+      C_UnitAuras = {{ GetPlayerAuraBySpellID = function() end }}
+      AGPS_T = AGPS_T + 5
+    """)
+    lua.eval("AGPS_FIRE")("BAG_UPDATE", 0)
+
+
+# (asked 2026-11-19: a character who crosses water at land speed is routed so: water priced as land, not only timed so.
+# A spell counts only castable now, its reagent in the bags: Water Walking a Fish Oil (17058), Levitate a Light Feather
+# (17056), the client's SpellReagents; Aquatic Form none; the Elixir of Water Walking (8827) in the bags)
+@pytest.mark.parametrize("how", ["water walking", "elixir", "aquatic form"])
+def test_water_as_fast_as_land_is_priced_as_land_and_crosses_the_pond(game, trip, water, how):
+    lua, ns = game
+    N, P = ns.Nav, ns.Passability
+    sx, sy, _ = ns.Layers.MapToWorld(1424, *POND_SHORE)
+    tx, ty, _ = ns.Layers.MapToWorld(1424, 0.58, 0.38)
+
+    def route():
+        trip.settle()
+        return N.route
+
+    trip((sx, sy), (tx, ty))
+    if how == "water walking":
+        # a shaman with Water Walking but no Fish Oil: water's a swim, round the pond
+        _bags(lua, ns, spells=(546,))
+        r = route()
+        assert N.WaterFast() is None and not P.waterFast and P.SwimCost() == P.SWIM_COST
+        assert r.swimYards < 5, round(r.swimYards)
+        _bags(lua, ns, spells=(546,), items={17058: 5})
+    elif how == "elixir":
+        _bags(lua, ns, items={8827: 1})
+    else:
+        _bags(lua, ns, spells=(1066,))
+    fast = N.WaterFast()
+    assert fast and P.waterFast and P.SwimCost() == pytest.approx(P.WATER_FAST_COST)
+    r = route()
+    assert r.swimYards > 40, round(r.swimYards)  # (straight across the pond)
+    if how == "water walking":
+        assert fast.spell == 546 and fast.name.endswith("(Fish Oil: 5)"), fast.name
+        assert f"{fast.name}: as fast as on land." in "\n".join(str(v) for v in ns.GPS.SwimTip().lines.values())
+        # the last Fish Oil used: worked out again, round the pond
+        _bags(lua, ns, spells=(546,), items={17058: 0})
+        r = route()
+        assert N.WaterFast() is None and not P.waterFast
+        assert r.swimYards < 5, round(r.swimYards)
+    # swimming left out (the option off) still goes round, however fast the water
+    if how == "elixir":
+        r = trip((sx, sy), (tx, ty), allow=False)
+        assert P.avoidSwim and P.SwimCost() == P.AVOID_SWIM_COST and r.swimYards < 5
+    water()  # (put back)
+    N.SyncSwim()
+    assert not P.waterFast
+
+
+def test_levitate_needs_its_light_feather(game, water):
+    lua, ns = game
+    N = ns.Nav
+    _bags(lua, ns, spells=(1706,))
+    assert N.WaterFast() is None
+    _bags(lua, ns, spells=(1706,), items={17056: 2})
+    fast = N.WaterFast()
+    assert fast and fast.spell == 1706 and fast.count == 2
+    water()
+
+
+# (reported 2026-11-19: in the Wetlands' marsh by Saltspray Glen, about 29.6, 19.9, a stop ~170 yd north-west was one
+# straight line swimming along two channels; on land north-west, across a channel where it's narrow, then along the
+# bank swims far less for a few yards more)
+MARSH, MARSH_STOP = (-2776.4, -1613.7), (-2654.1, -1491.3)
+
+
+def test_a_short_trip_through_a_marsh_crosses_its_channels_where_they_are_narrow(game, trip):
+    lua, ns = game
+    N, P = ns.Nav, ns.Passability
+    straight = sum((b - a) for a, b in zip(*[iter(list(P.WaterSpans(0, *MARSH, *MARSH_STOP).values()))] * 2)) \
+        * math.dist(MARSH, MARSH_STOP)
+    assert straight > 100, straight
+    r = trip(MARSH, MARSH_STOP)
+    assert len(r.parts[1].pts) > 4  # (not the straight line)
+    assert r.swimYards < straight - 50 and r.walkYards < math.dist(MARSH, MARSH_STOP) * 1.15, (
+        round(r.swimYards), round(straight), round(r.walkYards))
+    # timed with its swim at the swim speed, the rest at running speed
+    assert N.TripSecs(r.walkYards, r.swimYards, 0, 7) == pytest.approx(
+        (r.walkYards - r.swimYards) / 7 + r.swimYards / N.SwimSpeed())
