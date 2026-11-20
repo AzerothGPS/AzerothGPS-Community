@@ -1330,13 +1330,152 @@ function G.EditInteriorFloorsAt(x, y)
   return out
 end
 -- What the tools' hover says of the floors there: "Floor: 63 yd", "Floors: 57, 63 yd", or nil (none known there).
+-- (asked 2026-11-19, a screenshot over Blackrock Mountain: its central hall is one room 272 yd tall with 47 floor heights,
+-- and the tooltip listed every one across the screen) With no floor picked, at most FLOOR_TIP_MAX heights (G.TipFloorHeights)
+-- and how many more, and the hint to pick one; with one picked, only that floor ("Floor 12 of 47: 238 yd"): the one
+-- drawing goes on.
+G.FLOOR_TIP_MAX = 3
+-- At most FLOOR_TIP_MAX of the heights `hs` (bottom up): those nearest `near` (the floor picked last), else the lowest,
+-- the middle and the top; bottom up.
+function G.TipFloorHeights(hs, near)
+  local n, max = #hs, G.FLOOR_TIP_MAX
+  if n <= max then return hs end
+  local pick = {}
+  if near then
+    local idx = {}
+    for k = 1, n do idx[k] = k end
+    table.sort(idx, function(a, b)
+      local da, db = math.abs(hs[a] - near), math.abs(hs[b] - near)
+      if da ~= db then return da < db end
+      return a < b
+    end)
+    for k = 1, max do pick[k] = idx[k] end
+    table.sort(pick)
+  else
+    pick = { 1, math.floor((n + 1) / 2), n }
+  end
+  local out = {}
+  for k, i in ipairs(pick) do out[k] = hs[i] end
+  return out
+end
 function G.FloorHeightText(x, y)
   local hs2 = G.EditInteriorFloorsAt(x, y)
-  if #hs2 == 0 then return nil end
-  if #hs2 == 1 then return Format(L["Floor: %d yd"], math.floor(hs2[1] + 0.5)) end
+  local n = #hs2
+  if n == 0 then return nil end
+  local function yd(h) return math.floor(h + 0.5) end
+  local f = (G.roadMode or G.wallMode) and G.editFloor or nil
+  if f and f.z then
+    local best
+    for k, h in ipairs(hs2) do
+      if math.abs(h - f.z) <= G.FLOOR_SAME_YD and (not best or math.abs(h - f.z) < math.abs(hs2[best] - f.z)) then
+        best = k
+      end
+    end
+    if not best then return Format(L["Floor picked: %d yd"], yd(f.z)) end
+    if n == 1 then return Format(L["Floor: %d yd"], yd(hs2[best])) end
+    return Format(L["Floor %d of %d: %d yd"], best, n, yd(hs2[best]))
+  end
+  if n == 1 then return Format(L["Floor: %d yd"], yd(hs2[1])) end
+  local shown = G.TipFloorHeights(hs2, G.lastFloorZ)
   local parts = {}
-  for k, h in ipairs(hs2) do parts[k] = tostring(math.floor(h + 0.5)) end
-  return Format(L["Floors: %s yd"], table.concat(parts, ", "))
+  for k, h in ipairs(shown) do parts[k] = tostring(yd(h)) end
+  local list = table.concat(parts, ", ")
+  local text = n > #shown and Format(L["Floors: %s yd (+%d more)"], list, n - #shown) or Format(L["Floors: %s yd"], list)
+  return text .. "\n" .. L["Shift + mouse wheel: pick a floor"]
+end
+
+-- The building with floors the road or wall tools are over (1.3.10, asked 2026-11-19: "When road or wall tools are on,
+-- editing, and the crosshair is over a building, keep the floors showing"): G.floorBuilding = { key, place, wmo, room,
+-- cont, floors (the whole building's heights, bottom up), at (last seen), outside (the pick before it) }, kept
+-- FLOOR_BUILDING_GRACE after the pointer leaves its rooms (the gaps between them, its edges: no blinking). Its floor
+-- picked (Shift + mouse wheel) is remembered by building for the session (G.floorPicks): back over it, picked again.
+-- Never the player's height (none in WoW Forever): the floor is the player's pick.
+G.FLOOR_BUILDING_GRACE = 0.6
+G.floorPicks = {}
+function G.FloorBuildingKey(place, room, cont)
+  local k = tostring(cont) .. ":" .. tostring(place[1]) .. ":" .. tostring(place[2]) .. ":" .. tostring(place[3])
+  -- (an open city's model, Orgrimmar's: each building is its rooms there)
+  if G.OPEN_CITY_MODELS[place[1]] and room then k = k .. ":" .. tostring(room[1]) .. ":" .. tostring(room[2]) end
+  return k
+end
+function G.LeaveFloorBuilding()
+  local fb = G.floorBuilding
+  if not fb then return end
+  G.floorPicks[fb.key] = G.editFloor or false
+  G.editFloor = fb.outside
+  G.floorBuilding = nil
+  G.floorLine = nil
+end
+-- At each redraw (G.Update, after G.SetEditInterior): the building being edited, or the one just left within the grace.
+function G.TrackFloorBuilding(now)
+  local tools = G.roadMode or G.wallMode
+  local fb = G.floorBuilding
+  local e = tools and G.editInterior
+  if e and e[1] and e[2] then
+    local key = G.FloorBuildingKey(e[1], e[3], e.cont)
+    if fb and fb.key == key then
+      fb.at = now
+      return fb
+    end
+    local floors = G.InteriorFloorsAt(e[1], e[2], e[3])
+    if #floors >= 2 then
+      if fb then G.LeaveFloorBuilding() end
+      G.floorBuilding = { key = key, place = e[1], wmo = e[2], room = e[3], cont = e.cont, floors = floors, at = now,
+        outside = G.editFloor }
+      G.editFloor = G.floorPicks[key] or nil
+      G.floorLine = nil
+      G.FloorsChanged()
+      return G.floorBuilding
+    end
+  end
+  if fb and (not tools or now - fb.at > G.FLOOR_BUILDING_GRACE) then
+    G.LeaveFloorBuilding()
+    G.FloorsChanged()
+  end
+  return G.floorBuilding
+end
+-- The legend told at once (not at its next FLOOR_HINT_SECONDS), and the map redrawn: the picked floor's inside map.
+function G.FloorsChanged()
+  if (G.roadMode or G.wallMode) and G.RoadHint and G.drawHint and not G.drawMode then G.RoadHint() end
+  if G.Redraw then G.Redraw() end
+end
+-- The floors' list under the legend's state line: "Floors: 3 (top): 64 yd, 2: 60 yd, 1 (ground): 57 yd", the one
+-- picked highlighted; many (Blackrock Mountain's 47): the top, the ground and those round the pick (or the middle),
+-- "..." between. `floors`: G.EditFloors's, bottom up; nil without two heights.
+G.FLOOR_LIST_MAX = 5
+function G.FloorListText(floors, f)
+  local n = #floors
+  if n < 2 then return nil end
+  for _, o in ipairs(floors) do
+    if not o.z then return nil end
+  end
+  local pick = 0
+  for k, o in ipairs(floors) do
+    if f and f.z and math.abs(o.z - f.z) <= G.FLOOR_SAME_YD then pick = k end
+  end
+  local show = {}
+  if n <= G.FLOOR_LIST_MAX then
+    for k = 1, n do show[k] = true end
+  else
+    local mid = pick > 0 and pick or math.floor((n + 1) / 2)
+    show[1], show[n] = true, true
+    for k = mid - 1, mid + 1 do
+      if k >= 1 and k <= n then show[k] = true end
+    end
+  end
+  local parts, gap = {}, false
+  for k = n, 1, -1 do
+    if show[k] then
+      if gap then parts[#parts + 1] = "..." end
+      gap = false
+      local name = k == n and Format(L["%d (top)"], k) or k == 1 and Format(L["%d (ground)"], k) or tostring(k)
+      local item = Format(L["%s: %d yd"], name, math.floor(floors[k].z + 0.5))
+      parts[#parts + 1] = (k == pick and "|cffffd100" or "|cffa0a0a0") .. item .. "|r"
+    else
+      gap = true
+    end
+  end
+  return Format(L["Floors: %s"], table.concat(parts, " \194\183 "))
 end
 
 -- The NPCs in a building's or cave's inside map (asked 2026-11-14: "for every npc in the building I want a small dot to
@@ -1544,6 +1683,35 @@ function G.LayoutInterior(cx, cy, place, wmo, room, rot, zoom, half, anyGroup, q
     end
   end
   return quads
+end
+-- The inside map of the floor picked (1.3.10, asked 2026-11-19: "when scrolling to the floor to edit, show the
+-- appropriate floor's interior"): over G.floorBuilding with a floor picked (Shift + mouse wheel), a room standing for
+-- that floor, for G.LayoutInterior and the world map's floor (G.InteriorMapFor): the rooms with standing room
+-- (FLOOR_ART_FROM_YD to FLOOR_ART_HEAD_YD) over the floor's height, `room`'s box kept (an open city's building). A
+-- building whose one room holds several floors keeps its map (that room spans every floor); nil when no room with art
+-- is at that height (the room under the pointer's floor then, as ever). Second: the floor's band { lo, hi } (world).
+G.FLOOR_ART_FROM_YD, G.FLOOR_ART_HEAD_YD = 0.5, 2.5
+G.floorArtRooms = {}
+function G.FloorArtRoom(place, wmo, room, cont)
+  local fb, f = G.floorBuilding, G.editFloor
+  if not (fb and f and f.z and place and wmo and wmo.groups and room and (G.roadMode or G.wallMode)) then return nil end
+  if fb.place ~= place or fb.cont ~= cont or fb.key ~= G.FloorBuildingKey(place, room, cont) then return nil end
+  local lo, hi = f.z - place[4] + G.FLOOR_ART_FROM_YD, f.z - place[4] + G.FLOOR_ART_HEAD_YD
+  local key = fb.key .. ":" .. tostring(room) .. ":" .. lo
+  local hit = G.floorArtRooms[key]
+  if hit == nil then
+    hit = false
+    for _, g in ipairs(wmo.groups) do
+      if g["in"] and g.blocks and #g.blocks > 0 and g[6] >= lo and g[3] <= hi and G.RoomGroupShown(place, room, g) then
+        -- (LayoutInterior widens a room's heights by Z_SLACK: taken off here)
+        hit = { room[1], room[2], lo + Z_SLACK, room[4], room[5], hi - Z_SLACK, n = room.n, floorPick = true }
+        break
+      end
+    end
+    G.floorArtRooms[key] = hit
+  end
+  if not hit then return nil end
+  return hit, { f.z, f.z + G.FLOOR_ART_HEAD_YD }
 end
 
 -- A dungeon's map from the game's own minimap art of its models (Data/Instances.lua:
@@ -2588,8 +2756,11 @@ function G.EditFloors(level, x, y)
   end
   -- (a building's inside map being edited, 1.3.10: its floors' heights, Data/InteriorFloors.lua, there or the whole
   -- building's; `gz`: a road drawn on one takes its height as its ground heights, never as a floor road's `zs`)
-  if not (g and g.floorsAt) and G.editInterior then
-    local ifl = G.EditInteriorFloorsAt(x, y)
+  -- (the building the tools are over, G.floorBuilding, its floors the same wherever the map's middle is: the list
+  -- stays put while the pointer moves over it, and a moment past its edges)
+  local fb = (G.roadMode or G.wallMode) and G.floorBuilding
+  if not (g and g.floorsAt) and (fb or G.editInterior) then
+    local ifl = fb and fb.floors or G.EditInteriorFloorsAt(x, y)
     if #ifl == 0 then ifl = G.InteriorFloorsAt(G.editInterior[1], G.editInterior[2], G.editInterior[3]) end
     if #ifl >= 2 then
       for _, h in ipairs(ifl) do out[#out + 1] = { z = h, gz = true } end
@@ -2620,20 +2791,33 @@ local function SameFloor(a, b)
   if a.z and b.z then return math.abs(a.z - b.z) <= (ns.Router and ns.Router.LAYER_Z or 5) end
   return a.down == b.down
 end
+-- The number of floor `f` in `floors`: the nearest within SameFloor's reach (a building's floors lie closer than
+-- Router.LAYER_Z: the last one in reach was taken, and Shift + wheel skipped the Lion's Pride Inn's middle floor); 0: none.
+function G.FloorIndex(floors, f)
+  local i, bd = 0, nil
+  for k, o in ipairs(floors) do
+    if SameFloor(o, f) then
+      local d = (o.z and f and f.z) and math.abs(o.z - f.z) or 0
+      if not bd or d < bd then i, bd = k, d end
+    end
+  end
+  return i
+end
 -- Shift + mouse wheel with the tools on: the next floor up (delta > 0) or down, "all floors" past the
 -- ends, from the floors where the map is centered. Returns whether there were floors to pick from.
 function G.StepEditFloor(delta)
   local floors = G.EditFloors(G.shownLevel, view.x, view.y)
   if #floors == 0 then return false end
-  local i = 0 -- (0: all floors)
-  for k, f in ipairs(floors) do
-    if SameFloor(f, G.editFloor) then i = k end
-  end
+  local i = G.FloorIndex(floors, G.editFloor) -- (0: all floors)
   -- (over a cave's floor: up = up top, the second; a level's floors are bottom up)
   i = i + (delta > 0 and 1 or -1)
   if i > #floors then i = 0 elseif i < 0 then i = #floors end
   G.editFloor = floors[i]
   G.floorLine = nil
+  if G.editFloor and G.editFloor.z then G.lastFloorZ = G.editFloor.z end -- (the hover's heights: those near it)
+  -- (over a building: its pick remembered, and its inside map that floor's, G.FloorArtRoom)
+  if G.floorBuilding then G.floorPicks[G.floorBuilding.key] = G.editFloor or false end
+  if G.Redraw then G.Redraw() end
   if G.RoadHint and (G.roadMode or G.wallMode) then G.RoadHint() end
   elapsed = 1
   return true
@@ -2796,10 +2980,7 @@ function G.FloorText()
   if not f then
     what = L["all floors"]
   elseif f.z then
-    local i = 0
-    for k, o in ipairs(floors) do
-      if SameFloor(o, f) then i = k end
-    end
+    local i = G.FloorIndex(floors, f)
     what = i > 0 and Format(L["floor %d of %d here, counting up"], i, #floors) or L["the floor picked (none here)"]
   else
     what = f.down and L["down under"] or L["up top"]
@@ -9083,6 +9264,7 @@ function G.Update()
   end
   G.inside = place and ((room.n ~= "" and room.n or "?") .. " / " .. place[1]) or nil
   local instArt, instBand, instFloor = false, nil, 0
+  G.artRoom = nil -- (the floor picked's room, G.FloorArtRoom: set below with the inside map)
   view.mine = here and onMe
   -- (the seamless zoom, issue #57: the stitched map's art under the tiles on the terrain view, and the tiles' share;
   -- not drawn, the tiles as they always were)
@@ -9157,8 +9339,12 @@ function G.Update()
   elseif place and not browse then
     -- (its world map under it where it has one, the floor of the room's heights: Data/InteriorMaps.lua)
     local terrain = view.interiorTerrain -- (a building's: the terrain round it, 2026-11-14)
+    -- (the tools on over a building with a floor picked: that floor's inside map, G.FloorArtRoom)
+    local pickRoom, pickBand = G.FloorArtRoom(place, wmo, room, viewCont)
+    G.artRoom = pickRoom
+    local room = pickRoom or room
     -- (over the terrain, no world map's parchment under it either, as a cave's: 2026-11-15)
-    view.interiorMap = not terrain and G.InteriorMapFor(cont, { place }, room and { place[4] + room[3], place[4] + room[6] }, cx, cy) or nil
+    view.interiorMap = not terrain and G.InteriorMapFor(cont, { place }, pickBand or room and { place[4] + room[3], place[4] + room[6] }, cx, cy) or nil
     local ground = view.interiorSpot ~= nil or terrain -- (the interiors' edge blend, issue #85)
     quads = TilesKept("in:" .. tostring(place[1]) .. ":" .. tostring(room) .. ":" .. tostring(view.interiorMap and view.interiorMap.ui)
         .. (G.alsoInside and (":also:" .. tostring(G.alsoInsideKey)) or "")
@@ -9277,6 +9463,7 @@ function G.Update()
   -- faded and the building's own show, to edit them there: G.EditInterior, the roads and walls in it, G.InEditInterior)
   G.SetEditInterior(place and not artLevel and not capitalInside and not inst and not browse
     and not G.WholeCityPlace(place, viewCont) and place or nil, wmo, room, viewCont)
+  G.TrackFloorBuilding(GetTime()) -- (the building with floors the tools are over, kept a moment past it: its floors)
   local focus = G.editInterior and G.InEditInterior or nil
   if (st.showRoads or G.roadMode or forced) and (not place or artLevel or capitalInside or focus)
       and not (view.artOnly and not G.SeamDataNear(zoom)) then -- (the art alone, far out: its own roads)
@@ -9843,7 +10030,7 @@ function G.Update()
     -- world map's, and the quests and city locations
     local pois = {}
     if st.poiLabels ~= false then
-      for _, l in ipairs(G.InteriorLabels(place, wmo, room)) do
+      for _, l in ipairs(G.InteriorLabels(place, wmo, G.artRoom or room)) do
         local dx, dy = Geo.ScreenOffset(cx, cy, l[1], l[2])
         dx, dy = Geo.Rotate(dx * s, dy * s, rot)
         if math.abs(dx) <= half and math.abs(dy) <= half then
@@ -12868,9 +13055,17 @@ function G.ToolLegendRows()
   end
   row(L["Drag: pan the map"], "MouseLeft")
   -- (where floors lie over each other: which one is edited, Shift + wheel steps it)
-  local state = G.FloorText()
+  local state = G.FloorStateText()
   if state then row(L["Pick a floor"], "Shift", "MouseWheel") end
   return header, rows, state
+end
+-- The legend's state line: which floor is edited (G.FloorText) and, where they have heights, the floors' list under
+-- it (G.FloorListText: a building's whole list while the tools are over it, G.floorBuilding).
+function G.FloorStateText()
+  local state = G.FloorText()
+  if not state then return nil end
+  local list = G.FloorListText(G.EditFloors(G.shownLevel, view.x, view.y), G.editFloor)
+  return list and (state .. "\n" .. list) or state
 end
 -- The icons: each drawn at each of TOOL_ICON_PX pixels high (toolicons.py's ICON_PX), a keycap TOOL_ICON_WIDE times as
 -- wide, in the top-left corner of a square power-of-two canvas; shown TOOL_ICON_UNITS high, the size drawn nearest its
@@ -13076,7 +13271,7 @@ function G.KeepTipOffLegend()
 end
 -- The tools' hint: the legend (the line at the map's top is only for drawing an area now, G.drawMode).
 function G.RoadHint()
-  G.floorLine = G.FloorText()
+  G.floorLine = G.FloorStateText()
   if G.drawMode then return end
   drawHint:Hide()
   G.ShowToolLegend()
@@ -13090,7 +13285,7 @@ function G.RefreshFloorHint()
   if now - floorHintAt < G.FLOOR_HINT_SECONDS then return end
   floorHintAt = now
   G.PlaceDrawHint()
-  if G.FloorText() ~= G.floorLine then G.RoadHint() else G.PlaceToolLegend() end
+  if G.FloorStateText() ~= G.floorLine then G.RoadHint() else G.PlaceToolLegend() end
 end
 -- The hint under the top panel (the directions, a quest area's objectives): at DRAW_HINT_Y, or lower when that panel
 -- reaches further down (reported 2026-11-14: a quest's four lines hid the tools' hint).
@@ -13114,6 +13309,10 @@ end
 -- The tools off: the edits made with them into the road network now (Record.Apply), once.
 local function ToolsOff()
   if not G.roadMode and not G.wallMode and ns.Record and ns.Record.pending then ns.Record.Apply() end
+  if not G.roadMode and not G.wallMode and G.floorBuilding then -- (a building's pick kept for next time, G.floorPicks)
+    G.floorPicks[G.floorBuilding.key] = G.editFloor or false
+    G.floorBuilding = nil
+  end
   if not G.roadMode and not G.wallMode then G.editFloor, G.eraserMode = nil, nil end -- (the floor picked: all again next time)
   if not G.roadMode and not G.wallMode and ns.Ground then ns.Ground.Release() end -- (the ground's tiles let go)
 end
@@ -14748,7 +14947,8 @@ function G.RoadHover(dt)
   end
   G.roadTip = key
   GameTooltip:SetOwner(frame, G.ToolLegendShown() and "ANCHOR_NONE" or "ANCHOR_CURSOR")
-  GameTooltip:SetText(info.title, 1, 1, 1)
+  -- (wrapped, never wider than the map: a long floors' line, asked 2026-11-19)
+  GameTooltip:SetText(info.title, 1, 1, 1, 1, true)
   for _, l in ipairs(info.lines) do GameTooltip:AddLine(l, nil, nil, nil, true) end
   G.KeepTipOffLegend()
   GameTooltip:Show()
@@ -18628,6 +18828,14 @@ function G.BuildingHover()
         key = table.concat({ place[1], place[2], place[3], tostring(room), c }, ":")
       end
     end
+  end
+  -- (the road or wall tools on: a building's inside map kept FLOOR_BUILDING_GRACE past its rooms, the gaps between them
+  -- and its edges, as its floors' list is, G.TrackFloorBuilding; asked 2026-11-19: no blinking)
+  if hit and not hit.cave then
+    G.hoverBuildingAt = now
+  elseif not hit and (G.roadMode or G.wallMode) and G.hoverInside and not G.hoverInside.cave
+      and now - (G.hoverBuildingAt or 0) <= G.FLOOR_BUILDING_GRACE then
+    hit, key = G.hoverInside, G.hoverInsideKey
   end
   local held = G.heldInside
   if held and now > held.untilT then
