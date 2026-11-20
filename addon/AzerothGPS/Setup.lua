@@ -16,7 +16,8 @@
 --
 -- THE PICTURES: a card shows Media/Setup/<art>.tga (or .blp) when the client has the file (S.ImageKnown), else its
 -- drawing of plain color boxes (S.ART). Exact size, never filtered above LINEAR: the picture is S.IMAGE_PX[cards on
--- the page] pixels (the top left of a power-of-two canvas, the rest clear, as Media's CornerLogo files), shown pixel
+-- the page] pixels (the top left of a power-of-two canvas, the rest clear, as Media's CornerLogo files; the screenshot
+-- cut out of the game world with a gold glow, drawn straight on the card: no screen box behind it), shown pixel
 -- for pixel on a 1440-high screen at UI scale 1 (S.REF_PPU) and at the same size in UI units on any other.
 --
 -- THE POPUPS: the setup comes first. The tutorial's offer (T.MaybePrompt: "what's new", a tutorial cut short) waits
@@ -45,7 +46,7 @@ S.PAD_KEYS = { PADDUP = "up", PADDDOWN = "down", PADDLEFT = "left", PADDRIGHT = 
   PADLSHOULDER = "lb", PADRSHOULDER = "rb" }
 S.TIP_OWNER = "AzerothGPS tips" -- (Nav.arriveHooks)
 -- The settings the setup can change: taken as it opens, put back by Skip / closing.
-S.KEYS = { "replaceMinimap", "replaceMinimapSize", "useWorldMap", "navPanelDetached", "iconSize" }
+S.KEYS = { "replaceMinimap", "replaceMinimapSize", "useWorldMap" }
 S.SIZES = { { "small", L["Small"] }, { "medium", L["Medium"] }, { "large", L["Large"] } }
 
 local function GPS() return ns.settings.gps end
@@ -77,16 +78,6 @@ function S.BuildPages()
         text = L["The GPS map shows inside the game's world map (M)."],
         -- (as Options' own: not with the game's controller UI on, GPSFrame's G.WorldMapWanted)
         enabled = function() return not (ns.GPS and ns.GPS.ControllerUI and ns.GPS.ControllerUI()) end } } },
-    { id = "panel", title = L["Route directions"], key = "navPanelDetached", cards = {
-      { value = false, title = L["On the map"], art = "panelOn",
-        text = L["The directions sit at the top of the map."] },
-      { value = true, title = L["In their own window"], art = "panelOff",
-        text = L["Drag them anywhere. They stay while the map is closed."] } } },
-    { id = "icons", title = L["Map icon size"], key = "iconSize", cards = {
-      { value = "small", title = L["Small"], art = "icons1", text = L["More map, less clutter."] },
-      { value = "medium", title = L["Medium"], art = "icons2", text = L["The usual size."] },
-      { value = "large", title = L["Large"], art = "icons3", text = L["Easier to see."] },
-      { value = "xlarge", title = L["Extra large"], art = "icons4", text = L["Twice the small size."] } } },
   }
 end
 -- The pages shown this time (a page's `when()` false: left out).
@@ -104,8 +95,9 @@ end
 ---------------------------------------------------------------------------
 
 S.IMAGE_DIR = "Interface\\AddOns\\AzerothGPS\\Media\\Setup\\"
--- A card's picture in pixels, by the cards on its page (2: the minimap, the map, the route panel; 4: the icon sizes).
-S.IMAGE_PX = { [2] = { 300, 180 }, [4] = { 216, 130 } }
+-- A card's picture in pixels, by the cards on its page (2: the minimap, where the map opens; the route directions and
+-- icon size pages were taken out 2026-11-19). Made from in-game screenshots by `agps setup-art` (setupart.py).
+S.IMAGE_PX = { [2] = { 300, 180 } }
 S.REF_PPU = 1440 / 768 -- (screen pixels per UI unit the pictures are made for: ns.PixelsPerUnit, 1440 high, scale 1)
 -- The picture's box on a card `w` wide with `n` on its page, in UI units (the drawing's too).
 function S.ArtSize(n, w)
@@ -183,23 +175,7 @@ S.ART = {
     Box(a, 4, 4, 92, 52, PARCH) Box(a, 4, 4, 92, 5, DARK) Box(a, 22, 14, 56, 36, MAP)
     Box(a, 30, 32, 34, 2, ROAD)
   end,
-  panelOn = function(a)
-    Box(a, 22, 8, 56, 44, FRAME) Box(a, 24, 10, 52, 40, MAP) Box(a, 24, 10, 52, 9, DARK)
-    Box(a, 27, 13, 30, 2, WHITE)
-  end,
-  panelOff = function(a)
-    Box(a, 34, 18, 56, 38, FRAME) Box(a, 36, 20, 52, 34, MAP) Box(a, 6, 4, 40, 10, DARK)
-    Box(a, 9, 8, 26, 2, WHITE)
-  end,
 }
-for n, px in ipairs({ 4, 5, 6, 8 }) do
-  S.ART["icons" .. n] = function(a)
-    Box(a, 10, 6, 80, 48, MAP)
-    for i, at in ipairs({ { 22, 14 }, { 56, 22 }, { 34, 36 } }) do
-      Box(a, at[1], at[2], px, px, i == 2 and WHITE or ROAD)
-    end
-  end
-end
 
 ---------------------------------------------------------------------------
 -- The window
@@ -337,7 +313,9 @@ function S.ShowPage(i)
         local bg = b.art:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints()
         bg:SetColorTexture(SCREEN[1], SCREEN[2], SCREEN[3], SCREEN[4])
-        if not S.ShowImage(b.art, card.art, n) and S.ART[card.art] then S.ART[card.art](b.art) end
+        b.art.screen = bg
+        -- (a picture is cut out with a glow round it: on the card's own background, no screen box behind it)
+        if S.ShowImage(b.art, card.art, n) then bg:Hide() elseif S.ART[card.art] then S.ART[card.art](b.art) end
         b.title:ClearAllPoints()
         b.title:SetPoint("TOPLEFT", b.art, "BOTTOMLEFT", -4, -6)
         b.title:SetPoint("TOPRIGHT", b.art, "BOTTOMRIGHT", 4, -6)
@@ -394,7 +372,6 @@ end
 function S.Value(key)
   local v = GPS()[key]
   if v == nil and ns.DEFAULTS and ns.DEFAULTS.gps then v = ns.DEFAULTS.gps[key] end
-  if key == "iconSize" then return v or "medium" end
   if key == "replaceMinimapSize" then return v or "small" end
   return v == true
 end

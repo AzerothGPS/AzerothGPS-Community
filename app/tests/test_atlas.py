@@ -76,6 +76,11 @@ def _scaled_icon_bases():
     return {re.sub(r"[^a-z0-9_]", "_", k.replace("atlas:", "atlas_")) for k in keys}
 
 
+def _setup_art():
+    from azerothgps.setupart import SHOTS
+    return set(SHOTS)
+
+
 def test_no_blizzard_art_outside_the_atlas_folder():
     # (CLAUDE.md: the Atlas view's map art is the one exception, 2026-10-16)
     stray = []
@@ -101,6 +106,9 @@ def test_no_blizzard_art_outside_the_atlas_folder():
         # (the map's round buttons drawn at each size, 1.3.9: MapMenu.tga, our own, resized, and discs drawn from
         # numbers by coast.py; test_button_art.py checks they're what it makes)
         own = own or rel.parent == Path("Media/Buttons") and re.fullmatch(r"(Frame|Disc)\d+\.tga", p.name)
+        # (the third exception, 2026-11-19, CLAUDE.md: the first-run setup's four card pictures, Kooki3z's in-game
+        # screenshots made by setupart.py; only the names it makes)
+        own = own or rel.parent == Path("Media/Setup") and p.stem in _setup_art()
         if not own:
             stray.append(str(rel))
     assert not stray, stray

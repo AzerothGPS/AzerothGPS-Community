@@ -12,7 +12,7 @@ import struct
 
 import pytest
 
-UPGRADE = 'AzerothGPSDB = { settings = { gps = { size = 400, iconSize = "large" } }, chars = {} }'
+UPGRADE = 'AzerothGPSDB = { settings = { gps = { size = 400, iconSize = "large", useWorldMap = true } }, chars = {} }'
 
 
 def _start(saved=None):
@@ -72,7 +72,7 @@ def test_the_setup_shows_on_a_first_install_once():
     # test_map_redraw's test_a_popup_window_has_the_map_windows_frame_and_a_small_logo), a popup lifted over the map
     assert lua.eval("AGPS_NS.popups[AzerothGPSSetup] ~= nil") and f.SetWindowTitle is not None
     assert [str(b.title._text) for b in _cards(ns)] == ["GPS minimap", "The game's minimap"]
-    assert str(f.step._text) == "Step 1 of 4" and str(f.heading._text) == "Your minimap"
+    assert str(f.step._text) == "Step 1 of 2" and str(f.heading._text) == "Your minimap"
     assert [str(b._text) for b in (f.skip, f.back, f.next)] == ["Skip", "Back", "Next"]
     lua.globals().AGPS_CLICK(f.skip)
     assert S.Shown() is False and ns.db.setup.shown == S.VERSION
@@ -93,7 +93,7 @@ def test_a_player_updating_sees_it_once_on_their_own_settings_and_never_again(le
     lua, ns = _start(saved=UPGRADE)
     S = ns.Setup
     st = ns.settings.gps
-    assert st.size == 400 and st.iconSize == "large"  # (their settings kept)
+    assert st.size == 400 and st.iconSize == "large" and st.useWorldMap is True  # (their settings kept)
     assert ns.db.tips.due is None  # (no first-route tips for a player who has done routes)
     assert S.Due() is True
     S.OnEnteringWorld()
@@ -103,22 +103,21 @@ def test_a_player_updating_sees_it_once_on_their_own_settings_and_never_again(le
     _redraw(lua, ns)
     assert S.tipPanel is None or not S.tipPanel._shown
     click = lua.globals().AGPS_CLICK
-    for _ in range(3):
-        click(f.next)
-    assert str(f.heading._text) == "Map icon size"
-    assert [bool(b.lit._shown) for b in _cards(ns)] == [False, False, True, False]  # (lit to what they have)
+    click(f.next)
+    assert str(f.heading._text) == "Where the map opens"
+    assert [bool(b.lit._shown) for b in _cards(ns)] == [False, True]  # (lit to what they have)
     click(_cards(ns)[0])
     if leave == "finish":
         click(f.next)
-        assert st.iconSize == "small"
+        assert st.useWorldMap is False
     else:
         click(f.skip)
-        assert st.iconSize == "large"  # (theirs, as it was)
+        assert st.useWorldMap is True  # (theirs, as it was)
     assert S.Shown() is False and ns.db.setup.shown == S.VERSION
     # the next login: not again
     lua, ns = _relog(lua)
     S = ns.Setup
-    assert S.Due() is False and ns.settings.gps.iconSize == ("small" if leave == "finish" else "large")
+    assert S.Due() is False and ns.settings.gps.useWorldMap is (leave != "finish")
     S.OnEnteringWorld()
     assert lua.eval("#AGPS_AFTER") == 0 and S.MaybeShow() is False and S.window is None
 
@@ -166,7 +165,7 @@ def test_run_setup_again_from_options_and_the_slash_command():
     lua.globals().AGPS_CLICK(again)
     assert S.Shown() is True and lua.eval("AzerothGPSOptions._shown") is False  # (Options out of the way)
     _close(S.window)
-    assert ns.settings.gps.iconSize == "large"  # (closed: theirs as it was)
+    assert ns.settings.gps.useWorldMap is True  # (closed: theirs as it was)
     lua.eval("SlashCmdList.AZEROTHGPS")("setup")
     assert S.Shown() is True
     _close(S.window)
@@ -219,22 +218,18 @@ def test_finish_keeps_every_pick():
     assert str(f.heading._text) == "Where the map opens" and f.back._enabled is True
     assert [str(b.title._text) for b in _cards(ns)] == ["GPS map window", "In the world map"]
     click(_cards(ns)[1])
-    click(f.next)
-    assert [str(b.title._text) for b in _cards(ns)] == ["On the map", "In their own window"]
-    click(_cards(ns)[1])
-    click(f.next)
-    assert [str(b.title._text) for b in _cards(ns)] == ["Small", "Medium", "Large", "Extra large"]
-    assert _cards(ns)[1].lit._shown  # (medium: the default)
-    assert str(f.next._text) == "Finish"
-    click(_cards(ns)[3])
+    # (two pages since 2026-11-19: the route directions and icon size pages taken out)
+    assert str(f.next._text) == "Finish" and str(f.step._text) == "Step 2 of 2"
     click(f.back)
-    assert str(f.heading._text) == "Route directions" and _cards(ns)[1].lit._shown  # (Back shows what's picked)
+    assert str(f.heading._text) == "Your minimap" and _cards(ns)[0].lit._shown  # (Back shows what's picked)
+    assert f.sizes[2].lit._shown
     click(f.next)
+    assert _cards(ns)[1].lit._shown
     click(f.next)  # Finish
     assert S.Shown() is False and ns.db.setup.shown == S.VERSION and ns.db.setup.done
-    assert (st.replaceMinimap, st.replaceMinimapSize, st.useWorldMap, st.navPanelDetached, st.iconSize) == \
-        (True, "medium", True, True, "xlarge")
-    assert G.mmState.on is True and G.navDetached is True
+    assert (st.replaceMinimap, st.replaceMinimapSize, st.useWorldMap) == (True, "medium", True)
+    assert G.mmState.on is True
+    assert [str(p.id) for p in S.PAGES.values()] == ["minimap", "map"]
     assert "Setup done." in str(lua.eval("AGPS_PRINTS[#AGPS_PRINTS]"))
 
 
@@ -363,7 +358,7 @@ def test_the_whats_new_offer_waits_for_the_setup_and_never_shows_with_it():
 def test_a_card_shows_its_picture_file_and_the_drawing_without_one():
     lua, ns = _start()
     S = ns.Setup
-    assert not any(S.ImageKnown(a) for a in S.ART.keys())  # (no picture files yet: the drawings)
+    assert not any(S.ImageKnown(a) for a in S.ART.keys())  # (no files in the harness: the drawings)
     lua.execute("""
       local S = AGPS_NS.Setup
       AGPS_DRAWN = {}
@@ -377,7 +372,7 @@ def test_a_card_shows_its_picture_file_and_the_drawing_without_one():
     # (as at a new session's first open: the files are read at login, the cards made then)
     lua.execute("""
       local S = AGPS_NS.Setup
-      S.imageKnown.gpsMinimap, S.imageKnown.icons2 = true, true
+      S.imageKnown.gpsMinimap = true
       for _, b in ipairs(S.window.cards) do b.drawn = nil end
     """)
     S.Open()
@@ -386,22 +381,18 @@ def test_a_card_shows_its_picture_file_and_the_drawing_without_one():
     assert img is not None and str(img._tex).endswith("Media\\Setup\\gpsMinimap")
     assert [float(c) for c in img._coords.values()] == [0, 300 / 512, 0, 180 / 256]
     assert img._filter in (None, "LINEAR")
+    # (cut out with a glow: the card's own background behind it, no screen box; the drawings keep theirs)
+    assert a.screen is not None and not a.screen._shown and _cards(ns)[1].art.screen._shown
     w, h = a._w, a._h
     assert (round(w * S.REF_PPU), round(h * S.REF_PPU)) == (300, 180)
     assert _cards(ns)[1].art.image is None  # (the game's minimap: no file, its drawing)
     assert lua.eval("AGPS_DRAWN.gameMinimap and not AGPS_DRAWN.gpsMinimap")
-    for _ in range(3):
-        S.Go(1)
-    icons = _cards(ns)
-    assert icons[1].art.image is not None and icons[0].art.image is None
-    a = icons[1].art
-    assert (round(a._w * S.REF_PPU), round(a._h * S.REF_PPU)) == (216, 130)
     _close(S.window)
 
 
 def test_every_setup_picture_file_is_a_cards_and_exactly_its_size():
-    # (Media/Setup/<art>.tga: a card's art name, its picture S.IMAGE_PX big in the top left of a power-of-two canvas;
-    # none shipped yet, the screenshots come later)
+    # (Media/Setup/<art>.tga: a card's art name, its picture S.IMAGE_PX big in the top left of a power-of-two canvas,
+    # the rest clear; every card has one since 2026-11-19, Kooki3z's screenshots, `agps setup-art`)
     lua, ns = _start()
     S = ns.Setup
     sizes = {}
@@ -420,6 +411,15 @@ def test_every_setup_picture_file_is_a_cards_and_exactly_its_size():
                 w, h = struct.unpack("<HH", fh.read(18)[12:16])
             pw, ph = sizes[art]
             assert w >= pw and h >= ph and w & (w - 1) == 0 and h & (h - 1) == 0, name
+            from PIL import Image
+            with Image.open(os.path.join(media, name)) as im:
+                im = im.convert("RGBA")
+                # (the picture the right way up in the top left, the rest of the canvas clear; cut out, with alpha)
+                assert im.getpixel((pw // 2, ph // 2))[3] == 255, name
+                assert im.crop((pw, 0, w, h)).getchannel("A").getextrema()[1] == 0, name
+                assert im.crop((0, ph, w, h)).getchannel("A").getextrema()[1] == 0, name
+                assert im.getpixel((0, 0))[3] < 255 and im.getpixel((pw - 1, ph - 1))[3] < 255, name
+    assert sorted(os.path.splitext(n)[0] for n in files) == sorted(sizes)  # (a picture for every card)
 
 
 # ---------------------------------------------------------------- the controller
@@ -464,7 +464,7 @@ def test_the_cards_are_picked_with_a_controller():
     assert binds["PAD1"] == "AzerothGPSSetupPad_PAD1" and binds["PADDRIGHT"] == "AzerothGPSSetupPad_PADDRIGHT"
     assert ns.Pad.bound is False  # (the map's own off meanwhile)
     # (no page of its own for the controller: 2026-11-19, "not necessary")
-    assert str(f.step._text) == "Step 1 of 4"
+    assert str(f.step._text) == "Step 1 of 2"
     assert same(S.focus, _cards(ns)[1]) and f.focus._shown  # (the card picked: the game's minimap)
     press("PADDLEFT")
     assert same(S.focus, _cards(ns)[0])
@@ -481,14 +481,13 @@ def test_the_cards_are_picked_with_a_controller():
     assert str(f.heading._text) == "Where the map opens"
     press("PAD2")  # B: back a page
     assert str(f.heading._text) == "Your minimap"
-    for _ in range(3):
-        press("PADRSHOULDER")
-    assert str(f.heading._text) == "Map icon size" and "Controller" not in [str(p.title) for p in S.PAGES.values()]
-    press("PADDRIGHT")  # (from medium, lit as it opened)
+    press("PADRSHOULDER")
+    assert str(f.heading._text) == "Where the map opens" and "Controller" not in [str(p.title) for p in S.PAGES.values()]
+    press("PADDRIGHT")  # (from the map window, lit as it opened)
     press("PAD1")
-    assert st.iconSize == "large" and S.padBound is True
+    assert st.useWorldMap is True and S.padBound is True
     press("PADRSHOULDER")  # Finish
-    assert S.Shown() is False and st.iconSize == "large" and st.replaceMinimap is True
+    assert S.Shown() is False and st.useWorldMap is True and st.replaceMinimap is True
     assert not any(str(v.button).startswith("AzerothGPSSetupPad_") for v in lua.eval("AGPS_BINDS").values())
 
 
