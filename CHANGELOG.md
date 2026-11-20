@@ -31,6 +31,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Quest Route can take only the quests you track: the ones Questie's tracker shows, or the ones ticked in the quest log without Questie (Options > Routing). (thanks, DarkByteZero)
 - Roads: the way up Grom'gol's zeppelin tower in Stranglethorn Vale.
 - Walls: a wall moved in the Wetlands.
+- Roads: new road in Desolace, by Shadowprey Village.
 - NPCs: the search finds Captain Stoutfist where they stand in the Wetlands.
 - Swims on a route show as a wavy line on the map and the minimap; hover one to see why, right-click it to go round by land for that trip.
 - Trip times count swimming at swimming speed, or as land with water walking, levitation or Aquatic Form.
