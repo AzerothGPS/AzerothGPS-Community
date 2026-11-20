@@ -101,8 +101,9 @@ def test_no_blizzard_art_outside_the_atlas_folder():
         # (the controller's buttons and Options > Controller's diagram, 2026-11-16: drawn from numbers by padicons.py)
         own = own or rel.parent == Path("Media/Pad") and re.fullmatch(r"[A-Za-z0-9]+_\d+\.tga", p.name)
         # (the road and wall tools' legend icons, 1.3.10: the mouse's buttons, Shift and Ctrl, drawn from numbers by
-        # toolicons.py; test_tool_legend.py checks they're what it makes)
-        own = own or rel.parent == Path("Media/Tools") and re.fullmatch(r"[A-Za-z]+_\d+\.tga", p.name)
+        # toolicons.py, and the map's stairs glyph turned 45 degrees at a time, Stairs<d>; test_tool_legend.py checks
+        # they're what it makes)
+        own = own or rel.parent == Path("Media/Tools") and re.fullmatch(r"[A-Za-z]+\d?_\d+\.tga", p.name)
         # (the map's round buttons drawn at each size, 1.3.9: MapMenu.tga, our own, resized, and discs drawn from
         # numbers by coast.py; test_button_art.py checks they're what it makes)
         own = own or rel.parent == Path("Media/Buttons") and re.fullmatch(r"(Frame|Disc)\d+\.tga", p.name)

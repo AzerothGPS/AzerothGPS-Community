@@ -11,6 +11,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - On a new install, tips show where the route's directions go until your first route is done, instead of the tutorial popup.
 - Edit Road: change a road you drew or recorded into ground, a floor, a bridge, stairs or a lift, with its height and stairs on part of it.
 - With the road tools on, roads show their kind in color, with smooth corners and their connection points.
+- With the road tools on, stairs show stair icons from foot to top pointing uphill, in a color of their own (ramps too).
 - A road under a bridge stays apart from it: routes from under the bridge go round to its end.
 - Routes can jump off a bridge onto a road below when the fall is safe.
 - With the road or wall tools on, the pointer shows the ground's height from the map's data.
