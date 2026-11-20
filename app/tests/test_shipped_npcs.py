@@ -215,7 +215,9 @@ def test_each_npc_row_in_the_search_box_has_a_pin_button(horde):
         rows = [w for w in lua.eval("AGPS_WIDGETS").values()
                 if same(w._parent, panel) and w.entry is not None and w._shown and w.entry.shipped]
         assert rows and rows[0].pin is not None and rows[0].pin._shown
-        assert str(rows[0].pin._text) == "Pin"
+        # (a pixel-art map pin since 2026-11-19, test_search_keys.py; the word "Pin" only till a relog)
+        assert rows[0].pin.art._shown and str(rows[0].pin.art._tex).endswith("Pin_" + str(rows[0].pin.art.agpsArtPx))
+        assert str(rows[0].pin.label._text) == "Pin"
         rows[0].pin._scripts.OnClick(rows[0].pin)
         assert len(ns.db.pins) == 1 and str(ns.db.pins[1].name) == "Abe Winters <Apprentice Armorer>"
         rows[0].pin._scripts.OnClick(rows[0].pin)  # (again: said, no second)

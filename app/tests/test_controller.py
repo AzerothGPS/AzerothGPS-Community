@@ -974,7 +974,7 @@ def test_every_controls_macro_does_that_control(pad):
         assert c.follow == 1
         _a_route(lua)
         _slash(lua, M["clear"])
-        assert len(ns.Nav.stops) == 0 and c.follow == 2
+        assert len(ns.Nav.stops) == 0 and c.follow == 1  # (/agps clear: the view left where it is, asked 2026-11-19)
         _slash(lua, M["back"])
         assert lua.eval("AGPS_DID.toggleMap") == 1  # (nothing open: the map closed, as B)
         lua.execute("""
@@ -1111,15 +1111,15 @@ def test_a_slider_steps_and_a_dropdown_opens_picks_and_closes(pad):
     lua, ns = pad
     O, P, PO = _opts(lua, ns)
     st = ns.settings.gps
-    O.ShowPage("Performance")
-    hz = _control(ns, "hz")
+    O.ShowPage("Tools")  # (map redraws a second, the slider here before, is radio buttons since 2026-11-19)
+    hz = _control(ns, "mapEditIdle")
     assert PO.FocusOn(hz.slider)
-    v = st.hz or 20
+    v = st.mapEditIdle or 2
     _press(lua, "PADDRIGHT")
-    assert st.hz == v + 1
+    assert st.mapEditIdle == v + 1
     _press(lua, "PADDLEFT")
     _press(lua, "PADDLEFT")
-    assert st.hz == v - 1 and PO.side == "page"  # (a slider's left: a step, never the list)
+    assert st.mapEditIdle == v - 1 and PO.side == "page"  # (a slider's left: a step, never the list)
     O.ShowPage("General")
     dd = _control(ns, "distanceUnits")
     assert PO.FocusOn(dd)

@@ -68,11 +68,15 @@ end
 -- `edge` (the seamless map's edge blend, issue #62; north up only): each tile gets an opaque mask under it (a tile
 -- still loading never shows the art through it), and each known-empty cell beside a tile a feather (G.EdgeFeathers).
 -- Along the coast (issue #73, G.CoastAt): a tile all sea is left out like an empty cell, and a coastal tile and the
--- mask under it are drawn through its coastline mask (`q.mask`: the file and its whole tile's rectangle on the map)
-function G.LayoutMinimap(px, py, cont, rot, zoom, half, edge)
+-- mask under it are drawn through its coastline mask (`q.mask`: the file and its whole tile's rectangle on the map).
+-- `near` (0 to 1, G.CoastNear: zoomed in, the terrain alone): the coast's sea is the terrain's too; 1 drawn whole (no
+-- coastline masks, the tiles all sea laid: the art only past the last tiles), between it a copy of each coastal and
+-- sea tile unmasked over it at that alpha (`q.tint`, G.EDGE_NEAR_SUBLAYER)
+function G.LayoutMinimap(px, py, cont, rot, zoom, half, edge, near)
   local tiles = ns.MinimapTiles and ns.MinimapTiles[cont]
   local quads = {}
   if not tiles then return quads end
+  near = edge and near or 0
   local s = half / zoom -- UI units per yard
   local R = zoom * 1.42 -- covers the view's corners at any rotation
   local ptx, pty = Geo.WorldToTile(px, py)
@@ -81,7 +85,14 @@ function G.LayoutMinimap(px, py, cont, rot, zoom, half, edge)
     for ty = math.floor(pty - span), math.floor(pty + span) do
       local fid = tiles[tx * 64 + ty]
       local maxX, maxY = (32 - ty) * TILE, (32 - tx) * TILE -- north-west corner
-      local coast = edge and fid and G.CoastAt(cont, tx, ty)
+      local coast = edge and fid and near < 1 and G.CoastAt(cont, tx, ty)
+      if fid and coast and near > 0 then -- (the coast's sea coming back to the terrain: G.CoastNear)
+        local o = G.CropQuad(fid, maxX - TILE, maxX, maxY - TILE, maxY, 0, 1, 0, 1, px, py, R, rot, s, G.EDGE_NEAR_SUBLAYER)
+        if o then
+          o.tint = { 1, 1, 1, near }
+          quads[#quads + 1] = o
+        end
+      end
       if fid and coast ~= 0 then
         local q = G.CropQuad(fid, maxX - TILE, maxX, maxY - TILE, maxY, 0, 1, 0, 1, px, py, R, rot, s, 0)
         if q then
@@ -98,7 +109,7 @@ function G.LayoutMinimap(px, py, cont, rot, zoom, half, edge)
           end
         end
       elseif edge then
-        G.EdgeFeathers(quads, tiles, tx, ty, maxX, maxY, px, py, R, s, cont)
+        G.EdgeFeathers(quads, tiles, tx, ty, maxX, maxY, px, py, R, s, cont, near)
       end
     end
   end
@@ -116,6 +127,18 @@ G.EDGE_FEATHER_YD = 60 -- yards from a tile's edge into the empty cell over whic
 G.EDGE_SMEAR = 2 / 256 -- the share of the tile at its edge stretched over the feather (its last 2 px, about 4 yd)
 G.EDGE_MASK_COLOR = { 0.05, 0.05, 0.05 } -- the masks under the tiles: the map's own dark ground (its backdrop)
 G.EDGE_MASK_SUBLAYER = -1 -- (under the tiles, 0)
+G.EDGE_NEAR_SUBLAYER = 1 -- (the coastal tiles' unmasked copies, over them: G.LayoutMinimap's `near`)
+
+-- Zoomed in, the coast's sea is the terrain's (asked 2026-11-19, a screenshot over Menethil Harbor: the zones' map art,
+-- its big blurry label and hatched coast, showed in the bay and the sea a stone's throw off the docks; "let's not show
+-- the world map layer zoomed in here, trim it back"). The coastline masks (issue #73) fade the terrain out 60 yd off
+-- the shore; in the terrain-alone stage (the art's share 0, G.ArtBlend) the tiles are drawn whole, the sea's too, and
+-- the art shows only past the last tile (the edge blend's feathers, issue #62). The masks come back as the art comes
+-- in (SEAM_ART_IN): 1 - the art's share. `artA`: G.SeamBlend's; nil (no seamless zoom): 0.
+function G.CoastNear(artA)
+  if not artA then return 0 end
+  return 1 - artA
+end
 
 -- The coastline (issue #73): the edge blend followed the tiles' squares, and a coastal tile's own sea stayed dark.
 -- Data/Coast.lua (app/azerothgps/coast.py, from the shipped terrain grid's water) lists each continent's tiles by the
@@ -148,11 +171,12 @@ end
 
 -- Whether the view (north up, `zoom` yards to its long side's edge round px, py) has a cell with no terrain tile
 -- in it, or a tile's sea (G.CoastAt; a coastal tile by its box, G.CoastBox): the edge blend's one test, a few
--- hundred lookups at the terrain view's furthest zoom
-function G.EdgeInView(cont, px, py, zoom)
+-- hundred lookups at the terrain view's furthest zoom. `near` 1 (G.CoastNear): the tiles' sea is the terrain's, only
+-- a cell with no tile counts
+function G.EdgeInView(cont, px, py, zoom, near)
   local tiles = ns.MinimapTiles and ns.MinimapTiles[cont]
   if not tiles then return false end
-  local coast = ns.Coast and ns.Coast[cont]
+  local coast = (near or 0) < 1 and ns.Coast and ns.Coast[cont] or nil
   local x0, y0 = Geo.WorldToTile(px + zoom, py + zoom) -- (north-west: x is north, y is west)
   local x1, y1 = Geo.WorldToTile(px - zoom, py - zoom)
   local u0, u1, v0, v1 = math.min(x0, x1), math.max(x0, x1), math.min(y0, y1), math.max(y0, y1)
@@ -174,12 +198,13 @@ end
 -- `quads`: the tile's band at that edge stretched over EDGE_FEATHER_YD, `grad` its alpha (1 at the tile, 0 inward)
 -- along the screen's axis as cropped (north up: Texture:SetGradient's axes are the screen's). Only from a tile all
 -- land (G.CoastAt nil): a coastal one already fades out into its sea before its edge (its mask), and its edge's own
--- dark sea pixels smeared out would be the square edge again.
-function G.EdgeFeathers(quads, tiles, tx, ty, maxX, maxY, px, py, R, s, cont)
+-- dark sea pixels smeared out would be the square edge again. `near` (G.CoastNear): into a cell with no tile, from a
+-- coastal or sea tile too, its alpha times `near` (as that tile's unmasked copy).
+function G.EdgeFeathers(quads, tiles, tx, ty, maxX, maxY, px, py, R, s, cont, near)
   local F, e = G.EDGE_FEATHER_YD, G.EDGE_SMEAR
   local minX, minY = maxX - TILE, maxY - TILE
   local cx0, cx1, cy0, cy1 = px - R, px + R, py - R, py + R
-  local function Add(fid, x0, x1, y0, y1, u0, u1, v0, v1, side)
+  local function Add(fid, x0, x1, y0, y1, u0, u1, v0, v1, side, k)
     local q = G.CropQuad(fid, x0, x1, y0, y1, u0, u1, v0, v1, px, py, R, 0, s, 0)
     if not q then return end
     local X0, X1 = math.max(x0, cx0), math.min(x1, cx1)
@@ -193,20 +218,27 @@ function G.EdgeFeathers(quads, tiles, tx, ty, maxX, maxY, px, py, R, s, cont)
     else
       q.grad = { "VERTICAL", (x1 - X0) / F, (x1 - X1) / F }
     end
+    if k < 1 then
+      local g = q.grad
+      g[2], g[3] = math.max(0, math.min(1, g[2])) * k, math.max(0, math.min(1, g[3])) * k
+    end
     quads[#quads + 1] = q
   end
   local coast = ns.Coast and ns.Coast[cont]
+  near = near or 0
+  local void = not tiles[tx * 64 + ty]
   local function Land(k)
-    if not (coast and coast[k]) then return tiles[k] end
+    if not (coast and coast[k]) then return tiles[k], 1 end
+    if near > 0 and void then return tiles[k], near end
   end
-  local w = Land((tx - 1) * 64 + ty)
-  if w then Add(w, minX, maxX, maxY - F, maxY, 1 - e, 1, 0, 1, "W") end
-  local east = Land((tx + 1) * 64 + ty)
-  if east then Add(east, minX, maxX, minY, minY + F, 0, e, 0, 1, "E") end
-  local n = Land(tx * 64 + ty - 1)
-  if n then Add(n, maxX - F, maxX, minY, maxY, 0, 1, 1 - e, 1, "N") end
-  local south = Land(tx * 64 + ty + 1)
-  if south then Add(south, minX, minX + F, minY, maxY, 0, 1, 0, e, "S") end
+  local w, kw = Land((tx - 1) * 64 + ty)
+  if w then Add(w, minX, maxX, maxY - F, maxY, 1 - e, 1, 0, 1, "W", kw) end
+  local east, ke = Land((tx + 1) * 64 + ty)
+  if east then Add(east, minX, maxX, minY, minY + F, 0, e, 0, 1, "E", ke) end
+  local n, kn = Land(tx * 64 + ty - 1)
+  if n then Add(n, maxX - F, maxX, minY, maxY, 0, 1, 1 - e, 1, "N", kn) end
+  local south, ks = Land(tx * 64 + ty + 1)
+  if south then Add(south, minX, minX + F, minY, maxY, 0, 1, 0, e, "S", ks) end
 end
 
 -- a feather's alpha along the screen (`grad`: orientation, the left's or bottom's alpha, the right's or top's)
@@ -9467,8 +9499,10 @@ function G.Update()
   -- (the edge blend, issue #62: the land's tiles north up with a cell of no terrain in view, the art whole under
   -- them; G.LayoutMinimap's masks and feathers)
   -- (a dungeon the game hides the position in: only the land at its way in, zoomed out of its map, G.SeamOutOfInstance)
+  -- (zoomed in, the coast's sea the terrain's: G.CoastNear)
+  local near = G.CoastNear(artA)
   local edge = artA ~= nil and tileA > 0 and rot == 0 and not inst and not view.cave and not place
-    and zoom <= G.TilesMaxZoom(true) and G.EdgeInView(viewCont, cx, cy, zoom) or false
+    and zoom <= G.TilesMaxZoom(true) and G.EdgeInView(viewCont, cx, cy, zoom, near) or false
   local artShown = (edge or artA and artA > 0) and not inst and not view.cave and not place
     and G.SeamArt(viewCont, cx, cy, s, edge and 1 or artA) or false
   -- (a building's inside map, an underground city's or a cave's, 2026-11-14: the terrain round it, a little darker, at
@@ -9485,6 +9519,7 @@ function G.Update()
     tileA = 1
   end
   view.edge = artShown and edge or nil
+  view.near = view.edge and near or nil
   view.artOnly = artShown and tileA <= 0 or nil
   view.seamFar = artShown and G.SeamFar(zoom) or nil
   if inst and not browse then
@@ -9589,8 +9624,9 @@ function G.Update()
       or G.LayoutZone(cx, cy, id, rot, zoom, half, bounds, G.SpoilerMode(G.Style()))
     artLevel = G.CityArtLevel(nil, id)
   else
-    quads = TilesKept("tiles:" .. tostring(viewCont) .. (view.edge and ":edge" or ""))
-      or G.LayoutMinimap(cx, cy, viewCont, rot, zoom, half, view.edge)
+    local nearSig = view.near and (view.near >= 1 and ":near" or view.near > 0 and ":n" .. math.floor(view.near * 100)) or ""
+    quads = TilesKept("tiles:" .. tostring(viewCont) .. (view.edge and ":edge" .. nearSig or ""))
+      or G.LayoutMinimap(cx, cy, viewCont, rot, zoom, half, view.edge, view.near)
   end
   if view.interiorSpot then -- (the interiors' edge blend: the art under its ground; none without its art, as before)
     local sp = view.interiorSpot
@@ -11037,14 +11073,12 @@ function G.PadPan(dxUI, dyUI)
   if recenter then recenter:Show() end
   elapsed = 1
 end
--- The map's Clear Route (its button, the controller's control, /agps clear): the route and its stops gone, the map back
--- on the player. False with no route.
--- `keepView`: the view left where it is (a controller's Clear Route: asked 2026-11-16, "clearing route with controller
--- jumps back to the player position again, shouldn't do that")
-function G.ClearRoute(keepView)
+-- The map's Clear Route (its button, the controller's control, /agps clear): the route and its stops gone, the view
+-- left where it is (asked 2026-11-16 for the controller, "clearing route ... jumps back to the player position again,
+-- shouldn't do that", and 2026-11-19 for the button too). False with no route.
+function G.ClearRoute()
   if #ns.Nav.stops == 0 then return false end
   ns.Nav.Clear()
-  if not keepView then G.Follow() end -- (the route gone: back to the player, the city's inside map in a city)
   elapsed = 1
   return true
 end
@@ -13287,6 +13321,21 @@ function G.FitToolIcon(t, name, effScale)
   t:SetSize(w, h)
   return w, h
 end
+-- Search Places' Pin button: the pixel-art map pin (toolicons.py's Pin, PinLit with the mouse over it), drawn as the
+-- tools' icons are (pixel for pixel, the size nearest TOOL_ICON_UNITS on the screen); the word "Pin" till a relog
+-- makes the new files known. `eff`: the frame's effective scale (kept from the last call when nil).
+G.SEARCH_PIN_W = 20
+function G.SetSearchPinArt(btn, lit, eff)
+  if not btn then return end
+  if eff then btn.agpsEff = eff end
+  local w = btn.art and G.FitToolIcon(btn.art, lit and "PinLit" or "Pin", btn.agpsEff or 1)
+  if btn.art then btn.art.name = lit and "PinLit" or "Pin" btn.art:SetShown(w and true or false) end
+  if btn.label then
+    btn.label:SetShown(not w)
+    if lit then btn.label:SetTextColor(1, 1, 1) else btn.label:SetTextColor(1, 0.82, 0) end
+  end
+  btn:SetWidth(w and math.max(G.SEARCH_PIN_W, w + 4) or math.max(G.SEARCH_PIN_W, (btn.label and btn.label:GetStringWidth() or 0) + 8))
+end
 -- The inputs' names, where an icon can't be shown yet (before a relog).
 G.TOOL_INPUT_NAMES = { MouseLeft = L["Left-click"], MouseRight = L["Right-click"],
   MouseWheel = L["Mouse wheel"], Shift = L["Shift"], Ctrl = L["Ctrl"] }
@@ -14214,9 +14263,12 @@ function G.ShowRoadDetails(level, x, y, reach)
   if #pts < 4 then pts = { x, y, x, y } end
   local kind = info.title == L["Lift"] and "lift" or info.title == L["Stairs"] and "stairs"
     or (g and g.kind and c and g.kind[c.edge]) or "ground"
-  local f = G.AskRoadEdit(level, { t = { pts = pts, kind = kind }, readOnly = true })
+  -- (on a level with heights, the road's own from its ends: Delete's erase takes out that floor's only)
+  local za, zb = e and g.z and g.z[e[1]], e and g.z and g.z[e[2]]
+  local zs = za and zb and R.RampHeights and R.RampHeights(pts, za, zb) or nil
+  local f = G.AskRoadEdit(level, { t = { pts = pts, kind = kind, zs = zs }, readOnly = true })
   G.EditWindowReadOnly(f, true)
-  f.note:SetText(info.title .. ": " .. table.concat(info.lines, "  ") .. "\n" .. L["The map's own road: it can't be changed here. To change it, erase it (Shift + right-drag) and draw it again."])
+  f.note:SetText(info.title .. ": " .. table.concat(info.lines, "  ") .. "\n" .. L["The map's own road: it can't be changed here. To change it, erase it with Delete, then draw your own."])
   return true
 end
 -- The map's own wall under the pointer (the player's own are Record.WallAt's): Edit Wall read-only, plain or a cliff
@@ -14239,7 +14291,7 @@ function G.ShowWallDetails(level, x, y, reach)
   if not bw then return false end
   local pts = {}
   for k = 1, #bw do pts[k] = bw[k] end
-  local f = G.AskWallEdit(level, { t = { pts = pts }, i = bp, readOnly = true })
+  local f = G.AskWallEdit(level, { t = { pts = pts }, i = bp, readOnly = true, fl = bw.fl })
   local zl, zr
   if bw.kind == "cliff" and P.CliffSides then zl, zr = P.CliffSides(bw, bp) end
   G.wallEdit.kind = zl and "cliff" or "wall"
@@ -14249,7 +14301,7 @@ function G.ShowWallDetails(level, x, y, reach)
   G.EditWindowReadOnly(f, true)
   f.note:SetText((zl and Format(L["Cliff: left %d yd, right %d yd (%s)"], math.floor(zl + 0.5), math.floor(zr + 0.5),
     P.CliffSection(bw, bp) == "open" and L["level: open"] or P.CliffSection(bw, bp) == "down" and L["a safe jump down"]
-    or L["too high: blocked"]) or L["Wall"]) .. "\n" .. L["The map's own wall: it can't be changed here. To change it, erase it (Shift + right-drag) and draw your own."])
+    or L["too high: blocked"]) or L["Wall"]) .. "\n" .. L["The map's own wall: it can't be changed here. To change it, erase it with Delete, then draw your own."])
   return true
 end
 -- A click on the map with Edit Road at (x, y) of `level`: the stairs' foot or top when picking one, else the road there
@@ -14406,6 +14458,7 @@ function G.AskRoadEdit(level, sel)
     cancel:SetPoint("RIGHT", save, "LEFT", -6, 0)
     cancel:SetText(L["Cancel"])
     cancel:SetScript("OnClick", function() f:Hide() end)
+    f.delete = G.DeleteButton(f, L["Delete Road"], function() G.AskDeleteRoad() end)
     f:HookScript("OnHide", function()
       if G.roadEdit then G.roadEdit.sel = nil end
       if G.setHeightsWindow then G.setHeightsWindow:Hide() end -- (Set Heights goes with it)
@@ -14562,6 +14615,7 @@ function G.AskWallEdit(level, sel)
     cancel:SetPoint("RIGHT", save, "LEFT", -6, 0)
     cancel:SetText(L["Cancel"])
     cancel:SetScript("OnClick", function() f:Hide() end)
+    f.delete = G.DeleteButton(f, L["Delete Wall"], function() G.AskDeleteWall() end)
     f:HookScript("OnHide", function()
       if G.wallEdit then G.wallEdit.sel = nil end
       elapsed = 1
@@ -14777,6 +14831,69 @@ function G.SaveSetHeights()
   if G.roadEditWindow then G.roadEditWindow:Hide() end
   elapsed = 1
   return idx
+end
+
+-- Delete (asked 2026-11-19 for 1.3.10: "a Delete button that deletes exactly the highlighted section of road"): Edit
+-- Road's and Edit Wall's, the map's own lines (read-only) too, at the window's bottom left in red. Asked first (ns.Ask
+-- over the window's middle, over it as the options' questions are: "Delete this road section?" Delete / Cancel); then the stretch highlighted goes (Record.DeleteRoad,
+-- Record.DeleteWall: the player's own off the list, the map's own erased as Shift + right-drag erases), the window
+-- closes and routes and the map take it at once (Record.Changed).
+G.DELETE_COLOR = "|cffff6060"
+function G.DeleteButton(f, label, onClick)
+  local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+  b:SetSize(110, 22)
+  b:SetPoint("BOTTOMLEFT", 12, 10)
+  b:SetText(G.DELETE_COLOR .. label .. "|r")
+  b:SetWidth(math.max(110, (b:GetTextWidth() or 0) + 24))
+  b:SetScript("OnClick", onClick)
+  return b
+end
+-- The zone's name for an erase (the player's map's, as a stroke's: G.FinishRoad).
+function G.EraseZone()
+  local mapID = C_Map.GetBestMapForUnit("player")
+  local info = mapID and C_Map.GetMapInfo(mapID)
+  return info and info.name or "?"
+end
+-- The question over window `win` (unanswered, Escape: Cancel).
+function G.AskDelete(win, text, onYes)
+  if not ns.Ask then return nil end
+  G.askBox = ns.Ask("AzerothGPSDeleteAsk", text, L["Delete"], L["Cancel"], onYes, nil, { strata = ns.POPUP_OVER_STRATA,
+    place = function(f) f:SetPoint("CENTER", win, "CENTER", 0, 0) end })
+  return G.askBox
+end
+function G.AskDeleteRoad()
+  local re = G.roadEdit
+  local level, sel = re and re.level, re and re.sel
+  if not (sel and G.roadEditWindow) then return nil end
+  return G.AskDelete(G.roadEditWindow, L["Delete this road section?"], function() G.DeleteRoadEdit(level, sel) end)
+end
+function G.AskDeleteWall()
+  local we = G.wallEdit
+  local level, sel = we and we.level, we and we.sel
+  if not (sel and G.wallEditWindow) then return nil end
+  local i, j = G.WallSection(we)
+  return G.AskDelete(G.wallEditWindow, L["Delete this wall section?"], function() G.DeleteWallEdit(level, sel, i, j) end)
+end
+-- The road `sel` on `level` deleted (Record.DeleteRoad) and its window closed. What Record.DeleteRoad gave.
+function G.DeleteRoadEdit(level, sel)
+  local z, indoors, down = G.EditFloor(level, sel.t.pts)
+  local r = ns.Record.DeleteRoad(level, sel, { z = z, indoors = indoors, down = down, zone = G.EraseZone() })
+  if not r then return nil end
+  ns.Print(L["deleted that road section: routes leave it out now."])
+  G.roadEdit = nil
+  if G.roadEditWindow then G.roadEditWindow:Hide() end
+  G.Redraw()
+  return r
+end
+-- Section `i` .. `j` of the wall `sel` on `level` deleted (Record.DeleteWall) and its window closed.
+function G.DeleteWallEdit(level, sel, i, j)
+  local r = ns.Record.DeleteWall(level, sel, i, j, G.EraseZone())
+  if not r then return nil end
+  ns.Print(L["deleted that wall section: routes go through there now."])
+  G.wallEdit = nil
+  if G.wallEditWindow then G.wallEditWindow:Hide() end
+  G.Redraw()
+  return r
 end
 
 -- Save Road: the road picked saved as edited (Record.EditTrack). Its number, or nil (and the window says why).
@@ -16976,15 +17093,21 @@ function G.Init()
   G.PickSearchEntry = Pick -- (Quick Find's click: as picking a search result)
   local function Refresh()
     results = G.SearchPlaces(box:GetText(), 8)
+    panel.sel = nil -- (the text changed: no row highlighted till an arrow key or the mouse picks one)
+    local eff = panel.GetEffectiveScale and panel:GetEffectiveScale() or 1
     for i, e in ipairs(results) do
       local r = rows[i]
       if not r then
         r = CreateFrame("Button", nil, panel)
         r:SetSize(288, 18)
         r:SetPoint("TOPLEFT", 12, -32 - (i - 1) * 18)
-        local hl = r:CreateTexture(nil, "HIGHLIGHT")
+        r.index = i
+        -- (the highlighted row: the mouse over it or the arrow keys, one highlight for both, asked 2026-11-19)
+        local hl = r:CreateTexture(nil, "BACKGROUND")
         hl:SetAllPoints()
         hl:SetColorTexture(1, 1, 1, 0.1)
+        hl:Hide()
+        r.hl = hl
         r.text = r:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
         r.text:SetPoint("LEFT", 4, 0)
         r.text:SetPoint("RIGHT", -4, 0)
@@ -17000,6 +17123,7 @@ function G.Init()
         end)
         r:SetScript("OnEnter", function(self)
           panel.idle = 0
+          G.SetSearchHighlight(self.index)
           local shift = G.SearchHint(self.entry)
           if not shift then return end -- (no tooltip, as before, unless another addon says what a Shift-click does)
           GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
@@ -17008,27 +17132,39 @@ function G.Init()
           GameTooltip:Show()
         end)
         r:SetScript("OnLeave", GameTooltip_Hide)
-        -- (beside an NPC or a city place: Pin, a pin there for good; asked 2026-11-14)
-        local pin = CreateFrame("Button", nil, r, "UIPanelButtonTemplate")
-        pin:SetHeight(16)
-        pin:SetText(L["Pin"])
-        pin:SetWidth(math.max(32, (pin:GetTextWidth() or 0) + 12))
+        -- (beside an NPC or a city place: Pin, a pin there for good; asked 2026-11-14) a pixel-art map pin since
+        -- 2026-11-19 ("a literal pixel-art map pin"), its head brighter with the mouse over it (G.SetSearchPinArt)
+        local pin = CreateFrame("Button", nil, r)
+        pin:SetSize(G.SEARCH_PIN_W, 16)
         pin:SetPoint("RIGHT", r, "RIGHT", 0, 0)
+        pin.art = pin:CreateTexture(nil, "ARTWORK")
+        pin.art:SetPoint("CENTER")
+        pin.label = pin:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
+        pin.label:SetPoint("CENTER")
+        pin.label:SetText(L["Pin"])
         pin:SetScript("OnClick", function(self)
           panel.idle = 0
           G.PinSearchEntry(self:GetParent().entry)
         end)
         pin:SetScript("OnEnter", function(self)
           panel.idle = 0
+          G.SetSearchHighlight(self:GetParent().index)
+          G.SetSearchPinArt(self, true)
           GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-          GameTooltip:SetText(L["Add a pin here"], 1, 1, 1)
+          GameTooltip:SetText(L["Pin"], 1, 1, 1)
+          GameTooltip:AddLine(L["Add a pin here"], nil, nil, nil, true)
           GameTooltip:Show()
         end)
-        pin:SetScript("OnLeave", GameTooltip_Hide)
+        pin:SetScript("OnLeave", function(self)
+          G.SetSearchPinArt(self, false)
+          GameTooltip_Hide()
+        end)
         r.pin = pin
         rows[i] = r
       end
       r.entry = e
+      r.hl:Hide()
+      G.SetSearchPinArt(r.pin, false, eff)
       local pinnable = (e.npc or e.place) and not e.pin and true or false
       r.pin:SetShown(pinnable)
       r.text:SetPoint("RIGHT", pinnable and r.pin or r, pinnable and "LEFT" or "RIGHT", -4, 0)
@@ -17063,7 +17199,39 @@ function G.Init()
     end
   end)
   if ns.TimeScript then ns.TimeScript(panel, "OnUpdate", "map buttons") end
-  box:SetScript("OnEnterPressed", function() Pick(results[1]) end)
+  -- Up and Down move the highlight through the rows (asked 2026-11-19), stopping at the ends; the first Down the first
+  -- row. The box keeps the keys for typing; Left and Right still move its cursor.
+  function G.SetSearchHighlight(i)
+    if i and (i < 1 or i > #results) then i = nil end
+    panel.sel = i
+    for k, r in ipairs(rows) do r.hl:SetShown(k == i and r:IsShown()) end
+  end
+  function G.SearchArrow(key)
+    local n = #results
+    if n == 0 or (key ~= "UP" and key ~= "DOWN") then return false end
+    local i = panel.sel
+    if key == "DOWN" then i = i and math.min(n, i + 1) or 1
+    elseif i then i = math.max(1, i - 1) end
+    G.SetSearchHighlight(i)
+    panel.idle = 0
+    return true
+  end
+  if box.SetAltArrowKeyMode then box:SetAltArrowKeyMode(false) end
+  box:SetScript("OnArrowPressed", function(self, key)
+    if G.SearchArrow(key) and self.SetCursorPosition then
+      self:SetCursorPosition(#(self:GetText() or "")) -- (Up and Down: the cursor stays at the end, where typing goes)
+    end
+  end)
+  -- Enter: the highlighted row, as a click on it (a Shift-click too); none highlighted, the first, as before
+  box:SetScript("OnEnterPressed", function()
+    local r = panel.sel and rows[panel.sel]
+    if r and r:IsShown() and r.entry then
+      local click = r:GetScript("OnClick")
+      if click then click(r, "LeftButton") end
+      return
+    end
+    Pick(results[1])
+  end)
   box:SetScript("OnEscapePressed", function() panel:Hide() end)
   search:SetScript("OnClick", function()
     panel:SetShown(not panel:IsShown())
@@ -17076,7 +17244,7 @@ function G.Init()
   search:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     GameTooltip:SetText(L["Search Places"], 1, 1, 1)
-    GameTooltip:AddLine(L["Type 2+ letters, then pick a place to add it as a stop (Enter takes the first)."], nil, nil, nil, true)
+    GameTooltip:AddLine(L["Type 2+ letters, then pick a place to add it as a stop (Up and Down choose one, Enter takes it or the first)."], nil, nil, nil, true)
     -- (what it finds and the Pin button: Options > General > Search, asked 2026-11-14: "too much text for a button
     -- hover")
     GameTooltip:Show()

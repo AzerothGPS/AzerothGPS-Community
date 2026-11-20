@@ -50,7 +50,9 @@ function T.Path(route)
   if not route or not route.parts or not route.parts[1] then return nil end
   local first = route.parts[1]
   -- (`fz`: each point's floor in a building or a capital, Router's: the stairs' way, up or down, T.Stairs)
-  local path = { pts = {}, kinds = {}, cum = { 0 }, cont = first.cont, ends = "stop", zs = {}, fz = {} }
+  -- (`srcPart`, `srcI`: each piece's route part and its piece there, for its swims: T.Swims)
+  local path = { pts = {}, kinds = {}, cum = { 0 }, cont = first.cont, ends = "stop", zs = {}, fz = {}, srcPart = {},
+    srcI = {} }
   local pts, kinds, cum, zs, fz = path.pts, path.kinds, path.cum, path.zs, path.fz
   for _, part in ipairs(route.parts) do
     if part.stop ~= first.stop then break end
@@ -69,6 +71,7 @@ function T.Path(route)
         if n > 0 then
           cum[#cum + 1] = cum[#cum] + Dist(pts[n - 1], pts[n], x, y)
           kinds[#kinds + 1] = part.kinds[(i - 1) / 2] or part.kinds[1]
+          if i > 1 then path.srcPart[#kinds], path.srcI[#kinds] = part, (i - 1) / 2 end
         end
         pts[n + 1], pts[n + 2] = x, y
         zs[#zs + 1] = part.zs and part.zs[(i + 1) / 2] or false
@@ -168,6 +171,8 @@ T.WORDS = {
   enter_building = { L["Go into the building"], L["Go into the building"], L["go into the building"] },
   leave_building = { L["Leave the building"], L["Leave the building"], L["leave the building"] },
   bridge = { L["Cross the bridge"], L["Cross the bridge"], L["cross the bridge"] },
+  swim = { L["Start swimming"], L["Start swimming"], L["start swimming"] },
+  shore = { L["Leave the water"], L["Leave the water"], L["leave the water"] },
 }
 -- (a maneuver's text, "now" text and mid-sentence text from its words' id)
 local function Words(m, id)
@@ -212,6 +217,8 @@ function T.NowText(m, fmt, short)
   end
   -- (a maneuver made here has its words in the middle of a sentence, `mid`; one made by hand, as the English)
   local what = m.mid or (m.kind == "drop" and "jump down" or (m.text:sub(1, 1):lower() .. m.text:sub(2)))
+  -- (swimming till then: "Swim, then leave the water in 300 yd", T.Swims)
+  if m.swimNow then return Format(L["Swim, then %s in %s"], what, fmt(d)) end
   if short then return Format(L["Straight, then %s in %s"], what, fmt(d)) end
   return Format(L["Continue straight, then %s in %s"], what, fmt(d))
 end
@@ -350,10 +357,36 @@ function T.Places(path, horizon)
   return out
 end
 
+-- The path's swims (Nav.SwimSpans, folded as the steps are: Nav.SwimPieces) within `horizon`: { s0, s1, ... } in yards
+-- along it.
+function T.Swims(path, horizon)
+  local N = ns.Nav
+  local out = {}
+  if not (N and N.SwimSpans and N.SwimPieces and path and path.srcPart) then return out end
+  local runs, cum = {}, path.cum
+  for j = 1, #cum - 1 do
+    if horizon and cum[j] > horizon then break end
+    local part, i = path.srcPart[j], path.srcI[j]
+    local w = part and N.SwimSpans(part, i)
+    if w then
+      local len = cum[j + 1] - cum[j]
+      for q = 1, #w - 1, 2 do
+        local s0, s1 = cum[j] + w[q] * len, cum[j] + w[q + 1] * len
+        if #runs > 0 and s0 - runs[#runs] < 0.01 then runs[#runs] = s1 else runs[#runs + 1], runs[#runs + 2] = s0, s1 end
+      end
+    end
+  end
+  if #runs == 0 then return out end
+  for _, p in ipairs(N.SwimPieces(runs, 0, path.total)) do
+    if p.swim then out[#out + 1], out[#out + 2] = p.s0, p.s1 end
+  end
+  return out
+end
+
 -- The maneuvers ahead, nearest first: { dist, kind, text, toward, angle }.
 -- kind: "turn", "join" (onto the road), "leave" (off the road), "drop", "lift", "stairs" (up or down:
 -- `short` "Stairs up", `after` the turn just after them), "place" (into a cave or a building, or out: T.Places),
--- "bridge", "board", "arrive".
+-- "bridge", "swim" (into the water), "shore" (out of it), "board", "arrive". `swimNow`: swimming from here to it.
 -- stopLabel: how the next stop is named ("stop 1", a place name...). `horizon`: only the maneuvers within that many
 -- yards (and the arrival or boarding at the end): what the arrow and the map's panel show is the next one or two.
 function T.Maneuvers(path, stopLabel, horizon)
@@ -443,6 +476,15 @@ function T.Maneuvers(path, stopLabel, horizon)
     end
   end
   for _, m in ipairs(T.Places(path, horizon)) do out[#out + 1] = m end
+  -- swims: where each starts and ends (one under way where the walk starts: swimming now, till its end)
+  local swims, swimTo = T.Swims(path, horizon), nil
+  for j = 1, #swims - 1, 2 do
+    local s0, s1 = swims[j], swims[j + 1]
+    if s0 > 0.5 then out[#out + 1] = Words({ dist = s0, kind = "swim" }, "swim") else swimTo = s1 end
+    if s1 < path.total - 0.5 and not (horizon and s1 >= horizon) then
+      out[#out + 1] = Words({ dist = s1, kind = "shore" }, "shore")
+    end
+  end
   table.sort(out, function(a, b) return a.dist < b.dist end)
   -- a jog: turns close together that net out and bring the route back onto the line it
   -- was on (out and back) are no turn at all: straight on
@@ -533,6 +575,12 @@ function T.Maneuvers(path, stopLabel, horizon)
       m.after = nxt.mid or (nxt.text:sub(1, 1):lower() .. nxt.text:sub(2))
     end
   end
+  -- (and the arrival or boarding at the swim's end, below)
+  local function Swum(m)
+    if swimTo and m.dist <= swimTo + 0.5 then m.swimNow = true end
+    return m
+  end
+  for _, m in ipairs(merged) do Swum(m) end
   if path.ends == "ride" and path.ride then
     local t = path.ride
     local to = ns.RideEndName(t, path.from == 1 and 2 or 1)
@@ -545,13 +593,13 @@ function T.Maneuvers(path, stopLabel, horizon)
     else -- (a kind of ride with no words of its own: its kind as it is)
       m.text, m.mid = Format(L["Board the %s to %s"], t[8], to), Format(L["board the %s to %s"], t[8], to)
     end
-    merged[#merged + 1] = m
+    merged[#merged + 1] = Swum(m)
   elseif stopLabel then
-    merged[#merged + 1] = { dist = path.total, kind = "arrive", text = Format(L["Arrive at %s"], stopLabel),
-      mid = Format(L["arrive at %s"], stopLabel) }
+    merged[#merged + 1] = Swum({ dist = path.total, kind = "arrive", text = Format(L["Arrive at %s"], stopLabel),
+      mid = Format(L["arrive at %s"], stopLabel) })
   else
-    merged[#merged + 1] = { dist = path.total, kind = "arrive", text = L["Arrive at your destination"],
-      mid = L["arrive at your destination"] }
+    merged[#merged + 1] = Swum({ dist = path.total, kind = "arrive", text = L["Arrive at your destination"],
+      mid = L["arrive at your destination"] })
   end
   return merged
 end

@@ -462,6 +462,229 @@ function R.EditTrack(sel, edit)
   return R.Save(track)
 end
 
+-- Delete (asked 2026-11-19 for 1.3.10): Edit Road's and Edit Wall's Delete button takes out exactly the stretch the
+-- window shows highlighted. The player's own road or wall (on the drawn list, not an edit of another) comes off the
+-- list (R.TakeOut; a wall's section: the rest saved as its own walls); the map's own, or an edit, gets an erase saved
+-- as Shift + right-drag saves one ("remove" along the road, "unwall" at the wall), so it's kept, shared and imported
+-- like any erase, and Undo puts it back. An erase's ends stay R.DELETE_TRIM_YD off the roads it meets (the cut's reach
+-- would take their ends too: the stub left goes, Router.TRACK_STUB); a wall's is a yard at its point furthest from the
+-- other walls (an erase takes out every wall it comes near, whole).
+R.DELETE_TRIM_YD = 13 -- (Router.TRACK_REMOVE_YD and a yard)
+R.DELETE_ALONG_YD = 3 -- (a road with every point this near the stretch is a piece of it, not another road)
+
+-- Track number `i` taken off the drawn list (and the shared copies): routes leave it out at once. The track.
+function R.TakeOut(i)
+  local tr = table.remove(Tracks(), i)
+  if not tr then return nil end
+  if ns.Feedback and ns.Feedback.RoadRemoved then ns.Feedback.RoadRemoved(tr) end
+  if ns.MarkUnsaved then ns.MarkUnsaved("track:" .. tostring(tr.time), "remove") end
+  R.Changed()
+  return tr
+end
+
+-- How far (x, y) is from the line `pts` (flat x, y list; index `first` on, a graph road's 5).
+function R.LineDist(pts, x, y, first)
+  first = first or 1
+  if #pts - first < 3 then return math.sqrt((pts[first] - x) ^ 2 + (pts[first + 1] - y) ^ 2) end
+  local best = math.huge
+  for k = first, #pts - 3, 2 do
+    local ax, ay, bx, by = pts[k], pts[k + 1], pts[k + 2], pts[k + 3]
+    local vx, vy = bx - ax, by - ay
+    local L2 = vx * vx + vy * vy
+    local f = L2 > 0 and math.max(0, math.min(1, ((x - ax) * vx + (y - ay) * vy) / L2)) or 0
+    local d = math.sqrt((ax + vx * f - x) ^ 2 + (ay + vy * f - y) ^ 2)
+    if d < best then best = d end
+  end
+  return best
+end
+
+-- Whether a road other than the stretch `pts` (one not along it) comes within an erase's reach of (x, y) on `level`:
+-- the roads as routed now (only when they're built: Router.DebugGraph).
+function R.OtherRoadNear(level, x, y, pts)
+  local Rt = ns.Router
+  local g = Rt and Rt.DebugGraph and Rt.DebugGraph(level)
+  if not (g and Rt.NearestEdges) then return false end
+  local reach = (Rt.TRACK_REMOVE_YD or 12) + 1
+  for _, c in ipairs(Rt.NearestEdges(level, x, y)) do
+    local ed = g.e[c.edge]
+    if ed and c.dist and c.dist <= reach then
+      for k = 5, #ed - 1, 2 do
+        if R.LineDist(pts, ed[k], ed[k + 1]) > R.DELETE_ALONG_YD then return true end
+      end
+    end
+  end
+  return false
+end
+
+-- `pts` (and its heights `zs`, or nil) less its first `yd` yards (straight from its start): new lists, or nil when
+-- all of it is that near.
+local function TrimStart(pts, zs, yd)
+  local x0, y0 = pts[1], pts[2]
+  local n = #pts / 2
+  for k = 2, n do
+    local bx, by = pts[2 * k - 1], pts[2 * k]
+    if (bx - x0) ^ 2 + (by - y0) ^ 2 >= yd * yd then
+      local ax, ay = pts[2 * k - 3], pts[2 * k - 2]
+      local lo, hi = 0, 1
+      for _ = 1, 24 do
+        local m = (lo + hi) / 2
+        if (ax + (bx - ax) * m - x0) ^ 2 + (ay + (by - ay) * m - y0) ^ 2 >= yd * yd then hi = m else lo = m end
+      end
+      local op = { ax + (bx - ax) * hi, ay + (by - ay) * hi }
+      local oz = zs and { zs[k - 1] + (zs[k] - zs[k - 1]) * hi } or nil
+      for j = k, n do
+        op[#op + 1], op[#op + 2] = pts[2 * j - 1], pts[2 * j]
+        if oz then oz[#oz + 1] = zs[j] end
+      end
+      return op, oz
+    end
+  end
+  return nil
+end
+local function Reversed(pts, zs)
+  local op, oz = {}, zs and {} or nil
+  local n = #pts / 2
+  for k = n, 1, -1 do
+    op[#op + 1], op[#op + 2] = pts[2 * k - 1], pts[2 * k]
+    if oz then oz[#oz + 1] = zs[k] end
+  end
+  return op, oz
+end
+local function Length(pts)
+  local len = 0
+  for k = 1, #pts - 3, 2 do len = len + math.sqrt((pts[k + 2] - pts[k]) ^ 2 + (pts[k + 3] - pts[k + 1]) ^ 2) end
+  return len
+end
+-- The spot `d` yards along `pts`: x, y and its height (nil with no `zs`).
+local function Along(pts, zs, d)
+  for k = 1, #pts - 3, 2 do
+    local L = math.sqrt((pts[k + 2] - pts[k]) ^ 2 + (pts[k + 3] - pts[k + 1]) ^ 2)
+    if d <= L or k + 3 >= #pts then
+      local f = L > 0 and math.max(0, math.min(1, d / L)) or 0
+      local i = (k + 1) / 2
+      return pts[k] + (pts[k + 2] - pts[k]) * f, pts[k + 1] + (pts[k + 3] - pts[k + 1]) * f,
+        zs and zs[i] + (zs[i + 1] - zs[i]) * f or nil
+    end
+    d = d - L
+  end
+  return pts[1], pts[2], zs and zs[1] or nil
+end
+
+-- The erase that takes out road `pts` (heights `zs`, or nil) on `level` and no road it meets: its points and heights.
+function R.DeleteStroke(level, pts, zs)
+  local yd = R.DELETE_TRIM_YD
+  local out, oz = pts, zs
+  if R.OtherRoadNear(level, pts[1], pts[2], pts) then out, oz = TrimStart(out, oz, yd) end
+  if out and R.OtherRoadNear(level, pts[#pts - 1], pts[#pts], pts) then
+    local rp, rz = Reversed(out, oz)
+    rp, rz = TrimStart(rp, rz, yd)
+    if rp then out, oz = Reversed(rp, rz) else out = nil end
+  end
+  if not out or Length(out) < 1 then -- (shorter than its two ends' room: its middle)
+    local half = Length(pts) / 2
+    local ax, ay, az = Along(pts, zs, math.max(0, half - 0.5))
+    local bx, by, bz = Along(pts, zs, half + 0.5)
+    out, oz = { ax, ay, bx, by }, zs and { az, bz } or nil
+  end
+  local function r1(v) return math.floor(v * 10 + 0.5) / 10 end
+  for k = 1, #out do out[k] = r1(out[k]) end
+  if oz then for k = 1, #oz do oz[k] = r1(oz[k]) end end
+  return out, oz
+end
+
+-- Delete the road picked (`sel`, R.TrackAt's or the map's own road shown read-only, `sel.t.zs` its heights when it has
+-- them) on `level`. `floor`: { z, indoors, down, zone } for an erase with no heights (the floor being edited). "own"
+-- (taken off the list) or the erase's number; nil when there's nothing to delete.
+function R.DeleteRoad(level, sel, floor)
+  local t = sel and sel.t
+  if not (level and t and type(t.pts) == "table" and #t.pts >= 4) then return nil end
+  floor = floor or {}
+  if not (sel.readOnly or sel.shipped or sel.archived or t.replaces) then
+    for i, o in ipairs(Tracks()) do
+      if o == t then
+        R.TakeOut(i)
+        return "own"
+      end
+    end
+  end
+  local zs = type(t.zs) == "table" and #t.zs == #t.pts / 2 and t.zs or nil
+  for k = 1, zs and #zs or 0 do
+    if type(zs[k]) ~= "number" then zs = nil break end
+  end
+  local pts, hs = R.DeleteStroke(level, t.pts, zs)
+  return R.Save({ op = "remove", drawn = true, continent = level, zone = floor.zone or t.zone or "?", time = time(),
+    pts = pts, zs = hs, z = hs and hs[1] or floor.z, indoors = not hs and floor.indoors or nil,
+    down = not hs and floor.down or nil })
+end
+
+-- Delete the section `i` .. `j` of the wall picked (`sel`, R.WallAt's or the map's own wall shown read-only; `sel.fl`
+-- its floor) on `level`. "own" (the player's own wall off the list, the rest of it kept) or the erase's number.
+function R.DeleteWall(level, sel, i, j, zone)
+  local t = sel and sel.t
+  if not (level and t and type(t.pts) == "table" and #t.pts >= 4) then return nil end
+  local n = #t.pts / 2
+  i, j = tonumber(i) or 1, tonumber(j) or n
+  if j < i then i, j = j, i end
+  i, j = math.max(1, i), math.min(n, j)
+  local idx
+  if not sel.readOnly then
+    for k, o in ipairs(Tracks()) do
+      if o == t and o.op == "wall" then idx = k end
+    end
+  end
+  if idx and (i > 1 or j < n or not t.replaces) then
+    R.TakeOut(idx)
+    for _, ab in ipairs({ { 1, i }, { j, n } }) do
+      local a, b = ab[1], ab[2]
+      if b > a then
+        local pts, cl, cr, any = {}, {}, {}, false
+        for k = a, b do
+          pts[#pts + 1], pts[#pts + 2] = t.pts[2 * k - 1], t.pts[2 * k]
+          cl[#cl + 1] = type(t.cl) == "table" and tonumber(t.cl[k]) or false
+          cr[#cr + 1] = type(t.cr) == "table" and tonumber(t.cr[k]) or false
+          any = any or (cl[#cl] and cr[#cr]) and true or false
+        end
+        any = any and t.kind == "cliff"
+        R.Save({ op = "wall", drawn = true, edit = t.edit, continent = t.continent, zone = t.zone or "?",
+          time = time(), pts = pts, z = t.z, indoors = t.indoors, down = t.down, replaces = t.replaces,
+          kind = any and "cliff" or nil, cl = any and cl or nil, cr = any and cr or nil })
+      end
+    end
+    return "own"
+  end
+  -- (the map's own, or an edit: an erase at its point furthest from every other wall's)
+  local P = ns.Passability
+  local others = {}
+  for _, w in ipairs(P and P.WallLines and P.WallLines(level) or {}) do
+    local same = true
+    for k = 1, #w - 1, 2 do
+      if R.LineDist(t.pts, w[k], w[k + 1]) > 0.5 then same = false break end
+    end
+    if not same then others[#others + 1] = w end
+  end
+  local best, bk = -1, i
+  for k = i, j do
+    local x, y = t.pts[2 * k - 1], t.pts[2 * k]
+    local near = math.huge
+    for _, w in ipairs(others) do
+      for m = 1, #w - 1, 2 do
+        local d = (w[m] - x) ^ 2 + (w[m + 1] - y) ^ 2
+        if d < near then near = d end
+      end
+    end
+    if near > best then best, bk = near, k end
+  end
+  local x, y = t.pts[2 * bk - 1], t.pts[2 * bk]
+  local o = bk < n and bk + 1 or bk - 1
+  local dx, dy = t.pts[2 * o - 1] - x, t.pts[2 * o] - y
+  local d = math.sqrt(dx * dx + dy * dy)
+  if d > 0 then dx, dy = dx / d, dy / d else dx, dy = 1, 0 end
+  local function r1(v) return math.floor(v * 10 + 0.5) / 10 end
+  local fl = sel.fl or { z = t.z, indoors = t.indoors, down = t.down }
+  return R.Save({ op = "unwall", drawn = true, continent = level, zone = zone or t.zone or "?", time = time(),
+    pts = { r1(x), r1(y), r1(x + dx), r1(y + dy) }, z = fl.z, indoors = fl.indoors, down = fl.down })
+end
+
 -- Restoring the map's own data (asked 2026-11-14: "a magic eraser ... that can be used to restore original road and
 -- wall data", a zone's, a continent's): the player's own edits of one kind (the road tools': drawn roads, erased roads,
 -- stairs, recorded walks; the wall tools': walls and wall erasers) taken out where they lie, so the data's roads and

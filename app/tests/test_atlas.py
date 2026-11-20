@@ -584,6 +584,12 @@ def terrain_zoom(G, share=0.85):
     return G.SEAM_ART_IN[1] * share * G.ZoomScale()
 
 
+def coast_zoom(G):
+    """A zoom (yards, this map's size) with the art all in and the terrain still opaque: the coastline masks whole (in
+    the terrain-alone stage the coast's sea is the terrain's, G.CoastNear)."""
+    return G.SEAM_ART_IN[2] * G.ZoomScale()
+
+
 def test_the_zoom_to_blend_function_by_the_wheels_notches():
     lua, ns = _seamless()
     G = ns.GPS
@@ -1441,7 +1447,7 @@ def test_the_engine_draws_the_stages_as_the_wheel_goes_out():
 # ---------------------------------------------------------------- the edge blend (issue #62)
 
 # Off Westfall's coast and Durotar's shore: the last terrain tile's edge (no tile west of y 3725, east of y -6925),
-# a spot with terrain and the empty sea in view with the terrain sharp (about 260 yd)
+# a spot with terrain and the sea in view with the art all in and the terrain still opaque (coast_zoom)
 COASTS = [(0, -10400.0, 2000.0), (1, 388.0, -5012.0)]  # (the shore of Westfall, of Durotar: 100 yd inland)
 
 
@@ -1461,7 +1467,7 @@ def test_the_art_shows_where_the_terrain_has_no_tiles_and_nowhere_else(cont, x, 
     lua, ns = _seamless()
     G, A = ns.GPS, ns.Atlas
     lua.execute(f"AGPS_POS = {{ {x}, {y}, {cont} }}")
-    ns.settings.gps.zoom = terrain_zoom(G)
+    ns.settings.gps.zoom = coast_zoom(G)
     G.Update()
     view = G.shownView
     assert view.edge and not view.artOnly and view.rot == 0
@@ -1518,6 +1524,7 @@ def test_the_art_shows_where_the_terrain_has_no_tiles_and_nowhere_else(cont, x, 
     assert G.SeamReading().edge is True
     # inland (Brill): no empty cell in view, nothing more than before: no art, no masks, no feathers
     lua.execute("AGPS_POS = { 2254.0, 293.0, 0 }")
+    ns.settings.gps.zoom = terrain_zoom(G)  # (the terrain alone: at coast_zoom the art is in under the tiles anyway)
     G.Update()
     assert not view.edge and not A.artHost.IsShown(A.artHost) and G.laidTiles.laidSig == "tiles:0"
     tiles, masks, feathers = _laid(lua)
@@ -1563,19 +1570,26 @@ def test_no_edge_blend_heading_up_off_or_held():
     cont, x, y = COASTS[0]
     lua, ns = _seamless()
     G, A = ns.GPS, ns.Atlas
-    lua.execute(f"AGPS_POS = {{ {x}, {y}, {cont} }} GetPlayerFacing = function() return 1 end")
+    # (heading-up only with the terrain alone: out at sea by the last tiles, 125 yd off them, so the void is in view)
+    lua.execute(f"AGPS_POS = {{ {x}, 3600.0, {cont} }} GetPlayerFacing = function() return 1 end")
     ns.settings.gps.zoom = terrain_zoom(G)
     ns.settings.gps.rotate = True
     G.Update()
     assert G.shownView.rot != 0 and not G.shownView.edge and A.artHost is None  # (never even built)
     assert not any(_laid(lua)[1:])
     ns.settings.gps.rotate = False
+    lua.execute(f"AGPS_POS = {{ {x}, {y}, {cont} }}")
+    ns.settings.gps.zoom = coast_zoom(G)
     lua.globals().AzerothGPS.HoldMap("StreetGuess", True, None, lua.eval("{ style = 'minimap' }"))
     G.Update()
     assert not G.shownView.edge and A.artHost is None and not any(_laid(lua)[1:])
     lua.globals().AzerothGPS.HoldMap("StreetGuess", False)  # (let go: the blend)
     G.Update()
     assert G.shownView.edge and A.artHost.IsShown(A.artHost)
+    lua.execute(f"AGPS_POS = {{ {x}, 3600.0, {cont} }}")  # (north up where heading-up was: the blend)
+    ns.settings.gps.zoom = terrain_zoom(G)
+    G.Update()
+    assert G.shownView.rot == 0 and G.shownView.edge
     lua2, ns2 = _seamless(on=False)
     lua2.execute(f"AGPS_POS = {{ {x}, {y}, {cont} }}")
     ns2.settings.gps.zoom = 400
