@@ -293,6 +293,22 @@ def test_the_tips_follow_a_detached_route_panel_and_hide_with_the_map():
     assert S.TipsWanted(G) is False
 
 
+def test_the_tip_buttons_sit_above_the_tip_panel_so_they_take_clicks():
+    # (1.3.10, a player: "Hide Tips" and "Next" weren't clickable, on the map and detached. The buttons were made while
+    # the panel was on UIParent and kept that low level when it was raised; the panel's own mouse took their clicks.)
+    for detached in (False, True):
+        lua, ns = _start()
+        S, G = ns.Setup, ns.GPS
+        if detached:
+            ns.settings.gps.navPanelDetached = True
+            G.ApplySettings()
+        _redraw(lua, ns)
+        p = S.tipPanel
+        assert p._shown
+        for b in (p.next, p.hide):  # (the levels set: the stand-in's GetFrameLevel is always 5)
+            assert b._level is not None and b._level > p._level, (detached, b._level, p._level)
+
+
 def test_got_it_on_the_last_tip_and_hide_tips_stop_them():
     lua, ns = _start()
     S = ns.Setup

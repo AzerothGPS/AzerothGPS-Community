@@ -749,7 +749,11 @@ function S.RefreshTips(G)
   local parent = nav:GetParent() or UIParent
   if p:GetParent() ~= parent then p:SetParent(parent) end
   p:SetFrameStrata(nav:GetFrameStrata() or "MEDIUM")
-  p:SetFrameLevel((nav:GetFrameLevel() or 1) + 2)
+  local level = (nav:GetFrameLevel() or 1) + 2
+  p:SetFrameLevel(level)
+  -- (its buttons above it: made while it was on UIParent, they kept that low level when it was raised, and the
+  -- panel's own mouse took their clicks: "Next" and "Hide Tips" did nothing, on the map and detached, 1.3.10)
+  for _, b in ipairs({ p.next, p.hide }) do b:SetFrameLevel(level + 2) end
   p:ClearAllPoints()
   p:SetPoint("TOPLEFT", nav, "TOPLEFT", 0, 0)
   p:SetWidth(math.max(240, nav:GetWidth() or 0))

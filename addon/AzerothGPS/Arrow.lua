@@ -458,9 +458,10 @@ local function Update(dt)
   if textWait <= 0 then
     textWait = TEXT_EVERY
     local active = px and UpdateText(px, py, cont)
-    -- no route: hidden and click-through (kept shown so this keeps checking), except while either is unlocked (to
-    -- place and size them)
-    local placing = not active and not (S().arrowLocked and S().dirLocked)
+    -- no route: hidden and click-through (kept shown so this keeps checking), except while either is unlocked and
+    -- Options or the tutorial is open (to place and size them). Not always while unlocked (the default): a player,
+    -- 1.3.10, couldn't find how to turn off the arrow with no route.
+    local placing = not active and not (S().arrowLocked and S().dirLocked) and A.Placing()
     if placing then
       line1:SetText(L["|cff9d9d9dNo route|r"])
       line2:SetText(L["Set one on the map: double-click a spot, or pan and Confirm Route."])
@@ -639,6 +640,11 @@ end
 -- (asked 2026-11-18, "a separate lock option for the directions text than the arrow"): `arrowLocked` the arrow's,
 -- `dirLocked` the directions text's (Core.lua's InitDB: the old shared lock's value at first).
 -- The panel's lock: the directions' `dirLocked`, the arrow's `arrowLocked`.
+-- With no route, the placeholder shows (unlocked) only while there's a reason to place them: Options open, the tutorial.
+function A.Placing()
+  if ns.Tutorial and ns.Tutorial.run then return true end
+  return (ns.Options and ns.Options.IsShown and ns.Options.IsShown()) and true or false
+end
 function A.Locked(f)
   local st = S()
   if f ~= nil and f == dir then return st.dirLocked == true end
