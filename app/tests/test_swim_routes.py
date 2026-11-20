@@ -305,3 +305,195 @@ def test_a_swim_left_out_stays_out_on_every_reroute_the_stops_reached_and_a_relo
     trip.settle()
     assert (N.noSwim is not None) == (how == "removed")
     check("after a reload")
+
+
+# (the live report, 2026-11-19, the swim removed and a /reload: from the Wetlands' north shore by Dun Modr the route
+# swam north up the bay along Arathi's west coast to Hillsbrad, weighed 10 times a yard and still taken. The client it
+# was seen in ran a Router without #699's fix; either way a removed swim's water is now banned for the trip)
+DUN_MODR = (-2796.7, -1425.7)
+
+
+def _water_points(ns, r):
+    """Points every few yards along the route's swims: (cont, x, y)."""
+    out = []
+    for p in r.parts.values():
+        for i in range(1, len(p.pts) // 2):
+            sp = ns.Nav.SwimSpans(p, i)
+            if sp:
+                x1, y1, x2, y2 = p.pts[2 * i - 1], p.pts[2 * i], p.pts[2 * i + 1], p.pts[2 * i + 2]
+                for j in range(1, len(sp), 2):
+                    a, b = sp[j], sp[j + 1]
+                    n = max(1, int((b - a) * math.dist((x1, y1), (x2, y2)) / 4))
+                    for k in range(n + 1):
+                        t = a + (b - a) * k / n
+                        out.append((p.cont, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t))
+    return out
+
+
+# (in the bay north of the Wetlands up Arathi's west coast to Hillsbrad's shore: the live report's route swam there)
+BAY = [(-2237.0, -1704.0), (-1862.0, -1404.0), (-1621.0, -1096.0)]
+
+
+def _banned_yards(ns, r, ends):
+    """Yards of the route's pieces off the roads over banned water (swum, or straight over it: a hop), but within
+    STOP_SLACK of `ends` (a stop in the marsh's water: its last yards are)."""
+    N, P, R = ns.Nav, ns.Passability, ns.Router
+    yd = 0.0
+    for p in r.parts.values():
+        pts = p.pts
+        for i in range(1, len(p.pts) // 2):
+            if p.kinds[i] != R.KIND_OFFROAD:
+                continue
+            x1, y1, x2, y2 = pts[2 * i - 1], pts[2 * i], pts[2 * i + 1], pts[2 * i + 2]
+            n = max(1, math.ceil(math.dist((x1, y1), (x2, y2)) / 4))
+            for j in range(n):
+                x, y = x1 + (x2 - x1) * (j + 0.5) / n, y1 + (y2 - y1) * (j + 0.5) / n
+                if (N.InSwimBan(p.cont, x, y) and not N.SwimStays(p.cont, x, y)
+                        and min(math.dist((x, y), e) for e in ends) > P.STOP_SLACK):
+                    yd += math.dist((x1, y1), (x2, y2)) / n
+    return yd
+
+
+@pytest.mark.parametrize("start", [DUN_MODR, WETLANDS])
+def test_a_removed_swims_water_is_banned_for_the_trip(game, trip, start):
+    lua, ns = game
+    N, P = ns.Nav, ns.Passability
+    trip(start, MALEB)
+    N.SetStops(lua.eval(f"{{ {{ x = {NEAR[0]}, y = {NEAR[1]}, cont = 0, name = 'near' }},"
+                        f" {{ x = {MALEB[0]}, y = {MALEB[1]}, cont = 0, name = 'stop' }} }}"), False, "red")
+    trip.settle()
+    assert _water_points(ns, N.route)  # (it swims along the coast)
+    N.SkipSwim()
+    trip.settle()
+    bans = list(N.swimBans.values())
+    assert bans and not any(b.lifted for b in bans) and ns.CharDB().swimBans
+    # (the bay whole, up Arathi's west coast to Hillsbrad's shore; closed, as a wall is)
+    for x, y in BAY:
+        assert any(P.InSwimSection(b, 0, x, y) for b in bans) and P.At(0, x, y) == 2, (x, y)
+
+    def check(where):
+        r = N.route
+        assert r is not None, where
+        banned = _banned_yards(ns, r, (start, NEAR, MALEB, OFF))
+        assert banned == 0 and _strait_swim(ns, r) == 0 and _over_thandol(r), (where, banned)
+        assert not any(b.lifted for b in N.swimBans.values()), where
+
+    check("removed")
+    # off course, up the coast toward the strait: worked out again from there, still by land
+    lua.execute(f"AGPS_POS[1], AGPS_POS[2] = {OFF[0]}, {OFF[1]}")
+    trip.settle()
+    check("off course")
+    # the first stop reached: on to the next, still by land
+    lua.execute(f"AGPS_POS[1], AGPS_POS[2] = {NEAR[0]}, {NEAR[1]}")
+    trip.settle()
+    assert len(N.stops) == 1
+    check("a stop reached")
+    # a /reload: the stops and the banned water brought back
+    lua.execute(f"AGPS_POS[1], AGPS_POS[2] = {start[0]}, {start[1]}")
+    N.noSwim, N.swimBans = None, lua.table()
+    P.SetSwimBans(lua.table())
+    N.Restore()
+    assert len(N.swimBans) == len(bans)
+    N.Invalidate(True, True)
+    trip.settle()
+    assert P.At(0, *BAY[1]) == 2
+    check("after a reload")
+    # a new trip swims again: nothing banned
+    trip(start, MALEB)
+    assert not N.noSwim and len(N.swimBans) == 0 and P.At(0, *BAY[1]) == 1
+
+
+def test_the_bay_is_banned_whole_but_not_the_sea(game):
+    lua, ns = game
+    P = ns.Passability
+    import time
+    # (a short swim along the Wetlands' coast: the bay up to Hillsbrad's shore, a few milliseconds)
+    a = time.perf_counter()
+    bay = P.SwimSection(0, lua.table(-2866.0, -1406.0, -2949.0, -1493.0))
+    assert (time.perf_counter() - a) * 1000 < 20
+    assert all(P.InSwimSection(bay, 0, x, y) for x, y in BAY) and bay.n <= P.SWIM_BAN_MAX_CELLS
+    # (a short swim out at sea, off Westfall: a patch round it, never the sea)
+    sea = P.SwimSection(0, lua.table(-10600.0, 2200.0, -10650.0, 2220.0))
+    if sea:
+        x0, x1, y0, y1 = P.SwimSectionBox(sea)
+        assert x1 - x0 <= 2 * P.SWIM_BAN_REACH_YD + 200 and y1 - y0 <= 2 * P.SWIM_BAN_REACH_YD + 200
+        assert sea.n <= P.SWIM_BAN_MAX_CELLS
+
+
+def test_an_isle_is_still_swum_to_and_says_why(game, trip):
+    lua, ns = game
+    N, G = ns.Nav, ns.GPS
+    r = trip(SHORE, ISLE)
+    swum = r.swimYards
+    assert swum > 200
+    N.SkipSwim()
+    trip.settle()
+    # (the lake banned, the isle cut off: the water swum after all, the plan worked out again; never "No way")
+    r2 = N.route
+    assert r2 is not None and r2.swimYards > 50
+    assert any(b.lifted for b in N.swimBans.values())
+    assert any(N.SwimStays(*q) for q in _water_points(ns, r2))
+    # the swim's tooltip says so, and right-clicking it does nothing more
+    G.Update()
+    assert G.swimSegN > 0
+    sg = None
+    for i in range(1, G.swimSegN + 1):
+        if G.SwimSegStays(G.swimSegs[i]):
+            sg = G.swimSegs[i]
+            break
+    assert sg is not None
+    cx, cy = lua.eval("function(f) return f:GetCenter() end")(G.markLayer)
+    mx, my = cx + (sg[1] + sg[3]) / 2, cy + (sg[2] + sg[4]) / 2
+    lua.execute(f"AGPS_CUR = GetCursorPosition GetCursorPosition = function() return {mx}, {my} end")
+    try:
+        lines = "\n".join(str(v) for v in G.SwimTip().lines.values())
+        assert "No way round by land" in lines and "Right-click" not in lines
+        assert G.SwimClick() is False
+    finally:
+        lua.execute("GetCursorPosition = AGPS_CUR")
+
+
+def test_the_no_way_line_only_when_there_is_none(game, trip):
+    lua, ns = game
+    G = ns.GPS
+    # (swimming off, a swim still on the route: removable, never "No way round by land")
+    trip(ISLE, SHORE, allow=False)
+    G.Update()
+    assert G.swimSegN > 0
+    sg = G.swimSegs[1]
+    assert not G.SwimSegStays(sg)
+    cx, cy = lua.eval("function(f) return f:GetCenter() end")(G.markLayer)
+    mx, my = cx + (sg[1] + sg[3]) / 2, cy + (sg[2] + sg[4]) / 2
+    lua.execute(f"AGPS_CUR = GetCursorPosition GetCursorPosition = function() return {mx}, {my} end")
+    try:
+        lines = "\n".join(str(v) for v in G.SwimTip().lines.values())
+        assert "No way round by land" not in lines and "Right-click" in lines
+        assert G.SwimClick() is True
+    finally:
+        lua.execute("GetCursorPosition = AGPS_CUR")
+    G.removeAsk.Hide(G.removeAsk)
+
+
+def test_banning_a_bay_stays_within_the_frame_budget(game, trip):
+    # (the flood at the click is a few milliseconds; the blocks the ban changes are worked out in the background
+    # searches, a slice at a time)
+    from test_frame_budget import FRAME_MS
+    lua, ns = game
+    N, P = ns.Nav, ns.Passability
+    trip(DUN_MODR, MALEB)
+    clock = lua.eval("os.clock")
+    a = clock()
+    N.SkipSwim()
+    assert (clock() - a) * 1000 < FRAME_MS
+    assert len(N.swimBans) > 0
+    worst = lua.eval("""function(P)
+      local co = coroutine.create(function() return P.FindPath(0, -2796.7, -1425.7, -1600.0, -2100.0) end)
+      local worst, n = 0, 0
+      while coroutine.status(co) ~= "dead" do
+        local a = os.clock()
+        assert(coroutine.resume(co))
+        worst, n = math.max(worst, os.clock() - a), n + 1
+      end
+      return worst * 1000, n
+    end""")(P)
+    assert worst[0] < FRAME_MS, worst

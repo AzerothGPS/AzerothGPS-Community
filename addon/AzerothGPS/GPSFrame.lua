@@ -3715,10 +3715,11 @@ function G.WaveLines(ax, ay, bx, by, amp, wave, s0, total, fn)
   fn(px, py, x, y)
 end
 -- The swims drawn on the map at the last redraw, on the screen (round G.markLayer's middle): G.swimSegs[1..G.swimSegN]
--- = { x1, y1, x2, y2 }, for their tooltip (G.SwimHover) and right-click (G.SwimClick).
+-- = { x1, y1, x2, y2, part =, i =, t1 =, t2 = } (the route part's piece i from t1 to t2: where it is in the world), for
+-- their tooltip (G.SwimHover) and right-click (G.SwimClick).
 G.swimSegs, G.swimSegN = {}, 0
 G.SWIM_HOVER_PX = 8
-function G.AddSwimSeg(x1, y1, x2, y2)
+function G.AddSwimSeg(x1, y1, x2, y2, swim)
   G.swimSegN = G.swimSegN + 1
   local sg = G.swimSegs[G.swimSegN]
   if not sg then
@@ -3726,6 +3727,17 @@ function G.AddSwimSeg(x1, y1, x2, y2)
     G.swimSegs[G.swimSegN] = sg
   end
   sg[1], sg[2], sg[3], sg[4] = x1, y1, x2, y2
+  sg.part, sg.i, sg.t1, sg.t2 = swim and swim.part, swim and swim.i, swim and swim.t1, swim and swim.t2
+end
+-- Whether swim seg `sg` is one kept because there's no way round by land (Nav.SwimStays: its water banned, then swum
+-- after all).
+function G.SwimSegStays(sg)
+  local part = sg and sg.part
+  if not (part and part.pts and sg.i and part.pts[2 * sg.i + 2]) then return false end
+  local pts, i, t = part.pts, sg.i, ((sg.t1 or 0) + (sg.t2 or 1)) / 2
+  local x = pts[2 * i - 1] + (pts[2 * i + 1] - pts[2 * i - 1]) * t
+  local y = pts[2 * i] + (pts[2 * i + 2] - pts[2 * i]) * t
+  return ns.Nav.SwimStays and ns.Nav.SwimStays(part.cont, x, y) or false
 end
 -- A swim on the map at the cursor (within SWIM_HOVER_PX): its spot round G.markLayer's middle, or nil.
 function G.SwimAtCursor()
@@ -3741,7 +3753,7 @@ function G.SwimAtCursor()
     local vx, vy = sg[3] - sg[1], sg[4] - sg[2]
     local L2 = vx * vx + vy * vy
     local t = L2 > 0 and math.max(0, math.min(1, ((x - sg[1]) * vx + (y - sg[2]) * vy) / L2)) or 0
-    if (sg[1] + vx * t - x) ^ 2 + (sg[2] + vy * t - y) ^ 2 <= r2 then return x, y end
+    if (sg[1] + vx * t - x) ^ 2 + (sg[2] + vy * t - y) ^ 2 <= r2 then return x, y, sg end
   end
   return nil
 end
@@ -3753,7 +3765,8 @@ function G.SwimTip()
   if fast then
     lines[#lines + 1] = Format(L["%s: as fast as on land."], fast.name or "?")
   end
-  if N.SwimAllowed and not N.SwimAllowed() then
+  local _, _, sg = G.SwimAtCursor()
+  if G.SwimSegStays(sg) then -- (only when there's truly no way by land: removed, and swum after all)
     lines[#lines + 1] = L["No way round by land: this swim stays."]
   else
     lines[#lines + 1] = L["Right-click: go round by land instead (this trip)"]
@@ -3789,10 +3802,10 @@ function G.SwimHover(dt)
 end
 -- A right-click on the map over a swim: "Remove?" there (G.AskRemove); true when it was one.
 function G.SwimClick()
-  local x, y = G.SwimAtCursor()
+  local x, y, sg = G.SwimAtCursor()
   if not x then return false end
-  if ns.Nav.SwimAllowed and not ns.Nav.SwimAllowed() then return false end -- (left out already: the map's own click)
-  G.AskRemove({ swim = true, swimX = x, swimY = y })
+  if G.SwimSegStays(sg) then return false end -- (no way round it by land: the map's own click)
+  G.AskRemove({ swim = true, swimX = x, swimY = y, swimPart = sg.part, swimI = sg.i, swimT1 = sg.t1, swimT2 = sg.t2 })
   return true
 end
 -- Only the route near what's shown (asked 2026-10-06: zoomed in on a long route cost as much as zoomed out): each of
@@ -9390,7 +9403,7 @@ function G.Update()
         local cx1, cy1, cx2, cy2, t0
         if swim then cx1, cy1, cx2, cy2, t0 = G.ClipSeg(ax, ay, bx, by, swimBound) end
         if swim and cx1 then
-          G.AddSwimSeg(cx1, cy1, cx2, cy2)
+          G.AddSwimSeg(cx1, cy1, cx2, cy2, swim)
           local full = math.sqrt((bx - ax) ^ 2 + (by - ay) ^ 2)
           local w = math.max(2, width - 1)
           G.WaveLines(cx1, cy1, cx2, cy2, 1.5 + width * 0.5, G.SWIM_WAVE_PX + width * 2, swim[1] + full * t0, swim[2],
@@ -9454,7 +9467,8 @@ function G.Update()
           local full = math.sqrt((bx - ax) ^ 2 + (by - ay) ^ 2)
           N.EachRoutePiece(part, i, function(t1, t2, hostile, swim)
             DrawLeg(ax + (bx - ax) * t1, ay + (by - ay) * t1, ax + (bx - ax) * t2, ay + (by - ay) * t2,
-              hostile and N.HOSTILE_COLOR or col, width, dotted, partCont, swim and { 0, full * (t2 - t1) } or nil)
+              hostile and N.HOSTILE_COLOR or col, width, dotted, partCont,
+              swim and { 0, full * (t2 - t1), part = part, i = i, t1 = t1, t2 = t2 } or nil)
           end)
         else
           DrawLeg(ax, ay, bx, by, col, width, dotted, partCont)
@@ -14138,7 +14152,12 @@ function G.AskRemove(pin)
         ns.Nav.SkipRide(self.ride, self.hop, self.rideName)
         G.Redraw()
       elseif self.swim then -- (a swim: this trip goes round by land, Nav.SkipSwim)
-        ns.Nav.SkipSwim()
+        local N = ns.Nav
+        if self.swimPart then -- (its water banned for the trip: N.SwimStretch's points)
+          N.SkipSwim(N.SwimStretch(self.swimPart, self.swimI, self.swimT1, self.swimT2))
+        else
+          N.SkipSwim()
+        end
         G.Redraw()
       elseif self.customPin then -- (a pin: gone)
         ns.Pins.Remove(self.customPin)
@@ -14158,6 +14177,7 @@ function G.AskRemove(pin)
   removeAsk.ride, removeAsk.hop, removeAsk.customPin = pin.ride, pin.hop, pin.pin
   removeAsk.rideName = pin.ride and pin.title or nil
   removeAsk.swim = pin.swim
+  removeAsk.swimPart, removeAsk.swimI, removeAsk.swimT1, removeAsk.swimT2 = pin.swimPart, pin.swimI, pin.swimT1, pin.swimT2
   removeAsk.shownAt = GetTime()
   removeAsk:ClearAllPoints()
   if pin.swim then -- (a swim on the map, G.SwimClick: over the spot clicked)
