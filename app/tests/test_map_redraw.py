@@ -7413,6 +7413,43 @@ def test_a_ride_whose_walk_came_out_far_longer_than_planned_has_the_next_plan_lo
         G.Follow()
 
 
+def test_a_ride_whose_walk_came_out_far_longer_off_the_roads_has_the_next_plan_looked_at(game):
+    # (#715, route-quality on Thunder Bluff's rebuilt roads) Horde, level 40, Valley of Bones to Hive'Ashi: the plan
+    # walks to Camp Mojache's flight master, and past it to Thunder Bluff's, 4.9k yd round from 2.4k planned, a third of
+    # it off the roads: no long way round, nor along the roads, so the check stopped there and flew from Camp Mojache
+    # (1,187 s). Past the first plan, off the roads counts too: Shadowprey's flight (1,023 s)
+    lua, ns = game
+    G, N = ns.GPS, ns.Nav
+    cdb = ns.CharDB()
+    fac, nodes = cdb.faction, cdb.taxiNodes
+    known = (22, 23, 25, 29, 30, 40, 44, 48, 53, 61, 63, 72, 77, 79, 80)
+    try:
+        lua.execute("AGPS_LEVEL = 40")
+        cdb.faction = "Horde"
+        cdb.taxiNodes = lua.eval("{ [1415] = { nodes = { "
+                                 + "".join(f"{{ nodeID = {n}, known = true }}, " for n in known) + "} } }")
+        ns.Teleports.Changed()
+        N.FlightsChanged()
+        N.Clear()
+        lua.execute("AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = -2251.2, 1513.6, 1")
+        N.SetStops(lua.eval("{ { x = -6450.0, y = 1150.0, cont = 1, name = [[Hive'Ashi]] } }"), False, "red")
+        G.Follow()
+        for _ in range(10):
+            lua.execute("AGPS_T = AGPS_T + 0.5")
+            G.Update()
+        assert str(N.lastRideCheck).endswith(": rides"), N.lastRideCheck
+        steps = str(N.StepsText(4))
+        assert "Shadowprey" in steps and "Mojache" not in steps, steps
+    finally:
+        lua.execute("AGPS_LEVEL = nil")
+        cdb.faction, cdb.taxiNodes = fac, nodes
+        ns.Teleports.Changed()
+        N.FlightsChanged()
+        N.Clear()
+        lua.execute("AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = 2254.0, 293.0, 0 AGPS_T = AGPS_T + 1")
+        G.Follow()
+
+
 def test_the_ride_the_check_chose_is_the_one_taken_from_a_stop(game):
     # (the overnight trip sweep, 2026-10-07) Horde, level 14, The Zoram Strand, Cliffspring Falls, then The Forgotten
     # Pools: the ride check worked out the stretch from Cliffspring Falls from a spot rounded 25 yd off it, out of the

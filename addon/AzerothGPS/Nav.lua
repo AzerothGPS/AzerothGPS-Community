@@ -2616,11 +2616,15 @@ end
 -- 13.8k yd -> 7.5k, no longer a long way round; the check stopped at the tram's plan and walked (1,318 s), never trying
 -- Farholde Keep's flight (919 s). A walk round over the land is the walk search's and N.WithoutBlockedWalks': from Bough
 -- Shadow to Lake Mennar the walk to Valormok's flight master, 773 yd straight and 2.2k round, half of it on roads, left
--- out flew there (649 s), and the way on foot by it (527 s) was lost.
+-- out flew there (649 s), and the way on foot by it (527 s) was lost. `offRoad`: off the roads too, for the plans after
+-- the first (the check already looking past one: the best kept; #715, Thunder Bluff's rebuilt roads met the gap road's
+-- loose end north of it, and from Desolace the plan past Camp Mojache's flight walked to Thunder Bluff's, 4.9k yd (2.4k
+-- planned), a third of it off the roads: the check stopped there, at Camp Mojache's (1,187 s), never trying
+-- Shadowprey's (1,023 s); the same past three zeppelins (2,318 s) to the Golden Plains, not Brackenwall's (1,985 s)).
 N.NO_WALK_LONGER_YD, N.NO_WALK_LONGER_ROAD = 1000, 0.75
-function N.WalkLonger(leg, r, exempt)
+function N.WalkLonger(leg, r, exempt, offRoad)
   if not (r and r.pts and #r.pts >= 4) or r.pending or Unwalkable(r) then return 0 end
-  if not (r.length and r.length > 0 and (r.road or 0) >= r.length * N.NO_WALK_LONGER_ROAD) then return 0 end
+  if not (r.length and r.length > 0 and (offRoad or (r.road or 0) >= r.length * N.NO_WALK_LONGER_ROAD)) then return 0 end
   local planned = N.PlanYards(leg.cont, leg.x1, leg.y1, leg.x2, leg.y2, false, exempt) * N.WALK_FACTOR
   return math.max(0, Weighed(leg.cont, r.pts, 1, exempt, r.blocked) - planned)
 end
@@ -2763,11 +2767,12 @@ local function CompareRide(cont, sx, sy, d, walk, tps, opts, sz)
         break
       end
     end
-    -- (none: the walk that came out longest past the plan's yards, NO_WALK_LONGER_YD or more, N.WalkLonger)
+    -- (none: the walk that came out longest past the plan's yards, NO_WALK_LONGER_YD or more, N.WalkLonger; off the
+    -- roads too once past the first plan, `avoid` not empty)
     if not bad then
       local most = N.NO_WALK_LONGER_YD
       for li, leg in ipairs(try) do
-        local extra = not leg.ride and N.WalkLonger(leg, tryRoutes[li], exempt) or 0
+        local extra = not leg.ride and N.WalkLonger(leg, tryRoutes[li], exempt, next(avoid) ~= nil) or 0
         if extra >= most then bad, most = leg, extra end
       end
     end

@@ -548,6 +548,9 @@ def cmd_caves(args) -> int:
             p = ADDON_DIR / "Data" / "Caves.lua"
             p.write_text(text, encoding="utf-8", newline="\n")
             print(f"wrote {p} ({p.stat().st_size // 1024} KB)")
+            from .hpa import refresh
+
+            refresh()  # (the caves' grids are laid over the terrain the blocks are made from: Data/TerrainHPA.lua)
     lines = [f"{status:8s} [{cont}] {name or '(unnamed)'} ({uid}) {path.split('/')[-1]}: {why}"
              for cont, name, uid, path, status, why in sorted(report, key=lambda r: (r[4], r[0], r[1] or "~"))]
     out.mkdir(parents=True, exist_ok=True)
@@ -642,6 +645,9 @@ def cmd_capitals(args) -> int:
         p = ADDON_DIR / "Data" / "Capitals.lua"
         p.write_text(capitals_lua(cd, log=log, built=built), encoding="utf-8", newline="\n")
         print(f"wrote {p} ({p.stat().st_size // 1024} KB)")
+        from .hpa import refresh
+
+        refresh()  # (the terrain's blocks are made with the capitals' grids over it: Data/TerrainHPA.lua, #715)
     if args.check:  # (the routes over Data/Capitals.lua as it is: --write first after a change)
         from .capitals import check_routes
 
