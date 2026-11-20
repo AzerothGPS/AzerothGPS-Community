@@ -2011,5 +2011,7 @@ L["deleted that road section: routes leave it out now."] = "已刪除這段道�
 L["deleted that wall section: routes go through there now."] = "已刪除這段牆壁：路線現在可以從那裡通過。"
 L["Escape closes the map"] = "Esc 鍵關閉地圖"
 L["In the game's world map, Escape closes it with the GPS map, as the game's own map does. Off: Escape leaves it open; close it with its key or button. In combat, Escape always closes it. The GPS map in its own window never closes on Escape."] = "在遊戲的世界地圖中，Esc 鍵會連同 GPS 地圖一起關閉它，和遊戲自己的地圖一樣。關閉後：Esc 鍵不會關閉它，請用它的按鍵或按鈕關閉。戰鬥中 Esc 鍵總會關閉它。獨立視窗中的 GPS 地圖從不會被 Esc 鍵關閉。"
+L["road end picked (%s%s): Shift + drag from it to go on with it. Click it again to let it go."] = "已選取道路端點（%s%s）：按住 Shift 從它拖曳即可接著畫。再點一次取消選取。"
+L["went on with that %s (#%d, %s): its other end is picked, Shift + drag from it to go on."] = "已接著畫%s（#%d，%s）：已選取它的另一端，按住 Shift 從那裡拖曳可繼續。"
 L["Flip Lift"] = "翻轉升降梯"
 L["Foot and top swapped: the lift's other end is its top now. Save Road to keep it."] = "已交換底部和頂部：升降梯的另一端現在是頂部。儲存道路即可保留。"

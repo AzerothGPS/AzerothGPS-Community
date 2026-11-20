@@ -2011,5 +2011,7 @@ L["deleted that road section: routes leave it out now."] = "участок до�
 L["deleted that wall section: routes go through there now."] = "участок стены удален: маршруты теперь проходят там."
 L["Escape closes the map"] = "Escape закрывает карту"
 L["In the game's world map, Escape closes it with the GPS map, as the game's own map does. Off: Escape leaves it open; close it with its key or button. In combat, Escape always closes it. The GPS map in its own window never closes on Escape."] = "В карте мира игры Escape закрывает её вместе с картой GPS, как и обычную карту игры. Выключено: Escape оставляет её открытой; закрывайте её клавишей или кнопкой. В бою Escape всегда её закрывает. Карта GPS в собственном окне никогда не закрывается по Escape."
+L["road end picked (%s%s): Shift + drag from it to go on with it. Click it again to let it go."] = "конец дороги выбран (%s%s): Shift + перетаскивание от него продолжит её. Щёлкните ещё раз, чтобы отпустить."
+L["went on with that %s (#%d, %s): its other end is picked, Shift + drag from it to go on."] = "%s продолжено (#%d, %s): выбран другой конец, Shift + перетаскивание от него продолжит дальше."
 L["Flip Lift"] = "Перевернуть подъёмник"
 L["Foot and top swapped: the lift's other end is its top now. Save Road to keep it."] = "Низ и верх поменяны: другой конец подъёмника теперь верх. Сохраните дорогу, чтобы оставить так."
