@@ -7535,6 +7535,8 @@ function G.SetMinimapExpanded(on, own)
     return
   end
   m.backAfterCombat = nil
+  -- (back into the square: Find Herbs and Ore closes with it, asked 2026-11-19; it was opened for the map now gone)
+  if not on and ns.Layers and ns.Layers.finder and ns.Layers.finder:IsShown() then ns.Layers.finder:Hide() end
   local l0, b0, w0, h0 = frame:GetRect()
   if on then m.keepOut = G.MinimapKeepsSquare() or nil end -- (the square kept meanwhile: G.SquareKeptOut)
   m.expanded = on
@@ -16347,8 +16349,11 @@ function G.Init()
   -- A small round button like the map button: an icon in the same frame. Returns it and
   -- its icon texture.
   -- (drawn at whole pixels, its art pre-drawn at its size: G.RoundArt; its icon QUICK_ICON_SHARE of it, 16 of 26)
-  local function RoundButton(size, iconPath)
-    local b = CreateFrame("Button", nil, top)
+  local function RoundButton(size, iconPath) return G.NewRoundButton(top, size, iconPath) end
+  -- A round button like the map menu's on `parent` (Find Herbs and Ore's herbs and ore buttons too): the round frame,
+  -- the icon masked round, both drawn at whole pixels (G.RoundArt). Returns it and its icon.
+  function G.NewRoundButton(parent, size, iconPath)
+    local b = CreateFrame("Button", nil, parent)
     b:SetSize(size, size)
     local bg = b:CreateTexture(nil, "BACKGROUND")
     bg:SetAllPoints()

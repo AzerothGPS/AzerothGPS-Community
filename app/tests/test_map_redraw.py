@@ -9541,9 +9541,17 @@ def test_find_herbs_and_ore_open_keeps_the_opened_map_out(minimap):
 
     try:
         assert not quiet(30)
+        G.SetMinimapExpanded(True)
+        G.mmState.tween = None
         f = ns.Layers.ShowNodeFinder()
-        assert f._shown and quiet(30)
-        f.Hide(f)
+        now = lua.eval("GetTime()")
+        G.mmState.activeAt = now
+        G.MinimapIdle(now + 30)
+        assert G.mmState.expanded and f._shown  # (the finder open: in use, kept out)
+        # (and back into the square, by hand or by itself: the finder closes with it, asked 2026-11-19)
+        G.SetMinimapExpanded(False)
+        G.mmState.tween = None
+        assert not f._shown
         assert not quiet(30)
     finally:
         if ns.Layers.finder:
