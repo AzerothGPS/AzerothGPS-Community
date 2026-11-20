@@ -1213,7 +1213,7 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--preview", metavar="DIR", help="also pictures of them to look at, in DIR")
     sp.set_defaults(fn=cmd_padicons)
 
-    sp = sub.add_parser("toolicons", help="the road and wall tools' legend icons: mouse buttons, Shift, Ctrl (Media/Tools/)")
+    sp = sub.add_parser("toolicons", help="the road and wall tools' legend icons (mouse buttons, Shift, Ctrl) and the map's stairs glyph (Media/Tools/)")
     sp.add_argument("--preview", metavar="DIR", help="also pictures of them to look at, in DIR")
     sp.set_defaults(fn=cmd_toolicons)
 

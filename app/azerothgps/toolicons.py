@@ -3,7 +3,10 @@ the map was "a wall of colored text"; now a list on the map's left, one action a
 its input, as the controller's buttons are shown). Our own: drawn from numbers alone, nothing of the game's.
 
 Icons (Media/Tools/<name>_<px>.tga): the mouse with its left button lit (gold), its right button lit (red: erasing),
-its wheel rolled (ridged), and the Shift and Ctrl keys as keycaps twice as wide as high. Each drawn
+its wheel rolled (ridged), and the Shift and Ctrl keys as keycaps twice as wide as high; and the stairs glyph the map
+draws along a stairs road with the road tools on (`Stairs<d>`: three treads narrowing and lightening toward the top, an
+arrow uphill; one file per STAIR_DIRS way it points, d = 0 up, then clockwise by 45 degrees, each drawn turned rather
+than turned in the game, which would filter it). Each drawn
 at each of ICON_PX pixels high, pixel for pixel (never scaled in the game: the client's LINEAR filter blurs a shrunk
 one, and nothing above LINEAR may be asked, it crashes WoW Forever), in the top-left corner of the smallest square
 power-of-two canvas that holds it, as the corner logo is (media.on_canvas); GPSFrame's G.ToolIconFile picks the size
@@ -151,6 +154,57 @@ def key(n: int, text: str) -> np.ndarray:
     return img
 
 
+STAIR_DIRS = 8
+TREAD_FOOT = (165, 165, 160)  # (the stairs' lowest tread: darker; the top one white, so the climb reads)
+TREAD_TOP = (255, 255, 250)
+# (each tread: from and to along the way up, and its half width, as shares of the icon's side; foot first)
+TREADS = ((-0.42, -0.18, 0.46), (-0.11, 0.11, 0.32), (0.18, 0.40, 0.18))
+
+
+def _treads(n: int, d: int, scale: float) -> list:
+    """Each tread's pixels (4 x 4 samples a pixel, half or more inside), the glyph `scale` times its size."""
+    a = np.radians(d * 360.0 / STAIR_DIRS)
+    ux, uy = np.sin(a), -np.cos(a)  # (uphill, the image's y down)
+    vx, vy = np.cos(a), np.sin(a)
+    ss = 4
+    g = (np.arange(n * ss) + 0.5) / ss - n / 2
+    x, y = g[None, :], g[:, None]
+    along, across = (x * ux + y * uy) / (n * scale), (x * vx + y * vy) / (n * scale)
+    out = []
+    for p0, p1, w in TREADS:
+        inside = (along >= p0) & (along < p1) & (np.abs(across) <= w)
+        out.append(inside.reshape(n, ss, n, ss).mean(axis=(1, 3)) >= 0.5)
+    return out
+
+
+def stairs(n: int, d: int) -> np.ndarray:
+    """The stairs glyph, n x n, pointing uphill d * 45 degrees clockwise from up: the treads as big as fit with a pixel
+    round them for the dark outline (a turned one a little smaller), the foot's darker, the top's white."""
+    img = np.zeros((n, n, 4), np.uint8)
+    scale = 1.0
+    while True:
+        treads = _treads(n, d, scale)
+        lit = np.any(treads, axis=0)
+        ys, xs = np.nonzero(lit)
+        if scale < 0.5 or (len(xs) and xs.min() >= 1 and ys.min() >= 1 and xs.max() <= n - 2 and ys.max() <= n - 2):
+            break
+        scale *= 0.96
+    for k, cover in enumerate(treads):
+        t = k / (len(treads) - 1)
+        paint(img, cover, tuple(int(round(f + (h - f) * t)) for f, h in zip(TREAD_FOOT, TREAD_TOP)))
+    paint(img, grow_8(lit) & ~lit, OUTLINE)
+    return img
+
+
+def grow_8(mask):
+    p = np.pad(mask, 1)
+    out = mask.copy()
+    for dy in (-1, 0, 1):
+        for dx in (-1, 0, 1):
+            out |= p[1 + dy:1 + dy + mask.shape[0], 1 + dx:1 + dx + mask.shape[1]]
+    return out
+
+
 ICONS = {
     "MouseLeft": lambda n: mouse(n, "left"),
     "MouseRight": lambda n: mouse(n, "right"),
@@ -158,6 +212,8 @@ ICONS = {
     "Shift": lambda n: key(n, "Shift"),
     "Ctrl": lambda n: key(n, "Ctrl"),
 }
+for _d in range(STAIR_DIRS):
+    ICONS[f"Stairs{_d}"] = (lambda d: lambda n: stairs(n, d))(_d)
 
 
 def icon(name: str, n: int) -> np.ndarray:

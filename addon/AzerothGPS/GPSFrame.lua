@@ -731,18 +731,23 @@ local RECORDED = 9 -- (Router.SOURCE_RECORDED)
 G.ROAD_STEP_UI = 2
 -- The player's drawn roads not in the data yet, straight from their strokes, as index entries
 -- like RoadIndex's (drawn while the road graph is rebuilt after an edit).
+-- (each as its pieces, Router.TrackPieces: a stairs stretch its own, with its kind and heights, `kind` and `zs`, so
+-- the tools draw it in the stairs' color with their icons before the rebuild too)
 function G.DrawnTrackIndex(cont)
   local out, shipped = {}, ns.RoadTracksIn or {}
+  local R = ns.Router
   for _, t in ipairs(ns.db and ns.db.tracks or {}) do
-    local pts = t.pts
-    if t.continent == cont and (t.op == nil or t.op == "add") and pts and #pts >= 4 and not shipped[t.time or -1] then
-      local e = { 0, 0, 0, RECORDED, time = t.time }
-      local x0, x1, y0, y1 = math.huge, -math.huge, math.huge, -math.huge
-      for i = 1, #pts - 1, 2 do
-        e[#e + 1], e[#e + 2] = pts[i], pts[i + 1]
-        x0, x1, y0, y1 = math.min(x0, pts[i]), math.max(x1, pts[i]), math.min(y0, pts[i + 1]), math.max(y1, pts[i + 1])
+    if t.continent == cont and (t.op == nil or t.op == "add") and t.pts and #t.pts >= 4 and not shipped[t.time or -1] then
+      for _, p in ipairs(R and R.TrackPieces and not t.recorded and R.TrackPieces(t) or { t }) do
+        local pts = p.pts
+        local e = { 0, 0, 0, RECORDED, time = t.time, zs = p.zs, kind = p.kind or (p.stair and "stairs") or nil }
+        local x0, x1, y0, y1 = math.huge, -math.huge, math.huge, -math.huge
+        for i = 1, #pts - 1, 2 do
+          e[#e + 1], e[#e + 2] = pts[i], pts[i + 1]
+          x0, x1, y0, y1 = math.min(x0, pts[i]), math.max(x1, pts[i]), math.min(y0, pts[i + 1]), math.max(y1, pts[i + 1])
+        end
+        if #e >= 8 then out[#out + 1] = { x0, x1, y0, y1, e } end
       end
-      out[#out + 1] = { x0, x1, y0, y1, e }
     end
   end
   return out
@@ -795,15 +800,18 @@ local roadCoarse = {} -- [cont] = { zoom, k }: the spacing that fitted last
 -- Router's g.kind, else a stairs or lift road by its source), its corners joined (a square the line's width where it
 -- turns: no notch), and zoomed in to NODE_DOT_ZOOM the network's connection points as dots (G.JUNCTION_COLOR where three
 -- or more roads meet, G.ROAD_END_COLOR where one ends).
-G.KIND_COLORS = { bridge = { 0.1, 0.9, 1 }, floor = { 1, 0.55, 0.85 }, stairs = { 1, 0.9, 0.2 }, lift = { 0.75, 0.4, 1 },
-  ramp = { 1, 0.6, 0.15 } }
+-- Stairs lime and ramps teal (asked 2026-11-19: "use another color for the stairs path"; the stairs' yellow was the
+-- player's own walls', the ramps' orange a cliff's side): no other road kind's, route's or wall's color; Edit Road's and
+-- Set Heights' kind buttons show them too (G.KindSwatch).
+G.KIND_COLORS = { bridge = { 0.1, 0.9, 1 }, floor = { 1, 0.55, 0.85 }, stairs = { 0.6, 1, 0 }, lift = { 0.75, 0.4, 1 },
+  ramp = { 0, 0.75, 0.6 } }
 G.JUNCTION_COLOR, G.ROAD_END_COLOR = { 1, 1, 1 }, { 0.6, 0.6, 0.6 }
 G.NODE_DOT_ZOOM = 150 -- (yards from the view's middle to its edge)
 G.JUNCTION_DOT, G.END_DOT = 6, 4 -- (UI units across)
 G.JOIN_TURN_COS = 0.9 -- (a corner sharper than about 25 degrees gets its join)
 function G.RoadKindColor(g, ei, e)
   local R = ns.Router
-  local k = g and ei and g.kind and g.kind[ei]
+  local k = g and ei and g.kind and g.kind[ei] or e.kind -- (a drawn road not built in yet: its piece's own)
   if k and G.KIND_COLORS[k] then return G.KIND_COLORS[k] end
   if R and e[4] == R.SOURCE_STAIR then return G.KIND_COLORS.stairs end
   if R and e[4] == R.SOURCE_LIFT then return G.KIND_COLORS.lift end
@@ -830,6 +838,104 @@ function G.NodeDots(g)
   end
   G.nodeDots[g] = d
   return d
+end
+-- The stairs drawn with their icon (asked 2026-11-19 for 1.3.10: "Shouldn't the Stairs icon tool place the stairs icon
+-- from start to finish?"): with the road tools on, along every stairs road in view, a glyph at its foot, one at its
+-- top and more evenly between, about STAIR_GLYPH_GAP apart on the screen (zoomed in more of them, zoomed out fewer:
+-- never closer), each pointing the way the stairs climb there (Media\Tools\Stairs<d>, toolicons.py: one file per
+-- 45 degrees, d = 0 up then clockwise, drawn turned so none is turned or scaled in the game; shown pixel for pixel).
+-- Records { x, y, d, alpha } in G.stairGlyphs (reused), G.stairGlyphN this redraw; placed by G.PlaceStairGlyphs from
+-- a pool of textures.
+G.STAIR_GLYPH_UNITS = 12 -- (UI units across)
+G.STAIR_GLYPH_GAP = 32 -- (UI units between them along a flight, at the least)
+G.STAIR_GLYPH_DIRS = 8
+G.MAX_STAIR_GLYPHS = 160
+G.stairGlyphs, G.stairGlyphN = {}, 0
+-- The glyph pointing nearest the way (vx, vy) on the screen (y up): 0 up, then clockwise by 45 degrees.
+function G.StairGlyphDir(vx, vy)
+  local a = (math.atan2 or math.atan)(vx, vy)
+  local n = G.STAIR_GLYPH_DIRS
+  return math.floor(a / (2 * math.pi / n) + 0.5) % n
+end
+function G.StairGlyph(x, y, vx, vy, edge, alpha)
+  if G.stairGlyphN >= G.MAX_STAIR_GLYPHS or math.abs(x) > edge or math.abs(y) > edge then return end
+  local n = G.stairGlyphN + 1
+  local r = G.stairGlyphs[n]
+  if not r then
+    r = {}
+    G.stairGlyphs[n] = r
+  end
+  r[1], r[2], r[3], r[4] = x, y, G.StairGlyphDir(vx, vy), alpha or 1
+  G.stairGlyphN = n
+end
+-- Along a flight on the screen, `pts` (x, y, ... from its foot to its top; the first `m` numbers): a glyph at each end
+-- and evenly between, no closer than `gap` (STAIR_GLYPH_GAP); one in its middle when it's shorter on the screen than
+-- the glyph. Only those within `edge` of the view's middle. How many there are now.
+function G.StairGlyphsAlong(pts, m, edge, alpha, gap)
+  m = m or #pts
+  gap = gap or G.STAIR_GLYPH_GAP
+  if m < 4 then return G.stairGlyphN end
+  local total = 0
+  for i = 1, m - 3, 2 do total = total + math.sqrt((pts[i + 2] - pts[i]) ^ 2 + (pts[i + 3] - pts[i + 1]) ^ 2) end
+  if total <= 0 then return G.stairGlyphN end
+  local count = total < G.STAIR_GLYPH_UNITS and 1 or math.floor(total / gap) + 1
+  if count == 1 and total >= G.STAIR_GLYPH_UNITS then count = 2 end
+  local step = count > 1 and total / (count - 1) or 0
+  local k, want, acc = 0, count > 1 and 0 or total / 2, 0
+  local lvx, lvy
+  for i = 1, m - 3, 2 do
+    local ax, ay, bx, by = pts[i], pts[i + 1], pts[i + 2], pts[i + 3]
+    local len = math.sqrt((bx - ax) ^ 2 + (by - ay) ^ 2)
+    if len > 0 then
+      lvx, lvy = bx - ax, by - ay
+      while k < count and want <= acc + len do
+        local t = math.max(0, math.min(1, (want - acc) / len))
+        G.StairGlyph(ax + lvx * t, ay + lvy * t, lvx, lvy, edge, alpha)
+        k = k + 1
+        want = k * step
+      end
+      acc = acc + len
+    end
+  end
+  if k < count and lvx then G.StairGlyph(pts[m - 1], pts[m], lvx, lvy, edge, alpha) end -- (the top, past rounding)
+  return G.stairGlyphN
+end
+-- The stairs roads in reach (LayoutRoads' `runs`: { e, ei, alpha }), each from its foot to its top: the end the graph
+-- has higher (a drawn one not built in yet, its own heights), else as it was drawn; on the screen, broken where an
+-- erasure not built in yet takes it out.
+G.stairPts = {}
+function G.AddRoadStairGlyphs(runs, g, cont, px, py, rot, s, edge, erases, focus)
+  local heights = g and (g.z or g.nz)
+  local sp = G.stairPts
+  for _, r in ipairs(runs) do
+    local e, ei, alpha = r[1], r[2], r[3]
+    local up = true
+    if ei and heights then
+      local za, zb = heights[e[1]], heights[e[2]]
+      up = not (za and zb and za > zb)
+    elseif type(e.zs) == "table" and #e.zs >= 2 then
+      up = not (e.zs[1] > e.zs[#e.zs])
+    end
+    local mid = 5 + math.floor((#e - 5) / 4) * 2
+    if focus and e[mid + 1] and not focus(e[mid], e[mid + 1]) then alpha = G.INTERIOR_FADE_ALPHA * (alpha or 1) end
+    local function applies(er) return not (er.floor and ei and G.OtherFloor(g, ei, cont, er.floor)) end
+    local i0, i1, step = 5, #e - 1, 2
+    if not up then i0, i1, step = #e - 1, 5, -2 end
+    local n = 0
+    for i = i0, i1, step do
+      if erases and G.UnderErase(erases, e[i], e[i + 1], e.time, g and applies or nil) then
+        if n >= 4 then G.StairGlyphsAlong(sp, n, edge, alpha) end
+        n = 0
+      else
+        local dx, dy = Geo.ScreenOffset(px, py, e[i], e[i + 1])
+        dx, dy = Geo.Rotate(dx * s, dy * s, rot)
+        sp[n + 1], sp[n + 2] = dx, dy
+        n = n + 2
+      end
+    end
+    if n >= 4 then G.StairGlyphsAlong(sp, n, edge, alpha) end
+    if G.stairGlyphN >= G.MAX_STAIR_GLYPHS then return end
+  end
 end
 -- `focus` (optional, 1.3.10): a function (x, y) -> whether a world point is in the building being edited (its inside
 -- map shown, G.EditInterior); the roads elsewhere faded to G.INTERIOR_FADE_ALPHA.
@@ -870,8 +976,10 @@ function G.LayoutRoads(px, py, cont, rot, zoom, half, focus)
   local function applies(er)
     return not (er.floor and ei and G.OtherFloor(fg, ei, cont, er.floor))
   end
+  local runs -- (the tools on: the stairs roads in reach, { e, ei, alpha }, for their icons: G.AddRoadStairGlyphs)
   local function Lay(k)
     local out, seen = {}, {}
+    runs = {}
     local cell = G.ROAD_STEP_UI * k
     for round = 1, 2 do -- the player's drawn roads first, then the rest
       for _, list in ipairs(lists) do for _, b in ipairs(list) do
@@ -886,6 +994,7 @@ function G.LayoutRoads(px, py, cont, rot, zoom, half, focus)
             -- (the tools on: its kind's color)
             if tools then src = G.RoadKindColor(fg, ei, e) or src end
             local alpha = tf and ei and G.OtherFloor(fg, ei, cont, tf) and G.OTHER_FLOOR_ALPHA or nil
+            if tools and src == G.KIND_COLORS.stairs then runs[#runs + 1] = { e, ei, alpha } end
             local lx, ly, lc -- last point kept (screen) and its grid cell
             local fx, fy, any -- the first point, and whether any line was kept
             local lin -- (focus: whether the last point kept is in the building)
@@ -955,6 +1064,9 @@ function G.LayoutRoads(px, py, cont, rot, zoom, half, focus)
     segs, full = Lay(k)
   end
   roadCoarse[cont] = { zoom = zoom, k = k }
+  if runs and #runs > 0 then
+    G.AddRoadStairGlyphs(runs, fg, cont, px, py, rot, s, edge, erases, focus)
+  end
   -- (the tools on, zoomed in: the connection points)
   if tools and fg and zoom <= G.NODE_DOT_ZOOM then
     for _, d in ipairs(G.NodeDots(fg) or {}) do
@@ -4128,6 +4240,62 @@ local function DrawLines(n, thickness, colors, alpha)
   for i = nl + 1, linesUsed do HideLine(lines[i]) end
   for i = nd + 1, dashesUsed do HideLine(dashes[i]) end
   linesUsed, dashesUsed = nl, nd
+  G.PlaceStairGlyphs(n > 0 and G.stairGlyphN or 0) -- (no lines: none of the stairs' icons either)
+end
+-- The stairs' icons of this redraw (G.stairGlyphs, the first n) on textures kept from redraw to redraw, over the roads
+-- with them (hung off the marks' layer as the lines are, so a glide moves them too): the size drawn nearest
+-- STAIR_GLYPH_UNITS on the screen, pixel for pixel. A file the client doesn't know yet (before a relog): none shown.
+G.stairGlyphTex, G.stairGlyphUsed = {}, 0
+function G.PlaceStairGlyphs(n)
+  local used = 0
+  if n > 0 and lineLayer and G.markLayer then
+    local ppu = ns.PixelsPerUnit(lineLayer.GetEffectiveScale and lineLayer:GetEffectiveScale() or 1)
+    local px = G.NearestSize(G.TOOL_ICON_PX, G.STAIR_GLYPH_UNITS * ppu)
+    local pot = 1
+    while pot < px do pot = pot * 2 end
+    local size = px / ppu
+    for i = 1, n do
+      local r = G.stairGlyphs[i]
+      local file = G.ToolIconFile("Stairs" .. r[3], px)
+      if G.ArtFileKnown(file) then
+        used = used + 1
+        local t = G.stairGlyphTex[used]
+        if not t then
+          t = lineLayer:CreateTexture(nil, "OVERLAY", nil, 1)
+          G.SnapTexture(t)
+          G.stairGlyphTex[used] = t
+        end
+        if t.agpsFile ~= file then
+          t:SetTexture(file)
+          t:SetTexCoord(0, px / pot, 0, px / pot)
+          t.agpsFile, t.agpsArtPx = file, px
+        end
+        -- (placed again only when it moved, as the lines are: a still map's redraws don't touch them)
+        local e = G.LINE_EPS
+        if t.agpsSize ~= size or not t.agpsX or math.abs(t.agpsX - r[1]) > e or math.abs(t.agpsY - r[2]) > e then
+          t:SetSize(size, size)
+          t:ClearAllPoints()
+          t:SetPoint("CENTER", G.markLayer, "CENTER", r[1], r[2])
+          t.agpsSize, t.agpsX, t.agpsY = size, r[1], r[2]
+        end
+        local a = (r[4] or 1) * fade
+        if t.agpsA ~= a then
+          t:SetAlpha(a)
+          t.agpsA = a
+        end
+        if not t.agpsShown then
+          t:Show()
+          t.agpsShown = true
+        end
+      end
+    end
+  end
+  for i = used + 1, G.stairGlyphUsed do
+    local t = G.stairGlyphTex[i]
+    t:Hide()
+    t.agpsShown = nil
+  end
+  G.stairGlyphUsed = used
 end
 
 -- The lines made ahead, hidden, a slice a frame (in Router.WarmUp's background work after a
@@ -4800,8 +4968,9 @@ G.FLOOR_LEG_YD = 25
 -- road, its stairs (marked, and one still open up to the player) in the stairs' color. Only what's in view, and points
 -- under ROAD_STEP_UI pixels apart as one (a walk is up to REC_MAX_POINTS: a line a point, zoomed out, cost a redraw
 -- what another addon's 2500 lines did). How many lines.
--- The road picked with Edit Road, drawn over the network (G.roadEdit): bright, its stairs stretch in the stairs color,
--- its foot and top as dots. The number of lines.
+-- The road picked with Edit Road, drawn over the network (G.roadEdit): bright, its stairs stretch in the stairs color
+-- with the stairs' icons from the foot picked to the top (the whole road set to stairs: from its lower end by its
+-- heights, else as drawn), its foot and top as dots. The number of lines.
 G.EDIT_ROAD_COLOR = { 1, 1, 1 }
 function G.DrawRoadEdit(cx, cy, rot, s, viewCont, half)
   local re = G.roadEdit
@@ -4811,11 +4980,16 @@ function G.DrawRoadEdit(cx, cy, rot, s, viewCont, half)
   local edge = (half or 1e9) * 1.45
   local i0, j0 = re.foot, re.top
   if i0 and j0 and j0 < i0 then i0, j0 = j0, i0 end
+  local sp, m = G.stairPts, 0 -- (the stairs' points on the screen, for their icons)
   local lx, ly
   for k = 1, #pts - 1, 2 do
     local p = (k + 1) / 2
     local dx, dy = Geo.ScreenOffset(cx, cy, pts[k], pts[k + 1])
     local ax, ay = Geo.Rotate(dx * s, dy * s, rot)
+    if re.kind == "stairs" or (i0 and j0 and p >= i0 and p <= j0) then
+      sp[m + 1], sp[m + 2] = ax, ay
+      m = m + 2
+    end
     if lx and not ((lx < -edge and ax < -edge) or (lx > edge and ax > edge) or (ly < -edge and ay < -edge)
         or (ly > edge and ay > edge)) then
       local stairs = (re.kind == "stairs") or (i0 and j0 and p - 1 >= i0 and p <= j0)
@@ -4829,6 +5003,20 @@ function G.DrawRoadEdit(cx, cy, rot, s, viewCont, half)
       end
     end
     lx, ly = ax, ay
+  end
+  if m >= 4 then
+    -- (foot first: the foot picked, or the lower end)
+    local zs = t.zs
+    local down = (re.foot and re.top and re.foot > re.top)
+      or (not (re.foot and re.top) and type(zs) == "table" and #zs >= 2 and zs[1] > zs[#zs])
+    if down then
+      for a = 1, m / 2, 2 do
+        local b = m - a
+        sp[a], sp[b] = sp[b], sp[a]
+        sp[a + 1], sp[b + 1] = sp[b + 1], sp[a + 1]
+      end
+    end
+    G.StairGlyphsAlong(sp, m, edge)
   end
   return n
 end
@@ -4856,7 +5044,7 @@ function G.DrawRecording(cx, cy, rot, s, viewCont, half)
     elseif i == last or stairs ~= lp or (ax - lx) ^ 2 + (ay - ly) ^ 2 >= step2 then
       if not ((lx < -edge and ax < -edge) or (lx > edge and ax > edge) or (ly < -edge and ay < -edge)
           or (ly > edge and ay > edge)) then
-        AddSeg(lx, ly, ax, ay, stairs and G.STAIRS_COLOR or ROAD_COLORS[0], 3, 1, true)
+        AddSeg(lx, ly, ax, ay, stairs and G.KIND_COLORS.stairs or ROAD_COLORS[0], 3, 1, true)
         n = n + 1
       end
       lx, ly, lp = ax, ay, stairs
@@ -9449,6 +9637,7 @@ function G.Update()
   ns.PerfEnd("redraw: tiles", pt)
   pt = ns.PerfStart()
   segN = 0
+  G.stairGlyphN = 0
   G.DrawInsetFrames(cx, cy, rot, s)
   G.RefreshFloorHint() -- (the tools on: which floor the player is on, as they move)
   -- (the roads of the continent in view, the player's or another)
@@ -14124,6 +14313,19 @@ function G.FillRoadEdit()
   for _, b in ipairs(f.topRow.buttons) do b:SetShown(two and b.height ~= nil) end
   f.height.label:SetText(two and L["Foot"] or L["Height"])
 end
+-- A kind button's color (G.KIND_COLORS; ground and "heights only" have none): a strip along its bottom, the color the
+-- map draws that kind in with the road tools on.
+function G.KindSwatch(b, kind)
+  local c = G.KIND_COLORS[kind]
+  if not (c and b.CreateTexture) then return nil end
+  local t = b:CreateTexture(nil, "OVERLAY")
+  t:SetColorTexture(c[1], c[2], c[3], 1)
+  t:SetHeight(2)
+  t:SetPoint("BOTTOMLEFT", b, "BOTTOMLEFT", 7, 4)
+  t:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", -7, 4)
+  b.swatch, b.swatchColor = t, c
+  return t
+end
 function G.AskRoadEdit(level, sel)
   local f = G.roadEditWindow
   if not f then
@@ -14135,6 +14337,7 @@ function G.AskRoadEdit(level, sel)
       b:SetPoint("TOPLEFT", 14 + (k - 1) * 74, f.top - 8)
       b:SetText(G.EDIT_KIND_NAMES[kind])
       b.kind = kind
+      G.KindSwatch(b, kind)
       b:SetScript("OnClick", function()
         if G.roadEdit then G.roadEdit.kind = kind end
         G.FillRoadEdit()
@@ -14507,6 +14710,7 @@ function G.AskSetHeights()
       b:SetPoint("TOPLEFT", 14 + (k - 1) * 108, f.top - 70)
       b:SetText(G.STRETCH_KIND_NAMES[kind])
       b.kind = kind
+      G.KindSwatch(b, kind)
       b:SetScript("OnClick", function()
         f.kind = kind
         for _, o in ipairs(f.kinds) do o:SetEnabled(o.kind ~= kind) end
