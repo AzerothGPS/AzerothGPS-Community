@@ -307,24 +307,55 @@ function Lay.NodesInPolygon(cont, poly, kinds, names)
   return out
 end
 
--- Profession skill lines the character has (by kind).
-local profCache, profAt = nil, -100
-local function Professions()
-  if profCache and GetTime() - profAt < 10 then return profCache end
-  local have = {}
-  profCache, profAt = have, GetTime()
+-- Herbalism's and Mining's skill lines (locale-free): GetProfessionInfo's 7th value.
+Lay.GATHER_SKILL_LINES = { [182] = "herb", [186] = "ore" }
+
+-- The character's gathering professions as the game gives them: { herb = rank, ore = rank } (0 without it) and
+-- { [kind] = true } for those it has. WoW Forever has retail's GetProfessions / GetProfessionInfo (its own
+-- Blizzard_ProfessionsBook; GatherMate2 reads them too): GetSkillLineInfo gave no Mining there (Kooki3z, 2026-11-19,
+-- Mining read as 0). The classic skill lines as well, for a client with those.
+local function ReadGatherSkills()
+  local ranks, have = { herb = 0, ore = 0 }, {}
+  local function found(kind, rank)
+    have[kind] = true
+    ranks[kind] = math.max(ranks[kind], tonumber(rank) or 0)
+  end
+  local want = {}
   pcall(function()
-    local want = {}
     for kind, spell in pairs(Lay.GATHER_SPELLS) do
       want[Lay.PROFESSION[kind]] = kind
       local sname = SpellName(spell)
       if sname then want[sname] = kind end -- e.g. localized "Mining"
     end
-    for i = 1, GetNumSkillLines() do
-      local name, isHeader = GetSkillLineInfo(i)
-      if not isHeader and want[name] then have[want[name]] = true end
+  end)
+  pcall(function()
+    local list = GetProfessions and GetProfessionInfo and { n = select("#", GetProfessions()), GetProfessions() }
+    for i = 1, list and list.n or 0 do
+      local book = list[i]
+      if book then
+        local name, _, rank, _, _, _, line = GetProfessionInfo(book)
+        local kind = Lay.GATHER_SKILL_LINES[line] or (name and want[name])
+        if kind then found(kind, rank) end
+      end
     end
   end)
+  pcall(function()
+    if not (GetNumSkillLines and GetSkillLineInfo) then return end
+    for i = 1, GetNumSkillLines() do
+      local name, isHeader, _, rank = GetSkillLineInfo(i)
+      if not isHeader and name and want[name] then found(want[name], rank) end
+    end
+  end)
+  return ranks, have
+end
+Lay.ReadGatherSkills = ReadGatherSkills
+
+-- Profession skill lines the character has (by kind).
+local profCache, profAt = nil, -100
+local function Professions()
+  if profCache and GetTime() - profAt < 10 then return profCache end
+  local _, have = ReadGatherSkills()
+  profCache, profAt = have, GetTime()
   return have
 end
 Lay.Professions = Professions
@@ -349,25 +380,16 @@ Lay.NODE_SKILL = {
 }
 
 -- The character's Herbalism and Mining skill: { herb = rank, ore = rank } (0 without the profession). Kept until the
--- skills change (SKILL_LINES_CHANGED, CHAT_MSG_SKILL: L.OnSkillChanged).
-local rankCache
+-- skills change (SKILL_LINES_CHANGED, CHAT_MSG_SKILL: L.OnSkillChanged); none found, only RANK_EMPTY_SECONDS (read
+-- at login, before the game has the professions, it stayed 0).
+Lay.RANK_EMPTY_SECONDS = 5
+local rankCache, rankAt
 function Lay.SkillRanks()
-  if rankCache then return rankCache end
-  local ranks = { herb = 0, ore = 0 }
-  pcall(function()
-    local want = {}
-    for kind, spell in pairs(Lay.GATHER_SPELLS) do
-      want[Lay.PROFESSION[kind]] = kind
-      local sname = SpellName(spell)
-      if sname then want[sname] = kind end
-    end
-    for i = 1, GetNumSkillLines() do
-      local name, isHeader, _, rank = GetSkillLineInfo(i)
-      if not isHeader and want[name] then ranks[want[name]] = math.max(ranks[want[name]], tonumber(rank) or 0) end
-    end
-  end)
-  rankCache = ranks
-  return ranks
+  if rankCache and (rankCache.herb + rankCache.ore > 0 or GetTime() - rankAt < Lay.RANK_EMPTY_SECONDS) then
+    return rankCache
+  end
+  rankCache, rankAt = ReadGatherSkills(), GetTime()
+  return rankCache
 end
 
 -- The skill a node needs (1 when not known), and whether the character has it.
@@ -433,6 +455,20 @@ end
 
 -- Pick a herb or vein to show (`on`), or put it back; `name` nil with `on` false: none picked, every one shown. A pick
 -- turns its kind's layer on (only it would show otherwise: nothing). The map is drawn again at once.
+-- Available on with nothing picked, one unticked: every other one the skill gathers picked instead (only it hidden).
+function Lay.PickAvailableBut(name)
+  local st = ns.settings.gps
+  local f = {}
+  for n, kind in pairs(nodeKind) do
+    if n ~= name and Lay.CanGather(n, kind) then f[n] = true end
+  end
+  for n, kind in pairs(Learned() or {}) do
+    if n ~= name and Lay.CanGather(n, kind) then f[n] = true end
+  end
+  st.nodeFilter = f
+  Lay.SetNodeFilter(nil, true) -- (drawn again, the finder and buttons refreshed)
+end
+
 function Lay.SetNodeFilter(name, on)
   local st = ns.settings.gps
   if type(st.nodeFilter) ~= "table" then st.nodeFilter = {} end
@@ -452,9 +488,12 @@ function Lay.SetNodeFilter(name, on)
 end
 
 -- Every herb and vein name there is (KNOWN_NODES, the learned ones, any saved), for Find Herbs and Ore: matching
--- `query` (any case; "" or nil: all), { { name, kind, count = nodes known, picked, icon }, ... }: picked first, then
--- those with nodes known, then names starting with the query, then by name.
-function Lay.NodeNames(query)
+-- `query` (any case; "" or nil: all), { { name, kind, count = nodes known, picked, checked, icon }, ... }: picked
+-- first, then those with nodes known, then names starting with the query, then by name. Available on (asked
+-- 2026-11-19: "auto filter the list to show what would be selected"): only those the skill gathers, each `checked`
+-- (shown on the map) unless others are picked.
+-- `onlyKind`: "herb" or "ore" for those only (the finder's round buttons, Lay.finderKind).
+function Lay.NodeNames(query, onlyKind)
   local q = (query or ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
   local counts, kinds = {}, {}
   for name, kind in pairs(nodeKind) do kinds[name] = kind end
@@ -465,12 +504,15 @@ function Lay.NodeNames(query)
     end
   end
   local filter = Lay.NodeFilter() or {}
+  local avail = Lay.AvailableOnly()
+  local none = next(filter) == nil
   local out = {}
   for name, kind in pairs(kinds) do
     local i = q == "" and 1 or name:lower():find(q, 1, true)
-    if i then
-      out[#out + 1] = { name = name, kind = kind, count = counts[name] or 0, picked = filter[name] == true,
-        icon = Lay.NodeIcon(kind, name), starts = i == 1 }
+    if i and (not onlyKind or kind == onlyKind) and (not avail or Lay.CanGather(name, kind)) then
+      local picked = filter[name] == true
+      out[#out + 1] = { name = name, kind = kind, count = counts[name] or 0, picked = picked,
+        checked = picked or (avail and none), icon = Lay.NodeIcon(kind, name), starts = i == 1 }
     end
   end
   table.sort(out, function(a, b)
@@ -2870,10 +2912,22 @@ end
 Lay.FINDER_ROWS = 12
 Lay.FINDER_ROW_H = 20
 Lay.FINDER_GAP = 8 -- room between the hint, the search box and the list
+Lay.FINDER_KIND_SIZE = 24 -- the herbs and ore buttons, top right
+Lay.FINDER_KIND_NODE = { herb = "Peacebloom", ore = "Copper Vein" } -- (their icons: these nodes' items')
+Lay.FINDER_KIND_ICON = { herb = "Interface\\Icons\\INV_Misc_Flower_02", ore = "Interface\\Icons\\INV_Ore_Copper_01" }
+Lay.finderKind = nil -- "herb" / "ore": the finder lists only those (this session)
+
+-- The finder's herbs or ore button (`kind`, or nil for both): the list again, the one picked lit, the other dimmed.
+function Lay.SetFinderKind(kind)
+  Lay.finderKind = kind
+  local f = Lay.finder
+  if f and f.Refresh then f.Refresh() end
+end
 
 -- What the finder's last line says: "Showing all herbs and ore" or the names picked.
 function Lay.FilterText()
   local f = Lay.NodeFilter()
+  if not f and Lay.AvailableOnly() then return L["Showing the herbs and ore your skill can gather."] end
   if not f then return L["Showing all herbs and ore you know."] end
   local names = {}
   for name in pairs(f) do names[#names + 1] = name end
@@ -2898,7 +2952,43 @@ function Lay.ShowNodeFinder()
     Lay.finder = f
     local hint = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
     hint:SetPoint("TOPLEFT", 14, f.top - 4)
-    hint:SetWidth(W - 28)
+    hint:SetWidth(W - 28 - 2 * Lay.FINDER_KIND_SIZE - 10) -- (beside the herbs and ore buttons)
+    -- Herbs and Ore buttons, top right (asked 2026-11-19: "round icons at the top right of the window, one is a
+    -- copper ore and the other a peacebloom. clicking 1 or the other will filter to just ore or herbs. Clicking it
+    -- again takes the filter off, so does selecting the other type"): the list only, Lay.finderKind.
+    f.kindButtons = {}
+    local function KindButton(kind, x)
+      local G = ns.GPS
+      local icon = Lay.NodeIcon(kind, Lay.FINDER_KIND_NODE[kind]) or Lay.FINDER_KIND_ICON[kind]
+      local b, tex
+      if G and G.NewRoundButton then
+        b, tex = G.NewRoundButton(f, Lay.FINDER_KIND_SIZE, icon)
+      else
+        b = CreateFrame("Button", nil, f)
+        b:SetSize(Lay.FINDER_KIND_SIZE, Lay.FINDER_KIND_SIZE)
+        tex = b:CreateTexture(nil, "ARTWORK")
+        tex:SetAllPoints()
+        ns.SetIcon(tex, icon, "Interface\\Icons\\INV_Misc_QuestionMark")
+      end
+      b:SetPoint("TOPRIGHT", x, f.top - 2)
+      b.kind, b.iconTex = kind, tex
+      b:SetScript("OnClick", function(self)
+        Lay.SetFinderKind(Lay.finderKind ~= kind and kind or nil)
+        if GameTooltip:GetOwner() == self then self:GetScript("OnEnter")(self) end
+      end)
+      b:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:SetText(kind == "ore" and L["Ore Only"] or L["Herbs Only"], 1, 1, 1)
+        GameTooltip:AddLine(kind == "ore" and L["Lists only the ore veins. Click again for every herb and vein."]
+          or L["Lists only the herbs. Click again for every herb and vein."], nil, nil, nil, true)
+        GameTooltip:Show()
+      end)
+      b:SetScript("OnLeave", GameTooltip_Hide)
+      f.kindButtons[kind] = b
+      return b
+    end
+    KindButton("ore", -14)
+    KindButton("herb", -14 - Lay.FINDER_KIND_SIZE - 6)
     hint:SetJustifyH("LEFT")
     hint:SetText(L["Type a name, then click herbs or veins to show only those on the map."])
     -- (under the hint by its own height, two lines in English, with room: asked 2026-11-19, the box was on the hint's
@@ -2934,7 +3024,10 @@ function Lay.ShowNodeFinder()
       r.text:SetJustifyH("LEFT")
       r.text:SetWordWrap(false)
       r:SetScript("OnClick", function(self)
-        if self.entry then Lay.SetNodeFilter(self.entry.name, not self.entry.picked) end
+        local e = self.entry
+        if not e then return end
+        if e.checked and not e.picked then return Lay.PickAvailableBut(e.name) end -- (Available's own tick taken off)
+        Lay.SetNodeFilter(e.name, not e.picked)
       end)
       rows[i] = r
     end
@@ -2948,7 +3041,11 @@ function Lay.ShowNodeFinder()
     all:SetSize(100, 22)
     all:SetPoint("BOTTOMRIGHT", -12, 10)
     all:SetText(L["Show All"])
-    all:SetScript("OnClick", function() Lay.SetNodeFilter(nil, false) end)
+    -- (Show All: every one again, Available off too, asked 2026-11-19)
+    all:SetScript("OnClick", function()
+      if Lay.AvailableOnly() then Lay.SetAvailableOnly(false) end
+      Lay.SetNodeFilter(nil, false)
+    end)
     f.showAll = all
     -- Available (asked 2026-11-19): only the herbs and veins the character's skill gathers, on the map and in a farming
     -- area; "on" in green or "off" in red beside it.
@@ -2976,21 +3073,23 @@ function Lay.ShowNodeFinder()
     avail:SetScript("OnLeave", GameTooltip_Hide)
     f:SetHeight(-listTop + Lay.FINDER_ROWS * Lay.FINDER_ROW_H + 74)
     function f.Refresh()
-      list = Lay.NodeNames(box:GetText())
+      list = Lay.NodeNames(box:GetText(), Lay.finderKind)
       offset = math.max(0, math.min(offset, #list - Lay.FINDER_ROWS))
       for i, r in ipairs(rows) do
         local e = list[offset + i]
         r.entry = e
         if e then
           ns.SetIcon(r.icon, e.icon, "Interface\\Icons\\INV_Misc_QuestionMark")
-          r.check:SetShown(e.picked)
+          r.check:SetShown(e.checked)
           local ore = e.kind == "ore"
+          -- (the skill it needs in red beside its name when the character's is lower, asked 2026-11-19)
+          local name = Lay.CanGather(e.name, e.kind) and e.name or (e.name .. " |cffff3030" .. Lay.NodeSkill(e.name) .. "|r")
           if e.count == 0 then
-            r.text:SetText(string.format(ore and L["%s  |cff9d9d9dore, none known|r"] or L["%s  |cff9d9d9dherb, none known|r"], e.name))
+            r.text:SetText(string.format(ore and L["%s  |cff9d9d9dore, none known|r"] or L["%s  |cff9d9d9dherb, none known|r"], name))
           elseif e.count == 1 then
-            r.text:SetText(string.format(ore and L["%s  |cff9d9d9dore, 1 known|r"] or L["%s  |cff9d9d9dherb, 1 known|r"], e.name))
+            r.text:SetText(string.format(ore and L["%s  |cff9d9d9dore, 1 known|r"] or L["%s  |cff9d9d9dherb, 1 known|r"], name))
           else
-            r.text:SetText(Format(ore and L["%s  |cff9d9d9dore, %d known|r"] or L["%s  |cff9d9d9dherb, %d known|r"], e.name, e.count))
+            r.text:SetText(Format(ore and L["%s  |cff9d9d9dore, %d known|r"] or L["%s  |cff9d9d9dherb, %d known|r"], name, e.count))
           end
           r:Show()
         else
@@ -3000,7 +3099,18 @@ function Lay.ShowNodeFinder()
       local more = #list > Lay.FINDER_ROWS and string.format(L["  |cff9d9d9d(%d-%d of %d: scroll for more)|r"], offset + 1,
         math.min(#list, offset + Lay.FINDER_ROWS), #list) or ""
       status:SetText((#list == 0 and L["|cff9d9d9dNo herb or vein by that name.|r\n"] or "") .. Lay.FilterText() .. more)
-      all:SetEnabled(Lay.NodeFilter() ~= nil)
+      all:SetEnabled(Lay.NodeFilter() ~= nil or Lay.AvailableOnly())
+      -- (the herbs or ore button picked lit with the map menu's gold ring, the other dimmed)
+      for k, b in pairs(f.kindButtons) do
+        local picked = Lay.finderKind == k
+        local dim = Lay.finderKind ~= nil and not picked
+        if b.iconTex then
+          b.iconTex:SetDesaturated(dim)
+          b.iconTex:SetAlpha(dim and 0.45 or 1)
+        end
+        if picked and not b.glow and ns.GPS and ns.GPS.MakeGlow then b.glow = ns.GPS.MakeGlow(b) end
+        if b.glow then b.glow:SetShown(picked) end
+      end
       local on = Lay.AvailableOnly()
       state:SetText(on and ("|cff40ff40" .. L["on"] .. "|r") or ("|cffff4040" .. L["off"] .. "|r"))
     end
