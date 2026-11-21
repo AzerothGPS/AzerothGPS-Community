@@ -112,8 +112,15 @@ end
 -- The baked height at (x, y) of continent `cont`: bilinear between the grid's four values round it; nil off the map,
 -- over a hole, with no data or the tools closed. `water`: the water's surface there instead (nil where there's none).
 function GD.At(cont, x, y, water)
+  if not GD.Active() then return nil end
+  return GD.Sample(cont, x, y, water)
+end
+-- As GD.At, the tools open or not: for the route shaded by its slope (GPSFrame's G.SlopeGround; Kooki3z 2026-11-20:
+-- "since we have height indication now, can we use shades of lighter or darker path colors to indicate elevation or
+-- de-elevation of a route?"), which reads a few points per stretch of the route, once per route, near the view.
+function GD.Sample(cont, x, y, water)
   local H = ns.Heights
-  if not (H and H.n and x and y and GD.Active()) then return nil end
+  if not (H and H.n and x and y) then return nil end
   local n = H.n
   local tx, ty = math.floor(32 - y / TILE), math.floor(32 - x / TILE)
   if tx < 0 or tx > 63 or ty < 0 or ty > 63 then return nil end

@@ -2009,6 +2009,8 @@ L["road end picked (%s%s): Shift + drag from it to go on with it. Click it again
 L["went on with that %s (#%d, %s): its other end is picked, Shift + drag from it to go on."] = "%s 이어 그림 (#%d, %s): 다른 끝이 선택되었습니다. Shift + 드래그로 계속 이어 그립니다."
 L["Flip Lift"] = "승강기 뒤집기"
 L["Foot and top swapped: the lift's other end is its top now. Save Road to keep it."] = "아래와 위가 바뀌었습니다: 이제 승강기의 다른 끝이 위입니다. 유지하려면 길 저장을 누르세요."
+L["Shade the route by slope"] = "경사에 따라 경로 음영 표시"
+L["The route is drawn lighter where it goes uphill and darker where it goes downhill, more for a steeper slope; flat ground keeps the route's color. Where the map has no heights, the route is drawn as usual. Boats, zeppelins, flights and swims keep their color."] = "오르막에서는 경로가 더 밝게, 내리막에서는 더 어둡게 그려지며 경사가 가파를수록 더 진해집니다. 평지에서는 경로 색이 그대로입니다. 지도에 높이 정보가 없는 곳에서는 평소처럼 그려집니다. 배, 비행선, 비행 경로와 수영 구간은 색이 그대로입니다."
 L["Smooth arrow turns"] = "화살표 부드럽게 돌리기"
 L["A big change of direction (a turn coming up, stairs) swings the arrow round smoothly: slow, then faster, then slow again. Turning yourself, it follows at once."] = "방향이 크게 바뀌면 (다가오는 회전, 계단) 화살표가 부드럽게 돌아갑니다: 천천히, 빨라졌다가, 다시 천천히. 직접 방향을 돌리면 바로 따라옵니다."
 L["Record: Stairs on/off"] = "기록: 계단 켜기/끄기"

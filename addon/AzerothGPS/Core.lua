@@ -140,6 +140,9 @@ ns.DEFAULTS = {
     windowButtons = "default", -- its buttons' color: "default", "frame" (the tint's) or a tint's key
     windowClose = "buttons", -- its X's: "buttons" (as the buttons), "default", "frame" or a tint's key
     routeColor = "blue", -- "blue" (AzerothGPS's own) or "rainbow"
+    -- the route lighter uphill, darker downhill (Kooki3z 2026-11-20: "can we use shades of lighter or darker path colors
+    -- to indicate elevation or de-elevation of a route?"; GPSFrame's G.SlopeColor)
+    routeSlopeShade = true,
     charm = "none", -- hanging from the logo: "none" or a charm's key (Looks.CHARMS, or one another addon added)
     charmSwing = true, -- it swings and twists as you go (off: hangs still)
     roadTolerance = 0, -- Options > Routing (Router.RoadFactor): below 0 the roads kept more, above 0 open ground

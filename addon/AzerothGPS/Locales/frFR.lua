@@ -2009,6 +2009,8 @@ L["road end picked (%s%s): Shift + drag from it to go on with it. Click it again
 L["went on with that %s (#%d, %s): its other end is picked, Shift + drag from it to go on."] = "%s prolongé (#%d, %s) : son autre bout est choisi, Maj + glisser depuis lui pour continuer."
 L["Flip Lift"] = "Inverser l'ascenseur"
 L["Foot and top swapped: the lift's other end is its top now. Save Road to keep it."] = "Bas et haut échangés : l'autre bout de l'ascenseur est maintenant son haut. Enregistrez la route pour le garder."
+L["Shade the route by slope"] = "Nuancer l'itinéraire selon la pente"
+L["The route is drawn lighter where it goes uphill and darker where it goes downhill, more for a steeper slope; flat ground keeps the route's color. Where the map has no heights, the route is drawn as usual. Boats, zeppelins, flights and swims keep their color."] = "L'itinéraire est dessiné plus clair en montée et plus foncé en descente, d'autant plus que la pente est raide ; sur terrain plat, il garde sa couleur. Là où la carte n'a pas de hauteurs, l'itinéraire est dessiné comme d'habitude. Bateaux, zeppelins, vols et trajets à la nage gardent leur couleur."
 L["Smooth arrow turns"] = "Rotations douces de la flèche"
 L["A big change of direction (a turn coming up, stairs) swings the arrow round smoothly: slow, then faster, then slow again. Turning yourself, it follows at once."] = "Un grand changement de direction (un virage à venir, des escaliers) fait pivoter la flèche en douceur : lentement, puis plus vite, puis à nouveau lentement. Quand vous tournez vous-même, elle suit aussitôt."
 L["Record: Stairs on/off"] = "Enregistrer : escalier oui/non"

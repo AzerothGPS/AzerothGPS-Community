@@ -53,7 +53,8 @@ NEW = ["arrowEase", "allowSwim", "mapEditIdle", "language", "layerCity", "showRo
        "navPanelHideButtons", "navPanelAlpha", "navPanelLocked", "navPanelWrap",  # (1.3.9: detached, its buttons hidden and its background's opacity)
        "dirLocked",  # (1.3.9: the directions text's own lock, apart from the arrow's)
        "importKeepOrder",  # (1.3.9: imports routed in the order listed; the Import and Share window's box too)
-       "questTrackedOnly"]  # (1.3.10: the quest route from the tracked quests only, Questie's tracker's or the game's)
+       "questTrackedOnly",  # (1.3.10: the quest route from the tracked quests only, Questie's tracker's or the game's)
+       "routeSlopeShade"]  # (Kooki3z 2026-11-20: the route lighter uphill, darker downhill)
 # Where each setting's control is: the page a player would look on.
 HOME = {
     "General": "shown showCoords distanceUnits language quietChat searchCommonNpcs",
@@ -61,7 +62,7 @@ HOME = {
     "Controller": "padControl padLegend",
     # (asked 2026-11-10: "4 different map pages... maybe reduce to 2": the map itself, its icons, and its window)
     "Map": "style seamExploredOnly seamTerrainYd seamTerrainBlend seamContinentAt seamContinentBlend seamWorldAt "
-           "seamWorldBlend interiorZoomYd interiorHoldSec routeColor rotate approachZoom reopenFollow terrainZoomOut interiors "
+           "seamWorldBlend interiorZoomYd interiorHoldSec routeColor routeSlopeShade rotate approachZoom reopenFollow terrainZoomOut interiors "
            "useWorldMap escClosesMap",
     # (2026-11-19: a Minimap page again, the GPS map in its place and the game's own)
     "Minimap": "replaceMinimap replaceMinimapSize replaceMinimapCollapseOnMove replaceMinimapCollapseOnCombat "

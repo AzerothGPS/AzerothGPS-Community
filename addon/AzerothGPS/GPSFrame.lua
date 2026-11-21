@@ -2855,6 +2855,7 @@ local ROAD_COLORS = { [0] = { 1, 0.35, 0.1 }, [1] = { 0.1, 0.9, 1 }, [2] = { 0.3
 -- for roads and yellow for walls so the player can see what they have drawn"). Not in the map data yet; once they
 -- are, they're roads and walls like any.
 G.OWN_ROAD_COLOR, G.OWN_WALL_COLOR = 2, 9
+G.ROUTE_BASE_COLORS = ROAD_COLORS -- (a color index's own color, for the route shaded by its slope: G.SlopeColor)
 -- Route segment kinds -> { color, width, dotted }: road, off-road, transport ride, far-side walk.
 local ROUTE_STYLE = { [0] = { 3, 5, false }, [1] = { 3, 4, true }, [2] = { 4, 4, true }, [3] = { 5, 3, true } }
 ROUTE_STYLE[5], ROUTE_STYLE[6] = ROUTE_STYLE[2], ROUTE_STYLE[2] -- (a lift down or up, Router.KIND_LIFT_*: as a ride)
@@ -4201,6 +4202,152 @@ function G.EachSegmentNear(route, view, x, y, radius, fn)
     end
     before = before + ch.total
   end
+end
+-- The route shaded by its slope (Kooki3z 2026-11-20: "since we have height indication now, can we use shades of
+-- lighter or darker path colors to indicate elevation or de-elevation of a route?"): a stretch walked uphill drawn
+-- lighter (toward white), downhill darker (toward black), flat ground in the route's color as before; Options > Map's
+-- "Shade the route by slope" (routeSlopeShade), off: as before. Whatever color the stretch has (the blue, a look's, the
+-- rainbow's, a stop's) is the one shaded. Heights: the route's own where they're real, else the map's ground
+-- (Ground.lua's grid: the water's surface over water; none in a cave, whose roof the grid has). The route's own: `zs`
+-- (a level with heights: a dungeon's, a capital's, its floors, stairs and walkways); `fz` (a continent's building and
+-- capital floors) only inside a building or where the grid has no ground, since Router's Build carries the last floor
+-- on over every point without one (a route out of Brill's inn was 35.5 yd high all the way, flat). The grade (rise
+-- over run) over SLOPE_WINDOW_YD round the stretch's middle (a longer stretch: end to end), so bumpy ground doesn't make
+-- it noisy; under SLOPE_DEAD it's flat (no flicker on near-flat ground), at SLOPE_FULL the most, in SLOPE_STEPS steps,
+-- at most SLOPE_LIGHTEN / SLOPE_DARKEN of the way to white / black so the route's color stays its own. Rides (boats,
+-- zeppelins, flights, lifts), drops and the wavy swims keep their color. Worked out per stretch the first time it's
+-- drawn, and kept with the route's points (G.slopeCache, weak: gone with the route), so the many redraws of the same
+-- route read no height at all (G.slopeSamples counts the ground read: the tests); the first part trimmed as the player
+-- follows it reads the whole first part's (Nav's fullFirst, followIdx), not its own again each step.
+G.SLOPE_WINDOW_YD = 16
+G.SLOPE_DEAD, G.SLOPE_FULL = 0.05, 0.35
+G.SLOPE_STEPS = 6
+G.SLOPE_LIGHTEN, G.SLOPE_DARKEN = 0.45, 0.4
+G.SLOPE_KINDS = { [0] = true, [1] = true, [3] = true } -- (road, off-road, a later leg's walk)
+G.slopeCache = setmetatable({}, { __mode = "k" }) -- [part.pts] = { cont, zs, fz, n, cum, lv = { [i] = level } }
+G.slopeColors = setmetatable({}, { __mode = "k" }) -- [base color] = { [level] = shaded color }
+G.slopeSamples = 0
+function G.SlopeShadeOn()
+  return S().routeSlopeShade ~= false
+end
+-- The ground's height at (x, y) of `cont` for the shading: nil in a cave (the grid has the hill over it) or off the
+-- grid, the water's surface over water.
+function G.SlopeGround(cont, x, y)
+  local GD = ns.Ground
+  if not (GD and GD.Sample and ns.Heights and ns.Heights[cont]) then return nil end
+  if G.CaveAt and G.CaveAt(cont, x, y) then return nil end
+  G.slopeSamples = G.slopeSamples + 1
+  local h = GD.Sample(cont, x, y)
+  local w = h and GD.Sample(cont, x, y, true)
+  if w and w > h then h = w end
+  return h
+end
+-- Whether (x, y) of `cont` is inside one of Data/Indoors.lua's buildings: within its own radius (Nav.InBuilding's
+-- squares reach past it, into the street).
+function G.SlopeIndoors(cont, x, y)
+  local N = ns.Nav
+  local b = N and N.InBuilding and N.InBuilding(cont, x, y)
+  return b and b.x and b.r and (b.x - x) ^ 2 + (b.y - y) ^ 2 <= b.r * b.r or false
+end
+function G.SlopeEntry(part)
+  local pts = part.pts
+  local e = G.slopeCache[pts]
+  if e and e.cont == part.cont and e.zs == part.zs and e.fz == part.fz and e.n == #pts then return e end
+  local cum = { 0 }
+  for k = 2, math.floor(#pts / 2) do
+    cum[k] = cum[k - 1] + math.sqrt((pts[2 * k - 1] - pts[2 * k - 3]) ^ 2 + (pts[2 * k] - pts[2 * k - 2]) ^ 2)
+  end
+  e = { cont = part.cont, zs = part.zs, fz = part.fz, n = #pts, cum = cum, lv = {} }
+  G.slopeCache[pts] = e
+  return e
+end
+-- The height `s` yards along `part`: between its own heights where that stretch has them at both ends (`fz`: indoors,
+-- or no ground there), else the ground's.
+function G.SlopeHeightAt(part, e, s)
+  local cum, pts = e.cum, part.pts
+  local lo, hi = 1, #cum
+  if hi < 2 then return nil end
+  while hi - lo > 1 do
+    local mid = math.floor((lo + hi) / 2)
+    if cum[mid] <= s then lo = mid else hi = mid end
+  end
+  local len = cum[lo + 1] - cum[lo]
+  local t = len > 0 and math.max(0, math.min(1, (s - cum[lo]) / len)) or 0
+  local zs, fz = part.zs, part.fz
+  local a, b = zs and zs[lo], zs and zs[lo + 1]
+  if type(a) == "number" and type(b) == "number" then return a + (b - a) * t end
+  local x1, y1 = pts[2 * lo - 1], pts[2 * lo]
+  local x, y = x1 + (pts[2 * lo + 1] - x1) * t, y1 + (pts[2 * lo + 2] - y1) * t
+  local g = G.SlopeGround(part.cont, x, y)
+  a, b = fz and fz[lo], fz and fz[lo + 1]
+  if type(a) == "number" and type(b) == "number" and (g == nil or G.SlopeIndoors(part.cont, x, y)) then
+    return a + (b - a) * t
+  end
+  return g
+end
+-- Stretch `i` of `part`'s shade: 0 flat (or no heights), 1..SLOPE_STEPS uphill, -1..-SLOPE_STEPS downhill.
+function G.SlopeLevel(part, i)
+  local e = G.SlopeEntry(part)
+  local v = e.lv[i]
+  if v then return v end
+  v = 0
+  local cum = e.cum
+  if i >= 1 and cum[i + 1] then
+    local half = math.max(G.SLOPE_WINDOW_YD, cum[i + 1] - cum[i]) / 2
+    local mid = (cum[i] + cum[i + 1]) / 2
+    local s1, s2 = math.max(0, mid - half), math.min(cum[#cum], mid + half)
+    local run = s2 - s1
+    if run >= G.SLOPE_WINDOW_YD / 4 then
+      local h1 = G.SlopeHeightAt(part, e, s1)
+      local h2 = h1 and G.SlopeHeightAt(part, e, s2)
+      if h2 then
+        local g = (h2 - h1) / run
+        local f = math.min(1, (math.abs(g) - G.SLOPE_DEAD) / (G.SLOPE_FULL - G.SLOPE_DEAD))
+        if f > 0 then
+          local n = math.max(1, math.floor(f * G.SLOPE_STEPS + 0.5))
+          v = g > 0 and n or -n
+        end
+      end
+    end
+  end
+  e.lv[i] = v
+  return v
+end
+-- Stretch `i` of `route`'s `part`: its shade. The first part as followed (Nav trims it to the player each step, new
+-- points each time) reads the whole first part's, stretch i there being i + followIdx - 1.
+function G.RouteSlopeLevel(route, part, i)
+  local full = route and route.fullFirst
+  if full and full ~= part and full.pts and route.parts and route.parts[1] == part and full.cont == part.cont then
+    local off = (route.followIdx or 1) - 1
+    if #full.pts - #part.pts == 2 * off then return G.SlopeLevel(full, i + off) end
+  end
+  return G.SlopeLevel(part, i)
+end
+-- `col` (a color index or { r, g, b }) for stretch `i` of `route`'s `part`, of `kind`: shaded by its slope.
+function G.SlopeColor(route, part, i, kind, col)
+  if not (part and part.pts and i and G.SLOPE_KINDS[kind] and G.SlopeShadeOn()) then return col end
+  local lv = G.RouteSlopeLevel(route, part, i)
+  if lv == 0 then return col end
+  local c = type(col) == "table" and col or G.ROUTE_BASE_COLORS[col]
+  if not c then return col end
+  local by = G.slopeColors[c]
+  if not by or by.r ~= c[1] or by.g ~= c[2] or by.b ~= c[3] then -- (a look's color changed in its table: again)
+    by = { r = c[1], g = c[2], b = c[3] }
+    G.slopeColors[c] = by
+  end
+  local out = by[lv]
+  if not out then
+    local k = math.abs(lv) / G.SLOPE_STEPS
+    if lv > 0 then
+      k = k * G.SLOPE_LIGHTEN
+      out = { c[1] + (1 - c[1]) * k, c[2] + (1 - c[2]) * k, c[3] + (1 - c[3]) * k }
+    else
+      k = 1 - k * G.SLOPE_DARKEN
+      out = { c[1] * k, c[2] * k, c[3] * k }
+    end
+    by[lv] = out
+  end
+  return out
 end
 -- (asked 2026-10-06: a route that doesn't change isn't drawn again) a line whose ends moved less than this (UI units)
 -- since it was placed is left where it is: the game calls that place lines are most of a redraw's line work, and a
@@ -5873,12 +6020,12 @@ function G.UpdateMinimapRoute(force)
   local level, paused = N.PlayerLevel(cont), N.QuestPaused()
   if not force and mm.route == r and mm.pts == r.pts and mm.dest == N.dest and mm.yards == yards and mm.width == width
       and math.abs(mm.px - px) < step and math.abs(mm.py - py) < step and math.abs(mm.facing - facing) < 0.005
-      and mm.square == square and mm.level == level and mm.paused == paused then
+      and mm.square == square and mm.level == level and mm.paused == paused and mm.slope == G.SlopeShadeOn() then
     return mm.used -- (nothing it shows changed)
   end
   local t0 = ns.PerfStart and ns.PerfStart()
   mm.route, mm.pts, mm.dest, mm.yards, mm.width, mm.px, mm.py, mm.facing = r, r.pts, N.dest, yards, width, px, py, facing
-  mm.square, mm.level, mm.paused = square, level, paused
+  mm.square, mm.level, mm.paused, mm.slope = square, level, paused, G.SlopeShadeOn()
   mm.draws = mm.draws + 1
   local rad = width / 2 - 1
   local n = 0
@@ -5926,10 +6073,10 @@ function G.UpdateMinimapRoute(force)
     if N.HostileSpans(part, i) or N.SwimSpans(part, i) then
       N.EachRoutePiece(part, i, function(t1, t2, hostile, swim)
         Piece(x1 + (x2 - x1) * t1, y1 + (y2 - y1) * t1, x1 + (x2 - x1) * t2, y1 + (y2 - y1) * t2, kind,
-          hostile and N.HOSTILE_COLOR or col, swim)
+          hostile and N.HOSTILE_COLOR or swim and col or G.SlopeColor(r, part, i, kind, col), swim)
       end)
     else
-      Piece(x1, y1, x2, y2, kind, col)
+      Piece(x1, y1, x2, y2, kind, G.SlopeColor(r, part, i, kind, col)) -- (lighter uphill, darker downhill)
     end
   end)
   MinimapHide(n + 1)
@@ -9974,6 +10121,9 @@ function G.Update()
       legTop = multi and stop == 1 and G.ROUTE_TOP_SUB or nil
       local col, width, dotted = G.RouteLegLook(look, color(stop, kind, style[1]), style[2], style[3], kind, mid,
         multi, not (stops[stop] and stops[stop].corpse))
+      -- (lighter uphill, darker downhill: G.SlopeColor; `flat`, the color as it was, for a swim's waves)
+      local flat = col
+      col = G.SlopeColor(route, part, i, kind, col)
       -- (asked 2026-10-06) the last yards to a stop upstairs or in a cellar (G.FLOOR_LEG_YD round it): dotted in the
       -- stairs color, into the building and up (or down)
       local sd = stops[stop]
@@ -10001,7 +10151,7 @@ function G.Update()
           local full = math.sqrt((bx - ax) ^ 2 + (by - ay) ^ 2)
           N.EachRoutePiece(part, i, function(t1, t2, hostile, swim)
             DrawLeg(ax + (bx - ax) * t1, ay + (by - ay) * t1, ax + (bx - ax) * t2, ay + (by - ay) * t2,
-              hostile and N.HOSTILE_COLOR or col, width, dotted, partCont,
+              hostile and N.HOSTILE_COLOR or swim and flat or col, width, dotted, partCont,
               swim and { 0, full * (t2 - t1), part = part, i = i, t1 = t1, t2 = t2 } or nil)
           end)
         else

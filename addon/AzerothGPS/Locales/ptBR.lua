@@ -2009,6 +2009,8 @@ L["road end picked (%s%s): Shift + drag from it to go on with it. Click it again
 L["went on with that %s (#%d, %s): its other end is picked, Shift + drag from it to go on."] = "%s continuado (#%d, %s): a outra ponta está escolhida, Shift + arrastar a partir dela para seguir."
 L["Flip Lift"] = "Inverter elevador"
 L["Foot and top swapped: the lift's other end is its top now. Save Road to keep it."] = "Base e topo trocados: a outra ponta do elevador agora é o topo. Salve a estrada para manter."
+L["Shade the route by slope"] = "Sombrear a rota pela inclinação"
+L["The route is drawn lighter where it goes uphill and darker where it goes downhill, more for a steeper slope; flat ground keeps the route's color. Where the map has no heights, the route is drawn as usual. Boats, zeppelins, flights and swims keep their color."] = "A rota é desenhada mais clara onde sobe e mais escura onde desce, mais quanto mais íngreme for; em terreno plano mantém sua cor. Onde o mapa não tem alturas, a rota é desenhada como sempre. Barcos, zepelins, voos e trechos a nado mantêm sua cor."
 L["Smooth arrow turns"] = "Giros suaves da seta"
 L["A big change of direction (a turn coming up, stairs) swings the arrow round smoothly: slow, then faster, then slow again. Turning yourself, it follows at once."] = "Uma grande mudança de direção (uma curva chegando, escadas) gira a seta suavemente: devagar, depois mais rápido e devagar de novo. Quando você mesmo gira, ela acompanha na hora."
 L["Record: Stairs on/off"] = "Gravar: escada liga/desliga"

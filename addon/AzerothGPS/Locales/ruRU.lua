@@ -2009,6 +2009,8 @@ L["road end picked (%s%s): Shift + drag from it to go on with it. Click it again
 L["went on with that %s (#%d, %s): its other end is picked, Shift + drag from it to go on."] = "%s продолжено (#%d, %s): выбран другой конец, Shift + перетаскивание от него продолжит дальше."
 L["Flip Lift"] = "Перевернуть подъёмник"
 L["Foot and top swapped: the lift's other end is its top now. Save Road to keep it."] = "Низ и верх поменяны: другой конец подъёмника теперь верх. Сохраните дорогу, чтобы оставить так."
+L["Shade the route by slope"] = "Оттенять маршрут по уклону"
+L["The route is drawn lighter where it goes uphill and darker where it goes downhill, more for a steeper slope; flat ground keeps the route's color. Where the map has no heights, the route is drawn as usual. Boats, zeppelins, flights and swims keep their color."] = "Маршрут рисуется светлее там, где он идёт в гору, и темнее там, где идёт под гору, тем сильнее, чем круче склон; на ровной земле он сохраняет свой цвет. Где на карте нет высот, маршрут рисуется как обычно. Корабли, дирижабли, полёты и заплывы сохраняют свой цвет."
 L["Smooth arrow turns"] = "Плавный поворот стрелки"
 L["A big change of direction (a turn coming up, stairs) swings the arrow round smoothly: slow, then faster, then slow again. Turning yourself, it follows at once."] = "При резкой смене направления (впереди поворот, лестница) стрелка поворачивается плавно: медленно, быстрее, снова медленно. Когда вы поворачиваетесь сами, она следует сразу."
 L["Record: Stairs on/off"] = "Запись: лестница вкл/выкл"
