@@ -1141,6 +1141,11 @@ function Pad.Run(acts, down)
   end
   if has.select then
     if g.removeAsk and g.removeAsk:IsShown() then return Click(g.removeAsk) end
+    -- (searching: the row highlighted with the D-pad, as Enter; Kooki3z 2026-11-20)
+    if g.SearchOpen and g.SearchOpen() then
+      g.SearchPick()
+      return true
+    end
     local icon = Pad.IconAt()
     if icon then
       local dbl = icon:GetScript("OnDoubleClick")
@@ -1264,6 +1269,7 @@ function Pad.SetHovered(b)
     if enter then pcall(enter, b) end
   end
 end
+Pad.SEARCH_REPEAT_FIRST, Pad.SEARCH_REPEAT = 0.35, 0.1 -- (seconds: held, the search's next row after these)
 function Pad.Tick(dt)
   if not Pad.bound or not dt or dt <= 0 then return end
   local g = G()
@@ -1280,6 +1286,27 @@ function Pad.Tick(dt)
   local H = Pad.HeldNow
   local dx = ((H("panRight") and 1 or 0) - (H("panLeft") and 1 or 0))
   local dy = ((H("panUp") and 1 or 0) - (H("panDown") and 1 or 0))
+  -- (searching: up and down step through the results as the arrow keys do, a step a press and then repeating while
+  -- held; the map isn't panned up or down meanwhile. Kooki3z 2026-11-20: "When search is active and controller is on,
+  -- support D-pad for selecting line like arrow keys do")
+  if g.SearchOpen and g.SearchOpen() then
+    local dir = dy > 0 and "UP" or dy < 0 and "DOWN" or nil
+    if not dir then
+      Pad.searchDir = nil
+    elseif Pad.searchDir ~= dir then
+      Pad.searchDir, Pad.searchWait = dir, Pad.SEARCH_REPEAT_FIRST
+      g.SearchArrow(dir)
+    else
+      Pad.searchWait = (Pad.searchWait or 0) - dt
+      if Pad.searchWait <= 0 then
+        Pad.searchWait = Pad.SEARCH_REPEAT
+        g.SearchArrow(dir)
+      end
+    end
+    dy = 0
+  else
+    Pad.searchDir = nil
+  end
   local zIn, zOut = H("zoomIn"), H("zoomOut")
   if dx ~= 0 or dy ~= 0 then g.PadPan(dx * Pad.PAN_UI * dt, dy * Pad.PAN_UI * dt) end
   if zOut and not zIn then g.WheelZoom(Pad.ZOOM_TIMES ^ dt) end -- (out: more yards in view)

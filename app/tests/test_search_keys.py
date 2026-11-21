@@ -273,3 +273,41 @@ def test_the_keys_on_the_world_map_too(game):
             st[k] = v
         G.WorldMapChanged()
         G.ApplySettings()
+
+
+def test_the_controllers_dpad_steps_through_the_results_and_select_takes_one(search):
+    # (Kooki3z 2026-11-20: "When search is active and controller is on, support D-pad for selecting line like arrow keys
+    # do")
+    lua, ns, panel = search
+    P = ns.Pad
+    lua.execute("""
+      AGPS_PADREAL = { AGPS_NS.Pad.HeldNow, AGPS_NS.Pad.bound, AGPS_NS.Pad.MenuOpen }
+      AGPS_HELD = {}
+      AGPS_NS.Pad.HeldNow = function(id) return AGPS_HELD[id] end
+      AGPS_NS.Pad.bound = true
+      AGPS_NS.Pad.MenuOpen = function() return false end
+    """)
+    G = ns.GPS
+    try:
+        view0 = tuple(G.PadView())[:2]
+        held = lua.eval("AGPS_HELD")
+        held.panDown = True
+        P.Tick(0.016)
+        assert lit(lua, panel) == [1]  # (a press: one step)
+        P.Tick(0.1)
+        assert lit(lua, panel) == [1]  # (held: not yet repeating)
+        P.Tick(0.3)
+        assert lit(lua, panel) == [2]  # (held past the first wait: the next)
+        held.panDown = None
+        P.Tick(0.016)
+        held.panUp = True
+        P.Tick(0.016)
+        assert lit(lua, panel) == [1]
+        held.panUp = None
+        P.Tick(0.016)
+        assert tuple(G.PadView())[:2] == view0  # (the map wasn't panned meanwhile)
+        # Select: the highlighted row, as Enter
+        assert P.Run(lua.table("select"), True)
+        assert list(lua.eval("AGPS_PICKED").values()) == ["Rekkul"]
+    finally:
+        lua.execute("AGPS_NS.Pad.HeldNow, AGPS_NS.Pad.bound, AGPS_NS.Pad.MenuOpen = unpack(AGPS_PADREAL)")
