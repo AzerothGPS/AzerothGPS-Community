@@ -16228,9 +16228,25 @@ G.ROAD_HOVER_PX = 8
 function G.RoadHoverInfo(level, x, y, reach, z)
   local R = ns.Router
   if not (R and R.GraphReady and R.GraphReady(level)) then return nil end
-  local c = R.NearestEdges(level, x, y, z)[1]
+  local near = R.NearestEdges(level, x, y, z)
+  local c = near[1]
   if not c or c.dist > reach then return nil end
   local g = R.DebugGraph(level)
+  -- (roads on one line, the stairs over a drawn road's piece: the stairs or the lift named, not the first of them by
+  -- edge; Brill inn's stairs, issue #842)
+  local function special(o)
+    local s = g and g.e[o.edge] and g.e[o.edge][4]
+    return s == R.SOURCE_STAIR or s == R.SOURCE_LIFT or (g and g.kind and g.kind[o.edge] == "stairs")
+  end
+  if g and not special(c) then
+    for i = 2, #near do
+      if near[i].dist > c.dist then break end
+      if special(near[i]) then
+        c = near[i]
+        break
+      end
+    end
+  end
   local e = g and g.e[c.edge]
   if not e then return nil end
   local heights = g.z or g.nz
