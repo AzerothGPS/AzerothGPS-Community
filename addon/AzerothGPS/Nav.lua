@@ -4377,6 +4377,15 @@ function N.QuestBands(stops)
   return bands
 end
 
+-- A level gained (Kooki3z 2026-11-21: a level-up should re-sort the quest route by level too): the bands move with
+-- the player's level ("gray": which quests turn gray soon), so a quest route ordered by level is put in order again
+-- from here, the same way as after a turn-in (N.reorderDue, N.MaybeReorder). True when a reorder is due.
+function N.OnLevelUp()
+  if not N.QuestLevelOrder() or #N.stops < 2 or not N.OnQuestRoute() then return false end
+  N.reorderDue = true
+  return true
+end
+
 function N.OrderStops(px, py, cont, onlyIfFaster)
   local n = #N.stops
   if n < 2 then return false end

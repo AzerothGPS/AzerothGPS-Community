@@ -2799,6 +2799,7 @@ function Lay.Init()
   -- (a quest turned in or dropped: its route stops are done, asked 2026-10-06)
   pcall(f.RegisterEvent, f, "QUEST_TURNED_IN")
   pcall(f.RegisterEvent, f, "QUEST_REMOVED")
+  pcall(f.RegisterEvent, f, "PLAYER_LEVEL_UP") -- (a quest route by level: in order again, Nav.OnLevelUp)
   pcall(f.RegisterEvent, f, "DYNAMIC_GOSSIP_POI_UPDATED") -- a guard's directions
   -- Asked again for a place the guard already marked: the marker doesn't change, so no
   -- event. A pick that ends the talk (the answer: no more choices, or the window closes)
@@ -2864,6 +2865,10 @@ function Lay.Init()
       pcall(Lay.OnNpcWindow, event)
     elseif event == "MERCHANT_UPDATE" then
       pcall(Lay.OnMerchantUpdate)
+    elseif event == "PLAYER_LEVEL_UP" then -- (newLevel, ...: not a unit)
+      -- (a moment later: UnitLevel can still say the old level during the event)
+      local up = function() if ns.Nav and ns.Nav.OnLevelUp then ns.Nav.OnLevelUp() end end
+      if C_Timer and C_Timer.After then C_Timer.After(1, up) else up() end
     elseif event == "QUEST_ACCEPTED" then
       -- on a quest route: it doesn't have the new quest yet
       questCache, areaLists = {}, {}
