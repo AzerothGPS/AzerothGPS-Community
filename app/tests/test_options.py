@@ -33,7 +33,7 @@ replaceMinimapCollapseOnCombat replaceMinimapSize windowTint windowButtons windo
 charmSwing devTools recordHint pinning copyRoads copyWalls copyRoutes copyPins""".split()
 # (askToSave, "Remind me to save": removed with the map's Save and Dismiss buttons, asked 2026-11-17)
 # Settings that were a slash command only (or the Quick buttons page's "On" column only) and have a control now.
-NEW = ["allowSwim", "mapEditIdle", "language", "layerCity", "showRoads", "showWalls", "useWorldMap", "escClosesMap", "replaceMinimapIdle", "questAutoReroute", "quietChat",
+NEW = ["arrowEase", "allowSwim", "mapEditIdle", "language", "layerCity", "showRoads", "showWalls", "useWorldMap", "escClosesMap", "replaceMinimapIdle", "questAutoReroute", "quietChat",
        "questPickRoute", "seamTerrainYd", "seamContinentAt", "seamWorldAt", "seamTerrainBlend",
        "seamContinentBlend", "seamWorldBlend", "interiorZoomYd", "roundIcons", "interiorHoldSec", "iconSize",
        # (asked 2026-11-14: how far out each kind of icon shows, GPSFrame's G.IconShown)
@@ -77,7 +77,7 @@ HOME = {
                "clickThroughMoving clickThroughCombat",
     "Routing": "useFlights flightMapRing useHearthstone useTeleports avoidHighZones avoidHostile allowSwim roadTolerance fastestOrder "
                "cityKeepOrder importKeepOrder questZoneOnly questTrackedOnly questAutoReroute questPickRoute navCloseClears acceptWay acceptMapPins acceptShared",
-    "Directions": "arrow arrowLocked arrowPx arrowBg dirShown dirLocked dirStopsOnly arrowSnap arrowSide dirTextScale dirBg "
+    "Directions": "arrow arrowLocked arrowEase arrowPx arrowBg dirShown dirLocked dirStopsOnly arrowSnap arrowSide dirTextScale dirBg "
                   "questing",
     "Quick buttons": "keyBlockedInCombat",  # (2026-11-19: the keys with the buttons)
     "Performance": "hz rerouteSeconds stopsAhead autoPauseRouting autoPauseSeconds stutterPause gentleBackground arrowHz",
@@ -186,7 +186,7 @@ DEPENDENTS = [
     ("seamContinentAt", "style", "zone"), ("seamWorldAt", "style", "nospoiler"),
     ("seamTerrainBlend", "style", "minimap"), ("seamContinentBlend", "style", "zone"), ("seamWorldBlend", "style", "minimap"),
     ("interiorZoomYd", "style", "zone"), ("interiorHoldSec", "style", "zone"),
-    ("arrowLocked", "arrow", False), ("arrowPx", "arrow", False), ("arrowBg", "arrow", False),
+    ("arrowLocked", "arrow", False), ("arrowEase", "arrow", False), ("arrowPx", "arrow", False), ("arrowBg", "arrow", False),
     ("dirShown", "arrow", False), ("dirStopsOnly", "dirShown", False),
     ("dirLocked", "dirShown", False), ("dirLocked", "arrow", False), ("dirStopsOnly", "arrow", False),
     ("arrowSnap", "dirShown", False), ("dirTextScale", "dirShown", False), ("dirBg", "dirShown", False),

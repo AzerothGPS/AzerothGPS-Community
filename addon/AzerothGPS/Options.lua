@@ -2543,6 +2543,10 @@ local function BuildWindow()
   Key("arrowLocked")
   check(L["Lock arrow position"], L["Locks the arrow in place. Unlocked: drag it to move it. Snapped to the directions text, it still moves with the text while the text is unlocked. With no route it shows a placeholder while unlocked, so you can place it. Locked, clicks pass through it to the game world."],
     function() return GPS().arrowLocked end, function(v) GPS().arrowLocked = v end, ArrowOn, INDENT)
+  -- (asked 2026-11-20: "Add a gentle arrow turning change")
+  Key("arrowEase")
+  check(L["Smooth arrow turns"], L["A big change of direction (a turn coming up, stairs) swings the arrow round smoothly: slow, then faster, then slow again. Turning yourself, it follows at once."],
+    function() return GPS().arrowEase ~= false end, function(v) GPS().arrowEase = v and true or false end, ArrowOn, INDENT)
   Key("arrowPx")
   slider(L["Arrow size"], ns.Arrow.ARROW_PX_MIN, ns.Arrow.ARROW_PX_MAX, 2, L["%d px"],
     function() return GPS().arrowPx or ns.Arrow.ARROW_PX end, function(v) GPS().arrowPx = v end, ArrowShown)

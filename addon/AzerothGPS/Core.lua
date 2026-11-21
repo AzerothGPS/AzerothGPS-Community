@@ -52,6 +52,7 @@ ns.DEFAULTS = {
     hz = 20, -- redraws per second (at most; skipped when nothing changed; Options > Performance)
     -- performance (Options > Performance; its "Use Low-End Settings" sets these lighter)
     arrowHz = 0, -- the direction arrow turned this many times a second (0: every frame)
+    arrowEase = true, -- its big turns eased, slow, fast, slow (Arrow.lua A.EaseStep; asked 2026-11-20)
     rerouteSeconds = 2, -- a route the player left is worked out again at most this often
     gentleBackground = false, -- background searches in smaller slices of each frame (GPS.PumpBudget)
     -- map

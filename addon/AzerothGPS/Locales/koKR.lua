@@ -2009,6 +2009,8 @@ L["road end picked (%s%s): Shift + drag from it to go on with it. Click it again
 L["went on with that %s (#%d, %s): its other end is picked, Shift + drag from it to go on."] = "%s 이어 그림 (#%d, %s): 다른 끝이 선택되었습니다. Shift + 드래그로 계속 이어 그립니다."
 L["Flip Lift"] = "승강기 뒤집기"
 L["Foot and top swapped: the lift's other end is its top now. Save Road to keep it."] = "아래와 위가 바뀌었습니다: 이제 승강기의 다른 끝이 위입니다. 유지하려면 길 저장을 누르세요."
+L["Smooth arrow turns"] = "화살표 부드럽게 돌리기"
+L["A big change of direction (a turn coming up, stairs) swings the arrow round smoothly: slow, then faster, then slow again. Turning yourself, it follows at once."] = "방향이 크게 바뀌면 (다가오는 회전, 계단) 화살표가 부드럽게 돌아갑니다: 천천히, 빨라졌다가, 다시 천천히. 직접 방향을 돌리면 바로 따라옵니다."
 L["Record: Stairs on/off"] = "기록: 계단 켜기/끄기"
 L["recording: walk the road, switching the road type as you go (Stairs too), then Stop & Save"] = "기록 중: 길을 걸으며 길 종류를 바꾸세요 (계단도), 그다음 중지 및 저장"
 L["Record a road by walking it: opens the Record window (Record, Pause, Stop & Save, and the road type, Stairs too, or its key). Each walk is saved as a drawn road with where you were indoors and the rooms' names, so its floors can be worked out. Undo takes the last walk back. (Shown with the road tools)"] = "걸어서 길을 기록합니다: 기록 창을 엽니다 (기록, 일시정지, 중지 및 저장, 그리고 길 종류 — 계단 포함 — 또는 그 단축키). 걸은 길은 실내에 있던 곳과 방 이름과 함께 그린 길로 저장되어 층을 알아낼 수 있습니다. 실행 취소는 마지막 길을 되돌립니다. (길 도구와 함께 표시)"
