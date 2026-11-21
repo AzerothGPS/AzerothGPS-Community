@@ -581,6 +581,19 @@ def _dev_addon() -> Path | None:
     return ADDON_DIR.parents[2].joinpath(*DEV_ADDON)
 
 
+def cmd_city_roads(args) -> int:
+    """A capital's roads straightened and thinned over its navmesh (cityroads.py, issue #829)."""
+    from . import cityroads
+
+    res = cityroads.run(args.city, write=args.write)
+    if args.check:
+        out = cityroads.check(args.city, args.against)
+        (DATA / "debug" / "cityroads" / f"{args.city.lower().replace(' ', '_')}_check.json").write_text(
+            json.dumps(out, indent=1), encoding="utf-8")
+    print(f"{len(res.flags)} roads the mesh can't walk: data/debug/cityroads/ (for recording in game)")
+    return 0
+
+
 def cmd_navmesh(args) -> int:
     """The capitals' and Undercity's Recast meshes (recastmesh.py, a dev tool: nothing ships): `build-tool` compiles
     navbuild.exe with zig over Recast's sources in data/thirdparty/recastnavigation; `build` makes each city's mesh
@@ -1314,6 +1327,14 @@ def main(argv: list[str] | None = None) -> int:
                                               "meshes already built are kept in NavMeshData.lua)")
     sp.add_argument("--rebuild", action="store_true", help="build the meshes again (else the ones in data/navmesh/)")
     sp.set_defaults(fn=cmd_navmesh)
+    sp = sub.add_parser("city-roads", help="a capital's roads without the spiderweb: straightened and thinned over its "
+                                           "navmesh (data/navmesh/); report, pictures and flags in data/debug/cityroads/")
+    sp.add_argument("--city", default="Orgrimmar", help="the city (cityroads.CITIES: Orgrimmar so far)")
+    sp.add_argument("--write", action="store_true", help="patch that city's roads in Data/Capitals.lua")
+    sp.add_argument("--check", action="store_true", help="also route in the city over the data as --against had it and "
+                                                         "as it is: yards, turns, ways lost")
+    sp.add_argument("--against", default="HEAD")
+    sp.set_defaults(fn=cmd_city_roads)
     sp = sub.add_parser("capitals", help="build the capitals' grids and roads; renders in data/debug/capitals/")
     client_args(sp)
     sp.add_argument("--only", nargs="+", help="only capitals whose name contains one of these")
