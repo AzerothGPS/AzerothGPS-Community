@@ -304,6 +304,36 @@ def test_about_to_turn_gray_first(game, quests):
         lua.execute("AGPS_LEVEL = nil GetQuestGreenRange = nil")
 
 
+def test_a_level_up_sorts_a_quest_route_by_level_again(game, quests):
+    """Kooki3z 2026-11-21: on a level-up the quest route by level is put in order again (the gray bands move)."""
+    lua, ns = game
+    N, st = ns.Nav, ns.settings.gps
+    was_fastest = st.fastestOrder
+    lua.execute("AGPS_LEVEL = 14")
+    try:
+        st.fastestOrder = True
+        quests({"id": 571, "title": "Gray", "level": 8}, {"id": 572, "title": "Yellow", "level": 14},
+               {"id": 573, "title": "Soon", "level": 10}, {"id": 574, "title": "Sooner", "level": 9})
+        stops = lambda: _stops(lua, ("Gray", 571, 60, False), ("Yellow", 572, 120, False),
+                               ("Soon", 573, 240, False), ("Sooner", 574, 300, False))
+        # off: a level-up changes nothing
+        N.SetStops(stops(), True)
+        N.reorderDue = None
+        assert not N.OnLevelUp() and not N.reorderDue
+        st.questLevelOrder = "gray"
+        N.SetStops(stops(), True)
+        assert sorted(_order(ns)[:2]) == ["Soon", "Sooner"]
+        # level 18: gray at 12 and below, so the level 14 quest turns gray within two levels now and goes first
+        lua.execute("AGPS_LEVEL = 18")
+        N.reorderDue = None
+        assert N.OnLevelUp() and N.reorderDue
+        N.MaybeReorder(BRILL[0], BRILL[1], 0)
+        assert _order(ns)[0] == "Yellow"
+    finally:
+        st.fastestOrder = was_fastest
+        lua.execute("AGPS_LEVEL = nil")
+
+
 @pytest.mark.parametrize("mode", ["off", "low"])
 def test_a_quests_turn_in_comes_after_its_objectives(game, quests, mode):
     lua, ns = game
