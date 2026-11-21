@@ -369,6 +369,7 @@ function Pad.SawInput(used)
   Pad.used = used
   if not used and Pad.focus then Pad.SetFocus(nil) end -- (the map menu's ring and its tooltip: the mouse's now)
   Pad.ShowMarks(Pad.bound)
+  if ns.PadKeys then ns.PadKeys.Refresh() end -- (the search's legend and keyboard: the controller's only)
   if Pad.Opt and Pad.Opt.UpdateLook then Pad.Opt.UpdateLook() end -- (Options' look too)
   local g = G()
   if g and g.RefreshDrawHint then g.RefreshDrawHint() end -- (drawing an area: its hint in the pad's or the mouse's words)
@@ -1120,8 +1121,17 @@ function Pad.Run(acts, down)
     local r = Pad.DrawRun(has)
     if r ~= nil then return r end
   end
+  -- (searching with the controller: the search's own controls first, its keyboard's too, PadKeys.lua; over the map
+  -- menu's, which stays open behind a search opened from it. Kooki3z 2026-11-20: "A fading on highlighted letter,
+  -- D-Pad also closes keyboard and navigates the list")
+  local PK = ns.PadKeys
+  local searching = PK and PK.Wants()
+  if searching then
+    local r = PK.Run(has, down)
+    if r ~= nil then return r end
+  end
   -- (the map menu open, or opened: its own controls, Pad.MenuRun)
-  if Pad.MenuOpen() or (has.menu and down) then return Pad.MenuRun(has, down) end
+  if (Pad.MenuOpen() and not searching) or (has.menu and down) then return Pad.MenuRun(has, down) end
   local held = false
   for _, id in ipairs(acts) do
     if Pad.HELD[id] then
@@ -1270,11 +1280,37 @@ function Pad.SetHovered(b)
   end
 end
 Pad.SEARCH_REPEAT_FIRST, Pad.SEARCH_REPEAT = 0.35, 0.1 -- (seconds: held, the search's next row after these)
+-- The player moving their character (the game's own movement, the left stick or the keys; never the D-pad panning the
+-- map, which moves only the view): the controller's map menu and the search, its keyboard with it, closed as they start
+-- (Kooki3z 2026-11-20: "it moves the character, which btw would and should close map menu"). The controller in use
+-- only: a mouse player's menu keeps its own timer.
+function Pad.MoveTick()
+  local g = G()
+  local moving = g.PlayerMoving and g.PlayerMoving() or false
+  local started = moving and not Pad.wasMoving
+  Pad.wasMoving = moving
+  if not (started and Pad.used) then return false end
+  local closed = false
+  if Pad.MenuOpen() then
+    Pad.CloseMenu()
+    closed = true
+  end
+  if g.searchPanel and g.searchPanel:IsShown() then
+    g.searchPanel:Hide()
+    closed = true
+  end
+  return closed
+end
 function Pad.Tick(dt)
   if not Pad.bound or not dt or dt <= 0 then return end
   local g = G()
   Pad.HoverTick(dt)
-  if Pad.MenuOpen() then
+  Pad.MoveTick()
+  local PK = ns.PadKeys
+  if PK then PK.Refresh() end -- (the search's legend and keyboard: shown while the controller has the search)
+  local searching = PK and (PK.Wants() or (g.SearchOpen and g.SearchOpen())) or false
+  if searching and Pad.focus then Pad.SetFocus(nil) end -- (the map menu's ring: the search's turn)
+  if Pad.MenuOpen() and not searching then
     if g.mapMenu then g.mapMenu.idle = 0 end
     if Pad.focus and not Pad.focus:IsShown() then Pad.SetFocus(nil) end
     -- (the drawer slid out: its first button; not with the mouse in use, asked 2026-11-16: "if the player starts using
@@ -1288,21 +1324,9 @@ function Pad.Tick(dt)
   local dy = ((H("panUp") and 1 or 0) - (H("panDown") and 1 or 0))
   -- (searching: up and down step through the results as the arrow keys do, a step a press and then repeating while
   -- held; the map isn't panned up or down meanwhile. Kooki3z 2026-11-20: "When search is active and controller is on,
-  -- support D-pad for selecting line like arrow keys do")
-  if g.SearchOpen and g.SearchOpen() then
-    local dir = dy > 0 and "UP" or dy < 0 and "DOWN" or nil
-    if not dir then
-      Pad.searchDir = nil
-    elseif Pad.searchDir ~= dir then
-      Pad.searchDir, Pad.searchWait = dir, Pad.SEARCH_REPEAT_FIRST
-      g.SearchArrow(dir)
-    else
-      Pad.searchWait = (Pad.searchWait or 0) - dt
-      if Pad.searchWait <= 0 then
-        Pad.searchWait = Pad.SEARCH_REPEAT
-        g.SearchArrow(dir)
-      end
-    end
+  -- support D-pad for selecting line like arrow keys do". The keyboard open: all four move on its keys, PadKeys.Tick)
+  if searching then
+    if not PK.Tick(dt, dx, dy) then dx = 0 end
     dy = 0
   else
     Pad.searchDir = nil

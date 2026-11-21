@@ -104,6 +104,9 @@ def test_no_blizzard_art_outside_the_atlas_folder():
         # toolicons.py, and the map's stairs glyph turned 45 degrees at a time, Stairs<d>; test_tool_legend.py checks
         # they're what it makes)
         own = own or rel.parent == Path("Media/Tools") and re.fullmatch(r"[A-Za-z]+\d?_\d+\.tga", p.name)
+        # (the controller's on-screen keyboard's key caps, Kooki3z 2026-11-20: drawn from numbers by keyicons.py;
+        # test_pad_keyboard.py checks they're what it makes)
+        own = own or rel.parent == Path("Media/Keyboard") and re.fullmatch(r"Key\d?(Lit)?_\d+\.tga", p.name)
         # (the map's round buttons drawn at each size, 1.3.9: MapMenu.tga, our own, resized, and discs drawn from
         # numbers by coast.py; test_button_art.py checks they're what it makes)
         own = own or rel.parent == Path("Media/Buttons") and re.fullmatch(r"(Frame|Disc)\d+\.tga", p.name)

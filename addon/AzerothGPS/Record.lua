@@ -346,11 +346,32 @@ end
 -- only where the drop is safe, else a wall both ways), or a plain wall again. Saved as a new wall that `replaces` the
 -- old one (its time): Undo takes it back, and the road watcher ships it in its place.
 R.WALL_PICK_YD = 12
-R.CLIFF_SIDE_YD = 5 -- (the ground's height this far either side of the wall: the sides filled in)
--- The player's own walls on `cont` (not in the data yet), less those an edit replaced.
+-- The sides filled in (Record.WallSides): the ground read along the perpendicular on each side, every CLIFF_SIDE_STEP
+-- yards from CLIFF_SIDE_NEAR out to CLIFF_SIDE_REACH. (Read only next to the wall, CLIFF_SIDE_YD off, both sides came
+-- out nearly the same: the map's grid is ~16.7 yd a cell and bilinear, so a ledge is a smooth slope there; Kooki3z
+-- 2026-11-20, a Stonetalon ledge whose top is ~70-75 and its foot ~22-25 filled in "Left 70.0, Right 69.7", made a
+-- level, open cliff that blocked nothing. The grid there takes ~60 yd from the top (~73) to the foot (~25), with a
+-- shelf and bumps of a few yards on the way down.)
+R.CLIFF_SIDE_YD = 5 -- (the ground's height this far either side, when the ground's level across it)
+R.CLIFF_SIDE_NEAR, R.CLIFF_SIDE_STEP, R.CLIFF_SIDE_REACH = 3, 2, 60
+R.CLIFF_SIDE_TURN = 5 -- yards: past the top (the foot), ground this far below (above) it again ends that side's read
+-- (the next valley or rise: not this ledge's; a bump or a shelf on the way down less than this does not)
+-- The player's own walls on `cont` (not in the data yet), less those an edit replaced and those an erase took out since:
+-- the ones the map draws and the routes use (Passability.WallLines). (Kooki3z 2026-11-20: a wall deleted with an erase
+-- stayed pickable, though gone from the map and the routes, so the wall shown next to it could never be clicked and
+-- deleted: every click picked the erased one again.)
 function R.EditableWalls(cont)
   local shipped = ns.RoadTracksIn or {}
-  local gone, out = {}, {}
+  local P = ns.Passability
+  local out = {}
+  if P and P.WallLines and P.WallTrack then
+    for _, w in ipairs(P.WallLines(cont)) do
+      local t = P.WallTrack(w)
+      if t and t.op == "wall" and t.pts and #t.pts >= 4 and not shipped[t.time or -1] then out[#out + 1] = t end
+    end
+    return out
+  end
+  local gone = {}
   for _, t in ipairs(Tracks()) do
     if t.op == "wall" and t.replaces then gone[t.replaces] = true end
   end
@@ -377,21 +398,67 @@ function R.WallAt(cont, x, y, reach)
   end
   return best
 end
--- The ground's height on each side of wall `t`'s points i .. j (R.CLIFF_SIDE_YD off each section's middle, its left and
--- its right as drawn; ns.Ground), averaged: zl, zr (either nil with no ground data there).
+-- The ground's height on each side of wall `t`'s points i .. j (its left and its right as drawn; ns.Ground): zl, zr
+-- (either nil with no ground data there). For each section, at its middle, the ground is read out along the
+-- perpendicular on both sides (R.CLIFF_SIDE_NEAR .. R.CLIFF_SIDE_REACH); the higher side's height is its top (the
+-- highest it reaches before the ground falls away again: a ledge's plateau, not the next valley), the lower side's
+-- its foot (the lowest before it rises again), so the sides are the ledge's top and its foot, not two heights from
+-- its smoothed edge (Kooki3z 2026-11-20). Level ground (the two sides' reads alike): the heights R.CLIFF_SIDE_YD off.
+-- The sections' values averaged.
 function R.WallSides(level, t, i, j)
   local GD = ns.Ground
   if not GD then return nil, nil end
   local sl, nl, sr, nr = 0, 0, 0, 0
   local p = t.pts
+  -- (side `sg` of the section at (mx, my), its left unit (ux, uy): the heights out along it, nearest first)
+  local function profile(mx, my, ux, uy, sg)
+    local out = {}
+    local d = R.CLIFF_SIDE_NEAR
+    while d <= R.CLIFF_SIDE_REACH do
+      local h = GD.At(level, mx + ux * d * sg, my + uy * d * sg)
+      if not h then break end -- (off the grid, over a hole: as far as it reads)
+      out[#out + 1] = h
+      d = d + R.CLIFF_SIDE_STEP
+    end
+    return out
+  end
+  local function top(hs) -- (the highest before the ground falls CLIFF_SIDE_TURN below it again)
+    local best = hs[1]
+    for k = 2, #hs do
+      if hs[k] > best then best = hs[k] elseif hs[k] < best - R.CLIFF_SIDE_TURN then break end
+    end
+    return best
+  end
+  local function foot(hs) -- (the lowest before the ground rises CLIFF_SIDE_TURN over it again)
+    local best = hs[1]
+    for k = 2, #hs do
+      if hs[k] < best then best = hs[k] elseif hs[k] > best + R.CLIFF_SIDE_TURN then break end
+    end
+    return best
+  end
+  local function mean(hs)
+    local sum = 0
+    for k = 1, #hs do sum = sum + hs[k] end
+    return sum / #hs
+  end
   for k = i, math.max(i, j - 1) do
     local ax, ay, bx, by = p[2 * k - 1], p[2 * k], p[2 * k + 1], p[2 * k + 2]
     if bx then
       local ex, ey = bx - ax, by - ay
       local L = math.sqrt(ex * ex + ey * ey)
       if L > 0 then
-        local mx, my, lx, ly = (ax + bx) / 2, (ay + by) / 2, -ey / L * R.CLIFF_SIDE_YD, ex / L * R.CLIFF_SIDE_YD
-        local hl, hr = GD.At(level, mx + lx, my + ly), GD.At(level, mx - lx, my - ly)
+        local mx, my, ux, uy = (ax + bx) / 2, (ay + by) / 2, -ey / L, ex / L
+        local pl, pr = profile(mx, my, ux, uy, 1), profile(mx, my, ux, uy, -1)
+        local hl, hr
+        if #pl > 0 and #pr > 0 then
+          local ml, mr = mean(pl), mean(pr)
+          if ml >= mr then hl, hr = top(pl), foot(pr) else hl, hr = foot(pl), top(pr) end
+          -- (level across it, the top and foot within a step: the ground right by it, as it is)
+          if math.abs(hl - hr) <= (ns.Passability and ns.Passability.CLIFF_STEP or 2) then hl, hr = nil, nil end
+        end
+        local d = R.CLIFF_SIDE_YD
+        hl = hl or GD.At(level, mx + ux * d, my + uy * d)
+        hr = hr or GD.At(level, mx - ux * d, my - uy * d)
         if hl then sl, nl = sl + hl, nl + 1 end
         if hr then sr, nr = sr + hr, nr + 1 end
       end
@@ -636,6 +703,37 @@ function R.DeleteRoad(level, sel, floor)
     down = not hs and floor.down or nil })
 end
 
+-- Wall `t` (an edit: it `replaces` another) and the walls it replaced, back to the one first drawn, when every one of
+-- them is the player's own on the drawn list (not in the data) and no other wall replaces any of them: taken out
+-- together they leave nothing behind. A list, `t` first; nil otherwise (the data has one of them, or another wall
+-- would lose the one it replaced).
+function R.OwnWallChain(t)
+  local shipped = ns.RoadTracksIn or {}
+  if shipped[t.time or -1] then return nil end
+  local list, cur, seen = { t }, t, { [t] = true }
+  while cur.replaces do
+    local found
+    for _, o in ipairs(Tracks()) do
+      if o.op == "wall" and o.time == cur.replaces and o ~= cur then
+        if found then return nil end -- (two walls of that time: not sure which)
+        found = o
+      end
+    end
+    if not found or seen[found] or shipped[found.time or -1] then return nil end
+    seen[found] = true
+    list[#list + 1] = found
+    cur = found
+  end
+  for _, o in ipairs(Tracks()) do
+    if o.op == "wall" and o.replaces and not seen[o] then
+      for _, c in ipairs(list) do
+        if o.replaces == c.time then return nil end
+      end
+    end
+  end
+  return list
+end
+
 -- Delete the section `i` .. `j` of the wall picked (`sel`, R.WallAt's or the map's own wall shown read-only; `sel.fl`
 -- its floor) on `level`. "own" (the player's own wall off the list, the rest of it kept) or the erase's number.
 function R.DeleteWall(level, sel, i, j, zone)
@@ -650,6 +748,18 @@ function R.DeleteWall(level, sel, i, j, zone)
     for k, o in ipairs(Tracks()) do
       if o == t and o.op == "wall" then idx = k end
     end
+  end
+  -- (an edit of the player's own wall, the whole of it: off the list with the walls it replaced, when they're the
+  -- player's own too and nothing else depends on them; an erase there takes out any other wall near that point too and
+  -- opens the ground round it. Kooki3z 2026-11-20: Delete removes the one clicked)
+  local chain = idx and i == 1 and j == n and t.replaces and R.OwnWallChain(t)
+  if chain then
+    for _, o in ipairs(chain) do
+      for k, c in ipairs(Tracks()) do
+        if c == o then R.TakeOut(k) break end
+      end
+    end
+    return "own"
   end
   if idx and (i > 1 or j < n or not t.replaces) then
     R.TakeOut(idx)

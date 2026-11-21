@@ -369,6 +369,17 @@ def cmd_toolicons(args) -> int:
     return 0
 
 
+def cmd_keyicons(args) -> int:
+    from . import keyicons
+
+    files = keyicons.write()
+    print(f"wrote {len(files)} keyboard key caps in {keyicons.KEYS_DIR} (new files: log out and back in)")
+    if args.preview:
+        for p in keyicons.preview(Path(args.preview)):
+            print(f"preview {p}")
+    return 0
+
+
 def cmd_floors(args) -> int:
     """NPCs and quest objectives off the ground floor (upstairs, a cellar, a tower's top): a report for planning,
     data/debug/floors/report.md and floors.json (app/azerothgps/floors.py). Nothing goes into the addon."""
@@ -1226,6 +1237,10 @@ def main(argv: list[str] | None = None) -> int:
     sp = sub.add_parser("toolicons", help="the road and wall tools' legend icons (mouse buttons, Shift, Ctrl), the map's stairs glyph and Search Places' pin (Media/Tools/)")
     sp.add_argument("--preview", metavar="DIR", help="also pictures of them to look at, in DIR")
     sp.set_defaults(fn=cmd_toolicons)
+
+    sp = sub.add_parser("keyicons", help="the controller's on-screen keyboard's key caps (Media/Keyboard/)")
+    sp.add_argument("--preview", metavar="DIR", help="also pictures of them to look at, in DIR")
+    sp.set_defaults(fn=cmd_keyicons)
 
     sp = sub.add_parser("buildings", help="buildings as ground routes don't walk through (Data/Buildings.lua)")
     client_args(sp)

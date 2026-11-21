@@ -409,3 +409,69 @@ def test_a_road_end_picked_glows_and_a_road_drawn_from_it_goes_on_as_it_is(game)
         G.roadMode = None
         ns.db.tracks = saved
         R.Reset()
+
+
+def test_the_directions_say_cross_the_bridge_on_the_players_own_bridges(game):
+    # (Kooki3z 2026-11-20: "doesn't say cross the bridge on drawn bridges ... or recorded")
+    lua, ns = game
+    G, R, Rec, T = ns.GPS, ns.Router, ns.Record, ns.Turns
+    saved = ns.db.tracks
+    try:
+        ns.db.tracks = lua.table()
+        R.Reset()
+        G.roadMode = True
+        G.FinishRoad(lua.table(pts=lua.table(2600.0, 2100.0, 2620.0, 2100.0, 2640.0, 2100.0, 2660.0, 2100.0), cont=0),
+                     False, False)
+        sel = Rec.TrackAt(0, 2630.0, 2101.0)
+        assert sel and Rec.EditTrack(sel, lua.table(kind="bridge", z=20))
+        G.roadMode = None
+        R.NearestEdges(0, 2630.0, 2100.0)
+        assert R.OnKindRoad(0, 2630.0, 2100.5, "bridge", 2) and not R.OnKindRoad(0, 2630.0, 2110.0, "bridge", 2)
+        # a walk along the roads from 30 yd before it to 30 yd past it
+        pts = lua.table(2570.0, 2100.0, 2600.0, 2100.0, 2660.0, 2100.0, 2690.0, 2100.0)
+        path = T.Path(lua.table(parts=lua.table(lua.table(pts=pts, kinds=lua.table(0, 0, 0), cont=0, stop=1))))
+        places = list(T.Places(path).values())
+        br = [m for m in places if m.kind == "bridge"]
+        assert len(br) == 1 and abs(br[0].dist - 30) <= 5 and abs(br[0].stop - 90) <= 5
+        ms = T.Maneuvers(path, "the stop")
+        assert any("cross the bridge" in str(ms[i].text).lower() for i in range(1, len(ms) + 1))
+        # a plain road: nothing said
+        ns.db.tracks = lua.table()
+        R.Reset()
+        R.NearestEdges(0, 2630.0, 2100.0)
+        assert not [m for m in T.Places(path).values() if m.kind == "bridge"]
+    finally:
+        G.roadMode = None
+        ns.db.tracks = saved
+        R.Reset()
+
+
+def test_an_edited_road_isnt_drawn_twice_before_the_network_is_rebuilt(game):
+    # (Kooki3z 2026-11-20: "Save Road is creating duplicate roads": with the tools on, the road edited and its edit both
+    # drawn until the tools were turned off)
+    lua, ns = game
+    G, R, Rec = ns.GPS, ns.Router, ns.Record
+    saved = ns.db.tracks
+    try:
+        ns.db.tracks = lua.table()
+        R.Reset()
+        G.roadMode = True
+        G.FinishRoad(lua.table(pts=lua.table(2600.0, 1700.0, 2615.0, 1700.0, 2630.0, 1700.0), cont=0), False, False)
+        first = ns.db.tracks[1]
+        sel = Rec.TrackAt(0, 2615.0, 1701.0)
+        assert sel and Rec.EditTrack(sel, lua.table(kind="bridge", z=20))
+        ed = ns.db.tracks[2]
+        # the player's own roads drawn before the rebuild: the edit only
+        idx = G.DrawnTrackIndex(0)
+        times = [idx[i][5].time for i in range(1, len(idx) + 1)]
+        assert ed.time in times and first.time not in times
+        # the network as it was: the old road hidden under the edit, on any floor; the edit itself (saved then) drawn
+        er = G.PendingErases(0)
+        assert er and any(e.time == ed.time and e.floor is None for e in er.values())
+        assert G.UnderErase(er, 2615.0, 1700.5, None)  # (a road of the old network there)
+        assert not G.UnderErase(er, 2615.0, 1700.0, ed.time)  # (the edit)
+        assert not G.UnderErase(er, 2615.0, 1710.0, None)  # (a road beside it)
+    finally:
+        G.roadMode = None
+        ns.db.tracks = saved
+        R.Reset()

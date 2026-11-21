@@ -1072,7 +1072,7 @@ def test_the_page_list_moves_and_the_bumpers_change_the_page(pad):
     O, P, PO = _opts(lua, ns)
     b = _bound(lua)
     assert {k for k, v in b.items() if v.startswith("AzerothGPSPadOpt_")} == {
-        "PADDUP", "PADDDOWN", "PADDLEFT", "PADDRIGHT", "PAD1", "PAD2", "PADLSHOULDER", "PADRSHOULDER"}
+        "PADDUP", "PADDDOWN", "PADDLEFT", "PADDRIGHT", "PAD1", "PAD2", "PAD3", "PADLSHOULDER", "PADRSHOULDER"}
     assert "PADLSTICK" not in b  # (the map's own: off while Options has the pad)
     cur = O.CurrentPage()
     assert PO.side == "list" and _is(lua, PO.focus, O.tabs[cur]) and PO.bar._shown
@@ -1701,8 +1701,11 @@ def test_up_from_a_pages_first_row_is_the_search_box(pad):
     _press(lua, "PADDUP")
     box = O.search.box
     assert PO.side == "search" and _is(lua, PO.focus, box)
-    _press(lua, "PAD1")  # (A: typing in it)
-    assert _is(lua, PO.typing, box)
+    # (A: the controller's on-screen keyboard on it, Kooki3z 2026-11-20; test_pad_keyboard.py has the typing)
+    _press(lua, "PAD1")
+    assert PO.KeysOpen() and PO.typing is None
+    _press(lua, "PAD3")  # (X: closed again, the focus still on the box)
+    assert not PO.KeysOpen() and PO.side == "search"
     _press(lua, "PADDDOWN")  # (back to the page's first row)
     assert PO.typing is None and PO.side == "page" and _is(lua, PO.focus, first)
     _press(lua, "PADDUP")

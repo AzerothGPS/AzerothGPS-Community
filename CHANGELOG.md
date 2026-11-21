@@ -7,17 +7,36 @@ Each version's section is its release notes (GitHub and CurseForge).
 ### New
 
 - Options > Map: Escape closes the map can be turned off, to keep the GPS map in the world map open.
-- Roads: new roads in Dustwallow Marsh.
-- Roads: new roads, stairs and the Great Lift in Thousand Needles.
-- Roads: new roads, recorded walks and walls in Thousand Needles, Dustwallow Marsh and The Barrens.
+- Options > Map: an extra GPS map window you can keep open (on a second monitor); Escape never closes it.
+- Options > Map: No Map style, our route and icons over the world map, or over OpenMap's map when it's installed.
+- Options > Map: follow me again when I move, after looking around the map.
+- The route is shaded by slope: lighter uphill, darker downhill (Options > Map).
+- Near your stop, the directions say how far above or below you it is.
+- The direction arrow swings smoothly on big turns (Options > Directions).
+- Routes keep off cliffs: no more walking off a mesa or up a canyon wall; safe jumps down a ledge are taken.
+- Out of combat, routes take jumps down a ledge (or a cliff wall) of up to 39 yd; in combat, up to 14 yd.
+- A stop only a cliff leads to says it can't be reached on foot.
+- Controller: an on-screen keyboard (X) for Search Places and the Options search, in your language's layout (Chinese: Latin keys for now).
+- Controller: the D-pad picks results in Search Places, and left and right switch Find Herbs and Ore's buttons.
+- Keyboard: the arrow keys pick results in Find Herbs and Ore, as in Search Places.
+- Controller: starting to walk closes the search and the on-screen keyboard.
+- Record: pick the road type you're walking (Ground, Floor, Bridge, Stairs, Lift); heights come from the map.
+- Road tools: click a road's end, then Shift + drag from it to go on with that road at its height.
+- Road tools: Edit Road's Flip Lift swaps which end of a lift is its top.
+- Roads: new roads, stairs, lifts and bridges in Thousand Needles, walls in Dustwallow Marsh, walks in The Barrens.
 
 ### Fixed
 
 - Minimap: a node's name no longer draws on top of the game's own tooltip; both show in one.
-
-### Fixed
-
 - Road tools: a bridge saves without a height, and Edit Road's buttons show the road's kind lit instead of grayed out.
+- Lifts: up or down follows their heights, "Take the lift" stays while you ride, and each lift is one ride.
+- Bridges', floors' and lifts' ends join only what touches them.
+- Directions say "Cross the bridge" on bridges you drew or recorded.
+- Road tools: an edited road isn't drawn twice, and roads you erased can't be clicked where they're gone.
+- Road tools: hovering a road names its kind and the ground's height.
+- The detached route panel's resize corner works again.
+- Edit Wall: a cliff's two side heights fill in from the top and the foot of the ledge.
+- Edit Wall: a wall you deleted can't be clicked anymore, and Delete removes the wall you clicked.
 
 ## 1.3.11
 

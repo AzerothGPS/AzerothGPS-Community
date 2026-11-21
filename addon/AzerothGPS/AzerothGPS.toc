@@ -96,6 +96,7 @@ Pins.lua
 Feedback.lua
 Searches.lua
 Pad.lua
+PadKeys.lua
 Options.lua
 PadOptions.lua
 Config.lua
