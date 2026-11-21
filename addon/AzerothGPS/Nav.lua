@@ -6135,7 +6135,9 @@ function N.HeightHint(px, py, cont)
   -- (in a capital, near a stop with its height: the floor followed along its roads, phase 3; "23 yd below you" from
   -- the Drag for a trainer down in the Cleft)
   if not ns.CityLevels[lvl] then
-    if not (tx == d.x and ty == d.y and d.z and N.InCapital(lvl, tx, ty) and N.InCapital(lvl, px, py)) then return nil end
+    if not (tx == d.x and ty == d.y and d.z and N.InCapital(lvl, tx, ty) and N.InCapital(lvl, px, py)) then
+      return N.LandHeightHint(lvl, px, py, tx, ty, d)
+    end
     if (tx - px) ^ 2 + (ty - py) ^ 2 > N.FLOOR_HINT_YD ^ 2 then return nil end
     local zp = N.FollowedZ(lvl)
     if not zp or math.abs(d.z - zp) < N.HEIGHT_HINT_YD then return nil end
@@ -6147,6 +6149,31 @@ function N.HeightHint(px, py, cont)
   local zs = (tx == d.x and ty == d.y and d.z and zoff) and d.z - zoff or N.CityFloor(lvl, tx, ty)
   local zp = N.PlayerCityZ(lvl) or N.RouteStartCityZ(lvl, px, py) or N.CityHeight(lvl, px, py)
   if not (zs and zp) or math.abs(zs - zp) < N.HEIGHT_HINT_YD then return nil end
+  return zs < zp and "down" or "up", math.abs(zs - zp)
+end
+
+-- Out on the land, near the stop (LAND_HINT_YD): its height against the player's from the map's ground (Ground.lua: the
+-- game gives no player height), "Above you, 20 yd up" (Kooki3z 2026-11-20: "since we know on routing height changes, why
+-- can't we say when we get closer to the destination how much higher/lower it is?"). The player's: the floor followed
+-- (a bridge, N.FollowedZ), else the ground under them; the stop's: its own height, else the ground there. Not in caves
+-- or buildings (the ground's height there is the hill over them), nor under LAND_HINT_Z apart (the ground's bumps).
+N.LAND_HINT_YD = 80
+N.LAND_HINT_Z = 8
+function N.GroundAt(level, x, y)
+  local GD = ns.Ground
+  if not (GD and GD.PointHeight and x and y) then return nil end
+  local was = GD.force
+  GD.force = true -- (the map's ground data, the road tools open or not)
+  local ok, h = pcall(GD.PointHeight, level, x, y)
+  GD.force = was
+  return ok and type(h) == "number" and h or nil
+end
+function N.LandHeightHint(lvl, px, py, tx, ty, d)
+  if not (tx == d.x and ty == d.y) then return nil end -- (the stop itself, not a ride's dock)
+  if (tx - px) ^ 2 + (ty - py) ^ 2 > N.LAND_HINT_YD ^ 2 then return nil end
+  local zs = d.z or N.GroundAt(lvl, tx, ty)
+  local zp = N.FollowedZ(lvl) or N.GroundAt(lvl, px, py)
+  if not (zs and zp) or math.abs(zs - zp) < N.LAND_HINT_Z then return nil end
   return zs < zp and "down" or "up", math.abs(zs - zp)
 end
 
