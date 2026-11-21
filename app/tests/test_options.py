@@ -468,6 +468,31 @@ def test_the_language_can_be_picked_in_the_options(game):
         ns.db.language = before
 
 
+def test_the_map_style_lists_no_map_only_with_the_map_in_the_world_map(game):
+    # (Kooki3z 2026-11-20: "a No Map option ... This would require using the world map": Options > Map's style list
+    # has it only while the GPS map is in the game's world map; picked, then that option off, the style it stands for)
+    lua, ns = game
+    O, st = ns.Options, ns.settings.gps
+    dd = next(c.control for c in _controls(ns) if c.key == "style")
+    saved = {k: st[k] for k in ("useWorldMap", "style", "styleBeforeNone")}
+    try:
+        st.style, st.useWorldMap = "zone", False
+        O.Refresh()
+        assert "No Map" not in list(lua.globals().AGPS_MENU(dd).values())
+        st.useWorldMap = True
+        O.Refresh()
+        assert list(lua.globals().AGPS_MENU(dd).values())[-1] == "No Map"
+        lua.globals().AGPS_PICK(dd, "No Map")
+        assert st.style == "none" and st.styleBeforeNone == "zone"
+        st.useWorldMap = False
+        O.Refresh()
+        assert "No Map" not in list(lua.globals().AGPS_MENU(dd).values()) and dd._choice == "World Map"
+    finally:
+        for k, v in saved.items():
+            st[k] = v
+        O.Refresh()
+
+
 def test_a_changed_language_shows_an_apply_button_that_reloads(game):
     # (asked 2026-11-10: "for language selection, if changed add a Apply button to pop up if a /reload is required")
     lua, ns = game

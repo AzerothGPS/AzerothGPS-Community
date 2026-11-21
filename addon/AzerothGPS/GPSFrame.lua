@@ -314,7 +314,10 @@ end
 -- The map styles (issue #75; the Map Style buttons, /agps style, the `style` setting): "seamless" (the default: the
 -- terrain, and the wheel on out to the whole world on the stitched art, G.Seamless), "minimap" (Terrain: the terrain
 -- alone, as before the seamless map), "zone" and "nospoiler" (below). "unrevealed" is a held style only (API.HoldMap).
-G.STYLES = { seamless = true, minimap = true, zone = true, nospoiler = true }
+-- "none" (No map, Kooki3z 2026-11-20: "how difficult would it be to add a No Map option? This would require using the
+-- world map and we'd use whatever map others are using instead like OpenMap"): only in the game's world map, nothing of
+-- our own ground drawn, the map under it (the game's, or OpenMap's stitched one) followed exactly (G.NoMapView).
+G.STYLES = { seamless = true, minimap = true, zone = true, nospoiler = true, none = true }
 -- Map styles that draw world map art: "zone" (fully explored) and "nospoiler" (only what
 -- the character has explored).
 function G.IsMapStyle(style) return style == "zone" or style == "nospoiler" or style == "unrevealed" end
@@ -337,7 +340,19 @@ function G.SquareStyle()
   end
   return nil
 end
-function G.Style() return G.HeldStyle() or G.SquareStyle() or (ns.settings and ns.settings.gps.style) end
+function G.Style()
+  local style = G.HeldStyle() or G.SquareStyle() or (ns.settings and ns.settings.gps.style)
+  -- (No map out of the world map, its window closed or the option off, in a dungeon, or on the second map: the style
+  -- picked before it, everything as before)
+  if style == "none" and not G.NoMapOn() then style = G.NoMapFallback() end
+  return style
+end
+-- The style No map stands in for where it can't be (the one picked before it, else the default).
+function G.NoMapFallback()
+  local st = ns.settings and ns.settings.gps
+  local was = st and st.styleBeforeNone
+  return (was ~= "none" and G.STYLES[was]) and was or "seamless"
+end
 -- LayoutZone's overlays for a style: "zone" every area, "nospoiler" the ones this character explored
 -- (true), "unrevealed" none (the base art only, the same for every character).
 function G.SpoilerMode(style)
@@ -2331,6 +2346,8 @@ function G.ZoomScale()
   return math.max(1, math.max(w, h) / G.ZOOM_REF_SIZE)
 end
 function G.MaxZoom()
+  -- (the No map style: as far out as the map under it goes; its own steps keep the view in its range, G.NoMapView)
+  if G.NoMapOn() then return math.max(MAX_ZOOM * G.ZoomScale(), G.NOMAP_MAX_ZOOM) end
   if G.Seamless() then return math.max(MAX_ZOOM * G.ZoomScale(), G.WorldZoom()) end
   return MAX_ZOOM * G.ZoomScale()
 end
@@ -6677,7 +6694,11 @@ function G.WorldMapLevel()
   local child = box and rawget(box, "Child")
   local l = child and child.GetFrameLevel and child:GetFrameLevel()
   if type(l) ~= "number" then l = box and box.GetFrameLevel and box:GetFrameLevel() end
-  return type(l) == "number" and l + 1 or G.WORLD_MAP_LEVEL
+  l = type(l) == "number" and l + 1 or G.WORLD_MAP_LEVEL
+  -- (the No map style: over the map's own art, its explored areas and another map addon's stitched art too, which are
+  -- icons over the canvas; still under the game's other icons. G.NoMapArtTop)
+  if G.NoMapOn() then l = math.max(l, G.NoMapArtTop()) end
+  return l
 end
 function G.WorldMapStrata()
   local wm = rawget(_G, "WorldMapFrame")
@@ -6793,7 +6814,9 @@ function G.WorldMapArtPins(shown)
       end)
     end
   end
-  set(G.WORLD_MAP_ART_PINS, shown and 1 or 0)
+  -- (the No map style draws no art of ours: the game's explored areas and fog are the map's own, left as they are;
+  -- Kooki3z 2026-11-20: "we'd use whatever map others are using instead")
+  set(G.WORLD_MAP_ART_PINS, (shown or G.NoMapOn()) and 1 or 0)
   set(G.WORLD_MAP_AREA_PINS, (shown or not ours) and 1 or 0)
 end
 
@@ -6913,18 +6936,13 @@ function G.CityMapUnder(zoneID, x, y, viewW)
   end
   return nil
 end
-function G.WorldMapSync()
-  local st = G.wmState
-  if not (st.on and canvas) then return false end
-  local wm, box = WorldMapFrame, G.WorldMapBox()
-  local child = box and rawget(box, "Child")
-  if not (child and box.InstantPanAndZoom and wm.SetMapID and wm.GetMapID and ns.Maps) then return false end
-  local x, y, cont, _, s = G.ViewState()
-  if not (x and y and cont and s and s > 0) or G.ViewInstance() then return false end
+-- The maps the game's world map can show at world spot (x, y) of `cont`: { contMap, land, zone } (`cur` the map it
+-- shows now, for a land with no continent map); nil where it has none. (G.WorldMapPick picks one of them by the view's
+-- width; the No map style's zoom steps are theirs, G.NoMapLadder.)
+function G.WorldMapChain(x, y, cont, cur)
   local contMap = G.ContinentMap(Geo.Base(cont))
-  local land = not contMap and G.LandMap(Geo.Base(cont), x, y, wm:GetMapID()) -- (Zephras Isle: zones only)
-  if not (contMap or land) then return false end
-  local viewW = canvas:GetWidth() / s
+  local land = not contMap and G.LandMap(Geo.Base(cont), x, y, cur) -- (Zephras Isle: zones only)
+  if not (contMap or land) then return nil end
   -- (the zone there as the game has it; by the zones' rectangles alone a spot in the Barrens was Durotar's, whose
   -- rectangle reaches over it: the game's map showed Durotar's icons under a view of the Barrens, so its quest icons
   -- and other addons' objectives were missing, seen in game 2026-11-10)
@@ -6939,14 +6957,37 @@ function G.WorldMapSync()
     if ok and v and ns.Maps[v] and ns.Maps[v].type == 3 then id = v end
   end
   id = id or G.ZoneAt(x, y, contMap)
+  return { contMap = contMap or nil, land = land or nil, zone = id }
+end
+-- The map the game's world map shows for a view `viewW` yards wide on `chain` (G.WorldMapChain) at (x, y).
+function G.WorldMapPick(chain, x, y, viewW)
+  local id = chain.zone
   -- (a city's own map one level below its zone, Ironforge's under Dun Morogh's, when the view's middle is on it and the
   -- view no wider than it: the game asked about the continent's spot names the zone, and the game itself then went to
   -- the player's own map, the city, taken for a map picked in its bar; a player's screenshot 2026-11-16)
   id = G.CityMapUnder(id, x, y, viewW) or id
   local m = id and ns.Maps[id]
+  local contMap = chain.contMap
   if contMap and (not (m and m.bounds) or viewW > (m.bounds[4] - m.bounds[2]) * G.WORLD_MAP_ZONE_OVER) then
-    id, m = contMap, ns.Maps[contMap]
+    id = contMap
   end
+  return id
+end
+function G.WorldMapSync()
+  local st = G.wmState
+  if not (st.on and canvas) then return false end
+  local wm, box = WorldMapFrame, G.WorldMapBox()
+  local child = box and rawget(box, "Child")
+  if not (child and box.InstantPanAndZoom and wm.SetMapID and wm.GetMapID and ns.Maps) then return false end
+  -- (the No map style over another map addon's stitched map: that map's view is followed, never driven; G.NoMapView)
+  if G.NoMapOn() and G.NoMapStitched() then return false end
+  local x, y, cont, _, s = G.ViewState()
+  if not (x and y and cont and s and s > 0) or G.ViewInstance() then return false end
+  local chain = G.WorldMapChain(x, y, cont, wm:GetMapID())
+  if not chain then return false end
+  local viewW = canvas:GetWidth() / s
+  local id = G.WorldMapPick(chain, x, y, viewW)
+  local m = id and ns.Maps[id]
   if not (m and m.bounds) then return false end
   local cur = wm:GetMapID()
   if st.mapID and cur ~= st.mapID and cur ~= id then -- (picked in the game's own bar: ours looks at it)
@@ -7301,6 +7342,17 @@ function G.WorldMapTick()
   if st.level and G.WorldMapLevel() ~= st.level then G.ApplySettings() end -- (the game's window raised: over its art again)
   G.WorldMapSync()
   G.WorldMapKeepScale() -- (the game's canvas zoomed since, by us or by the game)
+  -- (No map over OpenMap's: its view moved, zoomed or went to another map since, by the player or a glide: drawn
+  -- again this frame, ours following it, G.NoMapView)
+  if G.NoMapOn() and G.NoMapStitched() then
+    local ux, uy, k, cw = G.NoMapCanvas()
+    local id = WorldMapFrame.GetMapID and WorldMapFrame:GetMapID()
+    local c = st.noMapCanvas
+    if not c or c[1] ~= ux or c[2] ~= uy or c[3] ~= k or c[4] ~= cw or c[5] ~= id then
+      st.noMapCanvas = { ux, uy, k, cw, id }
+      elapsed = 1
+    end
+  end
   local moving = G.PlayerMoving()
   local started = moving and not st.wasMoving
   st.wasMoving = moving
@@ -9468,6 +9520,10 @@ end
 
 function G.Update()
   local st = S()
+  -- (in the world map: our frame's size against the canvas's scale first, then our canvas as it always is, before
+  -- anything is laid out; No Map over OpenMap's moves both between redraws, G.NoMapCanvasMoved)
+  if G.wmState.on then G.WorldMapKeepScale() end
+  if G.noMapXf then G.NoMapCanvasXf(1, 0, 0) end
   do -- (the player's city: its own zoom-out limit, G.CITY_MAX_ZOOM_TIMES)
     local ok, id = pcall(function() return C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player") end)
     G.CITY_MAX_ZOOM = G.CityMaxZoomFor(ok and id or nil)
@@ -9531,10 +9587,16 @@ function G.Update()
   if free and not browse then G.LeaveInsideIfAway(zoom) end -- (an inside map opened, panned well away from: left)
   if G.wmState.on then rot = 0 end -- (in the game's world map: north up, as its icons are)
   local s = half / zoom
+  local noMap = G.NoMapOn()
+  if (G.noMapWas or false) ~= noMap then G.NoMapSwitched(noMap) end
   -- (heading-up, following: the player low on the map, more of the way ahead shown; the center
-  -- is the spot HEADING_UP_LOW of the half ahead of them)
-  if st.rotate and not free and not browse and not mmZoom then
+  -- is the spot HEADING_UP_LOW of the half ahead of them; never on No map: the map under it is north up and centered)
+  if st.rotate and not free and not browse and not mmZoom and not noMap then
     cx, cy = G.ScreenToWorld(px, py, 0, G.HEADING_UP_LOW * halfH, rot, s)
+  end
+  if noMap then -- (the view exactly the map's under it: G.NoMapView)
+    rot = 0
+    cx, cy, zoom, s = G.NoMapView(cx, cy, cont, zoom, half)
   end
   -- (the world view, G.WorldZoom: out at the furthest, Azeroth's whole map in the window, its middle the view's,
   -- following or not; a view looked at elsewhere on the art kept on the map, never past its edges, so there's
@@ -9691,6 +9753,10 @@ function G.Update()
   local hov, hovKey = G.hoverInside, G.hoverInsideKey
   if not hov and held then hov, hovKey = held.hit, held.key end
   if hov and hov.cave then hov = nil end -- (a cave's: its map, view.cave above)
+  if noMap then -- (No map: no inside map, cave or city of ours either, the map under it is the map)
+    hov, place, wmo, room, view.cave = nil, nil, nil, nil, nil
+    G.shownInside, G.hoveredCave = nil, nil
+  end
   -- (right-clicked while shown: not again till the mouse leaves it, G.hoverDismissKey; never G.outsideOf, which is by
   -- model: Orgrimmar is one, and one right-click shut every building in it till the map followed again, a video
   -- 2026-11-14)
@@ -9744,7 +9810,8 @@ function G.Update()
     elapsed = 1
   end
   -- a city inside a mountain (Ironforge) opened from its icon: its interior map while looking there
-  if not place and free and free.interior and not browse and not G.IsMapStyle(G.Style()) and zoom <= G.INTERIOR_MAX_ZOOM then
+  if not place and free and free.interior and not browse and not noMap and not G.IsMapStyle(G.Style())
+      and zoom <= G.INTERIOR_MAX_ZOOM then
     place, wmo, room = free.interior[1], free.interior[2], free.interior[3]
   end
   G.inside = place and ((room.n ~= "" and room.n or "?") .. " / " .. place[1]) or nil
@@ -9787,7 +9854,9 @@ function G.Update()
   view.near = view.edge and near or nil
   view.artOnly = artShown and tileA <= 0 or nil
   view.seamFar = artShown and G.SeamFar(zoom) or nil
-  if inst and not browse then
+  if noMap then -- (No map: none of our own ground at all, the map under it shows through; the route and icons drawn)
+    quads = TilesKept("nomap") or G.NO_QUADS
+  elseif inst and not browse then
     -- the game's minimap art of its models, one floor or all; none: its floors' outline (G.DrawFloors, below)
     local floors = G.InstanceFloors(inst)
     instFloor = G.ShownFloor(inst, view.mine and pz or nil)
@@ -11211,13 +11280,16 @@ local function ApplyFade()
   areaLayer:SetAlpha(fade)
   poiLayer:SetAlpha(fade)
   topLayer:SetAlpha(fade)
-  frame:SetBackdropColor(0.05, 0.05, 0.05, fade)
-  frame:SetBackdropBorderColor(0.15, 0.15, 0.15, fade)
+  -- (No map: no dark ground of ours behind the route, the map under it shows through)
+  local ground = G.NoMapOn() and 0 or fade
+  frame:SetBackdropColor(0.05, 0.05, 0.05, ground)
+  frame:SetBackdropBorderColor(0.15, 0.15, 0.15, ground)
   if G.chrome then G.chrome:SetAlpha(fade) end
   -- the crosshair (shown while looking around, not following the player) fades too
   crossH:SetAlpha(fade)
   crossV:SetAlpha(fade)
 end
+G.ApplyFade = ApplyFade -- (No map turned on or off: G.NoMapSwitched)
 
 local function PlayerMoving()
   local o = Geo.override -- (the dev tools' simulated player: driven or not)
@@ -11307,6 +11379,10 @@ function G.Follow()
   browse, browseZoom, browseCont, browseBounds = nil, nil, nil, nil
   if recenter then recenter:Hide() end
   elapsed = 1
+  if G.NoMapOn() and G.NoMapStitched() then -- (No map over OpenMap's: its view is the one brought back to the player)
+    local px, py, pc = Geo.PlayerWorld()
+    if px then G.NoMapGlide(pc, px, py) end
+  end
 end
 
 -- Another addon's view: centered on (x, y) of `cont`, north up, `zoom` yards from the middle to
@@ -11319,6 +11395,7 @@ function G.LookAt(cont, x, y, zoom)
   tour = nil
   if recenter then recenter:Show() end
   elapsed = 1
+  if G.NoMapOn() and G.NoMapStitched() then G.NoMapGlide(cont, x, y, browseZoom) end -- (No map over OpenMap's: it looks)
 end
 -- The controller's pan (Pad.lua): the view moved `dxUI`, `dyUI` UI units (right and up), as a drag the other way does.
 -- A controller's press or pan on the map: activity, as a click or drag (the opened-out map's quiet clock, G.MinimapIdle:
@@ -11423,6 +11500,441 @@ function G.WheelAt(f, dxUI, dyUI)
   if recenter then recenter:Show() end
   elapsed = 1
   return z
+end
+
+-- The No map style (Kooki3z 2026-11-20: "how difficult would it be to add a No Map option? This would require using the
+-- world map and we'd use whatever map others are using instead like OpenMap", then "yes start it, OpenMap is another
+-- addon"): in the game's world map only (`useWorldMap`), none of our own ground is drawn (no terrain, map art, inside
+-- maps, backdrop), and the route, stops, icons and layers go over the map under it: the game's own, or OpenMap's
+-- stitched map when that addon has the world map. Our view is that map's exactly, at every zoom:
+-- * OpenMap (OpenMapAPI.IsStitched): its view is followed, never driven. Each redraw reads the canvas (its middle,
+--   GetCurrentScrollX/Y, and scale, GetCanvasScale, as OpenMap's own View does) and puts three world spots near the
+--   view's middle through OpenMapAPI.CanvasFromWorldPos: the yards-to-screen map there, solved for the world spot
+--   under our middle and the UI units a yard. The wheel, a drag and right-click are handed to the canvas itself (its
+--   own scripts: OpenMap's zoom at the cursor and its pan); "Back to your position" and a place looked at glide it
+--   (OpenMapAPI.ShowWorld). Our frame sits over OpenMap's art (OpenMapAPI.ArtTopLevel), under the map's icons.
+-- * The game's map (one zone, continent or city map at a time, zoomed in steps): we drive it as in the other styles
+--   (G.WorldMapSync), but our zoom is only ever one of its steps (G.NoMapLadder: the zone's, its city's and its
+--   continent's zoom levels, as the game makes them from C_Map.GetMapArtLayers), within its range, and the view's
+--   middle is kept where the game's own scroll limits allow it, so the game never pulls its map off ours.
+-- North up always (the map under it can't turn); in a dungeon, out of the world map and on the second map, the style
+-- picked before it (G.NoMapFallback).
+G.NOMAP_MAX_ZOOM = 60000 -- (yards to the edge: the whole world fits; the steps keep it in range)
+G.NOMAP_FIT_YD = 64 -- (yards apart, the three spots the view's transform is read from)
+-- The OpenMap addon's API (its API.lua: OpenMapAPI, read only), or nil.
+function G.OpenMapAPI()
+  local api = rawget(_G, "OpenMapAPI")
+  if type(api) ~= "table" or type(api.IsStitched) ~= "function" or type(api.CanvasFromWorldPos) ~= "function" then
+    return nil
+  end
+  return api
+end
+-- Whether OpenMap's stitched map is the world map's now.
+function G.NoMapStitched()
+  local api = G.OpenMapAPI()
+  if not api then return false end
+  local ok, on = pcall(api.IsStitched)
+  return ok and on == true
+end
+-- Whether the No map style is drawn now: picked, the map in the open world map, not a dungeon's map, not held.
+function G.NoMapOn()
+  if G.clone or not (G.wmState and G.wmState.on) then return false end
+  local st = ns.settings and ns.settings.gps
+  if not (st and st.style == "none") then return false end
+  if G.HeldStyle() then return false end
+  if (free and free.instance) or view.instance then return false end
+  return true
+end
+-- The frame level our map goes to: over the game's explored areas and fog (map icons too: with no art of ours they're
+-- the map, so they're shown, G.WorldMapArtPins, and the route can't go under them), and over OpenMap's art.
+G.NOMAP_UNDER_PINS = { "PIN_FRAME_LEVEL_MAP_EXPLORATION", "PIN_FRAME_LEVEL_FOG_OF_WAR" }
+function G.NoMapArtTop()
+  local l = 0
+  local wm = rawget(_G, "WorldMapFrame")
+  local okM, mgr = pcall(function() return wm and wm.GetPinFrameLevelsManager and wm:GetPinFrameLevelsManager() end)
+  if okM and type(mgr) == "table" and mgr.GetValidFrameLevel then
+    for _, name in ipairs(G.NOMAP_UNDER_PINS) do
+      local ok, v = pcall(mgr.GetValidFrameLevel, mgr, name)
+      if ok and type(v) == "number" then l = math.max(l, v + 1) end
+    end
+  end
+  local api = G.OpenMapAPI()
+  if api and type(api.ArtTopLevel) == "function" and G.NoMapStitched() then
+    local ok, v = pcall(api.ArtTopLevel)
+    if ok and type(v) == "number" then l = math.max(l, v + 1) end
+  end
+  return l
+end
+-- No map turned on or off (picked, the world map opened or closed): our backdrop, the game's explored areas.
+function G.NoMapSwitched(on)
+  G.noMapWas = on
+  G.noMapLadder = nil
+  G.noMapDrawn = nil
+  if canvas then
+    G.NoMapCanvasXf(1, 0, 0)
+    canvas:SetClipsChildren(not on) -- (over another map the world map's scroll frame clips ours: G.NoMapCanvasXf)
+  end
+  if not on and free and free.nomap then free = nil end -- (OpenMap's view, not one of the player's: following again)
+  if G.ApplyFade then G.ApplyFade() end
+  if G.wmState.on then pcall(G.WorldMapArtPins, false) end
+end
+-- The world map's canvas: its view's middle on the map it shows (0-1), its scale, its size in its own units.
+function G.NoMapCanvas()
+  local box = G.WorldMapBox()
+  local child = box and rawget(box, "Child")
+  if not (type(child) == "table" and child.GetWidth) then return nil end
+  local function Num(name)
+    local fn = box[name]
+    if type(fn) ~= "function" then return nil end
+    local ok, v = pcall(fn, box)
+    return ok and type(v) == "number" and v == v and v or nil
+  end
+  local ux, uy, k = Num("GetCurrentScrollX"), Num("GetCurrentScrollY"), Num("GetCanvasScale")
+  local cw, ch = child:GetWidth(), child:GetHeight()
+  if not (ux and uy and k and k > 0 and cw and ch and cw > 0 and ch > 0) then return nil end
+  return ux, uy, k, cw, ch
+end
+-- OpenMap's view as ours: the world spot under our map's middle (x, y of continent `c`) and UI units a yard; nil when it
+-- can't be read. `cont`, `x0`, `y0`: where to start looking (the last view).
+function G.NoMapFollow(cont, x0, y0)
+  local api = G.OpenMapAPI()
+  local ux, uy, k, cw, ch = G.NoMapCanvas()
+  if not (api and ux and canvas) then return nil end
+  -- (the view's continent: the map under its middle, OpenMapAPI.MapAt; a spot there to start from)
+  local c, start = cont, nil
+  local okV, u, v = pcall(api.GetView)
+  if okV and type(u) == "number" and type(v) == "number" and type(api.MapAt) == "function" then
+    local okM, id = pcall(api.MapAt, u, v)
+    local m = okM and id and ns.Maps[id]
+    if m and m.continent ~= nil then
+      if cont == nil or Geo.Base(m.continent) ~= Geo.Base(cont) then c = m.continent end
+      start = m.bounds
+    end
+  end
+  if c == nil then return nil end
+  local x, y = x0, y0
+  if c ~= cont or not x then
+    local cm = ns.Maps[G.ContinentMap(Geo.Base(c)) or -1]
+    local b = start or (cm and cm.bounds)
+    if not b then return nil end
+    x, y = (b[1] + b[3]) / 2, (b[2] + b[4]) / 2
+  end
+  -- (our middle from the canvas box's middle, UI units: the map is laid on that box, a hair off by its rounding)
+  local ox, oy = 0, 0
+  local box = G.WorldMapBox()
+  local bx, by = box:GetCenter()
+  local mx, my = canvas:GetCenter()
+  local bes, mes = box:GetEffectiveScale(), canvas:GetEffectiveScale()
+  if bx and mx and bes and mes and mes > 0 then ox, oy = (bx * bes - mx * mes) / mes, (by * bes - my * mes) / mes end
+  -- (a world spot on the screen: UI units right and up of our middle)
+  local function At(px, py)
+    local ok, hx, hy = pcall(api.CanvasFromWorldPos, c, px, py)
+    if not (ok and type(hx) == "number" and type(hy) == "number") then return nil end
+    return (hx - ux) * cw * k + ox, (uy - hy) * ch * k + oy
+  end
+  local d, s = G.NOMAP_FIT_YD, nil
+  for _ = 1, 4 do -- (OpenMap lays the world out in pieces: read again where the middle turned out to be)
+    local ax, ay = At(x, y)
+    local nx, ny = At(x + d, y) -- (a step north)
+    local wx, wy = At(x, y + d) -- (a step west)
+    if not (ax and nx and wx) then return nil end
+    local jxx, jxy, jyx, jyy = (nx - ax) / d, (ny - ay) / d, (wx - ax) / d, (wy - ay) / d
+    local det = jxx * jyy - jyx * jxy
+    if det == 0 or det ~= det then return nil end
+    local dx, dy = (jyx * ay - ax * jyy) / det, (ax * jxy - jxx * ay) / det
+    x, y = x + dx, y + dy
+    s = math.sqrt(math.abs(det))
+    if dx * dx + dy * dy < 1e-6 then break end
+  end
+  if not (s and s > 0 and x == x and y == y) then return nil end
+  return x, y, c, s
+end
+-- The world map's zoom steps for map `id` in a box `bw` x `bh` (its own units): its canvas scales, low to high, and its
+-- canvas's width. The steps the game made, for the map it shows; else made as the game makes them (its map canvas's
+-- CreateZoomLevels: each art layer's least to most scale, 2 + additionalZoomSteps of them, times the scale that fits it).
+function G.NoMapSteps(id, bw, bh)
+  local wm = rawget(_G, "WorldMapFrame")
+  local box = G.WorldMapBox()
+  local child = box and rawget(box, "Child")
+  local levels = box and rawget(box, "zoomLevels")
+  if wm and wm.GetMapID and wm:GetMapID() == id and type(levels) == "table" and type(child) == "table" then
+    local list = {}
+    for _, z in ipairs(levels) do
+      if type(z) == "table" and type(z.scale) == "number" and z.scale > 0 then list[#list + 1] = z.scale end
+    end
+    local cw = child:GetWidth()
+    if #list > 0 and cw and cw > 0 then
+      table.sort(list)
+      return list, cw
+    end
+  end
+  if not (C_Map and C_Map.GetMapArtLayers and bw and bh and bw > 0 and bh > 0) then return nil end
+  local ok, layers = pcall(C_Map.GetMapArtLayers, id)
+  local l1 = ok and type(layers) == "table" and layers[1]
+  if not (type(l1) == "table" and (tonumber(l1.layerWidth) or 0) > 0 and (tonumber(l1.layerHeight) or 0) > 0) then return nil end
+  local base = math.min(bw / l1.layerWidth, bh / l1.layerHeight)
+  local list, cur = {}, 0
+  for _, layer in ipairs(layers) do
+    local lo, hi = tonumber(layer.minScale) or 1, tonumber(layer.maxScale) or 1
+    local n, step = 1, 1
+    if hi > lo then
+      n = 2 + (tonumber(layer.additionalZoomSteps) or 0)
+      step = (hi - lo) / (n - 1)
+    end
+    for i = 0, n - 1 do
+      cur = math.max(lo + step * i, cur + 0.01)
+      list[#list + 1] = cur * base
+    end
+  end
+  return list, l1.layerWidth
+end
+-- The zooms (yards from our middle to the long edge, `w` x `h` our map) the game's world map can show round (x, y) of
+-- `cont`, each one of its maps' steps where that map is the one it shows (G.WorldMapPick), closest first; nil for none.
+function G.NoMapLadder(x, y, cont, w, h)
+  local c = G.noMapLadder
+  if c and c.cont == cont and c.x == x and c.y == y and c.w == w and c.h == h then return c.list end
+  local wm = rawget(_G, "WorldMapFrame")
+  local cur = wm and wm.GetMapID and wm:GetMapID() or nil
+  local chain = G.WorldMapChain(x, y, cont, cur)
+  local list
+  if chain then
+    local box = G.WorldMapBox()
+    local bw, bh = box and box:GetWidth() or w, box and box:GetHeight() or h
+    local half = math.max(w, h) / 2
+    list = {}
+    local seen = {}
+    for _, id in ipairs({ G.CityMapUnder(chain.zone, x, y, 0) or false, chain.zone or false, chain.contMap or false }) do
+      local b = id and not seen[id] and ns.Maps[id] and ns.Maps[id].bounds
+      if b then
+        seen[id] = true
+        local scales, cw = G.NoMapSteps(id, bw, bh)
+        local mapW = b[4] - b[2]
+        for _, sc in ipairs(scales or {}) do
+          local s = sc * cw / mapW
+          if s > 0 and G.WorldMapPick(chain, x, y, w / s) == id then list[#list + 1] = { zoom = half / s, id = id } end
+        end
+      end
+    end
+    table.sort(list, function(a, b) return a.zoom < b.zoom end)
+    if #list == 0 then list = nil end
+  end
+  G.noMapLadder = { cont = cont, x = x, y = y, w = w, h = h, list = list }
+  return list
+end
+-- The ladder's step nearest `zoom` (by ratio), or `zoom` with none.
+function G.NoMapNearest(list, zoom)
+  local best, bd = nil, math.huge
+  for _, e in ipairs(list or {}) do
+    local dd = math.abs(math.log(e.zoom / zoom))
+    if dd < bd then best, bd = e.zoom, dd end
+  end
+  return best or zoom
+end
+-- The view's middle kept within the game's own scroll limits for the map it shows at scale `s` (its view no further
+-- past an edge than the map reaches; a view wider than the map: the map's middle), so the game never pulls its map
+-- away from ours.
+function G.NoMapClamp(cx, cy, cont, s, w, h)
+  local wm = rawget(_G, "WorldMapFrame")
+  local chain = G.WorldMapChain(cx, cy, cont, wm and wm.GetMapID and wm:GetMapID() or nil)
+  local id = chain and G.WorldMapPick(chain, cx, cy, w / s)
+  local b = id and ns.Maps[id] and ns.Maps[id].bounds
+  if not b then return cx, cy end
+  local function Keep(v, lo, hi, r)
+    if hi - lo <= 2 * r then return (lo + hi) / 2 end
+    return math.max(lo + r, math.min(hi - r, v))
+  end
+  return Keep(cx, b[1], b[3], h / 2 / s), Keep(cy, b[2], b[4], w / 2 / s)
+end
+-- The view No map draws (from G.Update: the view as it would be, `half` the long side's half): OpenMap's, else on the
+-- game's map's steps and within its limits. Returns the middle, the zoom and UI units a yard.
+function G.NoMapView(cx, cy, cont, zoom, half)
+  if G.NoMapStitched() then
+    G.NoMapHook() -- (its canvas followed every frame from now on, not only at our redraws)
+    local x, y, c, s = G.NoMapFollow(view.cont or cont, view.cont and view.x or cx, view.cont and view.y or cy)
+    if x then
+      free = { x = x, y = y, rot = 0, cont = c, nomap = true }
+      G.noMapDrawn = { x = x, y = y, cont = c, s = s }
+      return x, y, half / s, s
+    end
+    G.noMapDrawn = nil
+    return cx, cy, zoom, half / zoom
+  end
+  G.noMapDrawn = nil
+  local vc = ViewCont(cont)
+  local w, h = canvas:GetWidth(), canvas:GetHeight()
+  local list = G.NoMapLadder(cx, cy, vc, w, h)
+  if list then zoom = G.NoMapNearest(list, zoom) end
+  local s = half / zoom
+  cx, cy = G.NoMapClamp(cx, cy, vc, s, w, h)
+  if free and not free.instance then free.x, free.y = cx, cy end
+  return cx, cy, zoom, s
+end
+-- Over OpenMap's map, every frame (Kooki3z's test 2026-11-20 of the first No Map: "icons are hidden and icons jump
+-- around badly", a video zooming Kalimdor to Mulgore and back): OpenMap zooms and pans the canvas in its own updates,
+-- every frame of a glide, and our map, a child of that canvas, was put right only by our own redraw, at its own rate
+-- and in whichever order the game ran the two updates. Each frame between them our frame carried the canvas's new scale
+-- (anchored at its top left it grew and shrank from that corner: the jumps), and a redraw laid out then took that scale
+-- for its own, so its icons' sizes in screen pixels came out too small (zooming in) or too big, and stayed so: the
+-- tiny dots. Now the canvas's own setters are hooked (its Child's SetScale, the scroll's SetHorizontal/VerticalScroll,
+-- hooksecurefunc: OpenMap's and the game's code untouched), and at once, before anything is laid out:
+-- * our frame keeps its size against the canvas's new scale (G.WorldMapKeepScale);
+-- * what was drawn is moved and scaled onto OpenMap's view as it is now (G.NoMapPlace: our canvas, with everything
+--   drawn on it, put where the spot drawn at its middle now is, scaled by the zoom since), so it stays on OpenMap's
+--   points every frame; the next redraw lays it all out again for that view, the canvas back as it was.
+function G.NoMapHook()
+  local box = G.WorldMapBox()
+  local child = box and rawget(box, "Child")
+  local hook = rawget(_G, "hooksecurefunc")
+  if not (type(child) == "table" and hook) or G.noMapHooked == child then return false end
+  G.noMapHooked = child
+  local function Moved()
+    local ok, err = pcall(G.NoMapCanvasMoved)
+    if not ok then G.LogError("no map: following the canvas", err) end
+  end
+  pcall(hook, child, "SetScale", Moved)
+  pcall(hook, box, "SetHorizontalScroll", Moved)
+  pcall(hook, box, "SetVerticalScroll", Moved)
+  return true
+end
+-- OpenMap's canvas moved or zoomed (a hooked setter): our frame's scale, what's drawn onto it, a redraw asked for.
+function G.NoMapCanvasMoved()
+  if not (G.NoMapOn() and G.NoMapStitched()) then return end
+  G.WorldMapKeepScale()
+  G.NoMapPlace()
+  elapsed = 1
+end
+-- What the last redraw drew (G.noMapDrawn: its middle and scale) put on OpenMap's view as it is now.
+function G.NoMapPlace()
+  local d = G.noMapDrawn
+  if not (d and canvas and frame) then return false end
+  local x, y, c, s = G.NoMapFollow(d.cont, d.x, d.y)
+  if not x or c ~= d.cont then return false end -- (another continent: the redraw's)
+  local dx, dy = Geo.ScreenOffset(x, y, d.x, d.y)
+  return G.NoMapCanvasXf(s / d.s, dx * s, dy * s)
+end
+-- Our canvas scaled by `r` with its middle `ox`, `oy` UI units from the frame's (1, 0, 0: as it always is). The buttons
+-- and panels over it (topLayer) stay where they are meanwhile; nothing is clipped by our canvas then (the world map's
+-- scroll frame clips the map), so no edge opens as it shrinks.
+function G.NoMapCanvasXf(r, ox, oy)
+  local xf = G.noMapXf
+  if r == 1 and ox == 0 and oy == 0 then
+    if not xf then return false end
+    G.noMapXf = nil
+    canvas:SetScale(1)
+    canvas:ClearAllPoints()
+    canvas:SetPoint("TOPLEFT", frame, "TOPLEFT", BORDER, -BORDER)
+    canvas:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -BORDER, BORDER)
+    if topLayer then
+      topLayer:ClearAllPoints()
+      topLayer:SetAllPoints(canvas)
+    end
+    return true
+  end
+  if not (r > 0 and r == r) then return false end
+  if not xf then
+    xf = { w = frame:GetWidth() - 2 * BORDER, h = frame:GetHeight() - 2 * BORDER }
+    G.noMapXf = xf
+    if topLayer then
+      topLayer:ClearAllPoints()
+      topLayer:SetPoint("TOPLEFT", frame, "TOPLEFT", BORDER, -BORDER)
+      topLayer:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -BORDER, BORDER)
+    end
+  end
+  xf.r, xf.ox, xf.oy = r, ox, oy
+  canvas:ClearAllPoints()
+  canvas:SetSize(xf.w, xf.h)
+  canvas:SetScale(r)
+  canvas:SetPoint("CENTER", frame, "CENTER", ox / r, oy / r)
+  return true
+end
+-- Runs one of the world map canvas's own scripts (as the mouse would: every addon's hooks on it too).
+function G.CanvasScript(name, ...)
+  local box = G.WorldMapBox()
+  if not box then return false end
+  local run = rawget(_G, "ExecuteFrameScript")
+  if run then return (pcall(run, box, name, ...)) end
+  local fn = box.GetScript and box:GetScript(name)
+  if fn then return (pcall(fn, box, ...)) end
+  return false
+end
+-- The wheel (or right-click: `delta` -1, at the middle) on No map: OpenMap's own zoom at the cursor; on the game's
+-- map, its next step in or out (the spot under the cursor kept where it can be). False when it's not ours to do.
+function G.NoMapWheel(delta, dxUI, dyUI)
+  if not G.NoMapOn() then return false end
+  if G.NoMapStitched() then
+    G.CanvasScript("OnMouseWheel", delta)
+    return true
+  end
+  local s0 = view.s
+  if not (s0 and s0 > 0 and view.cont and canvas) then return false end
+  local w, h = canvas:GetWidth(), canvas:GetHeight()
+  local half = math.max(w, h) / 2
+  local z0 = half / s0
+  local ax, ay = view.x, view.y
+  if dxUI and dyUI then ax, ay = G.ScreenToWorld(view.x, view.y, dxUI, dyUI, 0, s0) end
+  -- (in: the steps of the maps under the cursor, so a zone is zoomed into from its continent; out: the middle's)
+  local list = delta > 0 and G.NoMapLadder(ax, ay, view.cont, w, h) or G.NoMapLadder(view.x, view.y, view.cont, w, h)
+  if not list then return false end
+  local zn
+  if delta > 0 then
+    for i = #list, 1, -1 do
+      if list[i].zoom < z0 * 0.999 then
+        zn = list[i].zoom
+        break
+      end
+    end
+  else
+    for i = 1, #list do
+      if list[i].zoom > z0 * 1.001 then
+        zn = list[i].zoom
+        break
+      end
+    end
+  end
+  if not zn then return true end -- (as far as the map goes)
+  local k = zn / z0
+  free = { x = ax + (view.x - ax) * k, y = ay + (view.y - ay) * k, rot = 0, cont = view.cont, pan = true }
+  if browseZoom then browseZoom = zn else G.SetZoom(zn) end
+  tour = nil
+  if recenter then recenter:Show() end
+  elapsed = 1
+  return true
+end
+-- A left press on our map over OpenMap's: the canvas's own too, so a drag pans OpenMap's map (as a press on one of its
+-- own icons does there); the release: the canvas's own after a drag, else only its pan stopped (the click is ours).
+function G.NoMapPress()
+  if not (G.NoMapOn() and G.NoMapStitched()) then return false end
+  G.noMapPressed = G.CanvasScript("OnMouseDown", "LeftButton") or nil
+  return G.noMapPressed == true
+end
+function G.NoMapRelease(moved)
+  if not G.noMapPressed then return false end
+  G.noMapPressed = nil
+  if moved then return G.CanvasScript("OnMouseUp", "LeftButton") end
+  local box = G.WorldMapBox()
+  local info = box and rawget(box, "mouseButtonInfo")
+  info = type(info) == "table" and info.LeftButton
+  if type(info) == "table" then info.down = false end
+  return true
+end
+-- OpenMap's view glided to world spot (x, y) of `cont`, `zoom` yards to our edge (nil: as it is); false when it can't.
+function G.NoMapGlide(cont, x, y, zoom)
+  local api = G.OpenMapAPI()
+  local wm = rawget(_G, "WorldMapFrame")
+  if not (api and wm and wm.GetMapID and type(api.ShowWorld) == "function" and type(api.WorldFromMap) == "function") then
+    return false
+  end
+  local okC, hx, hy = pcall(api.CanvasFromWorldPos, cont, x, y)
+  if not (okC and type(hx) == "number" and type(hy) == "number") then return false end
+  local okW, u, v = pcall(api.WorldFromMap, wm:GetMapID(), hx, hy)
+  if not (okW and type(u) == "number" and type(v) == "number") then return false end
+  local nz
+  local okV, _, _, oz = pcall(api.GetView)
+  if zoom and zoom > 0 and okV and type(oz) == "number" and view.s and view.s > 0 and canvas then
+    nz = oz * (math.max(canvas:GetWidth(), canvas:GetHeight()) / 2 / zoom) / view.s -- (its zoom goes with the scale)
+  end
+  local ok, done = pcall(api.ShowWorld, u, v, nz)
+  return ok and done and true or false
 end
 
 -- From browsing a map (a world map style) to the terrain view: over the same spot, about
@@ -15721,7 +16233,13 @@ function G.SetStyle(style)
     ns.Print(G.HELD_STYLE_TEXT)
     return false
   end
+  -- (No map: only with the GPS map in the game's world map, the map under it being the map; Kooki3z 2026-11-20)
+  if style == "none" and not G.WorldMapWanted() then
+    ns.Print(L["No map shows only in the game's world map: turn on Show the GPS map in the game's world map first (Options > Map)."])
+    return false
+  end
   local was = S().style
+  if style == "none" and was ~= "none" then S().styleBeforeNone = G.STYLES[was] and was or nil end
   S().style = style
   if style == "seamless" and was ~= style and ns.Atlas and ns.Atlas.ReloadIfNeeded then ns.Atlas.ReloadIfNeeded() end
   if not G.IsMapStyle(style) and browse then G.BrowseToTerrain() end
@@ -15732,6 +16250,7 @@ function G.SetStyle(style)
   end
   if frame and G.RefreshQuick then G.RefreshQuick() end
   if ns.Options and ns.Options.Refresh then ns.Options.Refresh() end
+  if (style == "none" or was == "none") and frame and G.wmState.on then G.ApplySettings() end -- (its level in the world map)
   G.Redraw()
   return true
 end
@@ -17048,6 +17567,7 @@ function G.Init()
     end
     if button == "RightButton" then
       if G.SwimClick() then return end -- (a swim on the route: "Remove?", asked for 1.3.10)
+      if G.NoMapWheel(-1) then return end -- (No map: a step out on the map under it)
       if G.IsMapStyle(G.Style()) then
         G.ZoomOut()
       elseif S().terrainZoomOut ~= false then
@@ -17069,8 +17589,10 @@ function G.Init()
     lastActivity = GetTime()
     drag = { cx = mx, cy = my, x = view.x, y = view.y, rot = view.rot, s = view.s, moved = false,
       land = (free ~= nil and not free.city and not free.instance and not free.cave and not G.cityMap) or nil } -- (looking at the land: dragged, still the land)
+    G.NoMapPress() -- (No map over OpenMap's: its own pan too)
   end)
   frame:SetScript("OnMouseUp", function(f, button)
+    if button == "LeftButton" then G.NoMapRelease(drag ~= nil and drag.moved) end -- (No map over OpenMap's)
     if button == "LeftButton" and G.pinClick then -- (Shift + left-click: "Create Pin", unless it was a drag)
       if f.moving then
         f:StopMovingOrSizing()
@@ -17159,6 +17681,7 @@ function G.Init()
     local ccx, ccy = canvas:GetCenter()
     local dx, dy
     if mx and sc and sc > 0 and ccx then dx, dy = mx / sc - ccx, my / sc - ccy end
+    if G.NoMapWheel(delta, dx, dy) then return end -- (No map: the map under it zooms, by its own steps)
     G.WheelAt(delta > 0 and 1 / G.ZOOM_STEP or G.ZOOM_STEP, dx, dy)
   end)
   frame:SetBackdrop({
@@ -17396,6 +17919,8 @@ function G.Init()
     { "minimap", "Interface\\Icons\\INV_Misc_Map02", L["Terrain"], L["The ground seen from above, like the minimap, zoomed out only as far as the land. Right-click opens the world map to pick a place."] },
     { "zone", "Interface\\Icons\\INV_Misc_Map05", L["World Map"], L["The world map, fully explored. Right-click to zoom out to the continent; click a zone to open it."] },
     { "nospoiler", "Interface\\Icons\\INV_Misc_Map03", L["No Spoiler Map"], L["The world map as your character has explored it: undiscovered parts stay hidden. Routes still use every road."] },
+    -- (Kooki3z 2026-11-20: "a No Map option ... using the world map": with the world map option only, `needs`)
+    { "none", "Interface\\Icons\\INV_Misc_Spyglass_02", L["No Map"], L["Only the route, stops and icons, over the game's world map or another map addon's that replaces it. Only with the GPS map in the game's world map (Options > Map)."], "useWorldMap" },
   }
   local mapButton = CreateFrame("Button", nil, top)
   mapButton:SetSize(MAP_BUTTON, MAP_BUTTON)
@@ -17941,7 +18466,7 @@ function G.Init()
   }
   -- the map styles: one at a time
   for i, sd in ipairs(STYLES) do
-    table.insert(QUICK, 3 + i, { id = "style_" .. sd[1], style = sd[1], icon = sd[2], label = sd[3], tip = sd[4] })
+    table.insert(QUICK, 3 + i, { id = "style_" .. sd[1], style = sd[1], icon = sd[2], label = sd[3], tip = sd[4], needs = sd[5] })
   end
   G.QUICK = QUICK
   -- Where each goes: always shown or in the menu, going up or right from the map button,
@@ -17955,7 +18480,7 @@ function G.Init()
   -- Groups: one button in the bar or menu; clicked, its buttons slide out beside it (to the
   -- right from a column going up, upward from a row going right).
   G.QUICK_GROUPS = {
-    { id = "styles", label = L["Map Style"], members = { "style_seamless", "style_minimap", "style_zone", "style_nospoiler" },
+    { id = "styles", label = L["Map Style"], members = { "style_seamless", "style_minimap", "style_zone", "style_nospoiler", "style_none" },
       tip = L["The map's look: click to choose."] },
     { id = "questsG", label = L["Quests"], members = { "quests", "questAreas" }, tip = L["Quests and quest areas on the map."] },
     { id = "dungeonsG", label = L["Caves/Dungeons/Raids"], icon = INSTANCE_ICON, members = { "caves", "instances", "dungeonPaths" },
@@ -18136,7 +18661,7 @@ function G.Init()
         GameTooltip:AddLine(tip, nil, nil, nil, true)
         local warn = t.warn and t.warn()
         if warn then GameTooltip:AddLine(warn, 1, 0.55, 0.2, true) end
-        if t.needs and not S()[t.needs] then GameTooltip:AddLine(L["Turn Quests on first."], 1, 0.5, 0.5) end
+        if t.needs and not t.style and not S()[t.needs] then GameTooltip:AddLine(L["Turn Quests on first."], 1, 0.5, 0.5) end
         GameTooltip:Show()
       end)
     end

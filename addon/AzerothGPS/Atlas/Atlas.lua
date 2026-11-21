@@ -259,7 +259,10 @@ end
 -- #57, #60). Never for a held style (API.HoldMap): those draw as they always did
 function A.Wanted()
   -- (and for the map in the minimap's place: its square is always the seamless map, GPSFrame.lua's G.SquareStyle)
-  return ns.settings.gps.style == "seamless" or ns.settings.gps.replaceMinimap == true
+  -- (No Map picked: the style it stands in for out of the world map, GPSFrame.lua's G.NoMapFallback)
+  local st = ns.settings.gps
+  return st.style == "seamless" or st.replaceMinimap == true
+    or (st.style == "none" and (st.styleBeforeNone == nil or st.styleBeforeNone == "seamless"))
 end
 
 -- On screen (issue #56: a chat line went unseen): the seamless map loads after a /reload, with a Reload UI button.

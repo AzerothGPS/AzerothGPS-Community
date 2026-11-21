@@ -1871,18 +1871,36 @@ local function BuildWindow()
   header(L["Map style"])
   -- (issue #75: the four map styles, as the Map Style buttons; the OpenMap style (issue #91, Seamless before) once the seamless map's option)
   Key("style")
-  Dropdown(L["Map style"], {
+  -- (No Map, Kooki3z 2026-11-20: "a No Map option ... using the world map": listed only while the GPS map is in the
+  -- game's world map; picked and then that option turned off, the style it stands in for is the one shown)
+  local styles = {
     { value = "seamless", text = "OpenMap" },
     { value = "minimap", text = L["Terrain"] },
     { value = "zone", text = L["World Map"] },
     { value = "nospoiler", text = L["No Spoiler Map"] },
-  }, function() return GPS().style or "seamless" end, function(v) ns.GPS.SetStyle(v) end)
+  }
+  local noMapStyle = { value = "none", text = L["No Map"], tip = L["Only the route, stops and icons, over the game's world map or another map addon's that replaces it. Only with the GPS map in the game's world map (Options > Map)."] }
+  local function WorldMapOn() return ns.GPS and ns.GPS.WorldMapWanted and ns.GPS.WorldMapWanted() or false end
+  local function SyncStyles()
+    local on = WorldMapOn()
+    if on and styles[#styles] ~= noMapStyle then styles[#styles + 1] = noMapStyle end
+    if not on and styles[#styles] == noMapStyle then styles[#styles] = nil end
+  end
+  SyncStyles()
+  controls[#controls + 1] = SyncStyles -- (before the list's own refresh, below)
+  O.styleChoices = styles
+  Dropdown(L["Map style"], styles, function()
+    local v = GPS().style or "seamless"
+    if v == "none" and not WorldMapOn() then v = ns.GPS.NoMapFallback() end
+    return v
+  end, function(v) ns.GPS.SetStyle(v) end)
   Key("seamExploredOnly")
   check(L["Show only explored areas"], L["The OpenMap style's zone art shows only the areas this character has explored, as the game's own world map does; the rest is the zone's blank parchment. The terrain close in is never changed."],
     function() return GPS().seamExploredOnly == true end, function(v) ns.Atlas.SetExploredOnly(v) end,
     function() return (GPS().style or "seamless") == "seamless" end, INDENT)
   note(L["OpenMap (the default): the ground seen from above, and the mouse wheel zooms on out past the land, through zones and continents to the whole world on a stitched world map, and back in to the roads. Right-click zooms out a few steps on the same spot, up to the whole world. Picked again after another style, it loads once the UI is reloaded (a prompt offers it); in the other styles nothing of it is loaded."])
   note(L["Terrain: the ground alone, as far out as the land. World Map: the world map, fully explored. No Spoiler Map: the world map as your character has explored it."])
+  note(L["No Map (with the GPS map in the game's world map): none of the GPS map's own ground, only its route, stops and icons, over the world map, or over the map another addon puts in it, lined up with it at every zoom. North stays up."])
   Key("routeColor")
   Dropdown(L["Route color"], { { value = "blue", text = L["Blue"] },
     { value = "rainbow", text = L["Rainbow"], tip = L["The colors of the rainbow along the route."] } },
