@@ -154,8 +154,12 @@ def split(f: np.ndarray, seeds=(), log=print):
 
 
 def build(u: dict, seeds_xyz=(), prune: float = 12.0, fill: int = 12, log=print, walls=None,
-          gap_max: float = GAP_MAX, spurs=(), completing: bool = False, wall_faces=None) -> dict:
+          gap_max: float = GAP_MAX, spurs=(), completing: bool = False, wall_faces=None,
+          step_lip: bool = False) -> dict:
     """The layered walk network of instance walk data `u` (walknet.build's, seeds reached).
+    `step_lip`: a cell with a neighbor more than a step on foot above it (walknet.step_lim, walknet.STEP_CAP) is a
+    ledge's foot too, the road kept off it (a building's: its stair landing's side, 4 yd over the passage beside it,
+    was one diagonal cell under LEDGE's, and the road went up it, issue #842).
     `walls` (as given to walknet.build): the floor's gaps at doorways filled (fill_seams); `wall_faces` (walls with
     their vertices' heights, ((zlo, zhi), xy triangle, zs)): never through one of them.
     `gap_max`: pieces with the way in joined across a gap this wide at most (straight).
@@ -213,6 +217,8 @@ def build(u: dict, seeds_xyz=(), prune: float = 12.0, fill: int = 12, log=print,
             sh = np.roll(np.roll(top, dr, 0), dc, 1)
             with np.errstate(invalid="ignore"):
                 lip |= mask & (sh >= top + LEDGE * math.hypot(dr, dc))
+                if step_lip:
+                    lip |= mask & (sh > top + walknet.step_lim(dr, dc))
         walk = mask & ~lip
         masks[L], tops[L] = (r0 - 1, c0 - 1, walk), top
 

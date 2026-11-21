@@ -6147,7 +6147,41 @@ def test_a_route_to_an_upstairs_stop_goes_in_by_the_door_and_up_the_stairs(game)
         (icon,) = inn_ups
         assert str(icon[4]) == "Stairs up"
         x, y = icon[5], icon[6]
-        assert math.dist((x, y), (2259.0, 235.9)) > 5  # (not by the stop)
+        # (not by the stop: the first flight's foot, 3.5 yd from the trainer, a floor under her; issue #842)
+        assert math.dist((x, y), (2261.5, 231.0)) <= 3 and math.dist((x, y), (2259.0, 235.9)) > 3
+    finally:
+        lua.execute("AGPS_POS[1], AGPS_POS[2] = 2254.0, 293.0")
+        N.Clear()
+        N.ResetCityTrack()
+        G.Update()
+
+
+def test_brill_inns_route_upstairs_climbs_the_stairs_not_the_landings_side(game):
+    # (issue #842: the route from the square to the Mage trainer went from the ground floor's passage straight up the
+    # side of the stair landing, 3 yd in 1.4 yd, and the QA walk stayed on the ground floor) it climbs from the first
+    # flight's foot (about 2261.5, 231) and never rises more than a yard and a half a yard
+    lua, ns = game
+    G, N = ns.GPS, ns.Nav
+    try:
+        lua.execute("AGPS_POS[1], AGPS_POS[2] = 2300.0, 300.0")  # (in Brill's square)
+        N.ResetCityTrack()
+        N.SetStops(lua.eval("{ { x = 2259.0, y = 235.9, cont = 0, name = 'Brill Mage Trainer', z = 41.2 } }"), False, "red")
+        G.Follow()
+        lua.execute("AGPS_T = AGPS_T + 1")
+        G.Update()
+        r = N.route
+        assert r and not r.noWay
+        part = next(p for p in r.parts.values() if p.fz)  # (the walk with its points' floors)
+        pts = [(part.pts[i], part.pts[i + 1]) for i in range(1, len(part.pts), 2)]
+        fz = [part.fz[i + 1] for i in range(len(pts))]
+        inside = [i for i in range(len(pts)) if fz[i] is not None and fz[i] > 1 and math.dist(pts[i], (2265, 240)) < 25]
+        climb = next(i for i in inside if fz[i] > 36)  # (the first point up off the inn's ground floor, 34.5)
+        foot = max(i for i in inside if i < climb and fz[i] <= 36)
+        assert math.dist(pts[foot], (2261.5, 231.0)) <= 3, (pts[foot], fz[foot])
+        for i, j in zip(inside, inside[1:]):
+            if j == i + 1:
+                d = math.dist(pts[i], pts[j])
+                assert fz[j] - fz[i] <= max(1.0, 1.5 * d), (pts[i], fz[i], pts[j], fz[j])
     finally:
         lua.execute("AGPS_POS[1], AGPS_POS[2] = 2254.0, 293.0")
         N.Clear()
@@ -6246,12 +6280,13 @@ def test_drawn_roads_carry_heights_and_the_stairs_tool_makes_stairs(game):
         g = R.DebugGraph(0)
         drawn = [e for e in g.e.values() if e[4] == 9 and abs(e[5] - 2250.4) < 1]
         assert drawn and all(abs(g.nz[e[1]] - 41.5) < 3 and abs(g.nz[e[2]] - 41.5) < 3 for e in drawn)  # (upstairs only)
-        stairs = [e for e in g.e.values() if e[4] == 6 and abs(e[5] - 2248.4) < 2 and abs(e[6] - 247.3) < 2]
+        # (its foot on the ground floor's road nearest the click: 2250.4, 245.3 since issue #842's inn roads)
+        stairs = [e for e in g.e.values() if e[4] == 6 and math.dist((e[5], e[6]), (2248.4, 247.3)) <= 3]
         assert stairs
         e = stairs[0]
         assert sorted([g.nz[e[1]], g.nz[e[2]]]) == [34.5, 41.5]  # (its foot and top on those floors)
         assert R.StairAt(0, 2248.4, 247.3, 2256.4, 247.3) is not None
-        info = G.RoadHoverInfo(0, 2252.4, 247.3, 2)
+        info = G.RoadHoverInfo(0, 2254.4, 246.6, 2)  # (on the stairs, off the road drawn upstairs)
         assert str(info.title) == "Stairs"
         # a drawn road with no heights, not in the data yet: none yet, not "on the ground" (a walk recorded up
         # Grom'gol's tower looked flat, 2026-11-18: its floors and stairs come with the import)
@@ -6292,7 +6327,7 @@ def test_a_shipped_stair_goes_on_as_it_was_drawn(game):
         R.Reset()
         R.NearestEdges(0, 2252.4, 247.3)
         g = R.DebugGraph(0)
-        stairs = [e for e in g.e.values() if e[4] == 6 and abs(e[5] - 2248.4) < 2 and abs(e[6] - 247.3) < 2]
+        stairs = [e for e in g.e.values() if e[4] == 6 and math.dist((e[5], e[6]), (2248.4, 247.3)) <= 3]
         assert len(stairs) == 1  # (the data's, not the player's copy too)
         e = stairs[0]
         assert sorted([g.nz[e[1]], g.nz[e[2]]]) == [34.5, 41.5]
@@ -8374,7 +8409,9 @@ def test_beside_the_cellar_stairs_the_ground_floor_is_kept(game):
     lua, ns = game
     N = ns.Nav
     try:
-        steps, _ = _walk_route(lua, ns, 2235.0, 260.0, 2262.0, 241.0)  # (Brill's square into the inn)
+        # (Brill's square into the inn, its ground floor: the upstairs floor is over the spot, its road nearer since
+        # issue #842's inn roads, which keep off the ground under the second flight)
+        steps, _ = _walk_route(lua, ns, 2235.0, 260.0, 2262.0, 241.0, tz=34.5)
         assert abs(steps[-1][1] - 34.5) < 1
         lua.execute("AGPS_POS[1], AGPS_POS[2] = 2280.0, 244.7 AGPS_T = AGPS_T + 1")
         assert abs(N.TrackCityZ(0, 2280.0, 244.7) - 34.5) < 1  # (it went 30.7, the landing)
@@ -8455,11 +8492,12 @@ def test_down_brill_inns_stairs_a_yard_off_their_middle_the_ground_floor_is_foll
                 assert abs(zs[-1] - 41.3) < 1, (off, step, zs[-10:])  # (up on its middle: followed up)
                 zs = _walk_off(lua, ns, _route_pts(down), off, step=step)
                 assert abs(zs[-1] - 34.5) < 1, (off, step, zs[-30:])  # (it stayed 41.5)
-        # outdoors by the door with the floor followed still upstairs (walked down 2.5 yd off the stairs' middle, which
-        # still loses it): let go there, and a route on west along the road doesn't go into the inn
+        # outdoors by the door with the floor followed still upstairs (walked down 3 yd off the stairs' middle, which
+        # still loses it; 2.5 did before issue #842's inn roads): let go there, and a route on west along the road
+        # doesn't go into the inn
         N.ResetCityTrack()
         _walk_off(lua, ns, _route_pts(up), 0.0)
-        zs = _walk_off(lua, ns, _route_pts(down), 2.5)
+        zs = _walk_off(lua, ns, _route_pts(down), 3.0)
         assert zs[-1] > 40  # (the case this part is about)
         lua.execute("AGPS_IN = false AGPS_T = AGPS_T + 0.3")
         assert abs(N.TrackCityZ(0, outside[0], outside[1]) - 34.5) < 1

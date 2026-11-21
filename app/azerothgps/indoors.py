@@ -59,6 +59,7 @@ LAYER_REACH = 6.0  # yards: a point's floor, this near the height it's followed 
 LEDGE = 3.0
 CLIMB_SLOPE = 0.25  # a yard along rising or falling this much is on stairs (a ramp's or steps')
 CLIMB_JOIN_YD = 2.0  # climbing stretches this near each other are one flight
+STEP_CAP = 2.0  # yards: a step on foot between neighboring cells at most (walknet.STEP_CAP; a stair rises a yard a yard)
 SPUR_YD = 25.0  # a town place inside: a road from it onto the nearest road on its floor this near (spurs)
 SPUR_Z = 3.5  # (that road's height about the place's)
 SPUR_FLOOR = 0.85  # (the spur's points over its floor, a yard apart: this share at least, the last 2 yd aside)
@@ -190,9 +191,15 @@ def build_building(cd: ClientData, p, ground: Ground, places: list, log=print, s
 
     name = (cd.name(p.wmo) or str(p.wmo)).split("/")[-1].removesuffix(".wmo")
     silent = lambda *a: None  # noqa: E731
-    u = walknet.build(fl, wl, [], label=name, ground=gnd, ground_reach=GROUND_PAD + 2, prune=PRUNE, fill=0,
-                      top_reached=True, road_pieces=True, seeds=seeds or None, stair_max=STAIR_SEARCH, log=silent)
-    lay = layers.build(u, seeds, prune=PRUNE, fill=0, log=silent)
+    # (steps on foot of at most STEP_CAP, a diagonal's too, as Undercity's: a stair landing's side 4 yd over the passage
+    # was one diagonal step under LEDGE's, and the stairs road went up it, issue #842)
+    cap, walknet.STEP_CAP = walknet.STEP_CAP, STEP_CAP
+    try:
+        u = walknet.build(fl, wl, [], label=name, ground=gnd, ground_reach=GROUND_PAD + 2, prune=PRUNE, fill=0,
+                          top_reached=True, road_pieces=True, seeds=seeds or None, stair_max=STAIR_SEARCH, log=silent)
+        lay = layers.build(u, seeds, prune=PRUNE, fill=0, log=silent, step_lip=True)
+    finally:
+        walknet.STEP_CAP = cap
     nodes, edges, _drops, zs = layers.roads(lay, u, SMOOTH)
     if not edges:
         return None
