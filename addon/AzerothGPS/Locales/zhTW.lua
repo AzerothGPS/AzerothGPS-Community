@@ -2023,6 +2023,7 @@ L["%s: Choose   %s: Pick   %s: Keyboard   %s: Close"] = "%s: 選擇   %s: 選取
 L["%s: Move   %s: Type   %s: Close Keyboard   %s: Delete"] = "%s: 移動   %s: 輸入   %s: 關閉鍵盤   %s: 刪除"
 L["%s: Choose   %s: Buttons   %s: Pick   %s: Keyboard   %s: Close"] = "%s: 選擇   %s: 按鈕   %s: 選取   %s: 鍵盤   %s: 關閉"
 L["%s: Move   %s: Keyboard   %s: Close"] = "%s: 移動   %s: 鍵盤   %s: 關閉"
+L["- Fixed: learned flight paths no longer go missing, and missing ones come back."] = "- 修正：已學會的飛行路線不再遺失，遺失的也會自動恢復。"
 L["- No Map style: our route and icons over the world map, or over OpenMap's (Options > Map)."] = "- 無地圖樣式：在世界地圖或 OpenMap 的地圖上顯示我們的路線和圖示（選項 > 地圖）。"
 L["- An extra GPS map window you can keep open, on a second monitor too (Options > Map)."] = "- 可以一直開著的額外 GPS 地圖視窗，也可放在第二個螢幕上（選項 > 地圖）。"
 L["- Routes keep off cliffs and take safe jumps down ledges."] = "- 路線會避開懸崖，並從安全高度的崖邊跳下。"

@@ -276,8 +276,9 @@ O.LANGUAGES = { { "enUS", "English" }, { "deDE", "Deutsch" }, { "esES", "Espa\19
 -- prep, like the toc's version (Kooki3z 2026-11-20: "part of release prep like how we update the version number in
 -- the addon in game should be the What's New section in help"): test_options checks it's never older than the toc,
 -- release.yml that it's the tag's.
-O.WHATS_NEW_VERSION = "1.3.12"
+O.WHATS_NEW_VERSION = "1.3.12.1"
 O.WHATS_NEW = {
+  L["- Fixed: learned flight paths no longer go missing, and missing ones come back."],
   L["- No Map style: our route and icons over the world map, or over OpenMap's (Options > Map)."],
   L["- An extra GPS map window you can keep open, on a second monitor too (Options > Map)."],
   L["- Routes keep off cliffs and take safe jumps down ledges."],
