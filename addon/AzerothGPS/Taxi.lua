@@ -437,7 +437,7 @@ function T.LogRide(text)
   while #log > T.RIDE_LOG_MAX do table.remove(log, 1) end
 end
 
-local function Realm() return (GetRealmName and GetRealmName()) or "?" end
+local function Realm() return (ns.RealmName and ns.RealmName()) or "?" end
 local function RowKey(t) return (t[9] or "?") .. " | " .. (t[10] or "?") end
 
 -- The sightings: { [realm] = { [row key] = { side, at (server time, seconds), cycle? } } }.

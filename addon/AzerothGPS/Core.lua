@@ -458,8 +458,97 @@ local function PlayerName()
 end
 ns.PlayerName = PlayerName
 
+-- The realm's name. The client sometimes gives an empty one (players' reports, 2026-11-21: "AzerothGPS forgot all my
+-- flight paths since the update"; Kooki3z's own saved file had a second record "-<name>", no realm, its flights
+-- unknown, beside "<realm>-<name>"). Then: the realm of this character's own record (by
+-- the game's normalized realm name where several realms have one of that name), else the last realm the client named.
+function ns.RealmName()
+  local db = AzerothGPSDB
+  local r = GetRealmName and GetRealmName()
+  if type(r) == "string" and r ~= "" then
+    if db then db.lastRealm = r end
+    return r
+  end
+  local name = PlayerName()
+  if db and type(db.chars) == "table" and name then
+    local norm
+    if GetNormalizedRealmName then
+      local ok, v = pcall(GetNormalizedRealmName)
+      if ok and type(v) == "string" and v ~= "" then norm = v end
+    end
+    if not norm and UnitFullName then
+      local ok, _, v = pcall(UnitFullName, "player")
+      if ok and type(v) == "string" and v ~= "" then norm = v end
+    end
+    local tail, found, many = "-" .. name, nil, false
+    for k in pairs(db.chars) do
+      if type(k) == "string" and #k > #tail and k:sub(-#tail) == tail then
+        local realm = k:sub(1, #k - #tail)
+        if realm ~= "?" then
+          if norm and realm:gsub("[%s%-']", "") == norm:gsub("[%s%-']", "") then return realm end
+          if found and found ~= realm then many = true end
+          found = found or realm
+        end
+      end
+    end
+    if found and not many then return found end
+  end
+  return db and db.lastRealm or nil
+end
+
 function ns.CharKey()
-  return (GetRealmName() or "?") .. "-" .. (PlayerName() or "Unknown")
+  return (ns.RealmName() or "?") .. "-" .. (PlayerName() or "Unknown")
+end
+
+-- When a character's record was last used: its flight paths' latest read (each login reads them), 0 with none.
+local function LastUsed(rec)
+  local t = 0
+  for _, entry in pairs(type(rec.taxiNodes) == "table" and rec.taxiNodes or {}) do
+    if type(entry) == "table" and type(entry.time) == "number" and entry.time > t then t = entry.time end
+  end
+  return t
+end
+
+-- A record saved under no realm ("-<name>", the client's empty realm name before 1.3.13) taken into the character's
+-- own (Kooki3z 2026-11-21: what was learned since the issue started comes back too). The one used last wins where
+-- both have a value (a hearthstone set since, the route), the other fills in what it lacks, and every flight path
+-- either knew stays known (one learned while saved under no realm too). The boats' and zeppelins' times learned
+-- meanwhile (`transports[""]`) go to the realm's. The no-realm record goes once taken in.
+function ns.TakeNoRealmRecord(db, key)
+  local name = PlayerName()
+  local stray = name and db.chars["-" .. name]
+  if type(stray) ~= "table" or key == "-" .. name then return false end
+  local own = db.chars[key]
+  local knew = {}
+  for _, rec in ipairs({ own or {}, stray }) do
+    for _, entry in pairs(type(rec.taxiNodes) == "table" and rec.taxiNodes or {}) do
+      for _, n in ipairs(type(entry) == "table" and entry.nodes or {}) do
+        if type(n) == "table" and n.known and n.nodeID then knew[n.nodeID] = true end
+      end
+    end
+  end
+  local merged
+  if type(own) ~= "table" then
+    merged = stray
+  elseif LastUsed(stray) > LastUsed(own) then
+    merged = ns.MergeInto(stray, own)
+  else
+    merged = ns.MergeInto(own, stray)
+  end
+  for _, entry in pairs(type(merged.taxiNodes) == "table" and merged.taxiNodes or {}) do
+    for _, n in ipairs(type(entry) == "table" and entry.nodes or {}) do
+      if type(n) == "table" and n.nodeID and knew[n.nodeID] then n.known = true end
+    end
+  end
+  db.chars[key] = merged
+  db.chars["-" .. name] = nil
+  if db.lastChar == "-" .. name then db.lastChar = key end
+  local realm = key:sub(1, #key - #name - 1)
+  if type(db.transports) == "table" and type(db.transports[""]) == "table" and realm ~= "" and realm ~= "?" then
+    db.transports[realm] = ns.MergeInto(db.transports[realm] or {}, db.transports[""])
+    db.transports[""] = nil
+  end
+  return true
 end
 
 -- A character with a surname and no record of its own yet: a copy of the record its first name had (until 1.1.11 a
@@ -467,7 +556,7 @@ end
 -- (keep data forever) for the others of that name.
 function ns.TakeFirstNameRecord(db, key)
   local first = UnitName("player")
-  local old = PlayerName() ~= first and db.chars[(GetRealmName() or "?") .. "-" .. first]
+  local old = PlayerName() ~= first and db.chars[(ns.RealmName() or "?") .. "-" .. first]
   if type(old) ~= "table" then return false end
   db.chars[key] = CopyTable(old)
   old.copiedTo = old.copiedTo or {}
@@ -483,6 +572,7 @@ function ns.CharDB()
   local db = AzerothGPSDB
   local key = ns.CharKey()
   if PlayerName() then
+    if ns.RealmName() then ns.TakeNoRealmRecord(db, key) end
     if db.chars[key] == nil then ns.TakeFirstNameRecord(db, key) end
     if pendingKey and pendingKey ~= key then
       local tmp = db.chars[pendingKey]

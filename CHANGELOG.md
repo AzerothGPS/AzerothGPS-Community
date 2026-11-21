@@ -12,6 +12,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 ### Fixed
 
+- Flight paths: no longer forgotten when the game gives no realm name at login; ones lost that way come back.
 - Quest Route: a quest you leave out stays out, rerouted or after a /reload, until you put it back.
 - Quest Route: a group quest is asked about once, not every time the route is made.
 - Quest Route: with only tracked quests on, finishing an untracked quest no longer asks for a reroute.
