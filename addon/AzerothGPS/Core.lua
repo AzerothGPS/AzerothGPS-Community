@@ -458,6 +458,29 @@ local function PlayerName()
 end
 ns.PlayerName = PlayerName
 
+-- A unit's whole name as whispers need it, or nil. On WoW Forever UnitName's second value is the surname, not a realm
+-- (issue #854: a party member asked for their route was whispered by the first name alone, "No player named ... is
+-- currently playing"): "First Surname" by the game's own separator (its UI's NameUtil does the same); else "Name-Realm".
+-- Surnames where the game says so (RegionalUniqueNamesEnabled), or, without that call, where the player's own name has one.
+function ns.UnitFullName(unit)
+  if not UnitName then return nil end
+  local n, second = UnitName(unit)
+  if not n or ns.IsSecret(n) or n == "" then return nil end
+  if ns.IsSecret(second) or type(second) ~= "string" or second == "" then return n end
+  local surnames
+  if RegionalUniqueNamesEnabled then
+    surnames = RegionalUniqueNamesEnabled() and true or false
+  else
+    local _, own = UnitName("player")
+    surnames = type(own) == "string" and own ~= ""
+  end
+  if surnames then
+    local c = Constants and Constants.CharacterNameSeparatorConsts
+    return n .. (c and c.CHARACTERNAME_SURNAME_SEPARATOR or " ") .. second
+  end
+  return n .. "-" .. second
+end
+
 -- The realm's name. The client sometimes gives an empty one (players' reports, 2026-11-21: "AzerothGPS forgot all my
 -- flight paths since the update"; Kooki3z's own saved file had a second record "-<name>", no realm, its flights
 -- unknown, beside "<realm>-<name>"). Then: the realm of this character's own record (by

@@ -531,9 +531,17 @@ local function Who(name)
   return ((name or ""):match("^[^-]*")):lower()
 end
 
+-- (WoW Forever's names have a surname, issue #854: the whole name, or the first name alone as an older sender gives it)
+local function FullName(unit)
+  if ns.UnitFullName then return ns.UnitFullName(unit) end
+  return UnitName and UnitName(unit) or nil
+end
+
 local function IsMe(name)
-  local me = UnitName and UnitName("player")
-  return me ~= nil and Who(name) == Who(me)
+  local me = FullName("player")
+  if me == nil then return false end
+  local first = UnitName("player")
+  return Who(name) == Who(me) or Who(name) == Who(first)
 end
 
 local answered = {} -- [who \t id] = when
@@ -730,10 +738,8 @@ function I.io.groupNames()
   for i = 1, n do
     local unit = raid and ("raid" .. i) or ("party" .. i)
     if UnitExists and UnitExists(unit) then
-      local name, realm = UnitName(unit)
-      if name and not (ns.IsSecret and ns.IsSecret(name)) then
-        out[#out + 1] = (realm and realm ~= "") and (name .. "-" .. realm) or name
-      end
+      local name = FullName(unit) -- ("First Surname" on WoW Forever, issue #854; else "Name-Realm")
+      if name then out[#out + 1] = name end
     end
   end
   return out
@@ -1378,8 +1384,7 @@ local function Build()
     keep:SetChecked(ns.settings and ns.settings.gps.importKeepOrder and true or false)
     -- your target, if it's another player, is the default recipient
     if UnitIsPlayer("target") and not UnitIsUnit("target", "player") then
-      local name, realm = UnitName("target")
-      f.who:SetText(realm and realm ~= "" and (name .. "-" .. realm) or name)
+      f.who:SetText(FullName("target") or "")
     end
     edit:SetFocus()
   end)
@@ -1554,7 +1559,7 @@ function I.Init()
   local addFilter = ChatFrameUtil and ChatFrameUtil.AddMessageEventFilter or ChatFrame_AddMessageEventFilter
   if addFilter then
     local function Filter(_, event, msg, author, ...)
-      if event == "CHAT_MSG_WHISPER_INFORM" or event == "CHAT_MSG_BN_WHISPER_INFORM" then author = UnitName("player") end
+      if event == "CHAT_MSG_WHISPER_INFORM" or event == "CHAT_MSG_BN_WHISPER_INFORM" then author = FullName("player") end
       local out = I.LinkifyRoutes(msg, author)
       if out ~= msg then return false, out, author, ... end
     end

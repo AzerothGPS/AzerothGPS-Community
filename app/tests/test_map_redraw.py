@@ -5196,6 +5196,57 @@ def test_group_members_share_and_ask_for_routes(game):
         G.Update()
 
 
+def test_asking_a_member_with_a_surname_whispers_their_whole_name(game):
+    # (issue #854) on WoW Forever UnitName gives (first name, surname), not (name, realm): the ask went to "Stoveson"
+    # alone ("No player named Stoveson is currently playing"), and their ask, from "Stoveson Borne-Realm", wasn't from
+    # the group ("stoveson" there) and was dropped
+    lua, ns = game
+    G, I, N = ns.GPS, ns.Import, ns.Nav
+    sent = []
+    real_send = I.io.send
+    lua.execute("""
+        AGPS_854 = { UnitName = UnitName, UnitExists = UnitExists, IsInGroup = IsInGroup, R = RegionalUniqueNamesEnabled }
+        UnitName = function(u)
+          if u == "player" then return "Tester", "Smith" end
+          if u == "party1" or u == "target" then return "Stoveson", "Borne" end
+        end
+        UnitExists = function(u) return u == "party1" end
+        IsInGroup = function() return true end
+        RegionalUniqueNamesEnabled = nil
+    """)
+    try:
+        I.io.send = lambda prefix, msg, channel, target: sent.append((msg, channel, target))
+        assert ns.UnitFullName("party1") == "Stoveson Borne"
+        assert list(I.io.groupNames().values()) == ["Stoveson Borne"]
+        assert I.AskForRoute("Stoveson Borne") is True
+        assert sent == [("!\troute?", "WHISPER", "Stoveson Borne")]
+        assert I.AskForRoute("Tester Smith")[0] is False  # (you)
+        # their ask, the sender as the game gives it: from the group
+        N.SetStops(lua.eval("{ { x = 2250, y = 250, cont = 0, name = 'Brill' } }"), False, "red")
+        I.routeAskBox = None
+        lua.execute("AGPS_T = AGPS_T + 600")
+        I.OnAddonMessage("AzerothGPS", "!\troute?", "WHISPER", "Stoveson Borne-Realm")
+        assert I.routeAskBox is not None and I.routeAskBox._shown
+        # the game saying names are realm names: "Name-Realm" as before
+        lua.execute("RegionalUniqueNamesEnabled = function() return false end")
+        assert ns.UnitFullName("party1") == "Stoveson-Borne"
+        lua.execute("RegionalUniqueNamesEnabled = function() return true end "
+                    "Constants = Constants or {} Constants.CharacterNameSeparatorConsts = { CHARACTERNAME_SURNAME_SEPARATOR = ' ' }")
+        assert ns.UnitFullName("party1") == "Stoveson Borne"
+    finally:
+        I.io.send = real_send
+        lua.execute("""
+            UnitName, UnitExists, IsInGroup = AGPS_854.UnitName, AGPS_854.UnitExists, AGPS_854.IsInGroup
+            RegionalUniqueNamesEnabled = AGPS_854.R
+            if Constants then Constants.CharacterNameSeparatorConsts = nil end
+        """)
+        if I.routeAskBox is not None:
+            I.routeAskBox.Hide(I.routeAskBox)
+        I.routeAskBox = None
+        N.Clear()
+        G.Update()
+
+
 def test_a_pin_shift_clicked_goes_in_chat_and_adds_from_its_link(game):
     # (asked 2026-10-06) Shift-click a pin: a line in the chat box (nothing sent) that carries the pin whole; in an
     # AzerothGPS user's chat it's a link, and clicking it asks to add the pin to their map (as theirs, once)
