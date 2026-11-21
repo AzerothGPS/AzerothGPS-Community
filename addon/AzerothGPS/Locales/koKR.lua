@@ -2023,6 +2023,7 @@ L["%s: Choose   %s: Pick   %s: Keyboard   %s: Close"] = "%s: 선택   %s: 고르
 L["%s: Move   %s: Type   %s: Close Keyboard   %s: Delete"] = "%s: 이동   %s: 입력   %s: 키보드 닫기   %s: 지우기"
 L["%s: Choose   %s: Buttons   %s: Pick   %s: Keyboard   %s: Close"] = "%s: 선택   %s: 버튼   %s: 고르기   %s: 키보드   %s: 닫기"
 L["%s: Move   %s: Keyboard   %s: Close"] = "%s: 이동   %s: 키보드   %s: 닫기"
+L["- Fixed: learned flight paths no longer go missing, and missing ones come back."] = "- 수정: 배운 비행 경로가 더 이상 사라지지 않으며, 사라졌던 경로도 돌아옵니다."
 L["- No Map style: our route and icons over the world map, or over OpenMap's (Options > Map)."] = "- 지도 없음 스타일: 세계 지도나 OpenMap 지도 위에 경로와 아이콘을 표시합니다 (설정 > 지도)."
 L["- An extra GPS map window you can keep open, on a second monitor too (Options > Map)."] = "- 계속 열어 둘 수 있는 추가 GPS 지도 창, 두 번째 모니터에도 쓸 수 있습니다 (설정 > 지도)."
 L["- Routes keep off cliffs and take safe jumps down ledges."] = "- 경로가 절벽을 피하고, 안전한 높이의 낭떠러지에서는 뛰어내립니다."

@@ -2023,6 +2023,7 @@ L["%s: Choose   %s: Pick   %s: Keyboard   %s: Close"] = "%s: Выбор   %s: В
 L["%s: Move   %s: Type   %s: Close Keyboard   %s: Delete"] = "%s: Перемещение   %s: Ввод   %s: Закрыть клавиатуру   %s: Удалить"
 L["%s: Choose   %s: Buttons   %s: Pick   %s: Keyboard   %s: Close"] = "%s: Выбор   %s: Кнопки   %s: Взять   %s: Клавиатура   %s: Закрыть"
 L["%s: Move   %s: Keyboard   %s: Close"] = "%s: Перемещение   %s: Клавиатура   %s: Закрыть"
+L["- Fixed: learned flight paths no longer go missing, and missing ones come back."] = "- Исправлено: изученные маршруты полетов больше не пропадают, а пропавшие возвращаются."
 L["- No Map style: our route and icons over the world map, or over OpenMap's (Options > Map)."] = "- Стиль «Без карты»: наш маршрут и значки поверх карты мира или карты OpenMap (Настройки > Карта)."
 L["- An extra GPS map window you can keep open, on a second monitor too (Options > Map)."] = "- Дополнительное окно GPS-карты, которое можно держать открытым, в том числе на втором мониторе (Настройки > Карта)."
 L["- Routes keep off cliffs and take safe jumps down ledges."] = "- Маршруты обходят обрывы и используют безопасные прыжки с уступов."

@@ -2023,6 +2023,7 @@ L["%s: Choose   %s: Pick   %s: Keyboard   %s: Close"] = "%s: Elegir   %s: Tomar 
 L["%s: Move   %s: Type   %s: Close Keyboard   %s: Delete"] = "%s: Mover   %s: Escribir   %s: Cerrar teclado   %s: Borrar"
 L["%s: Choose   %s: Buttons   %s: Pick   %s: Keyboard   %s: Close"] = "%s: Elegir   %s: Botones   %s: Tomar   %s: Teclado   %s: Cerrar"
 L["%s: Move   %s: Keyboard   %s: Close"] = "%s: Mover   %s: Teclado   %s: Cerrar"
+L["- Fixed: learned flight paths no longer go missing, and missing ones come back."] = "- Corregido: las rutas de vuelo aprendidas ya no desaparecen, y las que faltaban vuelven."
 L["- No Map style: our route and icons over the world map, or over OpenMap's (Options > Map)."] = "- Estilo «Sin mapa»: nuestra ruta e iconos sobre el mapa del mundo o sobre el de OpenMap (Opciones > Mapa)."
 L["- An extra GPS map window you can keep open, on a second monitor too (Options > Map)."] = "- Una ventana extra del mapa GPS que puede quedarse abierta, también en un segundo monitor (Opciones > Mapa)."
 L["- Routes keep off cliffs and take safe jumps down ledges."] = "- Las rutas evitan los acantilados y toman saltos seguros desde las cornisas."
