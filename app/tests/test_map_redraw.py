@@ -10047,7 +10047,10 @@ def test_orgrimmars_transmogrifier_is_down_in_the_cleft_of_shadow(game):
     n = len(r.pts) // 2
     pts = [(r.pts[2 * i - 1], r.pts[2 * i]) for i in range(1, n + 1)]
     assert abs(r.fz[n] - tz) <= 3.5  # (on the Cleft's floor, not the ledge 29 yd over it)
-    assert sum(math.dist(pts[k], pts[k + 1]) for k in range(n - 1)) > 400  # (round and down into it)
+    # (round and down into it; or, out of combat with the health hidden (Nav.FALL_SECRET_HEALTH, Kooki3z 2026-11-20:
+    # "you can safely jump down from areas in org"), by a jump down the ledge, a drop)
+    kinds = [r.kinds[i] for i in range(1, n)]
+    assert sum(math.dist(pts[k], pts[k + 1]) for k in range(n - 1)) > 400 or R.KIND_DROP in kinds
 
 
 def test_the_minimap_square_is_always_the_seamless_map_whatever_the_style(minimap):

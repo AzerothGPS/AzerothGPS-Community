@@ -6,7 +6,7 @@
 -- The buttons are fixed (not Options > Controller's map controls): the D-pad moves (up and down through the page list
 -- or the page's rows, left and right along a row; on a slider a step, on a dropdown the choice before or after), A
 -- presses (a checkbox ticked, a button clicked, a dropdown's list opened: the D-pad through it, A picks, B closes it;
--- an edit box takes the keyboard), LB and RB the page before and after, B backs out (a list, a question, a popup) and
+-- an edit box takes the keyboard; the search box the controller's on-screen one, PadKeys.lua), LB and RB the page before and after, B backs out (a list, a question, a popup) and
 -- then closes Options. A question up (ns.Ask): A is Yes, B No, as on the map. A popup over Options (ns.Window: a
 -- search button's editor): the D-pad goes through its controls.
 local _, ns = ...
@@ -18,7 +18,7 @@ Pad.Opt = PO
 
 PO.OWNER = "AzerothGPSPadOptOwner"
 PO.KEYS = { PADDUP = "up", PADDDOWN = "down", PADDLEFT = "left", PADDRIGHT = "right", PAD1 = "a", PAD2 = "b",
-  PADLSHOULDER = "lb", PADRSHOULDER = "rb" }
+  PAD3 = "x", PADLSHOULDER = "lb", PADRSHOULDER = "rb" } -- (X: the search's on-screen keyboard, as on the map's search)
 PO.REPEAT_WAIT, PO.REPEAT_EVERY = 0.4, 0.12 -- a D-pad held: again after this, then this often
 PO.LIST_ROWS, PO.LIST_ROW = 12, 18 -- a dropdown's list: rows shown, their height
 -- the frames a pad can act on, by their kind
@@ -251,7 +251,8 @@ function PO.SetFocus(f, row)
       PO.tipOwner = r
     end
     local kind = f:GetObjectType()
-    if kind == "EditBox" and GameTooltip then -- (typed in: a keyboard's)
+    -- (the search box: no "needs a keyboard", the controller's own keyboard is there, its legend beside it)
+    if kind == "EditBox" and GameTooltip and f ~= PO.SearchBox() then -- (typed in: a keyboard's)
       if not PO.tipOwner then
         GameTooltip:SetOwner(f, "ANCHOR_RIGHT")
         GameTooltip:SetText(L["Text box"], 1, 1, 1)
@@ -592,6 +593,17 @@ function PO.Do(what)
     elseif what == "b" then PO.CloseList() end
     return true
   end
+  -- the on-screen keyboard open on the search box (PadKeys.lua, the map search's own; Kooki3z 2026-11-20: "add the
+  -- keyboard function to the search bar in Options to when controller is detected"): as there, the D-pad on its keys
+  -- (up from its top row back to the results), A types the lit key, B deletes a letter, X closes it
+  if PO.KeysOpen() then
+    local K = ns.PadKeys
+    if what == "up" or what == "down" or what == "left" or what == "right" then K.Move(what:upper())
+    elseif what == "a" then K.Press()
+    elseif what == "b" then K.Back()
+    elseif what == "x" then K.Close() end
+    return true
+  end
   if PO.typing then
     if what == "b" or what ~= "a" then
       if PO.typing.ClearFocus then PO.typing:ClearFocus() end
@@ -640,7 +652,9 @@ function PO.Do(what)
   -- be selectable"): up from a page's first row; A types in it, down goes back to the page, left to the list
   if PO.side == "search" then
     local box = PO.SearchBox()
-    if what == "a" and box then PO.Press(box)
+    -- (A or X: the on-screen keyboard, as on the map's search; the cursor in it, for a real keyboard, only without one)
+    if (what == "a" or what == "x") and box then
+      if not PO.OpenKeys() and what == "a" then PO.Press(box) end
     elseif what == "down" and PO.searchFrom == "list" then ListFocus(1)
     elseif what == "down" then
       if not PageFocus(1, 1) then ListFocus(ns.Options.CurrentPage()) end
@@ -703,8 +717,76 @@ function PO.FocusSearch(from)
   local box = PO.SearchBox()
   if not box then return false end
   PO.side, PO.searchFrom = "search", from
+  PO.KeysTarget() -- (the on-screen keyboard's legend beside it: PadKeys.lua)
   PO.SetFocus(box)
   return true
+end
+-- The controller's on-screen keyboard on the search box (PadKeys.lua; Kooki3z 2026-11-20: "add the keyboard function to
+-- the search bar in Options to when controller is detected"): the same keyboard, legend and keys as the map's search,
+-- on a "target" of ours over the box (PadKeys' Pad* functions). Its buttons are Options' fixed ones (A, B, X, the
+-- D-pad: PO.KEYS), never the map's, so its legend is its own; the results filter as the letters are typed (O.Search);
+-- under the window (kept on the screen) so the results stay in sight. Only with the controller in use: PadWanted.
+function PO.KeysTarget()
+  local w, box = Window(), ns.Options.search and ns.Options.search.box
+  if PO.keysTarget or not (w and box) then return PO.keysTarget end
+  local t = CreateFrame("Frame", nil, w)
+  t:SetAllPoints(box)
+  t.box = box
+  local K = ns.PadKeys
+  local function OnIt() return K.open and K.frame and K.frame.target == t or false end
+  function t.PadBound() return PO.bound and true or false end
+  function t.PadWanted() return PO.bound and (PO.side == "search" or OnIt()) and true or false end
+  function t.PadCount() return 0 end
+  function t.PadArrow() return false end
+  function t.PadHighlight() end
+  function t.PadPick() end
+  function t.PadClose() K.Close() end
+  function t.PadSetText(text)
+    local s = ns.Options.search
+    local was = s.changes
+    box:SetText(text)
+    if s.changes == was then ns.Options.Search(text) end -- (the game's SetText runs OnTextChanged; a stand-in may not)
+    if box.SetCursorPosition then box:SetCursorPosition(#text) end
+  end
+  -- (up off the keys: the results' first row, else the box again)
+  function t.PadEnterList()
+    if not PageFocus(1, 1) then PO.FocusSearch(PO.searchFrom) end
+  end
+  -- (inside Options, right under the search box, over the empty top of the page: Kooki3z 2026-11-20, "rather the
+  -- keyboard be here"; raised over the page's own rows)
+  function t.PadPlaceKeys(kb)
+    kb:SetPoint("TOPRIGHT", box, "BOTTOMRIGHT", 0, -6)
+    if kb.SetFrameLevel and w.GetFrameLevel then kb:SetFrameLevel((w:GetFrameLevel() or 1) + 50) end
+  end
+  function t.PadPlaceLegend(lg) lg:SetPoint("RIGHT", box, "LEFT", -8, 0) end
+  function t.PadLegend()
+    local function I(key) return Pad.KeyIcon(key) or Pad.KeyLabel(key) end
+    if OnIt() then
+      return string.format(L["%s: Move   %s: Type   %s: Close Keyboard   %s: Delete"], I("DPAD"), I("PAD1"), I("PAD3"),
+        I("PAD2"))
+    end
+    return string.format(L["%s: Move   %s: Keyboard   %s: Close"], I("DPAD"), I("PAD1"), I("PAD2"))
+  end
+  -- (the player starting to move closes it, as moving closes the map's search: Kooki3z 2026-11-20, "it moves the
+  -- character, which btw would and should close map menu")
+  t:SetScript("OnUpdate", function()
+    local g = ns.GPS
+    local moving = g and g.PlayerMoving and g.PlayerMoving() or false
+    if moving and not t.wasMoving and OnIt() then K.Close() end
+    t.wasMoving = moving
+  end)
+  PO.keysTarget = t
+  return t
+end
+function PO.KeysOpen()
+  local t, K = PO.keysTarget, ns.PadKeys
+  return (t and K and K.open and K.frame and K.frame.target == t) and true or false
+end
+function PO.OpenKeys()
+  local K = ns.PadKeys
+  if not (K and PO.KeysTarget()) then return false end
+  PO.side = "search"
+  return K.Open() and PO.KeysOpen() or false
 end
 -- the focus back where it belongs (a popup gone, the window opened): the page's entry in the list, or the page's row
 function PO.Refocus()
@@ -742,6 +824,7 @@ local function KeyButton(key)
     Pad.SawInput(true) -- (the controller in use: its look on Options, PO.UpdateLook)
     local ok, err = pcall(PO.Do, what)
     if not ok and ns.GPS and ns.GPS.LogError then ns.GPS.LogError("controller", err) end
+    if ns.PadKeys then pcall(ns.PadKeys.Refresh) end -- (the search's legend: on the box or not now)
     if what == "up" or what == "down" or what == "left" or what == "right" then
       PO.held, PO.heldWait = key, PO.REPEAT_WAIT
       if repeater then repeater:Show() end
@@ -799,6 +882,7 @@ end
 -- the bindings gone (a fight, Options closed): the look with them
 function PO.Unmark()
   PO.bound, PO.held, PO.typing = false, nil, nil
+  if ns.PadKeys then pcall(ns.PadKeys.Refresh) end -- (the search's keyboard and legend: gone with the bindings)
   PO.CloseList()
   PO.SetFocus(nil)
   if arrow then arrow.agpsOn = nil arrow:Hide() end

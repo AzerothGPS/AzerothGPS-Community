@@ -253,6 +253,25 @@ end
 -- toward the low side, and the drop) or nil (a plain wall) for its section from point p to p + 1.
 P.CLIFF_STEP = 2
 P.CLIFF_DROP_MAX = 14
+-- ... and the drop is the player's safe one, as the routes': RouteOne's maxDrop (Nav.SafeDrop: 39 yd out of combat
+-- with the health hidden, 14 in it), set by P.SetDropMax; else the free one, Router.TRACK_DROP_MAX. Kooki3z 2026-11-20,
+-- Stonetalon Mountains: a ledge dropped off one way but never climbed, and routes may drop as far as the safe drop.
+-- The same limit for the map's ground's cliffs (CliffAlong) and the walks' first and last steps.
+P.dropMax = nil
+local cliffMemo, cliffMemoN -- (CliffAlong's, below: by the points, for this limit)
+local function DropMax()
+  return P.dropMax or ns.Router and ns.Router.TRACK_DROP_MAX or P.CLIFF_DROP_MAX
+end
+-- The safe drop for the routes from now on (whole yards); a new one works the cliff walls' ways down out again
+-- (RefreshWalls, at their next use) and forgets the legs costed by the old one.
+function P.SetDropMax(v)
+  v = v and math.floor(v) or nil
+  if v == P.dropMax then return end
+  P.dropMax = v
+  wallsBuilt = false
+  if P.ClearSegMemo then P.ClearSegMemo() end
+  cliffMemo, cliffMemoN = {}, 0
+end
 function P.CliffSides(w, p)
   local cl, cr = w.cl, w.cr
   if w.kind ~= "cliff" or type(cl) ~= "table" or type(cr) ~= "table" then return nil end
@@ -265,7 +284,7 @@ function P.CliffSection(w, p)
   if not zl then return nil end
   local dz = zl - zr
   if math.abs(dz) <= P.CLIFF_STEP then return "open" end
-  local max = ns.Router and ns.Router.TRACK_DROP_MAX or P.CLIFF_DROP_MAX
+  local max = DropMax()
   if math.abs(dz) > max then return nil end
   local ax, ay, bx, by = w[2 * p - 1], w[2 * p], w[2 * p + 1], w[2 * p + 2]
   local ex, ey = bx - ax, by - ay
@@ -274,6 +293,16 @@ function P.CliffSection(w, p)
   local lx, ly = -ey / L, ex / L -- (its left)
   if dz > 0 then lx, ly = -lx, -ly end -- (toward the low side)
   return "down", lx, ly, math.abs(dz)
+end
+
+-- (each of the player's own lines in P.WallLines: its track; weak, as the lines are)
+local lineTrack = setmetatable({}, { __mode = "k" })
+-- The player's own track a line of P.WallLines(cont) was made from (nil for the map's own): what's drawn and routed is
+-- what Edit Wall picks and Delete takes out (Record.EditableWalls; Kooki3z 2026-11-20, a wall deleted with an erase
+-- was gone from the map and the routes but still picked, so a click on the wall shown over it picked that one again
+-- and Delete never reached the one shown).
+function P.WallTrack(w)
+  return w and lineTrack[w]
 end
 
 -- The walls on `cont`: the shipped ones, then the player's drawn ones in order (an erase
@@ -295,6 +324,7 @@ function P.WallLines(cont)
     if t.continent == cont and t.pts and #t.pts >= 4 and not shipped[t.time or -1] and not (t.op == "wall" and gone[t.time or -1]) then
       if t.op == "wall" then
         local w = DrawnLine(t)
+        lineTrack[w] = t
         w.own = true -- (the player's own, not in the data: drawn in its own color, GPSFrame's G.LayoutWalls)
         out[#out + 1] = w
       elseif t.op == "unwall" then
@@ -691,6 +721,165 @@ P.CITY_INSIDE_SLACK = 0 -- (Router starts and stops from the nearest open floor 
 
 P.SEG_YIELD_EVERY = 200 -- samples between pauses when checked in the background (a cross-continent
 -- leg in one call was the ride check's 40-50 ms slice, the seed-31 sweep, 2026-10-07)
+
+-- Cliffs from the map's ground heights (Ground.lua, Data/Heights.lua): ground the terrain grid calls open can still be
+-- a cliff, and a walk off it isn't a way down (Kooki3z 2026-11-20, Freewind Post: "not a safe path down"; from the
+-- mesa's top to the road below, every step off-road, 130 yd straight down its side). Ground steeper than CLIFF_SLOPE
+-- (about 50 degrees: the steepest a character walks up, as the pipeline's floors, recastmesh.WALK_SLOPE) is a cliff: a
+-- straight leg (CliffAlong, so SegmentCost) never climbs one more than CLIFF_CLIMB_MAX, and drops off one only as far
+-- as the safe jumps do (Router.TRACK_DROP_MAX, the cliff walls' CLIFF_DROP_MAX: no fall damage), downhill; walks over
+-- the grid (FindPath) go round it either way, as round the cliff walls. Only where the ground has a height: none (no
+-- data, a city's or a cave's own grid, water) is as before.
+P.CLIFF_SLOPE = 1.2
+P.CLIFF_CLIMB_MAX = 4 -- (yards of steep rise: a jump clears about 1.5; the grid's 16.7 yd cells smooth steps out)
+P.CLIFF_SAMPLE = 4 -- yards between a leg's heights (the grid's cells are 16.7 yd: four a cell)
+P.CLIFF_CELL_Z_MAX = 60000 -- (the grid cells' ground heights remembered, then started over)
+-- The ground's height at (x, y) for the cliff checks (the road tools open or not, as Router.GroundZ), or nil.
+local function GroundZ(cont, x, y)
+  local GD = ns.Ground
+  if not (GD and GD.At) then return nil end
+  local was = GD.force
+  GD.force = true
+  local h = GD.At(cont, x, y)
+  GD.force = was
+  return type(h) == "number" and h or nil
+end
+-- (... and nil where it isn't the ground walked: water (the grid's 1, or the map's water over the ground: its floor,
+-- swum over; the deep sea far out the grid closes too), a city's or a cave's own grid (their floors, not the land's). Not a bridge's model: its outline over the gorge is its sides' too (Freewind
+-- Post's bridge reaches over the mesa's edge), and the bridges are raised roads, reached by their ends)
+local function WalkedZ(cont, g, x, y, near)
+  if g then
+    local c, r = ToCell(g, x, y)
+    if Cell(g, r, c) == 1 then return nil end
+  end
+  if near and OverlayRaw(cont, x, y) then return nil end
+  local z = GroundZ(cont, x, y)
+  if z then
+    local GD = ns.Ground
+    local was = GD.force
+    GD.force = true
+    local w = GD.At(cont, x, y, true)
+    GD.force = was
+    if type(w) == "number" and w > z then return nil end
+  end
+  return z
+end
+
+-- Whether the straight leg from (x1, y1) to (x2, y2), walked that way, goes up or down a cliff (above): its ground
+-- every CLIFF_SAMPLE yards, a run of steep samples rising more than CLIFF_CLIMB_MAX or falling more than the safe drop.
+-- Remembered by the points, as SegmentCost (the ground doesn't change; a recalculation asks the same legs again).
+local CLIFF_MEMO_MAX = 20000
+cliffMemo, cliffMemoN = {}, 0
+function P.CliffAlong(cont, x1, y1, x2, y2)
+  local key = cont .. ":" .. x1 .. ":" .. y1 .. ":" .. x2 .. ":" .. y2
+  local v = cliffMemo[key]
+  if v ~= nil then return v end
+  v = false
+  local g = ns.Terrain and ns.Terrain[cont]
+  local dx, dy = x2 - x1, y2 - y1
+  local len = math.sqrt(dx * dx + dy * dy)
+  if len > 0 and not (g and g.slack) and ns.Ground and ns.Ground.At then
+    local n = math.max(1, math.ceil(len / P.CLIFF_SAMPLE))
+    local rise = P.CLIFF_SLOPE * len / n
+    local drop = DropMax()
+    local near = OverlayNear(cont, x1, y1, x2, y2)
+    local co, isMain = coroutine.running()
+    local canYield = co ~= nil and not isMain
+    local up, down, prev = 0, 0, nil
+    for i = 0, n do
+      if canYield and i > 0 and i % P.SEG_YIELD_EVERY == 0 then coroutine.yield() end
+      local z = WalkedZ(cont, g, x1 + dx * i / n, y1 + dy * i / n, near)
+      if z and prev and z - prev > rise then
+        up, down = up + z - prev, 0
+      elseif z and prev and prev - z > rise then
+        up, down = 0, down + prev - z
+      else
+        up, down = 0, 0
+      end
+      if up > P.CLIFF_CLIMB_MAX or down > drop then
+        v = true
+        break
+      end
+      prev = z
+    end
+  end
+  if cliffMemoN >= CLIFF_MEMO_MAX then cliffMemo, cliffMemoN = {}, 0 end
+  cliffMemo[key], cliffMemoN = v, cliffMemoN + 1
+  return v
+end
+
+-- The ground's height at grid g's cell (c, r)'s middle for the walks' cliff check (WalkedZ), false where it has none;
+-- remembered (cells don't change: a search asks each cell's neighbors again and again).
+local cellZ, cellZN = {}, 0
+-- (the ground's heights read again: the tests' own ground)
+function P.ClearCliffMemo()
+  cliffMemo, cliffMemoN, cellZ, cellZN = {}, 0, {}, 0
+end
+local function CellZ(cont, g, c, r)
+  local t = cellZ[g]
+  local row = t and t[r]
+  local z = row and row[c]
+  if z == nil then
+    local x, y = CellCentre(g, c, r)
+    z = WalkedZ(cont, g, x, y, true) or false
+    if cellZN >= P.CLIFF_CELL_Z_MAX then cellZ, cellZN, t = {}, 0, nil end
+    if not t then
+      t = {}
+      cellZ[g] = t
+    end
+    row = t[r]
+    if not row then
+      row = {}
+      t[r] = row
+    end
+    row[c], cellZN = z, cellZN + 1
+  end
+  return z
+end
+
+-- Steep ground walked down (Kooki3z 2026-11-20, Stonetalon Mountains: on the road at the top of a ledge, the stop
+-- below it to the north-east, routed ~640 yd down the road and back up the valley; "you should be able to go off the
+-- cliff here"). The terrain grid closes a cell steeper than 50 degrees both ways (roads/terrain.py), and a cliff wall's
+-- way down opened only its own cells to the ground's value underneath, still closed there, so no straight leg ever went
+-- down the ledge's face. A character slides down such a face: a straight leg (SegmentCost) may cross a run of the
+-- terrain's own steep cells (not a wall's, a building's, a banned swim's, a city's grid) where it goes down it, the
+-- ground's height (Ground.lua) at the open ground past the run at least STEEP_FALL_MIN_YD (a ledge, ~33 yd across
+-- the closed cells there; not a bump or a hillside the grid's cells smooth out: those stay closed, as before, and the
+-- routes elsewhere as they were: at 15 yd, route-quality had 6 trips slower, a slide off a hill near Everlook making
+-- a road way beat the walk at road mode's 2x, 2026-11-20) and STEEP_FALL a yard
+-- of the run lower than before it, and the run at most STEEP_RUN_MAX_YD (a ledge's face, not a mountainside). Each run
+-- costs STEEP_RUN_COST yards more (as Router.DROP_COST, twice: taken only when it saves real distance). How far it falls is CliffAlong's, after: the ground's cliffs only as far as the safe drop.
+-- Never up a steep run; walks over the grid (FindPath, the blocks) still go round it either way.
+P.STEEP_RUN_MAX_YD = 60
+P.STEEP_FALL = 0.5
+P.STEEP_FALL_MIN_YD = 25
+P.STEEP_RUN_COST = 60
+local function SteepCell(g, row, col, dx, dy)
+  if row < 1 or row > g.h or col < 1 or col > g.w then return false end
+  local bl = banRows[g] and banRows[g][row]
+  if bl then
+    for i = 1, #bl - 1, 2 do
+      if col >= bl[i] and col <= bl[i + 1] then return false end
+    end
+  end
+  local wc = wallCells[g]
+  local w = wc and wc[row * 65536 + col]
+  if w == true then return false end
+  if type(w) == "table" and dx * w[1] + dy * w[2] <= 0 then return false end -- (a cliff wall's, crossed up)
+  if Buildings(g)[row * 65536 + col] then return false end
+  return CellBase(g, row, col) == 2
+end
+-- (the run of steep cells along the leg from t0 to t1, the open samples either side: walked down it?)
+local function SteepRunDown(cont, g, x1, y1, dx, dy, len, t0, t1, near)
+  local h = (t1 - t0) * len
+  if h > P.STEEP_RUN_MAX_YD then return false end
+  local z0 = WalkedZ(cont, g, x1 + dx * t0, y1 + dy * t0, near)
+  local z1 = WalkedZ(cont, g, x1 + dx * t1, y1 + dy * t1, near)
+  if not (z0 and z1) then return false end
+  local fall = z0 - z1
+  return fall >= P.STEEP_FALL_MIN_YD and fall >= P.STEEP_FALL * h
+end
+
 local function SegmentCostRaw(cont, x1, y1, x2, y2, endSlack)
   if P.CrossesWall(cont, x1, y1, x2, y2) then return nil end -- (a wall: never, not even near its ends)
   local g = ns.Terrain and ns.Terrain[cont]
@@ -710,7 +899,9 @@ local function SegmentCostRaw(cont, x1, y1, x2, y2, endSlack)
   -- (no grid laid over the continent near the line: its own cells only; and a cell's value is
   -- looked up once, not for each of the samples in it)
   local k = TILE / g.cell
-  local lastRow, lastCol, lastV, lastB
+  local lastRow, lastCol, lastV, lastB, lastS
+  local openT, runFrom = 0, nil -- (the last open sample's t; a steep run's start, the open sample before it)
+  local steepRuns = 0
   -- (a building's cells: no end slack, unless that end is in a building itself: a stop at the innkeeper)
   local bset = Buildings(g)
   local c1, r1 = ToCell(g, x1, y1)
@@ -723,27 +914,37 @@ local function SegmentCostRaw(cont, x1, y1, x2, y2, endSlack)
     local x, y = x1 + dx * t, y1 + dy * t
     local ov = near and Overlay(cont, x, y) or nil
     if ov == 2 and t > 0 and t < 1 then return nil end -- (a city's ruins: its walls are real, no slack)
-    local v, b = ov, false
+    local v, b, st = ov, false, false
     if not v then -- (the continent's own grid: the overlay was just asked)
       local col = math.floor(((32 - y / TILE) - g.tx0) * k) + 1
       local row = math.floor(((32 - x / TILE) - g.ty0) * k) + 1
       if row == lastRow and col == lastCol then
-        v, b = lastV, lastB
+        v, b, st = lastV, lastB, lastS
       else
         v = Cell(g, row, col)
         -- (a cliff's cell crossed toward its low side: the ground's own value, the drop is safe)
         local cd = v == 2 and CliffCell(g, row, col)
         if cd and dx * cd[1] + dy * cd[2] > 0 then v = CellBase(g, row, col) end
         b = v == 2 and bset[row * 65536 + col] or false
-        lastRow, lastCol, lastV, lastB = row, col, v, b
+        -- (the terrain's own steep cell: walked down, maybe; SteepRunDown above)
+        st = v == 2 and not b and not g.slack and SteepCell(g, row, col, dx, dy) or false
+        lastRow, lastCol, lastV, lastB, lastS = row, col, v, b, st
       end
     end
     if b then
       if not ((t <= slack and inB1) or (t >= 1 - slack and inB2)) then return nil end
-    elseif v == 2 and t > slack and t < 1 - slack then return nil end
+    elseif v == 2 and t > slack and t < 1 - slack then
+      if not st then return nil end
+      runFrom = runFrom or openT
+    elseif runFrom then
+      if not SteepRunDown(cont, g, x1, y1, dx, dy, len, runFrom, t, near) then return nil end
+      runFrom, steepRuns = nil, steepRuns + 1
+    end
+    if not (v == 2 and t > slack and t < 1 - slack) then openT = t end
     if v == 1 then water = water + 1 end
   end
-  return len + len * (water / (n + 1)) * (P.SwimCost() - 1)
+  if P.CliffAlong(cont, x1, y1, x2, y2) then return nil end -- (open ground, but up or down a cliff: CliffAlong)
+  return len + len * (water / (n + 1)) * (P.SwimCost() - 1) + steepRuns * P.STEEP_RUN_COST
 end
 
 -- Every caller's checks remembered, the exact points and end slack the key (no rounding: routes stay the
@@ -1052,7 +1253,7 @@ local function Spread(step, c0, r0, back, pause)
       for dr = -1, 1 do
         for dc = -1, 1 do
           if dr ~= 0 or dc ~= 0 then
-            local m = step(c + dc, r + dr)
+            local m = step(c + dc, r + dr, c, r)
             if m and (dr == 0 or dc == 0 or (step(c + dc, r) and step(c, r + dr))) then
               local k = (r + dr) * 65536 + c + dc
               local d = dist[n] + (back and here or m) * ((dr ~= 0 and dc ~= 0) and SQ2 or 1)
@@ -1102,7 +1303,7 @@ local function CellPath(step, c1, r1, c2, r2, pause, limit)
       for dr = -1, 1 do
         for dc = -1, 1 do
           if dr ~= 0 or dc ~= 0 then
-            local m = step(c + dc, r + dr)
+            local m = step(c + dc, r + dr, c, r)
             if m and (dr == 0 or dc == 0 or (step(c + dc, r) and step(c, r + dr))) then
               local k, gr, cc = (r + dr) * 65536 + c + dc, Row(gs, r + dr), c + dc
               local ng = gn + m * ((dr ~= 0 and dc ~= 0) and SQ2 or 1)
@@ -1137,7 +1338,7 @@ local function ShutIn(step, c1, r1, c2, r2, limit)
   if c1 == c2 and r1 == r2 then return false end
   if not step(c2, r2) then return true end -- (never stepped into)
   local function moves(c, r, dc, dr) -- (a move from (c, r) to the cell beside it, as CellPath allows)
-    return step(c + dc, r + dr) and (dr == 0 or dc == 0 or (step(c + dc, r) and step(c, r + dr))) and true or false
+    return step(c + dc, r + dr, c, r) and (dr == 0 or dc == 0 or (step(c + dc, r) and step(c, r + dr))) and true or false
   end
   local seen, list, n = { [r2 * 65536 + c2] = true }, { c2, r2 }, 1
   local i = 1
@@ -1172,7 +1373,7 @@ local function LineCells(step, c1, r1, c2, r2)
   local pc, pr = c1, r1
   for i = 1, n do
     local c, r = c1 + math.floor(dc * i / n + 0.5), r1 + math.floor(dr * i / n + 0.5)
-    if step(c, r) ~= 1 then return nil end
+    if step(c, r, pc, pr) ~= 1 then return nil end
     if c ~= pc and r ~= pr and not (step(c, pr) == 1 and step(pc, r) == 1) then return nil end
     cells[#cells + 1] = { c, r }
     pc, pr = c, r
@@ -1309,9 +1510,9 @@ local function ByBlocks(g, H, cont, c1, r1, c2, r2, step, box, hostile, pause)
   local br0, br1 = math.max(0, math.floor((box[3] - 1) / K)), math.min(ny - 1, math.floor((box[4] - 1) / K))
   local function Within(b) -- a block's cells only
     local r0, c0 = math.floor(b / nx) * K, (b % nx) * K
-    return function(c, r)
+    return function(c, r, fc, fr)
       if c <= c0 or c > c0 + K or r <= r0 or r > r0 + K then return nil end
-      return step(c, r)
+      return step(c, r, fc, fr)
     end
   end
   local bs, bg = BlockOf(c1, r1), BlockOf(c2, r2)
@@ -1403,7 +1604,7 @@ local function ByBlocks(g, H, cont, c1, r1, c2, r2, step, box, hostile, pause)
           local nb = BlockOf(nc, nr)
           local nbr, nbc = math.floor(nb / nx), nb % nx
           if nb ~= b and nbc >= bc0 and nbc <= bc1 and nbr >= br0 and nbr <= br1 then
-            local m = step(nc, nr)
+            local m = step(nc, nr, c, r)
             local j = m and Block(nb).at[((nr - 1) % K) * K + (nc - 1) % K]
             if j then
               local kj = nb * 4096 + j
@@ -1534,8 +1735,22 @@ function P.FindPath(cont, x1, y1, x2, y2, road1, road2)
     end
     return v == 1 and swimCost or 1
   end
+  -- (up or down a cliff (CliffAlong): no step between two cells whose ground differs more than CLIFF_SLOPE allows,
+  -- either way, as round the cliff walls; but out of the start's cell or into the stop's by a fall-free drop: the
+  -- player's there. Kooki3z 2026-11-20, Freewind Post: "not a safe path down")
+  local cliffs = not g.slack and ns.Ground and ns.Ground.At and true
+  local rise, drop = P.CLIFF_SLOPE * g.cell, DropMax()
+  local function steep(c, r, fc, fr)
+    local a = CellZ(cont, g, fc, fr)
+    local b = a and CellZ(cont, g, c, r)
+    if not b then return false end
+    local dz = math.abs(b - a)
+    if dz <= ((c ~= fc and r ~= fr) and rise * SQ2 or rise) then return false end
+    return not (dz <= drop and ((fc == c1 and fr == r1) or (c == c2 and r == r2)))
+  end
   local memo = {} -- (by row: Row)
-  local function step(c, r) -- step multiplier into (c, r), or nil where it can't go
+  -- step multiplier into (c, r) (from (fc, fr), when it's a move: the cliffs), or nil where it can't go
+  local function step(c, r, fc, fr)
     local row = Row(memo, r)
     local m = row[c]
     if m == nil then
@@ -1543,6 +1758,7 @@ function P.FindPath(cont, x1, y1, x2, y2, road1, road2)
       if m and hostile(c, r) then m = m * Rt.HOSTILE_FACTOR end
       row[c] = m
     end
+    if m and fc and cliffs and steep(c, r, fc, fr) then return nil end
     return m or nil
   end
   -- Run as a background job (a coroutine, see Router.Pump): hand control back every so
@@ -1562,9 +1778,9 @@ function P.FindPath(cont, x1, y1, x2, y2, road1, road2)
     if how == "none" then return nil end
   end
   if not cells then
-    local function inBox(c, r)
+    local function inBox(c, r, fc, fr)
       if c < cmin or c > cmax or r < rmin or r > rmax then return nil end
-      return step(c, r)
+      return step(c, r, fc, fr)
     end
     if ShutIn(inBox, c1, r1, c2, r2, P.SHUT_IN_CELLS) then return nil end
     cells = CellPath(inBox, c1, r1, c2, r2, pause, P.PATH_MAX_EXPANSIONS)
@@ -1659,6 +1875,7 @@ end
 function P.ClearCache()
   cache, ovIndex, hpaBlocks = {}, {}, {}
   wetMemo, wetMemoN = {}, 0
+  P.ClearCliffMemo()
   if P.ClearSegMemo then P.ClearSegMemo() end
 end
 

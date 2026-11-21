@@ -58,6 +58,10 @@ R.OFFROAD_TIE = 1.02 -- offroad mode: open ground costs a hair more, so roads wi
 R.BLOCKED_PENALTY = 12 -- a leg the terrain data calls blocked, when nothing better exists
 R.WALLS_CUT_ROADS = false -- (BuildGraph: walls pass roads through since 2026-11-15)
 R.WALL_PENALTY = 200 -- ... through a wall drawn with the road tools (only when there's no other way at all)
+-- ... up or down a cliff by the map's ground (Passability.CliffAlong), the same: a fall no one survives isn't a shortcut
+-- (Kooki3z 2026-11-20, Freewind Post: "not a safe path down")
+R.CLIFF_PENALTY = 200
+R.CLIFF_STOP_YD = 100 -- (a stop only reached up or down a cliff this near it: no way, RouteOne's `cliff`)
 -- A hop: a leg onto or off the roads, or a link between road pieces, straight over ground the terrain or a wall blocks
 -- with no walk round it found (searched, none). Asked 2026-11-14 (Loch Modan, a route to Stonesplinter Valley hopped
 -- the cliffs from the Maker's Terrace's road): "If there is a road that would continue the path and its reachable
@@ -1712,7 +1716,12 @@ R.DEAD_END_LINK_YD = 700
 R.DEAD_END_LINKS = 2
 R.DEAD_END_ROAD_FACTOR = 2.5
 R.DEAD_END_SOURCES = { [2] = true, [9] = true } -- (the shipped drawn roads, and the player's own: R.SOURCE_RECORDED)
-function R.DeadEndLinks(nodes, adj, bridges, skip, nearOverlay, zs, edges, nz)
+-- (and the nearest not up or down a cliff first, `cliff(n, m)` (Passability.CliffAlong), of the nearest
+-- DEAD_END_CLIFF_TRIES; those over one only when too few aren't. The gap road's end by the Wildmane Water Well had its
+-- two links up the ridges over it, a walk none; its way from Thunder Bluff was the jump off the mesa's east side, 100
+-- yd down (Kooki3z 2026-11-20, Freewind Post: "not a safe path down"). Mulgore's roads 530 yd off are walked to)
+R.DEAD_END_CLIFF_TRIES = 16
+function R.DeadEndLinks(nodes, adj, bridges, skip, nearOverlay, zs, edges, nz, cliff)
   local B = R.DEAD_END_LINK_YD
   local function zok(a, b)
     return not zs or not zs[a] or not zs[b] or math.abs(zs[a] - zs[b]) <= R.LAYER_Z
@@ -1779,6 +1788,15 @@ function R.DeadEndLinks(nodes, adj, bridges, skip, nearOverlay, zs, edges, nz)
       end
     end
     table.sort(near, function(a, b) return a[1] < b[1] end)
+    if cliff and #near > R.DEAD_END_LINKS then
+      local ok, over = {}, {}
+      for j, c in ipairs(near) do
+        if j > R.DEAD_END_CLIFF_TRIES or not (cliff(n, c[2]) or cliff(c[2], n)) then ok[#ok + 1] = c else over[#over + 1] = c end
+        if #ok >= R.DEAD_END_LINKS then break end
+      end
+      for _, c in ipairs(over) do ok[#ok + 1] = c end
+      near = ok
+    end
     for j = 1, math.min(#near, R.DEAD_END_LINKS) do
       local d, m = near[j][1], near[j][2]
       local have = false
@@ -2462,7 +2480,10 @@ function BuildGraph(cont)
     for nd in pairs(trackInfo.raisedNode) do skipB[nd] = skipB[nd] or true end
   end
   local bridges = Bridges(nodes, adj, grid and grid.slack and 0 or nil, nearOverlay, skipB, zs, nzB)
-  if not (grid and grid.slack) then R.DeadEndLinks(nodes, adj, bridges, skipB, nearOverlay, zs, edges, nzB) end -- (#411)
+  local cliff = not zs and P and P.CliffAlong and function(a, b)
+    return P.CliffAlong(cont, nodes[a * 2 - 1], nodes[a * 2], nodes[b * 2 - 1], nodes[b * 2])
+  end or nil
+  if not (grid and grid.slack) then R.DeadEndLinks(nodes, adj, bridges, skipB, nearOverlay, zs, edges, nzB, cliff) end -- (#411)
   for ei in pairs(drops) do
     local e = edges[ei]
     if e then adj[e[1]][#adj[e[1]] + 1] = { e[2], e[3], ei, true } end
@@ -3804,8 +3825,29 @@ end
 -- followed (Nav.TrackRaisedZ follows one onto a bridge from its end). Else the list as it was. `nearer`: only when the
 -- road not raised is as near as the raised one (a stop with no height: on a bridge when nearest it).
 R.RAISED_UNDER_YD = 40
-function R.OffRaised(g, list, nearer)
+-- ... unless the map's ground where the spot is lies about at a raised road's height there (RAISED_GROUND_Z): up there
+-- with it, a mesa's top and the bridge off it (Kooki3z 2026-11-20, Freewind Post: from the mesa's top the bridge was
+-- left out for the canyon road 130 yd below, and the route walked off the cliff).
+R.RAISED_GROUND_Z = 8
+-- The map's ground height at (x, y) of `cont` (Ground.lua: the terrain's heights, the road tools open or not), or nil.
+function R.GroundZ(cont, x, y)
+  local GD = ns.Ground
+  if not (GD and GD.At and cont and x and y) then return nil end
+  local was = GD.force
+  GD.force = true
+  local ok, h = pcall(GD.At, ns.Geo and ns.Geo.Base and ns.Geo.Base(cont) or cont, x, y)
+  GD.force = was
+  return ok and type(h) == "number" and h or nil
+end
+function R.OffRaised(g, list, nearer, cont, x, y)
   if not (g and g.raised and list and list[1]) then return list end
+  local gz = R.GroundZ(cont, x, y)
+  if gz then
+    for _, c in ipairs(list) do
+      local h = g.raised[c.edge] and R.RoadFloor(g, c)
+      if h and math.abs(h - gz) <= R.RAISED_GROUND_Z then return list end -- (on the ground up there with it)
+    end
+  end
   local near, out = math.huge, {}
   for _, c in ipairs(list) do near = math.min(near, c.dist or math.huge) end
   if nearer then
@@ -5039,6 +5081,8 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
   local offroad = opts and opts.offroad
   -- yards the player may drop off a ledge (Nav: what their health survives)
   local maxDrop = opts and opts.maxDrop or (ns.Nav and ns.Nav.SafeDrop and ns.Nav.SafeDrop()) or 0
+  -- (and the cliffs' ways down the same: the cliff walls', the map's ground's; Passability.SetDropMax)
+  if ns.Passability and ns.Passability.SetDropMax then ns.Passability.SetDropMax(math.max(maxDrop, R.TRACK_DROP_MAX)) end
   local grid = ns.Terrain and ns.Terrain[cont]
   local cityPenalty = grid and grid.slack and R.CITY_BLOCKED_PENALTY
   -- (a blocked leg or link: a city's walls are real, and so are its ruins' up top)
@@ -5051,6 +5095,7 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
         if P.Overlay(cont, x1 + (x2 - x1) * k / 4, y1 + (y2 - y1) * k / 4) then return R.CITY_BLOCKED_PENALTY end
       end
     end
+    if P and P.CliffAlong and x1 and P.CliffAlong(cont, x1, y1, x2, y2) then return R.CLIFF_PENALTY end
     return R.BLOCKED_PENALTY
   end
   local Pass = ns.Passability
@@ -5272,9 +5317,9 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
   -- (and no floor followed, on the ground, under a raised road (a bridge, a floor over the land, edited so): onto the
   -- roads under it, not up onto it overhead; it's reached by its ends, the route going round to one. Asked 2026-11-18
   -- for 1.3.10: "pathing would know if an area is accessible based on player position")
-  if not layered and g.raised and not (opts and opts.z) then ss = R.OffRaised(g, ss) end
+  if not layered and g.raised and not (opts and opts.z) then ss = R.OffRaised(g, ss, nil, cont, sx, sy) end
   -- (and a stop with no height by a road under one, nearer it than the raised road: not off the side of the bridge)
-  if not layered and g.raised and not (opts and opts.tz) then ts = R.OffRaised(g, ts, true) end
+  if not layered and g.raised and not (opts and opts.tz) then ts = R.OffRaised(g, ts, true, cont, tx, ty) end
   -- a city: roads on the same floor as the start or the stop (the nearest may be on a
   -- walk right above or below)
   local H = not layered and grid and grid.slack and ns.Nav and ns.Nav.CityHeight
@@ -5896,7 +5941,11 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
     -- Nav doesn't draw; asked 2026-10-01, a broken road network drew one over the mountains from
     -- Ironforge. Over open ground or water, a swim to an island, it's still the way. Not while a
     -- search is running: provisional)
-    if not pending and Pass and not (direct or Pass.SegmentCost(cont, sx, sy, tx, ty)) then res.noWay = true end
+    if not pending and Pass and not (direct or Pass.SegmentCost(cont, sx, sy, tx, ty)) then
+      res.noWay = true
+      -- (and a cliff on it: said so, Nav's "a cliff in the way")
+      res.cliff = Pass.CliffAlong and Pass.CliffAlong(cont, sx, sy, tx, ty) or nil
+    end
     return res
   end
 
@@ -5981,6 +6030,23 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
   end
   local res = Build(g, pieces)
   res.hops = hops
+  -- (the last leg, into the stop, left straight, blocked, up or down a cliff (Passability.CliffAlong, at
+  -- CLIFF_PENALTY): taken only when nothing else gets there, so nothing does on foot. No way, `noWay`, said as a cliff
+  -- in the way, not a line drawn up it. Kooki3z 2026-11-20: "If I picked a spot that actually isn't reachable then
+  -- should've said too high or route not possible". Not a cliff on the way from the start: the player got up there;
+  -- and only one within CLIFF_STOP_YD of the stop, the stop up on it or under it: a long line over the mountains to
+  -- a stop at sea, a hop as before, has a steep stretch somewhere on it whatever the stop)
+  if not pending and not layered and Pass and Pass.CliffAlong then
+    for _, p in ipairs(pieces) do
+      local d = p[4] == tx and p[5] == ty and Dist(p[2], p[3], tx, ty)
+      local k = d and d > R.CLIFF_STOP_YD and (d - R.CLIFF_STOP_YD) / d or 0
+      if d and p.gap and p[1] == OFF
+          and Pass.CliffAlong(cont, p[2] + (tx - p[2]) * k, p[3] + (ty - p[3]) * k, tx, ty) then
+        res.noWay, res.cliff = true, true
+        break
+      end
+    end
+  end
   local againPending, hopPending = false, false
   -- (a hop in the route, 2026-11-14: once more, every hop priced as one (HOP_COST), every candidate's leg walked and,
   -- from an end with only hops or on roads cut off by one, more and further roads tried (`hopRedo`). Taken with fewer

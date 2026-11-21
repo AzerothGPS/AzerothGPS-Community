@@ -3008,9 +3008,13 @@ function Lay.ShowNodeFinder()
       local r = CreateFrame("Button", nil, f)
       r:SetSize(W - 28, Lay.FINDER_ROW_H)
       r:SetPoint("TOPLEFT", 14, listTop - (i - 1) * Lay.FINDER_ROW_H)
-      local hl = r:CreateTexture(nil, "HIGHLIGHT")
+      -- (the highlighted row: the mouse over it, the arrow keys or the controller's D-pad, one highlight for all, as
+      -- Search Places'; Kooki3z 2026-11-20: "add D pad controller and keyboard functions to this too")
+      local hl = r:CreateTexture(nil, "BACKGROUND")
       hl:SetAllPoints()
       hl:SetColorTexture(1, 1, 1, 0.1)
+      hl:Hide()
+      r.hl, r.index = hl, i
       r.check = r:CreateTexture(nil, "ARTWORK")
       r.check:SetSize(16, 16)
       r.check:SetPoint("LEFT", 2, 0)
@@ -3029,6 +3033,7 @@ function Lay.ShowNodeFinder()
         if e.checked and not e.picked then return Lay.PickAvailableBut(e.name) end -- (Available's own tick taken off)
         Lay.SetNodeFilter(e.name, not e.picked)
       end)
+      r:SetScript("OnEnter", function(self) f.PadHighlight(offset + self.index) end)
       rows[i] = r
     end
     local status = f:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
@@ -3058,6 +3063,9 @@ function Lay.ShowNodeFinder()
     local state = f:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
     state:SetPoint("LEFT", avail, "RIGHT", 6, 0)
     f.available, f.availableState = avail, state
+    -- (the controller's D-pad left and right go through these, in this order; Kooki3z 2026-11-20: "Make D pad left and
+    -- right on this screen toggle through these 4 options", PadKeys.lua)
+    function f.PadButtons() return { f.kindButtons.herb, f.kindButtons.ore, avail, all } end
     avail:SetScript("OnClick", function(self)
       Lay.SetAvailableOnly(not Lay.AvailableOnly())
       if GameTooltip:GetOwner() == self then self:GetScript("OnEnter")(self) end
@@ -3075,9 +3083,11 @@ function Lay.ShowNodeFinder()
     function f.Refresh()
       list = Lay.NodeNames(box:GetText(), Lay.finderKind)
       offset = math.max(0, math.min(offset, #list - Lay.FINDER_ROWS))
+      if f.sel and f.sel > #list then f.sel = nil end
       for i, r in ipairs(rows) do
         local e = list[offset + i]
         r.entry = e
+        r.hl:SetShown(e ~= nil and f.sel == offset + i)
         if e then
           ns.SetIcon(r.icon, e.icon, "Interface\\Icons\\INV_Misc_QuestionMark")
           r.check:SetShown(e.checked)
@@ -3116,19 +3126,62 @@ function Lay.ShowNodeFinder()
     end
     f:EnableMouseWheel(true)
     f:SetScript("OnMouseWheel", function(_, delta)
-      offset = math.max(0, offset - delta * 3)
+      offset = math.max(0, math.min(offset - delta * 3, #list - Lay.FINDER_ROWS))
       f.Refresh()
     end)
     box:SetScript("OnTextChanged", function()
       offset = 0
+      f.sel = nil -- (the text changed: no row highlighted till an arrow key, the D-pad or the mouse picks one)
+      f.changes = (f.changes or 0) + 1
       f.Refresh()
     end)
-    -- (Enter: the first one picked, or put back)
-    box:SetScript("OnEnterPressed", function()
+    -- Up and Down move the highlight through the rows as in Search Places (Kooki3z 2026-11-20), stopping at the ends,
+    -- the first Down the first row, the list scrolled to keep it in view; the controller's D-pad the same (PadKeys.lua)
+    function f.PadHighlight(i)
+      if i and (i < 1 or i > #list) then i = nil end
+      f.sel = i
+      local was = offset
+      if i and i <= offset then offset = i - 1 end
+      if i and i > offset + Lay.FINDER_ROWS then offset = i - Lay.FINDER_ROWS end
+      if offset ~= was then return f.Refresh() end -- (scrolled: the rows filled again)
+      for k, r in ipairs(rows) do r.hl:SetShown(r.entry ~= nil and f.sel == offset + k) end
+    end
+    function f.PadArrow(key)
+      local n = #list
+      if n == 0 or (key ~= "UP" and key ~= "DOWN") then return false end
+      local i = f.sel
+      if key == "DOWN" then i = i and math.min(n, i + 1) or 1
+      elseif i then i = math.max(1, i - 1) end
+      f.PadHighlight(i)
+      return true
+    end
+    function f.PadCount() return #list end
+    -- (coming up off the controller's keyboard: the last row shown, the one nearest it)
+    function f.PadEnterList() if #list > 0 then f.PadHighlight(math.min(#list, offset + Lay.FINDER_ROWS)) end end
+    function f.PadClose() box:ClearFocus() f:Hide() end
+    -- (the controller's keyboard typing: as typed; the game's SetText runs OnTextChanged itself, a stand-in may not)
+    function f.PadSetText(text)
+      local was = f.changes
+      box:SetText(text)
+      if f.changes == was then box:GetScript("OnTextChanged")(box, true) end
+      if box.SetCursorPosition then box:SetCursorPosition(#text) end
+    end
+    -- Enter: the highlighted row, as a click on it; none highlighted, the first one picked, or put back, as before
+    function f.PadPick()
+      local r = f.sel and rows[f.sel - offset]
+      if r and r.entry then
+        r:GetScript("OnClick")(r, "LeftButton")
+        return
+      end
       local e = list[1]
       if e and box:GetText() ~= "" then Lay.SetNodeFilter(e.name, not e.picked) end
+    end
+    if box.SetAltArrowKeyMode then box:SetAltArrowKeyMode(false) end
+    box:SetScript("OnArrowPressed", function(self, key)
+      if f.PadArrow(key) and self.SetCursorPosition then self:SetCursorPosition(#(self:GetText() or "")) end
     end)
-    box:SetScript("OnEscapePressed", function() box:ClearFocus() f:Hide() end)
+    box:SetScript("OnEnterPressed", function() f.PadPick() end)
+    box:SetScript("OnEscapePressed", function() f.PadClose() end)
     local function Quick() if ns.GPS and ns.GPS.RefreshQuick then ns.GPS.RefreshQuick() end end -- (its button lit)
     f:SetScript("OnShow", function() f.Refresh() Quick() end)
     f:SetScript("OnHide", Quick)

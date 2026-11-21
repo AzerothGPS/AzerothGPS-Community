@@ -3107,7 +3107,11 @@ local function Stretch(cont, sx, sy, d, walk, opts, sz)
       o.lifted = true
       return Stretch(cont, sx, sy, d, walk, o, sz)
     end
-    if not leg.ride and r and r.noWay then return nil end
+    if not leg.ride and r and r.noWay then
+      -- (none but up or down a cliff, the Router's `cliff`: said so, N.CLIFF_TEXT)
+      if r.cliff then N.noWayCliff = true end
+      return nil
+    end
   end
   local st = { parts = {}, legs = legs, first = 0, walk = 0, ride = 0, road = 0 }
   local rode = false
@@ -3763,6 +3767,7 @@ local function Compute(px, py, cont, d, offroad)
   local tps = AssignTeleports(cont, px, py, d, walk)
   if ns.Router.Breathe then ns.Router.Breathe(1, 1) end -- (in a background job: a pause between the parts)
   local t1 = ns.PerfStart and ns.PerfStart()
+  N.noWayCliff = nil -- (set again by the stretches: no way but a cliff)
   local first = Stretch(cont, px, py, d, walk, { offroad = offroad, transient = true, fixed = { offroad = offroad },
     teleports = tps, indoors = N.Indoors(), swimming = N.Swimming(),
     z = N.PlayerZ() or N.TrackCityZ(cont, px, py) or N.TrackRaisedZ(cont, px, py) })
@@ -5824,6 +5829,10 @@ function N.Status(px, py, cont)
   if N.paused then return N.PausedText() end
   if not r then
     if not N.warming then N.AskSkipped() end -- (rides removed: put back?)
+    -- (no way but up or down a cliff: the spot can't be walked to, said so, never a line up it. Kooki3z
+    -- 2026-11-20: "If I picked a spot that actually isn't reachable then should've said too high or route not
+    -- possible")
+    if not N.warming and N.noWayCliff then return L["That spot can't be reached on foot from here (a cliff in the way)."] end
     return N.warming and N.WorkingText() or L["No way there found"]
   end
   if N.RedAsking() then return N.RED_ASK_TEXT end -- (not shown until kept)
@@ -6259,10 +6268,20 @@ end
 N.FALL_FREE = 14
 N.FALL_PER_YD = 0.02
 N.FALL_KEEP = 0.3 -- of their health left after the fall, at least
+-- (this client hides the player's health from addons, out of combat too: out of combat it's taken as FALL_SECRET_HEALTH
+-- of the most, health coming back out of combat, so the safe jumps down a capital's ledges are routed (Kooki3z
+-- 2026-11-20 in Orgrimmar: "should be jumpable cliffside, you can safely jump down from areas in org"; 22 yd from
+-- by the Hall of Legends to the Valley of Strength). In combat only the free ones.)
+N.FALL_SECRET_HEALTH = 0.8
 function N.SafeDrop()
   if UnitIsGhost and UnitIsGhost("player") then return math.huge end
   local h = UnitHealth and UnitHealth("player")
   local m = UnitHealthMax and UnitHealthMax("player")
+  if h and ns.IsSecret and ns.IsSecret(h) then
+    local fight = UnitAffectingCombat and UnitAffectingCombat("player")
+    if fight == false then return N.FALL_FREE + math.max(0, N.FALL_SECRET_HEALTH - N.FALL_KEEP) / N.FALL_PER_YD end
+    return N.FALL_FREE
+  end
   if not h or not m or (ns.IsSecret and (ns.IsSecret(h) or ns.IsSecret(m))) or m <= 0 then return N.FALL_FREE end
   return N.FALL_FREE + math.max(0, h / m - N.FALL_KEEP) / N.FALL_PER_YD
 end

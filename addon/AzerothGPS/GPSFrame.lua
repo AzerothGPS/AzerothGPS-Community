@@ -6,6 +6,11 @@
 -- (asked 2026-11-10: "need to just be 2 duplicate instances of AzerothGPS drawings when opened"; the bottom of the
 -- file). The second has everything of its own (its window, layers, view and pools are this function's locals) and
 -- only shows: `G.clone`.
+-- And once more, when it's asked for, as a GPS map window of its own the player leaves open (a second monitor), Escape
+-- never closing it (Options > Map, "Extra map window"; Kooki3z 2026-11-20: "its literally just a duplicate GPS map
+-- window with actions in sync across them"): `G.extra`. It is a `G.clone` too (nothing of the game's own touched, none
+-- of the things done once: saving, events, Escape, the minimap), but it takes the mouse and is the map in full; its
+-- settings are the player's (written through) but for its own place, size, zoom and minimized logo.
 local function BuildMap(...)
 local _, ns = ...
 local L = ns.L or setmetatable({}, { __index = function(_, k) return k end }) -- (the game's language: Locales.lua)
@@ -15,6 +20,8 @@ local Geo = ns.Geo
 local G = {}
 ns.GPS = G
 G.clone = ns.isMapClone == true -- (the second map: nothing of the game's own touched, no mouse, no names)
+G.extra = G.clone and ns.mapCloneKind == "window" -- (the extra map window: a clone that takes the mouse; top of file)
+G.square = G.clone and not G.extra -- (the minimap square's clone: only shows)
 
 local TILE = Geo.TILE
 local MIN_ZOOM, MAX_ZOOM = 60, 2500
@@ -4100,7 +4107,7 @@ function G.SwimSegStays(sg)
 end
 -- A swim on the map at the cursor (within SWIM_HOVER_PX): its spot round G.markLayer's middle, or nil.
 function G.SwimAtCursor()
-  if G.clone or G.swimSegN == 0 or not (G.markLayer and GetCursorPosition) then return nil end
+  if G.square or G.swimSegN == 0 or not (G.markLayer and GetCursorPosition) then return nil end
   local mx, my = GetCursorPosition()
   local sc = G.markLayer:GetEffectiveScale()
   local lx, ly = G.markLayer:GetCenter()
@@ -7545,6 +7552,10 @@ end
 -- Asked for, or back: done now out of combat, else at PLAYER_REGEN_ENABLED (G.ApplySettings calls it first).
 function G.ApplyMinimapReplace()
   local m = G.mmState
+  if G.extra then -- (the extra map window: never the minimap; that's the first map's)
+    m.queued = nil
+    return
+  end
   if G.clone then -- (the second map: always the square, combat or not; nothing of the game's is taken for it)
     if not m.on then G.TakeMinimap() end
     m.queued = nil
@@ -7696,6 +7707,7 @@ end
 -- Never in combat: queued, and done as the map is then. True while it's taken.
 function G.SyncMinimap()
   local m = G.mmState
+  if G.extra then return false end -- (the extra map window: the game's Minimap is nothing of its own)
   if G.clone then
     if not m.applied then G.CaptureMinimap() end
     return true
@@ -7756,6 +7768,59 @@ function G.SetCloneActive(on)
     if not ok then G.LogError("second map", err) end
   end
 end
+-- The extra map window (Options > Map, `extraWindow`; Kooki3z 2026-11-20: "another option for someone to create an
+-- additional GPS map window they can leave open on (like on a second monitor) and esc key wouldn't close it"): the first
+-- map's side. Made the first time it's turned on, shown and hidden after (a frame is never let go of in the game).
+function G.ApplyExtraWindow()
+  if G.clone or G.extraMaking then return end
+  local want = S().extraWindow == true
+  local e = ns.extraMap
+  if want and not e and ns.MakeMapClone then
+    -- (at login the map starts before the stitched map's art is loaded (Core.lua's PLAYER_LOGIN): made a frame later,
+    -- once it is, so the extra window gets an engine of its own from the first one's chunks, as the square's does)
+    local A = ns.Atlas
+    if A and A.loaded == nil and ns.AtlasChunks ~= nil and C_Timer and C_Timer.After then
+      if not G.extraWaiting then
+        G.extraWaiting = true
+        C_Timer.After(0, function()
+          G.extraWaiting = nil
+          G.ApplySettings()
+        end)
+      end
+      return
+    end
+    G.extraMaking = true
+    local ok, made = pcall(ns.MakeMapClone, "window")
+    if ok and made then
+      local ok2, err = pcall(made.Init)
+      if ok2 then e = made else G.LogError("extra map window", err) end
+    elseif not ok then
+      G.LogError("extra map window", made)
+    end
+    G.extraMaking = nil
+    ns.extraMap = e
+  end
+  if e then e.extraOn = want end -- (G.ApplySettings' G.Mirror shows or hides it next)
+end
+-- The same done on the other map window (the first map's and the extra one's, both ways): what changes how the map
+-- looks, so "actions in sync across them". The route and stops are one already (ns.Nav).
+function G.Mirror(name, ...)
+  local other
+  if G.extra then
+    if not G.extraOn then return end
+    other = ns.realGPS
+  elseif not G.clone then
+    other = ns.extraMap
+  end
+  if not other or G.mirroring or other.mirroring or other.extraPutAway and not other.extraOn or not other[name] then
+    return
+  end
+  G.mirroring = true
+  local ok, err = pcall(other[name], ...)
+  G.mirroring = nil
+  if not ok then G.LogError("extra map window", err) end
+end
+
 function G.SetActive(on)
   if not G.clone or not frame then return end
   local real = ns.realGPS
@@ -8572,7 +8637,7 @@ end
 -- UI's scale (placed again: the minimap's size is in its own scale). Its button, the expanded window's clock and
 -- Escape (a stand-in in UISpecialFrames, shown while it's out: Escape takes it back to the square).
 function G.InitMinimapReplace()
-  if G.mmEvents then return end
+  if G.mmEvents or G.extra then return end -- (the extra map window: never the minimap)
   if G.clone then -- (the second map: its zoom's events only; the button, Escape and combat are the first one's)
     local zoomEv = CreateFrame("Frame")
     for _, e in ipairs({ "MINIMAP_UPDATE_ZOOM", "CVAR_UPDATE" }) do pcall(zoomEv.RegisterEvent, zoomEv, e) end
@@ -9538,6 +9603,7 @@ function G.Update()
   end
   if G.WatchQuickOn then G.WatchQuickOn() end
   local px, py, cont, pz = Geo.PlayerWorld()
+  if px then pcall(G.AutoFollowCheck, px, py, cont) end
   -- In a dungeon the game hides the player's position: its map still (the art, the usual way
   -- through, the bosses), without them on it and without a route from where they stand.
   local hidden
@@ -11247,11 +11313,19 @@ function G.ApplySettings()
   -- option: in that window while it's open, and no window of its own)
   local ownWin = not wmWanted or G.wmState.own -- (with the world map option: its own window only for a fight)
   frame:SetShown(host or (st.shown and not hidden and not st.minimized and ownWin and not G.MinimapAwayHidden()) or mmOn)
-  if G.clone then frame:SetShown(G.cloneActive == true) end -- (the second map: only while the first is away)
+  if G.square then frame:SetShown(G.cloneActive == true) end -- (the second map: only while the first is away)
   local mini = not mmOn and ownWin and st.shown and not hidden and st.minimized
+  if G.extra then -- (the extra map window: while its option's on, as a window of its own; minimized, its own logo)
+    local on = G.extraOn == true and not hidden
+    frame:SetShown(on and not st.minimized)
+    mini = on and st.minimized and true or false
+    G.extraPutAway = not G.extraOn or nil -- (turned off and hidden: nothing mirrored to it till it's on again)
+  end
   if mini then G.PlaceMiniIcon() end
   if G.miniIcon or mini then G.MiniIcon():SetShown(mini and true or false) end
   elapsed = 1 -- redraw now
+  G.ApplyExtraWindow()
+  G.Mirror("ApplySettings") -- (settings changed in one map window: the other one's too)
 end
 
 -- Whether the map's own fading while moving applies: its own window only, not the minimap square nor in the game's
@@ -11320,7 +11394,7 @@ G.clickThrough = false
 local CLICK_HOLD = 0.3 -- seconds after stopping before the map takes clicks again
 
 function G.ClickThroughWanted(st, moving, inCombat)
-  if G.clone then return true end -- (the second map only shows)
+  if G.square then return true end -- (the second map only shows; the extra map window is clicked as the first)
   if G.wmState.on then return false end -- (in the game's world map: that window's, always clicked; the arrow's own)
   return (st.clickThroughMoving and moving) or (st.clickThroughCombat and inCombat) and true or false
 end
@@ -11393,6 +11467,31 @@ function G.Follow()
   end
 end
 
+-- Following again when the player starts moving (Options > Map, Following and zooming, `followOnMove`; Kooki3z
+-- 2026-11-20: "add an option to auto follow on when you start moving again ... This just does the same as Back to Your
+-- Position"): the view panned or looked around (free) follows the player again (G.Follow) once they've moved
+-- FOLLOW_MOVE_YD from where they stood when it was last panned. Not while stops placed wait to be confirmed (Follow
+-- drops them), a route's tour plays, the world map's browsed, a road or wall is being drawn or the tools are on, nor
+-- mid-drag. Each pan sets where they stood again, so looking around while standing still keeps the view.
+G.FOLLOW_MOVE_YD = 4
+function G.AutoFollowCheck(px, py, cont)
+  if not (free and px and S().followOnMove) then
+    G.followAnchor = nil
+    return false
+  end
+  local a = G.followAnchor
+  if not a or a.free ~= free then -- (a new pan or look: from where the player stands now)
+    G.followAnchor = { free = free, x = px, y = py, cont = cont }
+    return false
+  end
+  if tour or browse or drag or G.lasso or #pending > 0 or G.roadMode or G.wallMode or G.drawMode then return false end
+  if a.cont ~= cont or (px - a.x) ^ 2 + (py - a.y) ^ 2 >= G.FOLLOW_MOVE_YD ^ 2 then
+    G.followAnchor = nil
+    G.Follow()
+    return true
+  end
+  return false
+end
 -- Another addon's view: centered on (x, y) of `cont`, north up, `zoom` yards from the middle to
 -- the edge (at least MIN_ZOOM; more than MAX_ZOOM too, as the Route Here tour's). "Back to your
 -- position" returns as usual.
@@ -14420,7 +14519,7 @@ end
 function G.NoteMapUse() G.toolsIdle = 0 end
 -- Each frame the map is up: `busy` a drag or a stroke under way. True when it turned them off.
 function G.ToolsIdleTick(dt, busy)
-  if G.clone then return false end
+  if G.square then return false end
   local on = G.ToolsOn()
   local onSig = table.concat(on, ",")
   if #on == 0 or busy or onSig ~= G.toolsSig or (ns.Record and ns.Record.rec) then
@@ -16229,7 +16328,11 @@ function G.IsFree() return free ~= nil end
 
 -- (every caller is something changing what's drawn, often outside the icons' signature — a pin made, a ride
 -- toggled off, a boss marked dead — so the kept tiles and icons are placed again too, not only sooner)
-function G.Redraw() G.drawVersion = G.drawVersion + 1 elapsed = 1 end
+function G.Redraw()
+  G.drawVersion = G.drawVersion + 1
+  elapsed = 1
+  G.Mirror("Redraw") -- (the extra map window too: actions in sync across them)
+end
 
 -- The player picks a map style (issue #75: the Map Style buttons, /agps style, Options > Map): not while a game holds
 -- the map (API.HoldMap: said so, false). Live, no reload, but the Seamless style picked when the stitched map wasn't
@@ -16795,7 +16898,8 @@ function G.InitRouteHere()
   if ns.TimeScript then ns.TimeScript(f, "OnEvent", "events (route here)") end
 end
 function G.InitPickRoute()
-  if G.pickEvents or not CreateFrame then return end
+  -- (the first map's alone: a second map's would route to the picked quest twice)
+  if G.pickEvents or G.clone or not CreateFrame then return end
   local f = CreateFrame("Frame")
   G.pickEvents = f
   pcall(f.RegisterEvent, f, "SUPER_TRACKING_CHANGED") -- (a client without it: no picks to follow)
@@ -17757,6 +17861,11 @@ function G.Init()
     end)
     if chrome.CloseButton then
       chrome.CloseButton:SetScript("OnClick", function()
+        if G.extra then -- (the extra map window: its option off; Options > Map brings it back where it was)
+          S().extraWindow = false
+          ns.realGPS.ApplySettings()
+          return
+        end
         if G.mmState and G.mmState.on then G.SetMinimapExpanded(false) return end -- (back to the minimap square)
         S().shown = false
         G.ApplySettings()
@@ -18146,8 +18255,22 @@ function G.Init()
   panel.none:Hide()
   box:SetScript("OnTextChanged", function()
     panel.idle = 0 -- typing keeps it open
+    panel.changes = (panel.changes or 0) + 1
     Refresh()
   end)
+  -- (the controller's on-screen keyboard, PadKeys.lua: its keys typed as the box's own, the results following; the
+  -- game's SetText runs OnTextChanged itself, a stand-in may not. Kooki3z 2026-11-20: "can we add a qwerty keyboard to
+  -- search for controller users?")
+  function G.SearchSetText(text)
+    local was = panel.changes
+    box:SetText(text)
+    if panel.changes == was then
+      local f = box:GetScript("OnTextChanged")
+      if f then f(box, true) end
+    end
+    if box.SetCursorPosition then box:SetCursorPosition(#text) end
+  end
+  function G.SearchCount() return #results end
   -- closes by itself after SEARCH_IDLE seconds without typing or the mouse over it
   panel:SetScript("OnShow", function(self) self.idle = 0 end)
   panel:SetScript("OnUpdate", function(self, dt)
@@ -18219,6 +18342,11 @@ function G.Init()
   search:SetScript("OnLeave", GameTooltip_Hide)
   G.searchButton, G.searchPanel = search, panel
   panel.box = box -- (the tutorial reads what's typed)
+  -- (the controller's legend and on-screen keyboard on it, PadKeys.lua's "target": Kooki3z 2026-11-20)
+  panel.PadCount, panel.PadArrow, panel.PadHighlight = G.SearchCount, G.SearchArrow, G.SetSearchHighlight
+  panel.PadPick, panel.PadSetText = G.SearchPick, G.SearchSetText
+  function panel.PadEnterList() if #results > 0 then G.SetSearchHighlight(#results) end end -- (the row nearest the keys)
+  function panel.PadClose() panel:Hide() end
   -- (Quick Search's key, G.QuickSearch: the panel open, empty, the box taking the keys)
   G.FocusSearch = function()
     if not panel:IsShown() then
@@ -19639,7 +19767,10 @@ function G.Init()
   -- with the arrow off too, nothing pumped — the first route never finished and the minimap's route froze
   -- (the 2026-10-07 idle profile). A bare frame, always shown, pumps whenever the map isn't; the arrow no
   -- longer does. HasWork false is a few millionths of a second a frame.)
+  -- (the extra map window: none of its own, nor its searches pumped in its OnUpdate. The first map's pump or OnUpdate
+  -- does them every frame; twice, a frame would get two slices of route work)
   local pump = CreateFrame("Frame", nil, UIParent)
+  if G.extra then pump:Hide() end
   pump:SetSize(1, 1)
   pump:SetPoint("TOPLEFT")
   -- (timed: ns.Timed, the work besides the searches; the map's OnUpdate too, besides its redraw, searches and fade)
@@ -19688,7 +19819,7 @@ function G.Init()
     -- changes (Nav.SearchDone) is a new route, which the next redraw at G.RedrawHz sees (ViewChanged). Forced at once,
     -- walking off a long off-road leg redrew the map every frame, a search done in each (the 1.1.5 test pass: 20% of a
     -- core zoomed in on a long dotted leg)
-    G.PumpSearches()
+    if not G.extra then G.PumpSearches() end
     G.UpdateApproach(dt)
     G.GlidePan() -- (the laid layers slide with the player every frame; redraws refresh their content)
     -- (every frame only while fading; settled, every G.SettledEvery(): issue #191, most of an idle map's frames)
@@ -20330,12 +20461,35 @@ BuildMap(addonName, addon)
 -- The second map (G.clone): the same code over a stand-in for the addon's table. Everything is read through to the
 -- real one; what it writes stays with it (the map's settings and saved data: never the player's), and its settings
 -- always say "the minimap square, shown, not in the world map".
-function addon.MakeMapClone()
+-- `kind` "window": the extra map window instead (G.extra, the top of the file). Its settings are the player's, written
+-- through (a map menu toggle in either window is the same setting), but for "a window of its own, shown, not the
+-- minimap, not in the world map" and its own place, size, zoom and minimized logo, saved under keys of their own
+-- (EXTRA_OWN; the first window's till it has its own: the first one's place a little down and right). Its saved data
+-- likewise, but for the view kept over a /reload (the first map's).
+local EXTRA_OWN = { point = "extraWindowPoint", size = "extraWindowSize", width = "extraWindowWidth",
+  zoom = "extraWindowZoom", minimized = "extraWindowMinimized", miniAt = "extraWindowMiniAt" }
+local EXTRA_OFFSET = 40 -- (its first place: the first window's, this much down and right)
+local function ExtraOwn(st, k)
+  local v = st[EXTRA_OWN[k]]
+  if v ~= nil or k == "minimized" or k == "miniAt" then return v end
+  v = st[k]
+  if k == "point" and type(v) == "table" then
+    return { v[1], v[2], v[3], (v[4] or 0) + EXTRA_OFFSET, (v[5] or 0) - EXTRA_OFFSET }
+  end
+  return v
+end
+function addon.MakeMapClone(kind)
   local real, NIL = addon, {}
+  local window = kind == "window"
   local over = { replaceMinimap = true, useWorldMap = false, shown = true, minimized = NIL, locked = true,
     style = "seamless", -- (the square: always the seamless map, G.SquareStyle)
     replaceMinimapCollapseOnMove = false, replaceMinimapCollapseOnCombat = false }
+  if window then
+    over = { replaceMinimap = false, useWorldMap = false, shown = true, navPanelDetached = false,
+      replaceMinimapCollapseOnMove = false, replaceMinimapCollapseOnCombat = false }
+  end
   local own = {}
+  local function Real() return real.settings and real.settings.gps end
   local gps = setmetatable({}, {
     __index = function(_, k)
       local v = own[k]
@@ -20344,10 +20498,18 @@ function addon.MakeMapClone()
         if v == NIL then return nil end
         return v
       end
-      local st = real.settings and real.settings.gps
+      local st = Real()
+      if window and st and EXTRA_OWN[k] then return ExtraOwn(st, k) end
       return st and st[k]
     end,
-    __newindex = function(_, k, v) own[k] = v == nil and NIL or v end,
+    __newindex = function(_, k, v)
+      local st = Real()
+      if window and st and over[k] == nil then -- (the extra window: the player's settings, but its own place's keys)
+        st[EXTRA_OWN[k] or k] = v
+        return
+      end
+      own[k] = v == nil and NIL or v
+    end,
   })
   local settings = setmetatable({}, { __index = function(_, k)
     if k == "gps" then return gps end
@@ -20358,12 +20520,19 @@ function addon.MakeMapClone()
     __index = function(_, k)
       local v = dbOwn[k]
       if v ~= nil then return v end
+      if window and k == "mapView" then return nil end
       return real.db and real.db[k]
     end,
-    __newindex = function(_, k, v) dbOwn[k] = v end,
+    __newindex = function(_, k, v)
+      if window and k ~= "mapView" and real.db then
+        real.db[k] = v
+        return
+      end
+      dbOwn[k] = v
+    end,
   })
-  local proxy = setmetatable({ isMapClone = true, settings = settings, db = db, realGPS = real.GPS,
-    realAtlas = real.Atlas }, { __index = real })
+  local proxy = setmetatable({ isMapClone = true, mapCloneKind = window and "window" or "square", settings = settings,
+    db = db, realGPS = real.GPS, realAtlas = real.Atlas }, { __index = real })
   -- (the stitched map's art has one place on one map: the second map gets an engine and art of its own, Atlas.lua)
   if real.Atlas and real.MakeAtlasClone then
     local ok, made = pcall(real.MakeAtlasClone, proxy)

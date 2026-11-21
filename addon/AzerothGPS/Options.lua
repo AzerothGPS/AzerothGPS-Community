@@ -272,15 +272,18 @@ O.LANGUAGES = { { "enUS", "English" }, { "deDE", "Deutsch" }, { "esES", "Espa\19
   { "esMX", "Espa\195\177ol (Latinoam\195\169rica)" }, { "frFR", "Fran\195\167ais" }, { "itIT", "Italiano" },
   { "koKR", "Korean (koKR)" }, { "ptBR", "Portugu\195\170s (Brasil)" }, { "ruRU", "Russian (ruRU)" },
   { "zhCN", "Chinese, Simplified (zhCN)" }, { "zhTW", "Chinese, Traditional (zhTW)" } }
--- Options > Help's "What's new" (the changelog's 1.2.0 section, in short)
-O.WHATS_NEW = { -- (the biggest of 1.3.0-1.3.10, 2026-11-19; 1.2.0's six lines before)
-  L["- A one-time setup picks your minimap, where the map opens and the icons' size: Run Setup Again below, or /agps setup."],
-  L["- Controller support: the map, its menu and Options work from a controller (Options > Controller)."],
-  L["- Search finds every NPC of your faction by name, title or service (repair, innkeeper, trainer), in your game's language."],
-  L["- Zoomed in, hover a building or cave to see its inside map, with the NPCs who offer something there."],
-  L["- The route panel can be narrower, sit left or right, or be detached into a window of its own (Options > Map window)."],
-  L["- Swims show as a wavy line on the route: right-click one to go round by land (Options > Routing > Allow swimming)."],
-  L["- Find Herbs and Ore lists what your skill can gather, and takes in GatherMate2's herbs and mines."],
+-- Options > Help's "What's new": the release it's for, and its biggest changes in short. Part of every release's
+-- prep, like the toc's version (Kooki3z 2026-11-20: "part of release prep like how we update the version number in
+-- the addon in game should be the What's New section in help"): test_options checks it's never older than the toc,
+-- release.yml that it's the tag's.
+O.WHATS_NEW_VERSION = "1.3.12"
+O.WHATS_NEW = {
+  L["- No Map style: our route and icons over the world map, or over OpenMap's (Options > Map)."],
+  L["- An extra GPS map window you can keep open, on a second monitor too (Options > Map)."],
+  L["- Routes keep off cliffs and take safe jumps down ledges."],
+  L["- The route is shaded by slope, and near your stop the directions say how far above or below you it is."],
+  L["- Controller: an on-screen keyboard for Search Places and the Options search; the D-pad picks results."],
+  L["- Record: pick the road type you're walking (Ground, Floor, Bridge, Stairs, Lift); heights come from the map."],
 }
 -- A page's old id, still asked for by other code and addons (API.ShowOptions): the page it's on now.
 O.PAGE_ALIASES = { ["Help improve"] = "Help" }
@@ -1865,6 +1868,11 @@ local function BuildWindow()
   check(L["Escape closes the map"], L["In the game's world map, Escape closes it with the GPS map, as the game's own map does. Off: Escape leaves it open; close it with its key or button. In combat, Escape always closes it. The GPS map in its own window never closes on Escape."],
     function() return GPS().escClosesMap ~= false end, function(v) GPS().escClosesMap = v and true or false end,
     function() return GPS().useWorldMap == true end, INDENT)
+  -- (Kooki3z 2026-11-20: "another option for someone to create an additional GPS window they can leave open on (like on
+  -- a second monitor) and esc key wouldn't close it": GPSFrame's G.extra; whatever "Escape closes the map" says)
+  Key("extraWindow")
+  check(L["Extra map window"], L["A second GPS map window you can leave open, on a second monitor for one. Escape never closes it. Route from either window: the route, stops and settings are the same in both; its place, size and zoom are its own. Double-click its logo to minimize it."],
+    function() return GPS().extraWindow == true end, function(v) GPS().extraWindow = v and true or false end)
   O.worldMapPictures = pictures({ "window", L["GPS map window"] }, { "worldMap", L["In the world map"] },
     function() return GPS().useWorldMap == true end, function(v) GPS().useWorldMap = v and true or false end,
     function() return not (ns.GPS and ns.GPS.ControllerUI and ns.GPS.ControllerUI()) end)
@@ -1925,6 +1933,10 @@ local function BuildWindow()
   Key("reopenFollow")
   check(L["Reopen following me"], L["With a route set: if you hid the map while looking around it (dragged or zoomed out to the world map), it opens again centered on you, following your position. Off: it opens where you left it (the button at the bottom right brings it back to you)."],
     function() return GPS().reopenFollow end, function(v) GPS().reopenFollow = v end)
+  -- (asked 2026-11-20: "add an option to auto follow on when you start moving again")
+  Key("followOnMove")
+  check(L["Follow me again when I move"], L["After you pan or look around the map, it goes back to following you as soon as you start moving, as Back to Your Position does. Not while stops you placed wait to be confirmed, or while drawing roads or walls."],
+    function() return GPS().followOnMove == true end, function(v) GPS().followOnMove = v end)
   Key("terrainZoomOut")
   check(L["Right-click opens the world map"], L["In the OpenMap style, right-click zooms out a few steps on the same spot (each right-click a few more, up to the whole world). In the Terrain style, it shows Azeroth: click a continent, then a spot on it, to come back to the terrain view there. Right-click again goes back."],
     function() return GPS().terrainZoomOut ~= false end, function(v) GPS().terrainZoomOut = v end)
@@ -3117,7 +3129,7 @@ local function BuildWindow()
   -- rest, one frame hung under the host so sections can come, go and change height: LayoutHelp).
   Page(L["Help"], nil, "Help")
   pinfo.whole = true
-  header(L["What's new in 1.3"])
+  header(string.format(L["What's new in %s"], O.WHATS_NEW_VERSION))
   for _, line in ipairs(O.WHATS_NEW) do note(line) end
   help.page, help.top = page, col.y
   page.agpsOwnHeight = true -- (LayoutHelp sets it, not FinishPage)
@@ -3628,6 +3640,7 @@ local function BuildWindow()
     box:SetPoint("TOPRIGHT", f, "TOPRIGHT", -14, -32)
     if box.SetAutoFocus then box:SetAutoFocus(false) end
     local function Changed(self)
+      search.changes = (search.changes or 0) + 1 -- (seen run: the controller's keyboard, PadOptions' PO.KeysTarget)
       local ok, err = pcall(O.Search, self:GetText())
       if not ok and ns.Print then ns.Print(tostring(err)) end
     end

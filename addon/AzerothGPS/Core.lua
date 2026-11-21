@@ -18,6 +18,10 @@ ns.DEFAULTS = {
     replaceMinimap = false, -- the GPS map as the game's minimap (1.2.0, asked 2026-11-08; GPSFrame's G.MinimapMode)
     useWorldMap = false, -- the GPS map in the game's world map window, not one of its own (1.2.0, asked 2026-11-10)
     escClosesMap = true, -- Escape closes the world map with the GPS map in it, as the game's own does (off: asked 2026-11-20)
+    -- an extra GPS map window, left open, Escape never closing it (Kooki3z 2026-11-20; GPSFrame's G.extra); its own
+    -- place, size, zoom and minimized logo: extraWindowPoint, extraWindowSize, extraWindowWidth, extraWindowZoom,
+    -- extraWindowMinimized, extraWindowMiniAt (none till it's moved: the first window's)
+    extraWindow = false,
     replaceMinimapKeepSquare = true, -- the square kept as it is while the map is grown out of it, both shown (asked
     -- 2026-11-15; off: the game's minimap given back meanwhile; GPSFrame's G.SquareKeptOut)
     replaceMinimapIdle = 5, -- s of quiet before the map grown out of the square goes back (0: never; asked 2026-11-11)
@@ -106,6 +110,7 @@ ns.DEFAULTS = {
     navPanelLocked = false, -- (detached: no dragging, sizing or right-click back to the map)
     navPanelWrap = false, -- (detached and sized: long lines wrap instead of being cut short)
     reopenFollow = false, -- hidden while looking around the map (a route set): reopens on the player
+    followOnMove = false, -- the map panned away follows the player again once they start moving (asked 2026-11-20)
     questing = true, -- a stop in a quest area is done when the quest's objectives are
     questZoneOnly = false, -- the quest route: only the quests in the zone you're in
     questTrackedOnly = false, -- the quest route: only the quests you track (Questie's tracker's, else the game's; Layers.QuestTracked)

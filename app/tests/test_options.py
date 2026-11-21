@@ -33,7 +33,7 @@ replaceMinimapCollapseOnCombat replaceMinimapSize windowTint windowButtons windo
 charmSwing devTools recordHint pinning copyRoads copyWalls copyRoutes copyPins""".split()
 # (askToSave, "Remind me to save": removed with the map's Save and Dismiss buttons, asked 2026-11-17)
 # Settings that were a slash command only (or the Quick buttons page's "On" column only) and have a control now.
-NEW = ["arrowEase", "allowSwim", "mapEditIdle", "language", "layerCity", "showRoads", "showWalls", "useWorldMap", "escClosesMap", "replaceMinimapIdle", "questAutoReroute", "quietChat",
+NEW = ["extraWindow", "followOnMove", "arrowEase", "allowSwim", "mapEditIdle", "language", "layerCity", "showRoads", "showWalls", "useWorldMap", "escClosesMap", "replaceMinimapIdle", "questAutoReroute", "quietChat",
        "questPickRoute", "seamTerrainYd", "seamContinentAt", "seamWorldAt", "seamTerrainBlend",
        "seamContinentBlend", "seamWorldBlend", "interiorZoomYd", "roundIcons", "interiorHoldSec", "iconSize",
        # (asked 2026-11-14: how far out each kind of icon shows, GPSFrame's G.IconShown)
@@ -62,8 +62,8 @@ HOME = {
     "Controller": "padControl padLegend",
     # (asked 2026-11-10: "4 different map pages... maybe reduce to 2": the map itself, its icons, and its window)
     "Map": "style seamExploredOnly seamTerrainYd seamTerrainBlend seamContinentAt seamContinentBlend seamWorldAt "
-           "seamWorldBlend interiorZoomYd interiorHoldSec routeColor routeSlopeShade rotate approachZoom reopenFollow terrainZoomOut interiors "
-           "useWorldMap escClosesMap",
+           "seamWorldBlend interiorZoomYd interiorHoldSec routeColor routeSlopeShade rotate approachZoom reopenFollow followOnMove terrainZoomOut interiors "
+           "useWorldMap escClosesMap extraWindow",
     # (2026-11-19: a Minimap page again, the GPS map in its place and the game's own)
     "Minimap": "replaceMinimap replaceMinimapSize replaceMinimapCollapseOnMove replaceMinimapCollapseOnCombat "
                "replaceMinimapIdle replaceMinimapKeepSquare replaceMinimapRoute replaceMinimapResume "
@@ -306,7 +306,7 @@ def test_the_help_page_has_the_news_the_links_and_what_help_improve_had(game):
     O = ns.Options
     ws = lua.eval("AGPS_WIDGETS")
     texts = [str(w._text) for w in ws.values() if w._text]
-    for label in ("What's new in 1.3", "Commands and links", "Show Commands", "Help improve AzerothGPS",
+    for label in ("What's new in " + str(O.WHATS_NEW_VERSION), "Commands and links", "Show Commands", "Help improve AzerothGPS",
                   "How to share...", "Copy Map Data...", "What Copy Map Data... includes", "Thanks"):
         assert label in texts, label
     news = [str(line) for line in O.WHATS_NEW.values()]
@@ -922,3 +922,20 @@ def test_icon_size_is_a_dropdown_again(game):
     assert getattr(ns.Options, "iconSizeRow", None) is None
     src = (ADDON / "Options.lua").read_text(encoding="utf-8")
     assert 'Dropdown(L["Icon size"]' in src
+
+
+def test_whats_new_is_for_this_release_or_the_next(game):
+    """Help's What's new is part of release prep, like the toc's version (Kooki3z 2026-11-20: "part of release prep
+    like how we update the version number in the addon in game should be the What's New section in help"): never
+    older than the toc (release.yml also wants it to be the tag's)."""
+    import re
+    from pathlib import Path
+    lua, ns = game
+    toc = Path(__file__).resolve().parents[2] / "addon" / "AzerothGPS" / "AzerothGPS.toc"
+    have = re.search(r"^## Version:\s*(\S+)", toc.read_text(encoding="utf-8"), re.M).group(1)
+    news = str(ns.Options.WHATS_NEW_VERSION)
+
+    def key(v):
+        return tuple(int(p) for p in v.split("."))
+    assert key(news) >= key(have), f"Options' What's new is for {news}, the toc says {have}: update O.WHATS_NEW"
+    assert len(list(ns.Options.WHATS_NEW.values())) >= 3
