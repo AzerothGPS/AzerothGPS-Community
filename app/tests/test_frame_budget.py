@@ -498,12 +498,83 @@ def test_sort_by_first_orders_as_the_games_table_sort():
 # slower than here, the stutter watch counted them, and Routing was paused ("perf"): no route at all. Here the
 # pump's clock runs LIVE_SLOWER times the CPU's, standing in for the live client: the loops pause by that clock, a slice
 # of route work stays under STUTTER_MS, and the road data built once isn't counted at all)
+# LIVE_SLOWER times a reference PC's, not this one's (issue #849: by this CPU's own wall clock every bound hung on the
+# machine, and the CI runner, 2-3x slower and busy with the suite, failed by turns). The clock counts this thread's own
+# CPU time (`_thread_ms`: the other processes' turns on the CPU aren't the client's work, and multiplied by 8 one was
+# a 180 ms slice), and its factor is LIVE_SLOWER * SLOW_REF_MS / a fixed Lua workload's time (`_SLOW_WORK`, the best
+# of SLOW_TIMINGS before the frames): a slower CPU gets a smaller factor, so the modeled client does as much a frame
+# anywhere. SLOW_REF_MS is that best on the dev PC the 8x was tuned on, quiet, by that clock (2026-11-21: 3.3 to 3.4 ms; later in the
+# run the timings spread to 7 ms, so the best of those before, not their median, or one taken again on the way)
 LIVE_SLOWER = 8
+SLOW_REF_MS = 3.4
+SLOW_TIMINGS = 9
+# (it makes no garbage: what it left would be the collector's work inside the route's slices, 476 ms ones)
+_SLOW_WORK = """(function()
+  local t, sqrt = {}, math.sqrt
+  for i = 1, 1000 do t[i] = { i, 0, x = 0 } end
+  local function step(p, i) p[2] = (p[2] + i * 7919) % 1000; p.x = p.x * 0.5 + sqrt(p[2]) end
+  return function(n)
+    local s = 0
+    for r = 1, n do
+      for i = 1, 1000 do
+        local p = t[i]
+        step(p, r)
+        if p[2] < 500 then s = s + p.x else s = s - p[1] end
+      end
+    end
+    return s
+  end
+end)()"""
+
+
+def _thread_ms():
+    """A clock of this thread's own CPU time, in ms. Linux (the CI runner): time.thread_time. Windows' is only as fine
+    as the 15.6 ms tick, so there the thread's cycles (QueryThreadCycleTime), at the fastest rate a few spins see."""
+    import sys
+    import time
+
+    if sys.platform != "win32":
+        return lambda: time.thread_time() * 1000.0
+    import ctypes
+
+    k32 = ctypes.windll.kernel32
+    k32.GetCurrentThread.restype = ctypes.c_void_p
+    k32.QueryThreadCycleTime.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_ulonglong)]
+    h, c = k32.GetCurrentThread(), ctypes.c_ulonglong()
+
+    def cycles():
+        k32.QueryThreadCycleTime(h, ctypes.byref(c))
+        return c.value
+
+    rate = 0.0
+    for _ in range(5):
+        c0, t0 = cycles(), time.perf_counter()
+        while time.perf_counter() - t0 < 0.02:
+            pass
+        rate = max(rate, (cycles() - c0) / (time.perf_counter() - t0))
+    return lambda: cycles() * 1000.0 / rate
+
+
+class _SlowClock:
+    """The pump's clock as a slow client's: the frames' own time plus our work in them at `k` times this thread's CPU
+    time, `k` set so the work goes at LIVE_SLOWER times the reference PC's speed (issue #849)."""
+
+    def __init__(self, lua):
+        self.lua, self.cpu = lua, _thread_ms()
+        work = lua.eval(_SLOW_WORK)
+        self.timings = []
+        for _ in range(SLOW_TIMINGS):
+            c = self.cpu()
+            work(40)
+            self.timings.append(self.cpu() - c)
+        self.k = LIVE_SLOWER * SLOW_REF_MS / min(self.timings)
+        self.seg = self.cpu()
+
+    def __call__(self):
+        return float(self.lua.eval("AGPS_T")) * 1000.0 + (self.cpu() - self.seg) * self.k
 
 
 def test_route_work_on_a_slow_client_stays_in_its_slices_and_never_pauses_routing():
-    import time
-
     pytest.importorskip("lupa.lua51")
     from azerothgps.gameharness import start
 
@@ -512,9 +583,9 @@ def test_route_work_on_a_slow_client_stays_in_its_slices_and_never_pauses_routin
     lua.execute('UnitFactionGroup = function() return "Alliance", "Alliance" end; AGPS_LEVEL = 12')
     ns.CharDB().faction = "Alliance"
     lua.execute("AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = -3700.0, -900.0, 0")
-    c0 = time.perf_counter()
     # (the frames' own time, and our work in them as the slow client's)
-    lua.globals().debugprofilestop = lambda: float(lua.eval("AGPS_T")) * 1000.0 + (time.perf_counter() - c0) * 1000.0 * LIVE_SLOWER
+    clock = _SlowClock(lua)
+    lua.globals().debugprofilestop = clock
     R.Reset()  # (nothing built: as after a .go onto the continent)
     R.WARM, R.SYNC_WALKS = True, False
     N.STUTTER_WATCH = True
@@ -546,10 +617,10 @@ def test_route_work_on_a_slow_client_stays_in_its_slices_and_never_pauses_routin
     frame = lua.eval("AGPS_FRAME")
     try:
         N.SetStops(lua.eval("{ { x = -1650, y = -1900, cont = 0, name = 'bay' } }"), False, "red")
-        # (until the route, and half a minute on; within 10 minutes. The slices' work goes by this CPU's clock, so a
-        # slower one gets less done a frame: the route came 85 s in here, past 120 s on the CI runner, PR #846)
+        # (until the route, and half a minute on; within 10 minutes. By this CPU's own clock a slower one got less done
+        # a frame: the route came 85 s in on a dev PC, past 120 s on the CI runner, PR #846)
         fps, t, left = 30, float(lua.eval("AGPS_T")), None
-        for _ in range(fps * 600):
+        for i in range(fps * 600):
             t += 1 / fps
             lua.execute(f"AGPS_T = {t}")
             frame(1 / fps)
@@ -560,15 +631,17 @@ def test_route_work_on_a_slow_client_stays_in_its_slices_and_never_pauses_routin
                 if left <= 0:
                     break
         s = lua.eval("AGPS_SLICES")
-        assert not N.paused, f"routing paused ({N.paused}); the worst slice counted ran {s.counted:.0f} ms"
-        assert not N.degraded
-        assert N.route
+        seen = f"frame {i}, clock {clock.k:.1f}x this CPU's (the workload {min(clock.timings):.1f}-{max(clock.timings):.1f} ms)"
+        print(seen, f"worst {s.worst:.1f} ms, counted {s.counted:.1f} ms")
+        assert not N.paused, f"routing paused ({N.paused}); the worst slice counted ran {s.counted:.0f} ms; {seen}"
+        assert not N.degraded, seen
+        assert N.route, seen
         assert s.built > 0 and R.GraphReady(0)  # (the roads were built in a route's job, in slices)
-        assert s.counted < N.STUTTER_MS, f"a slice of route work ran {s.counted:.0f} ms"
+        assert s.counted < N.STUTTER_MS, f"a slice of route work ran {s.counted:.0f} ms; {seen}"
         # (the road data's too, though not counted: 117 ms before. 3x: the clock here runs the garbage collector's steps
         # 8x too, and those no pause splits; on the CI runner, about 3x slower than a dev PC, a table.sort Bridges did in
         # one go made a 74 ms slice and failed 2x: Router.SortByFirst. 14-21 ms here since)
-        assert s.worst < 3 * N.STUTTER_MS, f"a slice ran {s.worst:.0f} ms"
+        assert s.worst < 3 * N.STUTTER_MS, f"a slice ran {s.worst:.0f} ms; {seen}"
     finally:
         N.STUTTER_WATCH, N.STUTTER_RESUME_GRACE = False, grace
         R.WARM, R.SYNC_WALKS = False, True
