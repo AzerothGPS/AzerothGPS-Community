@@ -649,3 +649,59 @@ def test_a_stop_in_the_bay_is_swum_to_straight_from_the_marsh(game, trip):
     assert N.noSwim and gone.walkYards > 4000 and gone.swimYards < r.swimYards / 3, (gone.walkYards, gone.swimYards)
 
 
+def _queued(lua):
+    """How many jobs the Router's background queue holds (its `walkJobs`)."""
+    return int(lua.eval("""(function()
+      local i = 1
+      while true do
+        local n, v = debug.getupvalue(AGPS_NS.Router.Pump, i)
+        if not n then return -1 end
+        if n == "walkJobs" then return #v end
+        i = i + 1
+      end
+    end)()"""))
+
+
+def test_in_game_the_swim_lands_once_its_walk_is_in_not_after_the_ride_checks_walks(game):
+    # (#742: QA saw #719's trip still 5.4k yd round by Thandol Span in game. The route there is worked out in the
+    # background: provisional by the roads while the walk straight there is searched; once that walk was in, the
+    # route's recalculation was queued behind the ride check's 80 walk searches, and landed half a minute later)
+    lua, ns = game
+    N, st, R, G = ns.Nav, ns.settings.gps, ns.Router, ns.GPS
+    cdb = ns.CharDB()
+    saved = (cdb.faction, st.allowSwim, st.zoom, st.fastestOrder)
+    lua.execute("AGPS_LEVEL = 60")
+    st.allowSwim, st.zoom, st.fastestOrder = True, 600, False
+    cdb.faction = "Horde"
+    try:
+        N.Clear()
+        R.Reset()
+        lua.execute(f"AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = {WEST_MARSH[0]}, {WEST_MARSH[1]}, 0")
+        R.WARM, R.SYNC_WALKS = True, False
+        N.SetStops(lua.eval(f"{{ {{ x = {BAY_STOP[0]}, y = {BAY_STOP[1]}, cont = 0, name = 'stop' }} }}"), False, "red")
+        t = float(lua.eval("AGPS_T")) + 10
+        provisional, landed = None, None
+        for _ in range(6000):
+            t += 0.05
+            lua.execute(f"AGPS_T = {t}")
+            G.Update()
+            G.PumpSearches()  # (as the map's OnUpdate does: N.SearchDone when a search is in)
+            r = N.route
+            if r and r.pending and provisional is None:
+                provisional = r.walkYards
+            if r and not r.pending and r.swimYards > 1500:
+                landed = (r.walkYards, r.swimYards, _queued(lua))
+                break
+            if not R.HasWork() and r and not r.pending:
+                break
+        assert provisional and provisional > 4000, provisional  # (by the roads while the walk is searched)
+        assert landed and landed[0] < 2600, (N.route.walkYards, N.route.swimYards)
+        assert landed[2] >= 20, landed  # (the ride check's walks still queued: not waited for)
+    finally:
+        R.WARM, R.SYNC_WALKS = False, True
+        R.Reset()
+        lua.execute("AGPS_LEVEL = nil")
+        cdb.faction, st.allowSwim, st.zoom, st.fastestOrder = saved
+        N.Clear()
+        lua.execute("AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = 2254.0, 293.0, 0 AGPS_T = AGPS_T + 1")
+        G.Follow()

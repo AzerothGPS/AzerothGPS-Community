@@ -4123,6 +4123,10 @@ function N.Route(px, py, cont)
   local long = old and old.fullFirst and old.cum and (old.cum[#old.cum] - (old.consumed or 0)) >= N.REJOIN_MIN_YD
   if ns.Router.WARM and not ns.Router.SYNC_WALKS then -- (as in game; tests: at once)
     local off = old and not Follow(old, px, py)
+    -- (a provisional route's recalculation, a search it waited on done, first in the queue too: behind the ride check's
+    -- walks, 80 of them from the Wetlands' western marsh, the swim to the bay below Stromgarde landed half a minute
+    -- after its walk, the 5.4k yd road round by Thandol Span shown meanwhile, issue #742)
+    local first = off or (old and old.pending) or false
     if old and N.route == nil then
       -- (still on it, the route dropped for a finished search's recalculation: shown meanwhile, not
       -- "Working out the route..." with no route every few seconds while riding past searched ground)
@@ -4138,7 +4142,7 @@ function N.Route(px, py, cont)
       local cur = N.route or kept
       if cur and not (cur.version == version and cur.cont == res.cont) then cur = nil end
       Apply(res, cur, N.playerX or px, N.playerY or py, res.cont, offroad, GetTime(), true)
-    end, off)
+    end, first)
     if off then
       hurried = { key }
       if long then
