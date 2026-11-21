@@ -410,7 +410,8 @@ function R.JoinOnto(nodes, edges, nRoads, base, joins)
     return dx * dx + dy * dy, ax + vx * t, ay + vy * t
   end
   for ei = 1, nRoads do
-    if ei % 200 == 0 then
+    -- (and past the end of R.Pump's slice, R.SliceOver: a road's many points against crowded buckets)
+    if ei % 200 == 0 or (ei % 8 == 0 and R.SliceOver and R.SliceOver()) then
       local co, main = coroutine.running()
       if co and not main then coroutine.yield() end
     end
@@ -435,6 +436,8 @@ function R.JoinOnto(nodes, edges, nRoads, base, joins)
     if i % every == 0 then
       local co, main = coroutine.running()
       if co and not main then coroutine.yield() end
+    elseif every <= 50 and R.SliceOver and R.SliceOver() then -- (each join splits a road: by the clock too)
+      coroutine.yield()
     end
   end
   local index = {}
@@ -1449,10 +1452,83 @@ local function CanYield()
   local co, main = coroutine.running()
   return co ~= nil and not main
 end
-local function Breathe(i, every)
-  if i % every == 0 and CanYield() then coroutine.yield() end
+-- (and by the clock, issue #841: R.Pump's slice's end, `slice`; a loop's steps can cost far more than its `every`
+-- guessed (Bridges' 40 nodes in a city's crowded buckets were 13 ms here, 88 ms live, and the stutter watch paused
+-- routing): the clock is looked at every `every` / BREATHE_CLOCK_SHARE steps, and past the slice's end it pauses then)
+R.BREATHE_CLOCK_SHARE = 40
+R.CLOCK_PAUSES = true -- (off: by the counts alone, as before; tests that count the work by its pauses, or by clock calls)
+local slice = {} -- { stop = ms, now = fn } while R.Pump runs a job
+local function SliceOver()
+  local stop = slice.stop
+  return stop ~= nil and slice.now() >= stop
 end
+local function Breathe(i, every)
+  if i % every == 0 then
+    if CanYield() then coroutine.yield() end
+    return
+  end
+  if slice.stop then
+    local step = every > R.BREATHE_CLOCK_SHARE and math.floor(every / R.BREATHE_CLOCK_SHARE) or 1
+    if i % step == 0 and SliceOver() and CanYield() then coroutine.yield() end
+  end
+end
+-- By the clock alone, every `step` calls: no pause unless the slice has run out (loops whose pauses by a count would
+-- change how often a job is resumed, which some tests count).
+local function BreatheIfOver(i, step)
+  if slice.stop and i % step == 0 and SliceOver() and CanYield() then coroutine.yield() end
+end
+-- Whether a slice of the background work (R.Pump's) has run past its end: loops elsewhere that yield by a count of
+-- their own (Passability's searches) pause at once then too.
+function R.SliceOver() return SliceOver() and CanYield() end
 R.KEEP_BREATHE = 1000 -- (the road network's copies: values copied between pauses)
+
+-- table.sort(t, function(x, y) return x[1] < y[1] end), pausing by the clock (BreatheIfOver) in a background job: a
+-- sort can't pause, and Bridges' 3,600 pairs were 1.8 ms here in one go, the slow-client test's worst slice on the CI
+-- runner (issue #841). Lua 5.1's own sort (ltablib.c's auxsort) step for step, so the order, ties too, is the
+-- game's table.sort's and routes don't change.
+R.SORT_BREATHE = 64 -- (comparisons between looks at the clock)
+function R.SortByFirst(t)
+  local n = 0
+  local function lt(a, b)
+    n = n + 1
+    BreatheIfOver(n, R.SORT_BREATHE)
+    return a[1] < b[1]
+  end
+  local function aux(l, u)
+    while l < u do
+      if lt(t[u], t[l]) then t[l], t[u] = t[u], t[l] end
+      if u - l == 1 then break end
+      local i = math.floor((l + u) / 2)
+      if lt(t[i], t[l]) then
+        t[i], t[l] = t[l], t[i]
+      elseif lt(t[u], t[i]) then
+        t[i], t[u] = t[u], t[i]
+      end
+      if u - l == 2 then break end
+      local p = t[i]
+      t[i], t[u - 1] = t[u - 1], p
+      local j
+      i, j = l, u - 1
+      while true do
+        i = i + 1
+        while lt(t[i], p) do i = i + 1 end
+        j = j - 1
+        while lt(p, t[j]) do j = j - 1 end
+        if j < i then break end
+        t[i], t[j] = t[j], t[i]
+      end
+      t[u - 1], t[i] = t[i], t[u - 1]
+      if i - l < u - i then
+        j, i, l = l, i - 1, i + 1
+      else
+        j, i, u = i + 1, u, i - 1
+      end
+      aux(j, i)
+    end
+  end
+  aux(1, #t)
+  return t
+end
 
 -- Links between pieces, so a route can go on along roads instead of giving up: the
 -- closest node pair between pieces, Kruskal style until every piece is joined, plus every
@@ -1580,10 +1656,13 @@ local function Bridges(nodes, adj, short, nearOverlay, skip, zs, nz)
     end
   end
   local pairsByDist = {}
+  local tick = 0 -- (the loops below, a pause now and then: Breathe by the clock)
   for lo, row in pairs(best) do
+    tick = tick + 1
+    Breathe(tick, 2000)
     for hi, p in pairs(row) do pairsByDist[#pairsByDist + 1] = { math.sqrt(p[1]), p[2], p[3], lo, hi } end
   end
-  table.sort(pairsByDist, function(x, y) return x[1] < y[1] end)
+  R.SortByFirst(pairsByDist)
   local joined = {}
   local function jfind(a)
     while joined[a] and joined[a] ~= a do a = joined[a] end
@@ -1601,11 +1680,15 @@ local function Bridges(nodes, adj, short, nearOverlay, skip, zs, nz)
       kept[math.min(p[2], p[3]) * 1048576 + math.max(p[2], p[3])] = true
     end
   end
-  for _, p in ipairs(pairsByDist) do join(p) end
+  for i, p in ipairs(pairsByDist) do
+    Breathe(i, 2000)
+    join(p)
+  end
   -- groups of pieces still apart (farther than the buckets reach): joined by their closest
   -- pair among up to BRIDGE_SAMPLE of each group's nodes
   local groups, order = {}, {}
-  for _, n in ipairs(list) do
+  for i, n in ipairs(list) do
+    Breathe(i, 2000)
     if not shortOnly[n] then
       local gr = jfind(piece[n])
       if not groups[gr] then
@@ -1622,6 +1705,7 @@ local function Bridges(nodes, adj, short, nearOverlay, skip, zs, nz)
     -- city don't renumber another's sample, and its far links, across the continent)
     local samples = {}
     for gi, gr in ipairs(order) do
+      BreatheIfOver(gi, 1)
       local g = groups[gr]
       local x0, x1, y0, y1 = math.huge, -math.huge, math.huge, -math.huge
       for _, n in ipairs(g) do
@@ -1674,7 +1758,7 @@ local function Bridges(nodes, adj, short, nearOverlay, skip, zs, nz)
         end
       end
     end
-    table.sort(far, function(x, y) return x[1] < y[1] end)
+    R.SortByFirst(far)
     for _, p in ipairs(far) do join(p) end
     -- (and each group's nearest few such links whether they join anything or not: with the one joining link alone,
     -- a group whose nearest neighbor lies over a cliff had only that way in. Un'Goro's roads were joined to
@@ -1700,9 +1784,10 @@ local function Bridges(nodes, adj, short, nearOverlay, skip, zs, nz)
     end
   end
   -- the nearest few short links per node (and every joining one)
-  table.sort(links, function(x, y) return x[1] < y[1] end)
+  R.SortByFirst(links)
   local out, count = {}, {}
-  for _, l in ipairs(links) do
+  for i, l in ipairs(links) do
+    Breathe(i, 2000)
     local d, a, b = l[1], l[2], l[3]
     if l.keep or (not kept[math.min(a, b) * 1048576 + math.max(a, b)] -- (that pair's kept copy instead)
         and (count[a] or 0) < R.BRIDGE_MAX_PER_NODE and (count[b] or 0) < R.BRIDGE_MAX_PER_NODE) then
@@ -1755,7 +1840,10 @@ function R.DeadEndLinks(nodes, adj, bridges, skip, nearOverlay, zs, edges, nz, c
     end
   end
   local ends = {}
+  i = 0
   for n, links in pairs(adj) do
+    i = i + 1
+    Breathe(i, 2000)
     local e = #links == 1 and edges and edges[links[1][3]]
     if e and R.DEAD_END_SOURCES[e[4]] and not (skip and skip[n])
         and not (nearOverlay and nearOverlay(nodes[n * 2 - 1], nodes[n * 2])) then
@@ -2121,12 +2209,20 @@ end
 local BuildGraph
 local HostileSide
 local mergedRoads = {} -- [cont] = the roads with the overlays merged in (BuildGraph: kept between rebuilds)
+-- (the background jobs building a road network now: R.Pump's slices of it are the data built once, as the warm-up's,
+-- not routing the player could stop by pausing it; issue #841, R.PumpBuilt)
+local building = setmetatable({}, { __mode = "k" })
 local function Graph(cont)
   -- (built for the player's faction: its guards' towns cost more; rebuilt if that changes)
   if graphs[cont] and graphs[cont].side ~= HostileSide() then graphs[cont] = nil end
   if graphs[cont] ~= nil then return graphs[cont] or nil end
   local t0 = ns.PerfStart and ns.PerfStart()
+  local co, main = coroutine.running()
+  if main then co = nil end
+  local was = co and building[co]
+  if co then building[co] = true end
   local g = BuildGraph(cont)
+  if co then building[co] = was end
   if ns.PerfEnd then ns.PerfEnd("router: build roads", t0) end
   return g
 end
@@ -2186,6 +2282,7 @@ function BuildGraph(cont)
   -- roads that run through the ruins' walls there are left out. And the caves' roads
   -- (Data/Caves.lua), their ways out joined onto the continent's nearest road.
   local Pass = ns.Passability
+  local samples = 0
   local function throughWalls(e)
     if not (Pass and Pass.Overlay) then return false end
     for i = 5, #e - 3, 2 do
@@ -2193,6 +2290,8 @@ function BuildGraph(cont)
       if not Pass.OverlayNear or Pass.OverlayNear(cont, x1, y1, x2, y2) then -- (no grid there: nothing to cross)
         local n = math.max(1, math.floor(math.sqrt((x2 - x1) ^ 2 + (y2 - y1) ^ 2)))
         for k = 0, n do
+          samples = samples + 1
+          BreatheIfOver(samples, 64) -- (a sample a yard: one long road was 1.8 ms here, issue #841)
           -- (a city's walls: not a cave's rock, which is under the land)
           local v, o = Pass.OverlayRaw(cont, x1 + (x2 - x1) * k / n, y1 + (y2 - y1) * k / n, true)
           if v == 2 and not o.cave then return true end
@@ -2208,9 +2307,13 @@ function BuildGraph(cont)
       Breathe(i, 20000)
       n2[i] = nodes[i]
     end
-    for i = 1, #extra.n do n2[#nodes + i] = extra.n[i] end
+    for i = 1, #extra.n do
+      BreatheIfOver(i, 500) -- (an overlay's nodes, the indoors' tens of thousands: issue #841)
+      n2[#nodes + i] = extra.n[i]
+    end
     local ox0, ox1, oy0, oy1 = math.huge, -math.huge, math.huge, -math.huge
     for i = 1, #extra.n, 2 do
+      BreatheIfOver(i + 1, 500)
       ox0, ox1 = math.min(ox0, extra.n[i]), math.max(ox1, extra.n[i])
       oy0, oy1 = math.min(oy0, extra.n[i + 1]), math.max(oy1, extra.n[i + 1])
     end
@@ -2928,8 +3031,10 @@ end
 -- Run background terrain searches until `deadline` (now() in ms). Returns true when one
 -- finished (the route should then be recomputed to use it), and whether any of those was
 -- a leg between fixed points (then the legs between stops need recomputing too).
+local pumpBuilt = false
 function R.Pump(deadline, now)
   local finished, fixed = false, false
+  pumpBuilt = false
   while walkJobs[1] and now() < deadline do
     -- (a route worked out again for a hop searches its walks `low`: after the others, 2026-11-14. First in line, a
     -- dozen searches that find nothing held up the walks the route itself waited on, and off Teldrassil the plan
@@ -2941,7 +3046,11 @@ function R.Pump(deadline, now)
       end
     end
     local j = walkJobs[ji]
+    if R.CLOCK_PAUSES then slice.stop, slice.now = deadline, now end
+    local wasBuilding = building[j.co]
     local ok, c, path = coroutine.resume(j.co)
+    slice.stop, slice.now = nil, nil
+    if wasBuilding or building[j.co] then pumpBuilt = true end
     if not ok or coroutine.status(j.co) == "dead" then
       table.remove(walkJobs, ji)
       walkQueued[j.key] = nil
@@ -2962,6 +3071,16 @@ function R.Pump(deadline, now)
 end
 
 function R.HasWork() return walkJobs[1] ~= nil end
+-- Whether the last R.Pump built a road network in any of its jobs (the warm-up's or one a route's job needed): not
+-- counted by the stutter watch, Nav.RouteWork (issue #841: built for a search after a .go, it paused routing).
+function R.PumpBuilt() return pumpBuilt end
+-- Whether a job is building a road network now (paused in the middle of it): its slices get the warm-up's size.
+function R.Building()
+  for co, on in pairs(building) do
+    if on and coroutine.status(co) ~= "dead" then return true end
+  end
+  return false
+end
 
 -- Other work in the background, pumped with the searches: fn() (it may route: a route's search
 -- pauses every ROUTE_BREATHE nodes when run here), then done(result) with what it returned. One
@@ -3151,6 +3270,7 @@ local function BlockedYards(cont, x1, y1, x2, y2)
   local n = math.max(1, math.floor(d / 4))
   local blocked = 0
   for i = 0, n do
+    BreatheIfOver(i + 1, 16) -- (a long line decodes the grid's rows as it goes)
     local t = i / n
     if P.At(cont, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t) == 2 then blocked = blocked + d / (n + 1) end
   end
@@ -3164,6 +3284,7 @@ local function BlockedRun(cont, x1, y1, x2, y2)
   local n = math.max(1, math.floor(d / 4))
   local run, most = 0, 0
   for i = 0, n do
+    BreatheIfOver(i + 1, 16)
     local t = i / n
     if P.At(cont, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t) == 2 then
       run = run + d / n

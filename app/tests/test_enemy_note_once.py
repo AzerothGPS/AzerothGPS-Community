@@ -199,6 +199,7 @@ def test_walking_by_dun_algaz_off_and_on_the_road_plans_a_bounded_amount(game):
         frame(0.05)
 
     R.WARM, R.SYNC_WALKS = True, False
+    R.CLOCK_PAUSES = False  # (the clock here counts calls: the pauses by the clock would spend it, issue #841)
     try:
         step(*WETLANDS)
         N.SetStops(lua.eval(KOOKI3Z_STOPS), False, "red", True)
@@ -223,7 +224,7 @@ def test_walking_by_dun_algaz_off_and_on_the_road_plans_a_bounded_amount(game):
         assert work.plans <= 160, f"{work.plans} plans in 2 minutes"
         assert work.routes <= 300, f"{work.routes} routes in 2 minutes"
     finally:
-        R.WARM, R.SYNC_WALKS = False, True
+        R.WARM, R.SYNC_WALKS, R.CLOCK_PAUSES = False, True, True
         lua.execute("""
           debugprofilestop = AGPS_DPS
           AGPS_NS.Nav.Plan, AGPS_NS.Router.Route, AGPS_NS.Router.Background = AGPS_REAL.plan, AGPS_REAL.route, AGPS_REAL.bg

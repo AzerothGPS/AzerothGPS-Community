@@ -17332,15 +17332,18 @@ function G.PumpSearches()
   local now = debugprofilestop()
   local frameMs = lastPump and now - lastPump or 16
   lastPump = now
-  -- (the warm-up's bigger slices for the road data after login, for a route just asked for (Nav.Fresh), and for a
-  -- reroute off the route, first in the queue till it lands (Nav.Rerouting))
-  local budget = G.PumpBudget(frameMs, (ns.Router.Warming and ns.Router.Warming()) or (ns.Nav.Fresh and ns.Nav.Fresh())
+  -- (the warm-up's bigger slices for the road data after login, or built in a route's job (Router.Building), for a
+  -- route just asked for (Nav.Fresh), and for a reroute off the route, first in the queue till it lands (Nav.Rerouting))
+  local budget = G.PumpBudget(frameMs, (ns.Router.Warming and ns.Router.Warming())
+    or (ns.Router.Building and ns.Router.Building()) or (ns.Nav.Fresh and ns.Nav.Fresh())
     or (ns.Nav.Rerouting and ns.Nav.Rerouting()))
   local warm = ns.Router.Warming and ns.Router.Warming()
   local p0 = debugprofilestop()
   local done, fixed = ns.Router.Pump(p0 + budget, debugprofilestop)
-  -- (the slice for the stutter watch, Nav.RouteWork: route work in this frame; not the road data built after login)
-  if not warm and ns.Nav.RouteWork then ns.Nav.RouteWork(debugprofilestop() - p0) end
+  -- (the slice for the stutter watch, Nav.RouteWork: route work in this frame; not the road data built after login, nor
+  -- a road network a route's job built, Router.PumpBuilt: issue #841)
+  local built = ns.Router.PumpBuilt and ns.Router.PumpBuilt()
+  if not warm and not built and ns.Nav.RouteWork then ns.Nav.RouteWork(debugprofilestop() - p0) end
   if done then ns.Nav.SearchDone(fixed) end
   ns.PerfEnd("terrain search", t0)
   return done

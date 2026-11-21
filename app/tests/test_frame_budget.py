@@ -285,6 +285,7 @@ def test_walking_by_brills_buildings_keeps_the_terrain_search_small(faction):
     lua.execute("AGPS_POS[1], AGPS_POS[2] = 2300.0, 300.0")
     G.SetZoom(60)
     R.WARM, R.SYNC_WALKS = True, False
+    R.CLOCK_PAUSES = False  # (its pauses counted as the work done: by the counts alone, issue #841)
     lua.execute("""
       AGPS_FRAME = function(dt)
         for _, w in ipairs(AGPS_WIDGETS) do
@@ -461,4 +462,105 @@ def test_going_off_course_on_a_long_route_works_nothing_out_in_the_frame(sx, sy)
             assert frames < 60, "no route from where the player went"  # (two reroutes' worth)
         assert landed >= 5  # (rerouted all the way, from the player's spot each time)
     finally:
+        R.WARM, R.SYNC_WALKS = False, True
+
+
+# (Bridges' sorts pause by the clock, Router.SortByFirst: a table.sort of 3,600 pairs was the slow-client test's worst
+# slice on the CI runner, issue #841. It's Lua 5.1's sort step for step, so the order, ties too, is the game's
+# and no route changes)
+def test_sort_by_first_orders_as_the_games_table_sort():
+    pytest.importorskip("lupa.lua51")
+    from azerothgps.gameharness import start
+
+    lua, ns = start()
+    bad = lua.execute("""
+      local R = AGPS_NS.Router
+      math.randomseed(841)
+      for _, n in ipairs({ 0, 1, 2, 3, 4, 5, 7, 12, 50, 101, 300, 3600 }) do
+        for _, spread in ipairs({ 3, 40, 1e9 }) do
+          local a, b = {}, {}
+          for i = 1, n do
+            local p = { math.random(1, spread), i }
+            a[i], b[i] = p, p
+          end
+          table.sort(a, function(x, y) return x[1] < y[1] end)
+          R.SortByFirst(b)
+          for i = 1, n do
+            if a[i] ~= b[i] then return n .. " pairs, spread " .. spread .. ": apart at " .. i end
+          end
+        end
+      end""")
+    assert bad is None, bad
+
+
+# (issue #841, the live QA of #744: an Alliance level 12 in the Wetlands, a route to the bay below Stromgarde. Eastern
+# Kingdoms' roads built in a route's job, not the warm-up's: the slices ran to 88 ms live, where the Lua is several times
+# slower than here, the stutter watch counted them, and Routing was paused ("perf"): no route at all. Here the
+# pump's clock runs LIVE_SLOWER times the CPU's, standing in for the live client: the loops pause by that clock, a slice
+# of route work stays under STUTTER_MS, and the road data built once isn't counted at all)
+LIVE_SLOWER = 8
+
+
+def test_route_work_on_a_slow_client_stays_in_its_slices_and_never_pauses_routing():
+    import time
+
+    pytest.importorskip("lupa.lua51")
+    from azerothgps.gameharness import start
+
+    lua, ns = start()
+    N, R = ns.Nav, ns.Router
+    lua.execute('UnitFactionGroup = function() return "Alliance", "Alliance" end; AGPS_LEVEL = 12')
+    ns.CharDB().faction = "Alliance"
+    lua.execute("AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = -3700.0, -900.0, 0")
+    c0 = time.perf_counter()
+    # (the frames' own time, and our work in them as the slow client's)
+    lua.globals().debugprofilestop = lambda: float(lua.eval("AGPS_T")) * 1000.0 + (time.perf_counter() - c0) * 1000.0 * LIVE_SLOWER
+    R.Reset()  # (nothing built: as after a .go onto the continent)
+    R.WARM, R.SYNC_WALKS = True, False
+    N.STUTTER_WATCH = True
+    grace = N.STUTTER_RESUME_GRACE
+    N.STUTTER_RESUME_GRACE = 0  # (watched from the first frame)
+    lua.execute("""
+      AGPS_FRAME = function(dt)
+        for _, w in ipairs(AGPS_WIDGETS) do
+          local f = w._scripts.OnUpdate
+          if f and w._shown then f(w, dt) end
+        end
+      end
+      AGPS_SLICES = { worst = 0, counted = 0, built = 0 }
+      local R = AGPS_NS.Router
+      local pump = R.Pump
+      R.Pump = function(deadline, now)
+        local warm = R.Warming()
+        local a = debugprofilestop()
+        local f, x = pump(deadline, now)
+        local d, s = debugprofilestop() - a, AGPS_SLICES
+        s.worst = math.max(s.worst, d)
+        if R.PumpBuilt and R.PumpBuilt() then
+          s.built = s.built + 1
+        elseif not warm then
+          s.counted = math.max(s.counted, d) -- (what the stutter watch is given)
+        end
+        return f, x
+      end""")
+    frame = lua.eval("AGPS_FRAME")
+    try:
+        N.SetStops(lua.eval("{ { x = -1650, y = -1900, cont = 0, name = 'bay' } }"), False, "red")
+        fps, t = 30, float(lua.eval("AGPS_T"))
+        for _ in range(fps * 120):
+            t += 1 / fps
+            lua.execute(f"AGPS_T = {t}")
+            frame(1 / fps)
+        s = lua.eval("AGPS_SLICES")
+        assert not N.paused, f"routing paused ({N.paused}); the worst slice counted ran {s.counted:.0f} ms"
+        assert not N.degraded
+        assert N.route
+        assert s.built > 0 and R.GraphReady(0)  # (the roads were built in a route's job, in slices)
+        assert s.counted < N.STUTTER_MS, f"a slice of route work ran {s.counted:.0f} ms"
+        # (the road data's too, though not counted: 117 ms before. 3x: the clock here runs the garbage collector's steps
+        # 8x too, and those no pause splits; on the CI runner, about 3x slower than a dev PC, a table.sort Bridges did in
+        # one go made a 74 ms slice and failed 2x: Router.SortByFirst. 14-21 ms here since)
+        assert s.worst < 3 * N.STUTTER_MS, f"a slice ran {s.worst:.0f} ms"
+    finally:
+        N.STUTTER_WATCH, N.STUTTER_RESUME_GRACE = False, grace
         R.WARM, R.SYNC_WALKS = False, True
