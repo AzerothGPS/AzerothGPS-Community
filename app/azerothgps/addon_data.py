@@ -231,11 +231,16 @@ MEASURED_CYCLES = {  # "dock 1 | dock 2" (the row's names) -> seconds
     "Grom'gol Base Camp, Stranglethorn Vale | Brill, Tirisfal Glades": 336.3,
 }
 # Who may take a ride, where the other faction's guards by its docks can't tell (Nav.TransportUsable: "A", "H" or "both";
-# none: by the guards). WoW Forever's own zeppelins to Zephras Isle: open to both until it's known in game (the user,
-# 2026-10-08, "Not sure"; a 1.1.7 QA check asks).
+# none: by the guards). WoW Forever's own zeppelins to Zephras Isle were open to both until it was known in game (the
+# user, 2026-10-08, "Not sure"). Camp Gev'rek's is the Horde's: an Alliance player sent on it to reach Stonetalon Peak
+# "had to death run from the dock" (a player's report, relayed by Kooki3z 2026-11-21: "make sure alliance isn't routed
+# there"); Camp Gev'rek (AreaTable 17223) lies in Mulgore, the Horde's (FactionGroupMask 4), and its guards aren't in
+# the 1.12 NPC dump (hostile.FOREVER_GUARDS). Old Dalaran Ruins' stays open to both: Alterac Mountains is contested
+# (FactionGroupMask 0), the NPC data has only wild creatures by its dock, and Zephras Isle's own NPCs are friendly to
+# both (faction 35).
 TRANSPORT_FACTIONS = {  # "dock 1 | dock 2" (the row's names) -> "A", "H" or "both"
     "Old Dalaran Ruins, Alterac Mountains | Valanaar Skydocks, Zephras Isle": "both",
-    "Camp Gev'rek, Mulgore | Fairweather Stables, Zephras Isle": "both",
+    "Camp Gev'rek, Mulgore | Fairweather Stables, Zephras Isle": "H",
 }
 
 

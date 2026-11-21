@@ -4859,14 +4859,14 @@ def test_a_stop_made_from_a_quest_icon_carries_its_quest(game):
 def test_each_faction_gets_only_the_rides_it_can_take_search_too(game):
     # (asked 2026-10-08: "why does zeppelins show for alliance players?") the other faction's zeppelins (their docks
     # among its guards) are left out of Search too, as on the map, in the routes and the options; WoW Forever's own to
-    # Zephras Isle carry a `faction` (Data/Transports.lua: open to both until it's known in game); a row's own faction
-    # wins over the guards
+    # Zephras Isle carry a `faction` (Data/Transports.lua: Old Dalaran's open to both, Camp Gev'rek's the Horde's since
+    # Kooki3z 2026-11-21, test_alliance_zephras_ride.py); a row's own faction wins over the guards
     lua, ns = game
     G, N = ns.GPS, ns.Nav
     rows = {ns.Transports[i][9] + " | " + ns.Transports[i][10]: ns.Transports[i] for i in range(1, len(ns.Transports) + 1)}
     horde = rows["Grom'gol Base Camp, Stranglethorn Vale | Jaggedswine Farm, Durotar"]
     zephras = rows["Old Dalaran Ruins, Alterac Mountains | Valanaar Skydocks, Zephras Isle"]
-    assert zephras.faction == "both" and rows["Camp Gev'rek, Mulgore | Fairweather Stables, Zephras Isle"].faction == "both"
+    assert zephras.faction == "both" and rows["Camp Gev'rek, Mulgore | Fairweather Stables, Zephras Isle"].faction == "H"
     old = ns.CharDB().faction
 
     def found(text):
