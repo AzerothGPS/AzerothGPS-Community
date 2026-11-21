@@ -31,6 +31,13 @@ LIGHT_WANDER_YD = 10.0  # (their wander counted up to this: a few walk a whole f
 CELL_YD = 20.0  # circles within a cell of this size are one
 GROUP_ALLIANCE, GROUP_HORDE = 2, 4
 DUMP = Path("thirdparty") / "cmangos-classic-db" / "ClassicDB_1_12_1_z2815.sql.gz"
+# WoW Forever's own camps, whose guards aren't in the 1.12 dump: { continent:
+# { side: [(x, y, reach)] } }, merged like the dump's. Camp Gev'rek in Mulgore (Horde): an Alliance player "had to death
+# run from the dock" of its zeppelin (a player's report, relayed by Kooki3z 2026-11-21); its dock, and the camp over
+# AreaTable 17223's chunks (x -733..-567, y 333..500), so Alliance walks keep off it too.
+FOREVER_GUARDS = {
+    1: {"A": [(-802.0, 366.5, GUARD_YD), (-650.0, 416.7, 110.0)]},
+}
 
 
 def _tuples(s: str):
@@ -113,6 +120,9 @@ def guard_points(data_dir: Path, faction_templates: dict[int, dict]) -> dict[int
         k = spawn.get(r["Id"])
         if k:
             out[k[0]][k[1]].append((float(r["PositionX"]), float(r["PositionY"]), GUARD_YD if k[1].isupper() else LIGHT_YD))
+    for mp, sides in FOREVER_GUARDS.items():
+        for s, circles in sides.items():
+            out.setdefault(mp, {"A": [], "H": [], "a": [], "h": []})[s].extend(circles)
     return out
 
 

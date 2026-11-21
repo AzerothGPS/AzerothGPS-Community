@@ -14,6 +14,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Quest Route: a quest you leave out stays out, rerouted or after a /reload, until you put it back.
 - Quest Route: a group quest is asked about once, not every time the route is made.
 - Quest Route: with only tracked quests on, finishing an untracked quest no longer asks for a reroute.
+- Alliance routes no longer take the Zephras Isle zeppelin to Camp Gev'rek in Mulgore.
 
 ## 1.3.12
 
