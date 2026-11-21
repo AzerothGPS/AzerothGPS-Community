@@ -780,11 +780,15 @@ G.ROAD_STEP_UI = 2
 -- like RoadIndex's (drawn while the road graph is rebuilt after an edit).
 -- (each as its pieces, Router.TrackPieces: a stairs stretch its own, with its kind and heights, `kind` and `zs`, so
 -- the tools draw it in the stairs' color with their icons before the rebuild too)
+-- (an edit's old road left out: Kooki3z 2026-11-20, "Save Road is creating duplicate roads": the road edited and its
+-- edit were both drawn until the tools were turned off and the network rebuilt)
 function G.DrawnTrackIndex(cont)
   local out, shipped = {}, ns.RoadTracksIn or {}
   local R = ns.Router
+  local gone = R and R.ReplacedSet and R.ReplacedSet(ns.db and ns.db.tracks or {}) or {}
   for _, t in ipairs(ns.db and ns.db.tracks or {}) do
-    if t.continent == cont and (t.op == nil or t.op == "add") and t.pts and #t.pts >= 4 and not shipped[t.time or -1] then
+    if t.continent == cont and (t.op == nil or t.op == "add") and t.pts and #t.pts >= 4 and not shipped[t.time or -1]
+        and not (R and R.Replaced and R.Replaced(gone, t)) then
       for _, p in ipairs(R and R.TrackPieces and not t.recorded and R.TrackPieces(t) or { t }) do
         local pts = p.pts
         local e = { 0, 0, 0, RECORDED, time = t.time, zs = p.zs, kind = p.kind or (p.stair and "stairs") or nil }
@@ -801,19 +805,23 @@ function G.DrawnTrackIndex(cont)
 end
 -- The player's erasures not in the data yet: { { pts, area, reach, x0, x1, y0, y1, time }, ... }
 -- (while the road graph is rebuilt after one, the roads under it go at once, not after).
+-- And each edit not built in yet, along its own points (G.REPLACED_HIDE_YD): the road it replaced, in the network as it
+-- was, hidden under it (the edit itself, saved then, is newer than none of it: drawn).
+G.REPLACED_HIDE_YD = 2
 function G.PendingErases(cont)
   local out, shipped = {}, ns.RoadTracksIn or {}
   local reach = ns.Router and ns.Router.TRACK_REMOVE_YD or 8
   for _, t in ipairs(ns.db and ns.db.tracks or {}) do
     local pts = t.pts
-    if t.continent == cont and t.op == "remove" and pts and #pts >= 4 and not shipped[t.time or -1] then
-      local r = t.area and 0 or reach
+    local edit = t.op == "add" and t.replaces ~= nil
+    if t.continent == cont and (t.op == "remove" or edit) and pts and #pts >= 4 and not shipped[t.time or -1] then
+      local r = edit and G.REPLACED_HIDE_YD or t.area and 0 or reach
       local x0, x1, y0, y1 = math.huge, -math.huge, math.huge, -math.huge
       for i = 1, #pts - 1, 2 do
         x0, x1, y0, y1 = math.min(x0, pts[i]), math.max(x1, pts[i]), math.min(y0, pts[i + 1]), math.max(y1, pts[i + 1])
       end
       out[#out + 1] = { pts = pts, area = t.area, reach = r, x0 = x0 - r, x1 = x1 + r, y0 = y0 - r, y1 = y1 + r, time = t.time,
-        floor = (t.z or t.down ~= nil) and { z = t.z, down = t.down } or nil }
+        floor = not edit and (t.z or t.down ~= nil) and { z = t.z, down = t.down } or nil } -- (an edit: on any floor)
     end
   end
   return out

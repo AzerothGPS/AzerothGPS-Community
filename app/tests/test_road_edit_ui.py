@@ -231,6 +231,37 @@ def test_a_lift_with_no_heights_is_a_lift_ride_from_its_first_end_and_flips(game
         R.Reset()
 
 
+def test_an_edited_road_isnt_drawn_twice_before_the_network_is_rebuilt(game):
+    # (Kooki3z 2026-11-20: "Save Road is creating duplicate roads": with the tools on, the road edited and its edit both
+    # drawn until the tools were turned off)
+    lua, ns = game
+    G, R, Rec = ns.GPS, ns.Router, ns.Record
+    saved = ns.db.tracks
+    try:
+        ns.db.tracks = lua.table()
+        R.Reset()
+        G.roadMode = True
+        G.FinishRoad(lua.table(pts=lua.table(2600.0, 1700.0, 2615.0, 1700.0, 2630.0, 1700.0), cont=0), False, False)
+        first = ns.db.tracks[1]
+        sel = Rec.TrackAt(0, 2615.0, 1701.0)
+        assert sel and Rec.EditTrack(sel, lua.table(kind="bridge", z=20))
+        ed = ns.db.tracks[2]
+        # the player's own roads drawn before the rebuild: the edit only
+        idx = G.DrawnTrackIndex(0)
+        times = [idx[i][5].time for i in range(1, len(idx) + 1)]
+        assert ed.time in times and first.time not in times
+        # the network as it was: the old road hidden under the edit, on any floor; the edit itself (saved then) drawn
+        er = G.PendingErases(0)
+        assert er and any(e.time == ed.time and e.floor is None for e in er.values())
+        assert G.UnderErase(er, 2615.0, 1700.5, None)  # (a road of the old network there)
+        assert not G.UnderErase(er, 2615.0, 1700.0, ed.time)  # (the edit)
+        assert not G.UnderErase(er, 2615.0, 1710.0, None)  # (a road beside it)
+    finally:
+        G.roadMode = None
+        ns.db.tracks = saved
+        R.Reset()
+
+
 def test_the_directions_say_cross_the_bridge_on_the_players_own_bridges(game):
     # (Kooki3z 2026-11-20: "doesn't say cross the bridge on drawn bridges ... or recorded")
     lua, ns = game
