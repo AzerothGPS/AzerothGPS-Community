@@ -5,6 +5,13 @@ local _, ns = ...
 local P = {}
 ns.Passability = P
 
+-- (in a background job: past the end of the Router's slice, Router.SliceOver; issue #841: a search's pauses by a count
+-- of its own ran 88 ms live between them, and the stutter watch paused routing)
+local function SliceOver()
+  local R = ns.Router
+  return R ~= nil and R.SliceOver ~= nil and R.SliceOver()
+end
+
 P.SWIM_COST = 1.5 -- swimming is about 2/3 of run speed (the game's base swim speed 4.72 yd/s, its run 7)
 -- Swimming left out (Options > Routing "Allow swimming" off, or a swim removed from the trip on the map: Nav.SyncSwim):
 -- water costs AVOID_SWIM_COST a yard instead, so a route goes round by land wherever there's a way, and still swims to
@@ -98,6 +105,9 @@ P.Rows = Rows
 -- closed (wallCells[grid][row * 65536 + col]) and legs crossing them blocked (P.CrossesWall).
 -- Built again when the drawn ones change (P.RefreshWalls: Record.Changed).
 local wallCells, wallSegs, wallsBuilt = {}, {}, false
+-- (what the walls are built from changed: the drawn ones, P.RefreshWalls, or the safe drop, P.SetDropMax; a build begun
+-- before that is dropped at its end)
+local wallInputs = 0
 -- Blocked ground a wall eraser went over (a mountain's edge the grid has wrong): open
 -- (openCells[grid][row * 65536 + col]). Drawn walls still close their cells.
 local openCells = {}
@@ -268,7 +278,7 @@ function P.SetDropMax(v)
   v = v and math.floor(v) or nil
   if v == P.dropMax then return end
   P.dropMax = v
-  wallsBuilt = false
+  wallsBuilt, wallInputs = false, wallInputs + 1
   if P.ClearSegMemo then P.ClearSegMemo() end
   cliffMemo, cliffMemoN = {}, 0
 end
@@ -374,12 +384,14 @@ local function WallConts()
   return set
 end
 
--- A continent's wall cells, segments and opened cells from these walls and wall erasers.
-local function WallGrid(g, lines, opens)
+-- A continent's wall cells, segments and opened cells from these walls and wall erasers. (`pause()`: called now and
+-- then, RefreshWalls' pause in a background job)
+local function WallGrid(g, lines, opens, pause)
   local cells, segs, open = {}, {}, {}
   local B = P.WALL_BUCKET
   for _, w in ipairs(lines) do
     for k = 1, #w - 3, 2 do
+      if pause then pause() end
       local ax, ay, bx, by = w[k], w[k + 1], w[k + 2], w[k + 3]
       -- (a cliff's section: none where its sides are level, one way where the drop is safe)
       local how, nx, ny, dz
@@ -427,6 +439,7 @@ local function WallGrid(g, lines, opens)
       local cA, rA = ToCell(g, x1 + pad, y1 + pad)
       local cB, rB = ToCell(g, x0 - pad, y0 - pad)
       for r = math.min(rA, rB), math.max(rA, rB) do
+        if pause then pause() end
         for c = math.min(cA, cB), math.max(cA, cB) do
           local x, y = CellCentre(g, c, r)
           if (o.area and InLoop(pts, x, y)) or (not o.area and NearLine(pts, x, y, P.OPEN_YD + g.cell / 2)) then
@@ -470,34 +483,52 @@ local function MarkBlock(H, d, r, c)
 end
 
 -- Build the walls' cells and segments again (after drawing or erasing one).
-function P.RefreshWalls()
-  wallCells, wallSegs, openCells = {}, {}, {}
-  wallsBuilt = true
-  wallDirty = {}
-  if P.ClearSegMemo then P.ClearSegMemo() end -- (walls feed SegmentCost: its memo starts over)
+-- (In a background job it pauses as the Router's slice runs out (issue #841: a wall eraser's area tested cell by cell,
+-- tens of ms in one go inside a route's job). Built into its own tables and put in place at the end, so nothing reads
+-- half of it meanwhile; anything asking for the walls then builds them itself, and a build begun before what they're
+-- built from changed is dropped at its end, `wallInputs`.)
+local function BuildWalls()
+  local gen = wallInputs
+  local co, isMain = coroutine.running()
+  local pause
+  if co ~= nil and not isMain then
+    pause = function() if SliceOver() then coroutine.yield() end end
+  end
+  local newCells, newSegs, newOpen, newDirty = {}, {}, {}, {}
   for cont in pairs(WallConts()) do
     local g = ns.Terrain and ns.Terrain[cont]
-    local cells, segs, open = WallGrid(g, P.WallLines(cont), P.OpenAreas(cont))
-    if g then wallCells[g] = cells end
-    wallSegs[cont] = segs
-    if g and next(open) then openCells[g] = open end
+    local cells, segs, open = WallGrid(g, P.WallLines(cont), P.OpenAreas(cont), pause)
+    if g then newCells[g] = cells end
+    newSegs[cont] = segs
+    if g and next(open) then newOpen[g] = open end
     -- (the player's own, not in the data yet: the blocks they change, and their neighbors,
     -- are worked out here; the prepared ones have the shipped walls)
     local H = g and ns.TerrainHPA and ns.TerrainHPA[cont]
     if H and Drawn(cont) then
-      local sc, _, so = WallGrid(g, ns.Walls and ns.Walls[cont] or {}, ns.WallOpens and ns.WallOpens[cont] or {})
+      local sc, _, so = WallGrid(g, ns.Walls and ns.Walls[cont] or {}, ns.WallOpens and ns.WallOpens[cont] or {},
+        pause)
       local d = {}
       local function mark(key) MarkBlock(H, d, math.floor(key / 65536), key % 65536) end
       for k in pairs(cells) do if not sc[k] then mark(k) end end
       for k in pairs(sc) do if not cells[k] then mark(k) end end
       for k in pairs(open) do if not so[k] then mark(k) end end
       for k in pairs(so) do if not open[k] then mark(k) end end
-      if next(d) then wallDirty[cont] = d end
+      if next(d) then newDirty[cont] = d end
     end
   end
+  if gen ~= wallInputs then return end -- (changed meanwhile: built again from what they are now)
+  wallCells, wallSegs, openCells, wallDirty = newCells, newSegs, newOpen, newDirty
+  wallsBuilt = true
+  if P.ClearSegMemo then P.ClearSegMemo() end -- (walls feed SegmentCost: its memo starts over)
   MergeDirty()
 end
-local function EnsureWalls() if not wallsBuilt then P.RefreshWalls() end end
+local function EnsureWalls()
+  while not wallsBuilt do BuildWalls() end
+end
+function P.RefreshWalls()
+  wallsBuilt, wallInputs = false, wallInputs + 1
+  EnsureWalls()
+end
 
 local function Orient(ax, ay, bx, by, cx, cy)
   local v = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
@@ -795,7 +826,7 @@ function P.CliffAlong(cont, x1, y1, x2, y2)
     for i = 0, n do
       if canYield then
         local k = P.cliffSamples + 1
-        if k >= P.CLIFF_YIELD_EVERY then
+        if k >= P.CLIFF_YIELD_EVERY or (k % 8 == 0 and SliceOver()) then
           k = 0
           coroutine.yield()
         end
@@ -923,7 +954,7 @@ local function SegmentCostRaw(cont, x1, y1, x2, y2, endSlack)
   local inB1 = bset[r1 * 65536 + c1] and Cell(g, r1, c1) == 2
   local inB2 = bset[r2 * 65536 + c2] and Cell(g, r2, c2) == 2
   for i = 0, n do
-    if canYield and i > 0 and i % P.SEG_YIELD_EVERY == 0 then coroutine.yield() end
+    if canYield and i > 0 and (i % P.SEG_YIELD_EVERY == 0 or (i % 8 == 0 and SliceOver())) then coroutine.yield() end
     local t = i / n
     local x, y = x1 + dx * t, y1 + dy * t
     local ov = near and Overlay(cont, x, y) or nil
@@ -1348,7 +1379,7 @@ end
 -- point a walk was searched to stood in the cells of the walls drawn round them, shut in; each search flooded its
 -- whole box before giving up, 70 ms of background work, one after another while the player walked)
 P.SHUT_IN_CELLS = 400
-local function ShutIn(step, c1, r1, c2, r2, limit)
+local function ShutIn(step, c1, r1, c2, r2, limit, pause)
   if c1 == c2 and r1 == r2 then return false end
   if not step(c2, r2) then return true end -- (never stepped into)
   local function moves(c, r, dc, dr) -- (a move from (c, r) to the cell beside it, as CellPath allows)
@@ -1357,6 +1388,7 @@ local function ShutIn(step, c1, r1, c2, r2, limit)
   local seen, list, n = { [r2 * 65536 + c2] = true }, { c2, r2 }, 1
   local i = 1
   while i < #list do
+    if pause then pause() end -- (each cell's steps: the cliffs' heights, a tile of ground decoded now and then)
     local c, r = list[i], list[i + 1]
     i = i + 2
     if math.abs(c - c1) <= 1 and math.abs(r - r1) <= 1 and moves(c1, r1, c - c1, r - r1) then return false end
@@ -1782,7 +1814,10 @@ function P.FindPath(cont, x1, y1, x2, y2, road1, road2)
   local count = 0
   local pause = canYield and function()
     count = count + 1
-    if count % P.PATH_YIELD_EVERY == 0 then coroutine.yield() end
+    if count % P.PATH_YIELD_EVERY == 0 or SliceOver() then coroutine.yield() end
+  end or nil
+  local overPause = canYield and function() -- (by the clock alone: ShutIn's few hundred cells)
+    if SliceOver() then coroutine.yield() end
   end or nil
   local cells, how
   local H = ns.TerrainHPA and ns.TerrainHPA[cont]
@@ -1796,7 +1831,7 @@ function P.FindPath(cont, x1, y1, x2, y2, road1, road2)
       if c < cmin or c > cmax or r < rmin or r > rmax then return nil end
       return step(c, r, fc, fr)
     end
-    if ShutIn(inBox, c1, r1, c2, r2, P.SHUT_IN_CELLS) then return nil end
+    if ShutIn(inBox, c1, r1, c2, r2, P.SHUT_IN_CELLS, overPause) then return nil end
     cells = CellPath(inBox, c1, r1, c2, r2, pause, P.PATH_MAX_EXPANSIONS)
     if not cells then return nil end
   end
@@ -1840,7 +1875,7 @@ function P.FindPath(cont, x1, y1, x2, y2, road1, road2)
     local out, total, i = { x1, y1 }, 0, 1
     local function sees(j)
       checks = checks + 1
-      if canYield and checks % 6 == 0 then coroutine.yield() end
+      if canYield and (checks % 6 == 0 or SliceOver()) then coroutine.yield() end
       return shortcut(i, j)
     end
     while i < #pts do
@@ -1953,7 +1988,7 @@ function P.WarmRows(cont, x, y, yd)
     if not rc[row] and Rows(g)[row] then
       rc[row] = DecodeRow(Rows(g)[row], g.short, g.long, g.deep)
       n = n + 1
-      if canYield and n % 6 == 0 then coroutine.yield() end
+      if canYield and (n % 6 == 0 or SliceOver()) then coroutine.yield() end
     end
   end
 end
