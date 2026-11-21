@@ -4,6 +4,17 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 ## 1.3.13 (in progress)
 
+### New
+
+- Quest Route: order by level, lowest level first or about to turn gray first (Options > Routing > Quest Route).
+- Quest Route: Options lists the quests you left out, with Put Back All.
+
+### Fixed
+
+- Quest Route: a quest you leave out stays out, rerouted or after a /reload, until you put it back.
+- Quest Route: a group quest is asked about once, not every time the route is made.
+- Quest Route: with only tracked quests on, finishing an untracked quest no longer asks for a reroute.
+
 ## 1.3.12
 
 ### New

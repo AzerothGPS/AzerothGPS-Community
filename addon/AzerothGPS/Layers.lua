@@ -576,23 +576,49 @@ end
 -- A red quest (asked 2026-11-07: "do the same for red quests to offer leaving them out of the route", as the group
 -- quests): its level at least QUEST_RED_LEVELS over the player's, as the quest log colors it red. Its level, or nil.
 Lay.QUEST_RED_LEVELS = 5
-function Lay.QuestRed(id)
+local function KnownNumber(v) return type(v) == "number" and not (ns.IsSecret and ns.IsSecret(v)) end
+-- A quest's level in the log (its difficulty level, as the log colors it), or nil.
+function Lay.QuestLevel(id)
   local Q = C_QuestLog
   if not (Q and id) then return nil end
-  local function known(v) return type(v) == "number" and not (ns.IsSecret and ns.IsSecret(v)) end
-  local lvl
   if Q.GetQuestDifficultyLevel then
     local ok, n = pcall(Q.GetQuestDifficultyLevel, id)
-    if ok and known(n) and n > 0 then lvl = n end
+    if ok and KnownNumber(n) and n > 0 then return n end
   end
-  if not lvl and Q.GetLogIndexForQuestID and Q.GetInfo then
+  if Q.GetLogIndexForQuestID and Q.GetInfo then
     local ok, i = pcall(Q.GetLogIndexForQuestID, id)
     local info = ok and i and not (ns.IsSecret and ns.IsSecret(i)) and Q.GetInfo(i)
-    if type(info) == "table" and known(info.level) and info.level > 0 then lvl = info.level end
+    if type(info) == "table" and KnownNumber(info.level) and info.level > 0 then return info.level end
   end
+  return nil
+end
+local function PlayerLevel()
   local ok, me = pcall(UnitLevel or error, "player")
-  if not (lvl and ok and known(me) and me > 0) then return nil end
+  return ok and KnownNumber(me) and me > 0 and me or nil
+end
+function Lay.QuestRed(id)
+  local lvl, me = Lay.QuestLevel(id), PlayerLevel()
+  if not (lvl and me) then return nil end
   return lvl - me >= Lay.QUEST_RED_LEVELS and lvl or nil
+end
+-- The highest quest level that's gray (trivial) for the player, as the quest log colors it: the game's green range
+-- (GetQuestGreenRange in Classic, UnitQuestTrivialLevelRange in later clients; a quest is gray when the player is more
+-- than that many levels over it), else Classic's gray level by the player's level. Nil when the level isn't known.
+-- (For the quest route's "About to turn gray first", Nav.QuestBands.)
+function Lay.QuestGrayLevel()
+  local me = PlayerLevel()
+  if not me then return nil end
+  for _, name in ipairs({ "GetQuestGreenRange", "UnitQuestTrivialLevelRange" }) do
+    local fn = rawget(_G, name)
+    if type(fn) == "function" then
+      local ok, r = pcall(fn, "player")
+      if ok and KnownNumber(r) and r > 0 then return me - r - 1 end
+    end
+  end
+  if me <= 5 then return 0 end
+  if me <= 39 then return me - 5 - math.floor(me / 10) end
+  if me <= 59 then return me - 1 - math.floor(me / 5) end
+  return me - 9
 end
 
 -- Quest marks on uiMap `mapID`: { { x, y, cont, kind, name }, ... }

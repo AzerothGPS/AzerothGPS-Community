@@ -16594,18 +16594,15 @@ function G.QuestRoute()
       or L["Quest Route: no quest locations found in your quest log."])
     return
   end
-  -- (asked 2026-10-06) a group quest (elite, or more than one player suggested): asked whether to keep it, each
-  -- once a session (G.groupChoice), then the route. Its choice is shown in the directions with a button to change it
-  -- (G.LayoutGroupRows; asked 2026-10-07: "show my choice and let me change it"). Every quest found left out: asked
-  -- again, or the route would have nothing to show the choices on, and no way back
+  -- (asked 2026-10-06) a group quest (elite, or more than one player suggested): asked whether to keep it, then the
+  -- route. Its choice is shown in the directions with a button to change it (G.LayoutGroupRows; asked 2026-10-07: "show
+  -- my choice and let me change it"). Since 1.3.13 (players' request relayed by Kooki3z 2026-11-21: "when a quest is
+  -- excluded via the popup, it comes up again every time the route regenerates") asked once per quest, not per
+  -- session: the choice is saved per character (Nav.SaveQuestChoices) until the quest leaves the log, and a quest
+  -- left out stays out of every quest route until put back (the directions' Put Back, or Options > Routing > Quest
+  -- Route). Every quest found left out isn't asked again any more: said, with where to put them back.
+  if ns.Nav.ForgetGoneQuests and ns.Layers.LogQuests then ns.Nav.ForgetGoneQuests(ns.Layers.LogQuests()) end
   G.groupQuests = G.GroupQuestsOf(stops)
-  local any = false
-  for _, d in ipairs(stops) do
-    if not (d.quest and not d.turnin and G.groupChoice[d.quest] == "leave") then any = true break end
-  end
-  if not any then
-    for _, q in ipairs(G.groupQuests) do G.groupChoice[q.id] = nil end
-  end
   local ask = G.GroupQuestsToAsk(stops)
   local function Next(i)
     local q = ask[i]
@@ -16617,7 +16614,8 @@ function G.QuestRoute()
   Next(1)
 end
 
--- Group quests asked about this session: questID -> "keep" or "leave" (Leave Out, or the question closed).
+-- Group quests asked about: questID -> "keep" or "leave" (Leave Out, or the question closed). Saved per character
+-- (Nav.SaveQuestChoices), let go when the quest leaves the log (Nav.ForgetQuest).
 G.groupChoice = {}
 
 -- The directions' pulsing Sprint icon clicked (a quest picked up or finished since the quest route was made): the
@@ -16906,13 +16904,18 @@ function G.InitPickRoute()
   f:SetScript("OnEvent", function() G.OnQuestPicked() end)
   if ns.TimeScript then ns.TimeScript(f, "OnEvent", "events (quest picked)") end
 end
--- The quest route's group quests: { { id, title, group = Layers.QuestGroup's }, ... }. A turn-in isn't one to ask
--- about (the quest's done).
+-- The quest route's group quests: { { id, title, group = Layers.QuestGroup's }, ... }, and the quests left out
+-- (Nav.QuestLeftOut: a row each in the directions, to put back). A turn-in isn't one to ask about (the quest's done).
 function G.GroupQuestsOf(stops)
   local out, seen = {}, {}
   for _, d in ipairs(stops) do
     local id = d.quest
-    if id and not d.turnin and not seen[id] and ns.Layers.QuestGroup then
+    if id and not seen[id] and ns.Nav.QuestLeftOut(id) then
+      seen[id] = true
+      local g = ns.Layers.QuestGroup and ns.Layers.QuestGroup(id)
+      local red = ns.Layers.QuestRed and ns.Layers.QuestRed(id)
+      out[#out + 1] = { id = id, title = d.name, group = g, red = red }
+    elseif id and not d.turnin and not seen[id] and ns.Layers.QuestGroup then
       seen[id] = true
       local g = ns.Layers.QuestGroup(id)
       local red = ns.Layers.QuestRed and ns.Layers.QuestRed(id) -- (a red quest: asked about the same way)
@@ -16921,20 +16924,25 @@ function G.GroupQuestsOf(stops)
   end
   return out
 end
--- Those not asked about yet this session.
+-- Those not decided yet: never asked, nor left out by removing its stop.
 function G.GroupQuestsToAsk(stops)
   local out = {}
   for _, q in ipairs(G.GroupQuestsOf(stops)) do
-    if not G.groupChoice[q.id] then out[#out + 1] = q end
+    if (q.group or q.red) and not G.groupChoice[q.id] and not ns.Nav.QuestLeftOut(q.id) then out[#out + 1] = q end
   end
   return out
 end
 -- The quest route's group quests (G.QuestRoute's last), for the directions' rows.
 G.groupQuests = {}
--- A row's button: a group quest left out put back, or a kept one left out, and the quest route made again (not asked
--- again: the choice is the player's).
+-- A row's button: a quest left out put back (Nav.PutBackQuest), or a kept one left out, and the quest route made again
+-- (not asked again: the choice is the player's).
 function G.ToggleGroupQuest(id)
-  G.groupChoice[id] = G.groupChoice[id] == "leave" and "keep" or "leave"
+  if ns.Nav.QuestLeftOut(id) then
+    ns.Nav.PutBackQuest(id)
+  else
+    G.groupChoice[id] = "leave"
+    ns.Nav.SaveQuestChoices()
+  end
   G.QuestRoute()
 end
 -- The directions' rows for the quest route's group quests, under `below` in `panel`: each one kept or left out, with
@@ -16948,13 +16956,12 @@ function G.LayoutGroupRows(panel, below, show)
   end
   local shown = 0
   for _, q in ipairs(show and ns.Nav.OnQuestRoute() and G.groupQuests or {}) do
-    local choice = G.groupChoice[q.id]
-    if choice then
+    local left = ns.Nav.QuestLeftOut(q.id)
+    if left or G.groupChoice[q.id] then
       shown = shown + 1
       local row = G.groupRows[shown] or G.MakeGroupRow(panel)
       G.groupRows[shown] = row
       row.qid = q.id
-      local left = choice == "leave"
       row.text:SetText(Format(left and L["|cff9d9d9dLeft out:|r %s"]
         or (q.group and L["|cffb0b0b0Group quest:|r %s"] or L["|cffff4040Red quest:|r %s"]), q.title or "?"))
       row.button.label:SetText(left and L["Put Back"] or L["Leave Out"])
@@ -16991,7 +16998,7 @@ function G.MakeGroupRow(panel)
   b:SetScript("OnClick", function() if row.qid then G.ToggleGroupQuest(row.qid) end end)
   b:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_TOP")
-    local left = G.groupChoice[row.qid] == "leave"
+    local left = ns.Nav.QuestLeftOut(row.qid)
     GameTooltip:SetText(left and L["Put Back"] or L["Leave Out"], 1, 1, 1)
     GameTooltip:AddLine(left and L["Puts this quest back in your Quest Route."] or
       L["Leaves this quest out of your Quest Route. Put Back brings it back."], nil, nil, nil, true)
@@ -17019,9 +17026,10 @@ function G.GroupQuestText(q)
   return Format(L["|cffffd100%s|r is a group quest (%s).\nKeep it in your route?"], q.title or L["This quest"],
     table.concat(why, L[", "]))
 end
--- The quest route set: `stops` less the group quests left out and the stops the player removed on this quest route run
--- (Nav.QuestDropped); `c` the counts from Layers.QuestStops.
+-- The quest route set: `stops` less the group quests left out and the stops the player removed (Nav.QuestDropped);
+-- `c` the counts from Layers.QuestStops.
 function G.SetQuestRoute(stops, c)
+  ns.Nav.SaveQuestChoices() -- (the answers just given kept, a route set or not)
   local kept, left = {}, {}
   for _, d in ipairs(stops) do
     if (d.quest and not d.turnin and G.groupChoice[d.quest] == "leave") or ns.Nav.QuestDropped(d) then
@@ -17031,7 +17039,7 @@ function G.SetQuestRoute(stops, c)
     end
   end
   if #kept == 0 then
-    ns.Print(L["Quest Route: every quest found is one you left out."])
+    ns.Print(L["Quest Route: every quest found is one you left out."] .. " " .. L["To put quests back: Options > Routing > Quest Route."])
     return
   end
   if ns.Nav.SetStops(kept, true) == false then return end -- (asked first: a zone too high)
@@ -18405,6 +18413,9 @@ function G.Init()
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     GameTooltip:SetText(L["Quest Route"], 1, 1, 1)
     GameTooltip:AddLine(L["A route through your quest log: where each quest's objectives are, and where finished quests are turned in, in the fastest order. Replaces the current route."], nil, nil, nil, true)
+    -- (players' request relayed by Kooki3z 2026-11-21, "Quest route to be able to go through tracked quests only": it
+    -- was there already, unfound; said where)
+    GameTooltip:AddLine(L["Only tracked quests, lowest level first, quests left out: Options > Routing > Quest Route."], 0.6, 0.6, 0.6, true)
     GameTooltip:Show()
   end)
 

@@ -54,6 +54,7 @@ NEW = ["extraWindow", "followOnMove", "arrowEase", "allowSwim", "mapEditIdle", "
        "dirLocked",  # (1.3.9: the directions text's own lock, apart from the arrow's)
        "importKeepOrder",  # (1.3.9: imports routed in the order listed; the Import and Share window's box too)
        "questTrackedOnly",  # (1.3.10: the quest route from the tracked quests only, Questie's tracker's or the game's)
+       "questLevelOrder",  # (Kooki3z 2026-11-21: the quest route by level, lowest or about to turn gray first)
        "routeSlopeShade"]  # (Kooki3z 2026-11-20: the route lighter uphill, darker downhill)
 # Where each setting's control is: the page a player would look on.
 HOME = {
@@ -77,7 +78,7 @@ HOME = {
     "Opacity": "alpha fadeMoving movingAlpha combatHideMap combatAlpha combatHideArrow arrowCombatAlpha "
                "clickThroughMoving clickThroughCombat",
     "Routing": "useFlights flightMapRing useHearthstone useTeleports avoidHighZones avoidHostile allowSwim roadTolerance fastestOrder "
-               "cityKeepOrder importKeepOrder questZoneOnly questTrackedOnly questAutoReroute questPickRoute navCloseClears acceptWay acceptMapPins acceptShared",
+               "cityKeepOrder importKeepOrder questZoneOnly questTrackedOnly questLevelOrder questAutoReroute questPickRoute navCloseClears acceptWay acceptMapPins acceptShared",
     "Directions": "arrow arrowLocked arrowEase arrowPx arrowBg dirShown dirLocked dirStopsOnly arrowSnap arrowSide dirTextScale dirBg "
                   "questing",
     "Quick buttons": "keyBlockedInCombat",  # (2026-11-19: the keys with the buttons)
