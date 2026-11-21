@@ -29,6 +29,12 @@ _Double-click where you want to go, confirm, and follow the line: across zones, 
 
 The map and Options menu now support controller navigation. Pan with the D-pad, zoom with the triggers, set stops at the crosshair, open the map menu, even draw farming routes. Every button can be changed in **Options → Controller**, and the crosshair shows icons' tooltips just like the mouse does.
 
+**New in 1.3.12:** search with an on-screen keyboard. Type a name or a service with the D-pad, pick a result, and the route is drawn. It works in Find Herbs and Ore and the Options search too, in your game's language.
+
+![Search Places on a controller: typing "repa" on the on-screen keyboard, choosing a repair NPC with the D-pad, and the route to them](https://azerothgps.com/press/controller-search-1312.gif)
+
+![Find Herbs and Ore on a controller: the D-pad going down the list of veins, then across its buttons](https://azerothgps.com/press/controller-herbs-1312.gif)
+
 ![The map with the controller's buttons on its left and the View Controls drawing over it](https://azerothgps.com/press/controller-map.png)
 
 ![Options, Controller page: the controller drawn in gold, click a button to change what it does](https://azerothgps.com/press/controller-options.png)
