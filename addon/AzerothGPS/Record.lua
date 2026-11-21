@@ -260,9 +260,15 @@ end
 
 -- The editable road nearest (x, y) on `cont` within `reach` (EDIT_PICK_YD): { t, shipped, archived, d, i (its point
 -- nearest), part }, or nil.
+-- (never a road erased there since: gone from the map and the routes, it was picked all the same and Delete took out
+-- that one, not the road shown; Kooki3z 2026-11-20, "cant delete stairs here, also seems like I can select phantom
+-- roads that aren't shown with the road tool")
 function R.TrackAt(cont, x, y, reach)
   reach = reach or R.EDIT_PICK_YD
   local best
+  local G = ns.GPS
+  local erases = G and G.PendingErases and G.PendingErases(cont)
+  if erases and #erases == 0 then erases = nil end
   for _, c in ipairs(R.Editable(cont)) do
     local p = c.t.pts
     for k = 1, #p - 3, 2 do
@@ -270,8 +276,10 @@ function R.TrackAt(cont, x, y, reach)
       local vx, vy = bx - ax, by - ay
       local L2 = vx * vx + vy * vy
       local f = L2 > 0 and math.max(0, math.min(1, ((x - ax) * vx + (y - ay) * vy) / L2)) or 0
-      local d = math.sqrt((ax + vx * f - x) ^ 2 + (ay + vy * f - y) ^ 2)
-      if d <= reach and (not best or d < best.d) then
+      local qx, qy = ax + vx * f, ay + vy * f
+      local d = math.sqrt((qx - x) ^ 2 + (qy - y) ^ 2)
+      if d <= reach and (not best or d < best.d)
+          and not (erases and G.UnderErase(erases, qx, qy, c.t.time)) then
         best = { t = c.t, shipped = c.shipped, archived = c.archived, d = d, i = f < 0.5 and (k + 1) / 2 or (k + 3) / 2,
           part = c.t.part }
       end

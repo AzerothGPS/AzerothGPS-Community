@@ -194,7 +194,8 @@ def test_delete_takes_a_road_of_your_own_off_the_list(tools):
     click_map(lua, 2615.0, 700.5)
     press(ask_delete(lua, ns, win, "Delete this road section?").yes)
     assert ops(ns) == ["add", "add", "remove"]
-    assert ns.Record.TrackAt(0, 2615.0, 700.0) is not None  # (still listed for editing: the erase is over it)
+    # (erased there: no longer picked there, a phantom road no one sees; Kooki3z 2026-11-20)
+    assert ns.Record.TrackAt(0, 2615.0, 700.0) is None
     assert nearest(ns, 0, 2622.0, 700.0) > 5
 
 

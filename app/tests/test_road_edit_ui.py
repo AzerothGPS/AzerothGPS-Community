@@ -231,6 +231,37 @@ def test_a_lift_with_no_heights_is_a_lift_ride_from_its_first_end_and_flips(game
         R.Reset()
 
 
+def test_a_road_erased_since_isnt_picked_where_its_gone(game):
+    # (Kooki3z 2026-11-20: "cant delete stairs here, also seems like I can select phantom roads that aren't shown with the
+    # road tool": a road erased since was still picked there, and Delete took out that one, not the road shown)
+    lua, ns = game
+    G, R, Rec = ns.GPS, ns.Router, ns.Record
+    saved = ns.db.tracks
+    try:
+        ns.db.tracks = lua.table()
+        R.Reset()
+        G.roadMode = True
+        G.FinishRoad(lua.table(pts=lua.table(2600.0, 1900.0, 2630.0, 1900.0, 2660.0, 1900.0), cont=0), False, False)
+        old = ns.db.tracks[1]
+        assert Rec.TrackAt(0, 2615.0, 1901.0).t.time == old.time
+        # erased along its west half: gone there, still picked on the rest
+        G.FinishRoad(lua.table(pts=lua.table(2598.0, 1900.0, 2628.0, 1900.0), cont=0), True, False)
+        er = ns.db.tracks[2]
+        assert er.op == "remove" and er.time > old.time
+        assert Rec.TrackAt(0, 2610.0, 1901.0) is None
+        assert Rec.TrackAt(0, 2655.0, 1901.0).t.time == old.time
+        # a road drawn there after the erase: picked (the erase is older than it)
+        G.FinishRoad(lua.table(pts=lua.table(2600.0, 1902.0, 2625.0, 1902.0), cont=0), False, False)
+        new = ns.db.tracks[3]
+        if new.time <= er.time:
+            new.time = er.time + 1
+        assert Rec.TrackAt(0, 2610.0, 1902.0).t.time == new.time
+    finally:
+        G.roadMode = None
+        ns.db.tracks = saved
+        R.Reset()
+
+
 def test_on_a_lift_it_still_says_take_the_lift_then_whats_next(game):
     # (Kooki3z 2026-11-20: "while on the lift part of the path, it should still say take the lift then cross the bridge")
     lua, ns = game
