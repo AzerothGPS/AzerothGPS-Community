@@ -6042,6 +6042,48 @@ R.WARM_TERRAIN_YD = 800
 -- it (built in the background by WarmUp) rather than building it all at once in a frame.
 function R.GraphReady(cont) return graphs[cont] ~= nil end
 function R.DebugGraph(cont) return graphs[cont] end -- (for tests and checks)
+-- Whether (x, y) of `cont` is on a road of kind `kind` (an edited, drawn or recorded road's, g.kind), within `reach`
+-- yards: the directions' "Cross the bridge" for the player's own bridges (Turns.Places; Kooki3z 2026-11-20, "doesn't say
+-- cross the bridge on drawn bridges ... or recorded"). Each graph's roads of a kind kept with their boxes, once.
+R.kindBoxes = setmetatable({}, { __mode = "k" })
+function R.OnKindRoad(cont, x, y, kind, reach)
+  local g = graphs[cont]
+  if not (g and g.kind and x and y) then return false end
+  local per = R.kindBoxes[g]
+  if not per then
+    per = {}
+    R.kindBoxes[g] = per
+  end
+  local list = per[kind]
+  if not list then
+    list = {}
+    for ei, k in pairs(g.kind) do
+      local e = k == kind and g.e[ei]
+      if e and #e >= 8 then
+        local x0, x1, y0, y1 = math.huge, -math.huge, math.huge, -math.huge
+        for i = 5, #e - 1, 2 do
+          x0, x1, y0, y1 = math.min(x0, e[i]), math.max(x1, e[i]), math.min(y0, e[i + 1]), math.max(y1, e[i + 1])
+        end
+        list[#list + 1] = { e, x0, x1, y0, y1 }
+      end
+    end
+    per[kind] = list
+  end
+  local r2 = reach * reach
+  for _, b in ipairs(list) do
+    if x >= b[2] - reach and x <= b[3] + reach and y >= b[4] - reach and y <= b[5] + reach then
+      local e = b[1]
+      for i = 5, #e - 3, 2 do
+        local ax, ay, bx, by = e[i], e[i + 1], e[i + 2], e[i + 3]
+        local vx, vy = bx - ax, by - ay
+        local L2 = vx * vx + vy * vy
+        local f = L2 > 0 and math.max(0, math.min(1, ((x - ax) * vx + (y - ay) * vy) / L2)) or 0
+        if (ax + vx * f - x) ^ 2 + (ay + vy * f - y) ^ 2 <= r2 then return true end
+      end
+    end
+  end
+  return false
+end
 R.Breathe = Breathe -- (long loops elsewhere that may run inside the background work: GPSFrame's road index)
 
 function R.WarmUp(cont, x, y)
