@@ -5521,7 +5521,8 @@ function G.party.io.members()
       if ok and x and y and not ns.IsSecret(x) and not ns.IsSecret(y) then
         local class
         if UnitClass then class = select(2, UnitClass(u)) end -- (its file name: MAGE; not `a and f()`, one value)
-        out[#out + 1] = { name = UnitName and UnitName(u) or u, cont = inst, x = x, y = y, class = class, raid = raid,
+        out[#out + 1] = { name = ns.UnitFullName and ns.UnitFullName(u) or UnitName and UnitName(u) or u, -- (the whole name a whisper needs: issue #854)
+          cont = inst, x = x, y = y, class = class, raid = raid,
           unit = u } -- (one of the game's group: the game's Minimap has its blip, G.DrawParty)
       end
     end
