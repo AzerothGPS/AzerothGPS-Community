@@ -661,8 +661,15 @@ function R.WithTracks(roads, tracks, cont)
     if R.Breathe then R.Breathe(ticks, every or 200) end
   end
   local n, e = {}, {}
-  for i = 1, #roads.n do n[i] = roads.n[i] end
-  for i = 1, #roads.e do e[i] = roads.e[i] end
+  -- (the copies too: with the next thousand roads indexed, a 14 ms slice on Kalimdor; 2026-11-21)
+  for i = 1, #roads.n do
+    tick(R.KEEP_BREATHE)
+    n[i] = roads.n[i]
+  end
+  for i = 1, #roads.e do
+    tick(R.KEEP_BREATHE)
+    e[i] = roads.e[i]
+  end
   -- (the edits: the tracks they replaced left out, a stairs stretch its own piece)
   tracks = R.ExpandTracks(tracks)
   -- (each road's kind, edited (R.TRACK_KINDS): the map draws it; a raised one's (R.RAISED_KINDS) roads, the nodes
@@ -748,10 +755,16 @@ function R.WithTracks(roads, tracks, cont)
   if not mine0 then return n, e, roads.z, roads.nz end
   if roads.z then
     zs = {}
-    for k, z in pairs(roads.z) do zs[k] = z end
+    for k, z in pairs(roads.z) do
+      tick(R.KEEP_BREATHE)
+      zs[k] = z
+    end
   elseif roads.nz then
     nzs = {}
-    for k, z in pairs(roads.nz) do nzs[k] = z end
+    for k, z in pairs(roads.nz) do
+      tick(R.KEEP_BREATHE)
+      nzs[k] = z
+    end
   end
   local reach0 = R.TRACK_REACH
   local function keys(ed, fn)
@@ -1439,6 +1452,7 @@ end
 local function Breathe(i, every)
   if i % every == 0 and CanYield() then coroutine.yield() end
 end
+R.KEEP_BREATHE = 1000 -- (the road network's copies: values copied between pauses)
 
 -- Links between pieces, so a route can go on along roads instead of giving up: the
 -- closest node pair between pieces, Kruskal style until every piece is joined, plus every
@@ -2244,23 +2258,40 @@ function BuildGraph(cont)
   end
   if nodes == roads.n then -- (no overlays: copies, as the data's own lists aren't changed)
     local n2, e2 = {}, {}
-    for i = 1, #nodes do n2[i] = nodes[i] end
-    for i = 1, #edges do e2[i] = edges[i] end
+    for i = 1, #nodes do
+      Breathe(i, R.KEEP_BREATHE)
+      n2[i] = nodes[i]
+    end
+    for i = 1, #edges do
+      Breathe(i, R.KEEP_BREATHE)
+      e2[i] = edges[i]
+    end
     nodes, edges = n2, e2
   end
   if not roads.z then R.JoinDrawnEnds(nodes, edges, caveOf, dropOf, noBridge) end -- (not a level with heights: by floor there)
   local keep ={ roads = roads, overlays = overlays, nOverlays = overlays and #overlays or 0,
     nodes = {}, edges = {}, dropOf = {}, caveOf = {}, noBridge = noBridge, nodeZ = nodeZ, indoorOf = indoorOf }
+  -- (a pause every KEEP_BREATHE: a copy's growing table is moved and the garbage collector's share comes with it,
+  -- 8-11 ms a 5,000 on Kalimdor, release 1.3.12's CI timing)
   for i = 1, #nodes do
-    Breathe(i, 5000)
+    Breathe(i, R.KEEP_BREATHE)
     keep.nodes[i] = nodes[i]
   end
   for i = 1, #edges do
-    Breathe(i, 5000)
+    Breathe(i, R.KEEP_BREATHE)
     keep.edges[i] = edges[i]
   end
-  for k, v in pairs(dropOf) do keep.dropOf[k] = v end
-  for k, v in pairs(caveOf) do keep.caveOf[k] = v end
+  local copied = 0
+  for k, v in pairs(dropOf) do
+    copied = copied + 1
+    Breathe(copied, R.KEEP_BREATHE)
+    keep.dropOf[k] = v
+  end
+  for k, v in pairs(caveOf) do
+    copied = copied + 1
+    Breathe(copied, R.KEEP_BREATHE)
+    keep.caveOf[k] = v
+  end
   mergedRoads[cont] = keep
   end
   P1("router: build roads: overlays and caves", pt)
