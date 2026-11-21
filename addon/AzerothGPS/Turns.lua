@@ -35,6 +35,7 @@ T.STAIRS_THEN_YD = 20 -- yards: a turn this soon after the stairs is said with t
 T.BRIDGE_MIN_YD = 8
 T.CITY_BRIDGE_MIN_YD = 20
 T.BRIDGE_STEP = 2
+T.DRAWN_BRIDGE_YD = 2 -- (on the player's own bridge, a road edited, drawn or recorded as one: this near it, Router.OnKindRoad)
 
 local atan2 = math.atan2 or math.atan
 
@@ -341,11 +342,13 @@ function T.Places(path, horizon)
           local x, y = T.PointAt(path, s)
           if kinds[j] == 0 then
             on = R.BridgeAt(cont, x, y, (bx - ax) / len, (by - ay) / len)
+            -- (or the player's own bridge, drawn or recorded: a road of the bridge kind)
+            if not on and R.OnKindRoad and R.OnKindRoad(cont, x, y, "bridge", T.DRAWN_BRIDGE_YD) then on = "drawn" end
           else
             on = R.OnBridgeModel ~= nil and R.OnBridgeModel(cont, x, y)
           end
           if on and not run then -- (a capital's walkway, not a bridge model: a longer run wanted)
-            run, runCity = s, not (R.OnBridgeModel and R.OnBridgeModel(cont, x, y))
+            run, runCity = s, on ~= "drawn" and not (R.OnBridgeModel and R.OnBridgeModel(cont, x, y))
           end
         end
       end

@@ -231,6 +231,41 @@ def test_a_lift_with_no_heights_is_a_lift_ride_from_its_first_end_and_flips(game
         R.Reset()
 
 
+def test_the_directions_say_cross_the_bridge_on_the_players_own_bridges(game):
+    # (Kooki3z 2026-11-20: "doesn't say cross the bridge on drawn bridges ... or recorded")
+    lua, ns = game
+    G, R, Rec, T = ns.GPS, ns.Router, ns.Record, ns.Turns
+    saved = ns.db.tracks
+    try:
+        ns.db.tracks = lua.table()
+        R.Reset()
+        G.roadMode = True
+        G.FinishRoad(lua.table(pts=lua.table(2600.0, 2100.0, 2620.0, 2100.0, 2640.0, 2100.0, 2660.0, 2100.0), cont=0),
+                     False, False)
+        sel = Rec.TrackAt(0, 2630.0, 2101.0)
+        assert sel and Rec.EditTrack(sel, lua.table(kind="bridge", z=20))
+        G.roadMode = None
+        R.NearestEdges(0, 2630.0, 2100.0)
+        assert R.OnKindRoad(0, 2630.0, 2100.5, "bridge", 2) and not R.OnKindRoad(0, 2630.0, 2110.0, "bridge", 2)
+        # a walk along the roads from 30 yd before it to 30 yd past it
+        pts = lua.table(2570.0, 2100.0, 2600.0, 2100.0, 2660.0, 2100.0, 2690.0, 2100.0)
+        path = T.Path(lua.table(parts=lua.table(lua.table(pts=pts, kinds=lua.table(0, 0, 0), cont=0, stop=1))))
+        places = list(T.Places(path).values())
+        br = [m for m in places if m.kind == "bridge"]
+        assert len(br) == 1 and abs(br[0].dist - 30) <= 5 and abs(br[0].stop - 90) <= 5
+        ms = T.Maneuvers(path, "the stop")
+        assert any("cross the bridge" in str(ms[i].text).lower() for i in range(1, len(ms) + 1))
+        # a plain road: nothing said
+        ns.db.tracks = lua.table()
+        R.Reset()
+        R.NearestEdges(0, 2630.0, 2100.0)
+        assert not [m for m in T.Places(path).values() if m.kind == "bridge"]
+    finally:
+        G.roadMode = None
+        ns.db.tracks = saved
+        R.Reset()
+
+
 def test_a_road_erased_since_isnt_picked_where_its_gone(game):
     # (Kooki3z 2026-11-20: "cant delete stairs here, also seems like I can select phantom roads that aren't shown with the
     # road tool": a road erased since was still picked there, and Delete took out that one, not the road shown)
