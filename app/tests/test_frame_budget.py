@@ -546,11 +546,19 @@ def test_route_work_on_a_slow_client_stays_in_its_slices_and_never_pauses_routin
     frame = lua.eval("AGPS_FRAME")
     try:
         N.SetStops(lua.eval("{ { x = -1650, y = -1900, cont = 0, name = 'bay' } }"), False, "red")
-        fps, t = 30, float(lua.eval("AGPS_T"))
-        for _ in range(fps * 120):
+        # (until the route, and half a minute on; within 10 minutes. The slices' work goes by this CPU's clock, so a
+        # slower one gets less done a frame: the route came 85 s in here, past 120 s on the CI runner, PR #846)
+        fps, t, left = 30, float(lua.eval("AGPS_T")), None
+        for _ in range(fps * 600):
             t += 1 / fps
             lua.execute(f"AGPS_T = {t}")
             frame(1 / fps)
+            if left is None and (N.route or N.paused):
+                left = fps * 30
+            elif left is not None:
+                left -= 1
+                if left <= 0:
+                    break
         s = lua.eval("AGPS_SLICES")
         assert not N.paused, f"routing paused ({N.paused}); the worst slice counted ran {s.counted:.0f} ms"
         assert not N.degraded
