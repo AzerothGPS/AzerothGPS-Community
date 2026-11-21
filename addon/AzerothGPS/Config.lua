@@ -10,7 +10,7 @@ local HELP = {
   L["/agps zoom <yards>       (center to edge; or mouse wheel over the frame)"],
   L["/agps rotate on|off      (heading-up / north-up)"],
   L["/agps lookat <continent> <x> <y> [zoom]  (the map's view on a spot) | follow  (back on you)"],
-  L["/agps style openmap|minimap|zone|nospoiler (OpenMap / terrain / world map / explored parts only)"],
+  L["/agps style openmap|minimap|zone|nospoiler|none (OpenMap / terrain / world map / explored parts only / no map, in the world map)"],
   L["/agps language auto|enUS|deDE|esES|esMX|frFR|itIT|koKR|ptBR|ruRU|zhCN|zhTW  (AzerothGPS's text; then /reload)"],
   L["/agps clear              (cancel the route)"],
   L["/agps pause              (pause or resume routing, the stops kept)"],
@@ -114,12 +114,13 @@ Command = function(msg)
   elseif a == "rotate" then
     gps.rotate = OnOff(b, gps.rotate)
   elseif a == "style" then -- (issue #75: seamless, minimap = Terrain, zone = World Map, nospoiler = No Spoiler Map;
-    -- issue #91: openmap = seamless, the OpenMap style, its saved value still "seamless")
-    local style = ({ terrain = "minimap", world = "zone", openmap = "seamless" })[b] or b
+    -- issue #91: openmap = seamless, the OpenMap style, its saved value still "seamless"; none = No Map, Kooki3z
+    -- 2026-11-20, only with the map in the game's world map: SetStyle says so)
+    local style = ({ terrain = "minimap", world = "zone", openmap = "seamless", nomap = "none" })[b] or b
     if ns.GPS.STYLES[style] then
       ns.GPS.SetStyle(style) -- (not while a game on the map set it: API.HoldMap; it says so)
     else
-      ns.Print(string.format(L["map style: %s. /agps style openmap|minimap|zone|nospoiler"], tostring(gps.style)))
+      ns.Print(string.format(L["map style: %s. /agps style openmap|minimap|zone|nospoiler|none"], tostring(gps.style)))
     end
   elseif a == "language" then -- (AzerothGPS's own text in another language than the game's: Locales.lua)
     local want

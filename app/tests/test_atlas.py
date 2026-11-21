@@ -477,6 +477,8 @@ AUTHOR_FILES |= {f"addon/AzerothGPS/Locales/{c}.lua" for c in ("deDE", "esES", "
 # where the style's name may be: those, and the player-facing text of the map menu, the commands and the reload prompt
 OPENMAP_FILES = AUTHOR_FILES | {"addon/AzerothGPS/GPSFrame.lua", "addon/AzerothGPS/Config.lua",
                                 "addon/AzerothGPS/Atlas/Atlas.lua"}
+# (and the No Map style's tests: they stub the OpenMap addon's API, which No Map follows; Kooki3z 2026-11-20)
+OPENMAP_FILES |= {"app/tests/test_no_map_style.py"}
 
 
 def _repo_files():
@@ -1172,10 +1174,16 @@ def test_the_map_style_buttons_switch_between_the_four_live():
     lua.globals().DEFAULT_CHAT_FRAME = lua.eval("{ AddMessage = function() end }")
     G.ApplySettings()
     buttons = {t.style: t for t in G.QUICK.values() if t.style}
-    assert set(buttons) == {"seamless", "minimap", "zone", "nospoiler"}
-    assert [buttons[k].label for k in ("seamless", "minimap", "zone", "nospoiler")] ==         ["OpenMap", "Terrain", "World Map", "No Spoiler Map"]
+    # (and No Map, Kooki3z 2026-11-20: only with the map in the game's world map, refused here; test_no_map_style.py)
+    assert set(buttons) == {"seamless", "minimap", "zone", "nospoiler", "none"}
+    assert [buttons[k].label for k in ("seamless", "minimap", "zone", "nospoiler", "none")] ==         ["OpenMap", "Terrain", "World Map", "No Spoiler Map", "No Map"]
     group = next(g for g in G.QUICK_GROUPS.values() if g.id == "styles")
-    assert list(group.members.values()) == ["style_seamless", "style_minimap", "style_zone", "style_nospoiler"]
+    assert list(group.members.values()) == ["style_seamless", "style_minimap", "style_zone", "style_nospoiler",
+                                            "style_none"]
+    was = gps.style
+    buttons["none"].button._scripts.OnClick(buttons["none"].button)
+    assert gps.style == was and buttons["none"].needs == "useWorldMap"
+    buttons.pop("none")
     terrain_max = 2500 * G.ZoomScale()
     for i, style in enumerate(["seamless", "minimap", "zone", "nospoiler", "seamless", "minimap"]):
         if style == "minimap" and i == 1:
