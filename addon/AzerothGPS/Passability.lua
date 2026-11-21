@@ -770,9 +770,15 @@ end
 -- Remembered by the points, as SegmentCost (the ground doesn't change; a recalculation asks the same legs again).
 local CLIFF_MEMO_MAX = 20000
 cliffMemo, cliffMemoN = {}, 0
+-- (in the background: a pause every CLIFF_YIELD_EVERY heights read, counted across the calls, not per leg. The road
+-- network's dead ends check up to 32 legs each, every one shorter than a pause's worth, so none paused: slices of the
+-- route's work up to 25 ms here, 56 on CI, release 1.3.12's checks)
+P.CLIFF_YIELD_EVERY = 100
+P.cliffSamples = 0
 function P.CliffAlong(cont, x1, y1, x2, y2)
   local key = cont .. ":" .. x1 .. ":" .. y1 .. ":" .. x2 .. ":" .. y2
-  local v = cliffMemo[key]
+  local memo = cliffMemo
+  local v = memo[key]
   if v ~= nil then return v end
   v = false
   local g = ns.Terrain and ns.Terrain[cont]
@@ -787,7 +793,14 @@ function P.CliffAlong(cont, x1, y1, x2, y2)
     local canYield = co ~= nil and not isMain
     local up, down, prev = 0, 0, nil
     for i = 0, n do
-      if canYield and i > 0 and i % P.SEG_YIELD_EVERY == 0 then coroutine.yield() end
+      if canYield then
+        local k = P.cliffSamples + 1
+        if k >= P.CLIFF_YIELD_EVERY then
+          k = 0
+          coroutine.yield()
+        end
+        P.cliffSamples = k
+      end
       local z = WalkedZ(cont, g, x1 + dx * i / n, y1 + dy * i / n, near)
       if z and prev and z - prev > rise then
         up, down = up + z - prev, 0
@@ -803,6 +816,7 @@ function P.CliffAlong(cont, x1, y1, x2, y2)
       prev = z
     end
   end
+  if memo ~= cliffMemo then return v end -- (the limit changed while it paused: not kept under the new one)
   if cliffMemoN >= CLIFF_MEMO_MAX then cliffMemo, cliffMemoN = {}, 0 end
   cliffMemo[key], cliffMemoN = v, cliffMemoN + 1
   return v

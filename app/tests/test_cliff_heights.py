@@ -57,6 +57,46 @@ def test_a_straight_leg_never_goes_down_or_up_a_cliff_and_a_gentle_slope_is_walk
     assert P.SegmentCost(1, *A, *B) is not None and P.SegmentCost(1, *B, *A) is not None
 
 
+def test_cliff_checks_in_the_background_pause_across_short_legs(mesa):
+    # (release 1.3.12's CI: a slice of the route's background work 56 ms, test_map_redraw's caves' roads trip) the
+    # checks paused every SEG_YIELD_EVERY heights of one leg, but the road network's dead ends check up to 32 short legs
+    # each: none ever paused. Now a pause every CLIFF_YIELD_EVERY heights, counted across the legs; the same answers
+    lua, ns, make = mesa
+    P = ns.Passability
+    ground(lua, ns, make(20, False))
+    run = lua.eval("""function(P, GD, legs)
+      local reads, most, pauses = 0, 0, 0
+      local at = GD.At
+      GD.At = function(...) reads = reads + 1 return at(...) end
+      local co = coroutine.create(function()
+        local out = {}
+        for i, l in ipairs(legs) do out[i] = P.CliffAlong(1, l[1], l[2], l[3], l[4]) end
+        return out
+      end)
+      local ok, out
+      while true do
+        reads = 0
+        ok, out = coroutine.resume(co)
+        assert(ok, out)
+        most = math.max(most, reads)
+        if coroutine.status(co) == "dead" then break end
+        pauses = pauses + 1
+      end
+      GD.At = at
+      return out, pauses, most
+    end""")
+    # (40 legs of 60 yd, 16 heights each: half across the edge, a cliff, half along the high side)
+    legs = [(-1700.0 + 10 * i, -2030.0, -1700.0 + 10 * i, -1970.0) if i % 2 else
+            (-1700.0 + 10 * i, -2090.0, -1640.0 + 10 * i, -2090.0) for i in range(40)]
+    out, pauses, most = run(P, ns.Ground, lua.table_from([lua.table_from(l) for l in legs]))
+    got = [out[i + 1] for i in range(len(legs))]
+    assert pauses >= 40 * 16 // P.CLIFF_YIELD_EVERY - 1, pauses
+    assert most <= 2 * (P.CLIFF_YIELD_EVERY + 1), most  # (two reads a height: the ground's and the water's)
+    P.ClearCliffMemo()
+    assert got == [bool(P.CliffAlong(1, *l)) for l in legs]  # (in the frame, no pauses: the same)
+    assert any(got) and not all(got)
+
+
 def test_a_safe_drop_is_taken_downhill_only(mesa):
     lua, ns, _ = mesa
     P = ns.Passability
