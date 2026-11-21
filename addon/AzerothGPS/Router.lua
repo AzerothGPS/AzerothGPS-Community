@@ -3598,6 +3598,12 @@ function R.EdgesJoined(cont, ei, reach)
   return set
 end
 
+-- The nearer road first; the same yards off (the roads at one junction), by edge. The lists are gathered by pairs(),
+-- whose order moves with the road ids, so which of two roads at a junction came first, and past ENTRY_CANDIDATES
+-- which was tried at all, changed with a building's roads rebuilt far away: Brill inn's 3 fewer nodes (#846) sent a
+-- walk from Tarren Mill's flight master round by the road, 34 s longer.
+function R.NearerEdge(a, b) return a.dist < b.dist or (a.dist == b.dist and a.edge < b.edge) end
+
 -- `z`: with roads with heights (a dungeon's floors), only those about at that height.
 local function NearestEdgesRaw(cont, x, y, z)
   local g = GraphQuery(cont, x, y)
@@ -3661,7 +3667,7 @@ local function NearestEdgesRaw(cont, x, y, z)
     b.dist = math.sqrt(b.d2)
     list[#list + 1] = b
   end
-  table.sort(list, function(a, b) return a.dist < b.dist end)
+  table.sort(list, R.NearerEdge)
   return list
 end
 
@@ -3917,8 +3923,8 @@ function R.OnFloor(g, list, z, x, y)
     if c.floorOff <= best + R.FLOOR_PICK_Z then kept[#kept + 1] = c end
   end
   if moved then
-    table.sort(kept, function(a, b) return a.dist < b.dist end)
-    table.sort(list, function(a, b) return a.dist < b.dist end)
+    table.sort(kept, R.NearerEdge)
+    table.sort(list, R.NearerEdge)
   end
   return kept[1] and kept or list
 end
@@ -4302,7 +4308,7 @@ function R.NearestEdgesAll(cont, x, y, ok, keep)
     list[#list + 1] = { edge = ei, px = ax + (bx - ax) * t, py = ay + (by - ay) * t, d2 = c[1],
       along = c[4] + Dist(ax, ay, bx, by) * t, dist = math.sqrt(c[1]) }
   end
-  table.sort(list, function(p, q) return p.d2 < q.d2 end)
+  table.sort(list, R.NearerEdge)
   for n = #list, K + 1, -1 do list[n] = nil end
   return list
 end
@@ -5456,7 +5462,7 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
         for _, c in ipairs(list) do seen = seen or c.edge == w.edge end
         if not seen then list[#list + 1] = w end
       end
-      table.sort(list, function(p, q) return p.dist < q.dist end)
+      table.sort(list, R.NearerEdge)
     end
   end
   -- a capital's stop with a height (a city place's: its NPC's): onto the roads on its floor, not the

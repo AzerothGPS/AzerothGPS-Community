@@ -184,6 +184,30 @@ def test_a_road_to_the_flight_master_leaves_the_walk_south_east_to_the_south_roa
     assert r.length < 1250
 
 
+# (PR #846: Brill inn rebuilt with 3 fewer nodes moved every later road id, and the nearest roads to
+# Tarren Mill's flight master came out of pairs() in another order. The 8th and 9th are the same node's two roads,
+# 145.6 yd off: the road west to the Hillsbrad crossroads fell out of the ENTRY_CANDIDATES, and the walk to Crown Guard
+# Tower went round by the town's road, 3331 s -> 3365 s. Roads the same yards off are taken by edge, whatever the ids.)
+
+def test_roads_the_same_yards_off_come_in_edge_order_whatever_the_ids():
+    from azerothgps import gameharness
+
+    lua, ns = gameharness.start()
+    lua.execute("AGPS_LEVEL = 10; UnitFactionGroup = function() return 'Horde' end")
+    R = ns.Router
+    R.Reset()
+    R.Route(0, -0.1, -859.9, 1850.0, -3750.0, lua.table())  # (the roads built)
+    near = R.NearestEdges(0, -0.1, -859.9)
+    got = [(near[i].dist, near[i].edge) for i in range(1, len(near) + 1)]
+    ties = [(a, b) for a, b in zip(got, got[1:]) if a[0] == b[0]]
+    assert len(ties) >= 3  # (the junctions by the flight master)
+    assert got == sorted(got), [t for t in ties if t[0][1] > t[1][1]]
+    for x, y in ((-0.1, -859.9), (1850.0, -3750.0), (-1816.7, -3316.7)):
+        al = R.NearestEdgesAll(0, x, y)
+        got = [(al[i].dist, al[i].edge) for i in range(1, len(al) + 1)]
+        assert got == sorted(got)
+
+
 def test_a_recorded_walks_top_isnt_joined_to_the_ground_road_by_its_foot(world):
     # (the same walk's top, 31 yd up the tower, ended 14 yd from its own way to the stairs' foot on the ground and was
     # joined onto it: a step from the ground onto the tower's top. WithTracks' LandHeightOK, R.LAND_CLIMB)
