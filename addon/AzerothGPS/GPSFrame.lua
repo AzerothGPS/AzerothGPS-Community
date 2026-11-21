@@ -17491,6 +17491,9 @@ function G.Init()
     panel.idle = 0
     return true
   end
+  -- (the controller's, Pad.lua: the D-pad's up and down as Up and Down, its Select as Enter; Kooki3z 2026-11-20, "When
+  -- search is active and controller is on, support D-pad for selecting line like arrow keys do")
+  function G.SearchOpen() return panel:IsShown() and #results > 0 end
   if box.SetAltArrowKeyMode then box:SetAltArrowKeyMode(false) end
   box:SetScript("OnArrowPressed", function(self, key)
     if G.SearchArrow(key) and self.SetCursorPosition then
@@ -17498,7 +17501,7 @@ function G.Init()
     end
   end)
   -- Enter: the highlighted row, as a click on it (a Shift-click too); none highlighted, the first, as before
-  box:SetScript("OnEnterPressed", function()
+  function G.SearchPick()
     local r = panel.sel and rows[panel.sel]
     if r and r:IsShown() and r.entry then
       local click = r:GetScript("OnClick")
@@ -17506,7 +17509,8 @@ function G.Init()
       return
     end
     Pick(results[1])
-  end)
+  end
+  box:SetScript("OnEnterPressed", function() G.SearchPick() end)
   box:SetScript("OnEscapePressed", function() panel:Hide() end)
   search:SetScript("OnClick", function()
     panel:SetShown(not panel:IsShown())
