@@ -2014,3 +2014,4 @@ L["A big change of direction (a turn coming up, stairs) swings the arrow round s
 L["Record: Stairs on/off"] = "录制：楼梯开/关"
 L["recording: walk the road, switching the road type as you go (Stairs too), then Stop & Save"] = "录制中：沿道路走，途中切换道路类型（包括楼梯），然后停止并保存"
 L["Record a road by walking it: opens the Record window (Record, Pause, Stop & Save, and the road type, Stairs too, or its key). Each walk is saved as a drawn road with where you were indoors and the rooms' names, so its floors can be worked out. Undo takes the last walk back. (Shown with the road tools)"] = "边走边录制道路：打开录制窗口（录制、暂停、停止并保存，以及道路类型（包括楼梯）或其按键）。每段路线都会存为一条手绘道路，并记下你在室内的位置和房间名称，以便推算楼层。撤销会取回最后一段路线。（随道路工具显示）"
+L["On the ground: %d yd"] = "地面：%d码"

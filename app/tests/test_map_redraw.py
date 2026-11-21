@@ -6175,6 +6175,13 @@ def test_the_road_tools_hover_shows_a_roads_height(game):
                 if g0.nz[g0.e[c.edge][1]] is None and g0.nz[g0.e[c.edge][2]] is None)
     info = G.RoadHoverInfo(0, land.px, land.py, land.dist + 1)
     assert str(info.title) == "Road" and str(info.lines[1]).startswith("On the ground")
+    # (Kooki3z 2026-11-20: the map's ground height said for a land road, not "no height")
+    lua.execute("AGPS_PH = AGPS_NS.Ground.PointHeight AGPS_NS.Ground.PointHeight = function() return 31.4 end")
+    try:
+        info = G.RoadHoverInfo(0, land.px, land.py, land.dist + 1)
+        assert str(info.lines[1]) == "On the ground: 31 yd"
+    finally:
+        lua.execute("AGPS_NS.Ground.PointHeight = AGPS_PH")
     assert G.RoadHoverInfo(0, 2300.0 + 3000, 330.0, 3) is None  # (no road near)
     if not R.GraphReady(1):
         assert G.RoadHoverInfo(1, 0.0, 0.0, 3) is None and not R.GraphReady(1)  # (never builds the roads for it)

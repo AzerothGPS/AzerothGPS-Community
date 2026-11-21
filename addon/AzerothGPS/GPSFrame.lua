@@ -15480,7 +15480,12 @@ function G.RoadHoverInfo(level, x, y, reach, z)
     -- the import works out a recorded walk's floors and stairs, 2026-11-18: a walk up Grom'gol's tower looked flat)
     lines[1] = L["No height yet: its floors and stairs are worked out when it's added to the road data"]
   elseif not here then
-    lines[1] = L["On the ground (the game's data has no height for it)"]
+    -- (the map's ground there, Ground.lua: a land road's height is the ground's; Kooki3z 2026-11-20, "Seems like all of
+    -- orgrimmar has none")
+    local GD = ns.Ground
+    local gz = GD and GD.PointHeight and GD.PointHeight(level, x, y)
+    lines[1] = gz and Format(L["On the ground: %d yd"], math.floor(gz + 0.5))
+      or L["On the ground (the game's data has no height for it)"]
   elseif za and zb and math.abs(za - zb) >= R.STAIR_MIN_Z then
     -- (rising along it: stairs, unless its kind says what it is: a recorded bridge rising between its ends' ground is a
     -- bridge, Kooki3z 2026-11-20 "recorded bridge, mouse over says stairs")

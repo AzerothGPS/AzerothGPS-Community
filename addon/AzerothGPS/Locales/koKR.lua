@@ -2014,3 +2014,4 @@ L["A big change of direction (a turn coming up, stairs) swings the arrow round s
 L["Record: Stairs on/off"] = "기록: 계단 켜기/끄기"
 L["recording: walk the road, switching the road type as you go (Stairs too), then Stop & Save"] = "기록 중: 길을 걸으며 길 종류를 바꾸세요 (계단도), 그다음 중지 및 저장"
 L["Record a road by walking it: opens the Record window (Record, Pause, Stop & Save, and the road type, Stairs too, or its key). Each walk is saved as a drawn road with where you were indoors and the rooms' names, so its floors can be worked out. Undo takes the last walk back. (Shown with the road tools)"] = "걸어서 길을 기록합니다: 기록 창을 엽니다 (기록, 일시정지, 중지 및 저장, 그리고 길 종류 — 계단 포함 — 또는 그 단축키). 걸은 길은 실내에 있던 곳과 방 이름과 함께 그린 길로 저장되어 층을 알아낼 수 있습니다. 실행 취소는 마지막 길을 되돌립니다. (길 도구와 함께 표시)"
+L["On the ground: %d yd"] = "지면: %d미터"
