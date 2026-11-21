@@ -134,10 +134,7 @@ local function Save()
   local risk = {}
   for k, v in pairs(N.riskOk or {}) do risk[k] = v end
   cdb.riskOk = (#list > 0 and next(risk)) and risk or nil
-  -- (the group quests kept or left out: not asked again after a /reload while the trip is on, GPS.groupChoice)
-  local group = {}
-  for id, v in pairs(ns.GPS and ns.GPS.groupChoice or {}) do group[id] = v end
-  cdb.groupChoice = (#list > 0 and next(group)) and group or nil
+  N.SaveQuestChoices(cdb) -- (the quests kept or left out: with or without a route, N.questDropped)
   local skip = {}
   for node in pairs(N.skipLearn or {}) do skip[#skip + 1] = node end
   cdb.skipLearn = (#list > 0 and #skip > 0) and skip or nil
@@ -146,9 +143,6 @@ local function Save()
   cdb.skipRides = (#list > 0 and #rides > 0) and rides or nil
   cdb.noSwim = (#list > 0 and N.noSwim) or nil -- (a swim removed from this trip: N.SkipSwim)
   cdb.swimBans = (#list > 0 and N.noSwim and N.swimBans and #N.swimBans > 0) and N.swimBans or nil -- (its water)
-  local dropped = {}
-  for i, e in ipairs(N.questDropped or {}) do dropped[i] = Copy(e) end
-  cdb.questDropped = (#list > 0 and #dropped > 0) and dropped or nil
   -- (the other faction's towns said in chat for this trip, N.CheckHostileRoute: not said again after a /reload)
   local towns = {}
   for name in pairs(N.hostileSaid or {}) do towns[#towns + 1] = name end
@@ -157,7 +151,6 @@ end
 N.SaveStops = Save
 
 local function Changed()
-  if #N.stops == 0 then N.questDropped = {} end -- (the quest route run over: its dropped stops let go)
   N.dest = N.stops[1]
   N.route, N.arrivedAt = nil, nil
   version = version + 1
@@ -1026,12 +1019,6 @@ function N.SetStops(stops, fastest, force, keep)
     end
   end
   N.pauseWatch = nil
-  -- (a route with no quest route stop: the quest route run is over, its dropped stops let go)
-  local quest = false
-  for _, d in ipairs(stops) do
-    if d.questRoute then quest = true break end
-  end
-  if not quest then N.questDropped = {} end
   N.stops, N.loop, N.keepOrder = {}, false, keep and true or false
   for i, d in ipairs(stops) do
     if i > N.MAX_STOPS then break end
@@ -1173,32 +1160,144 @@ function N.OnQuestRoute()
 end
 
 -- The quest route's stops the player removed (asked 2026-11-12: "Remember the quest stops they've dropped from the
--- route and/or not included (like elite quests) for this current route run"): { quest, turnin, x, y, cont, name },
--- left out when the quest route is made again (GPS.SetQuestRoute, by N.QuestDropped) until this quest route run is
--- over: cleared, every stop done, or another route set (N.SetStops without quest route stops). Saved with the stops.
--- (The group quests left out are GPS.groupChoice's, kept for the session.)
+-- route"): { quest, turnin, name }, left out when the quest route is made again (GPS.SetQuestRoute, by N.QuestDropped).
+-- Since 1.3.13 (players' request relayed by Kooki3z 2026-11-21: "when a quest is excluded via the popup, it comes up
+-- again every time the route regenerates") they stay out of every later quest route, not just this run's: saved per
+-- character with or without a route, kept over a /reload, a new route and the route cleared, until the player puts
+-- the quest back (N.PutBackQuest: the directions' Put Back, Options > Routing > Quest Route's Put Back All) or the
+-- quest leaves the log (N.ForgetQuest). A stop is matched by its quest and part (objectives or turn-in), not where it
+-- is: a quest's spot moves on as its objectives are done (its next one), and a removed stop matched by place (40 yd,
+-- till 1.3.12) came back there. The group quests left out on the popup are GPS.groupChoice's, saved the same way.
 N.questDropped = {}
-N.QUEST_DROP_YD = 40 -- yards: a stop for the same quest and part this near one dropped is that one
 function N.QuestDropped(d)
   if not (d and d.quest) then return false end
   for _, e in ipairs(N.questDropped or {}) do
-    if e.quest == d.quest and (e.turnin or false) == (d.turnin or false) and e.cont and d.cont
-        and Geo.Base(e.cont) == Geo.Base(d.cont)
-        and (e.x - d.x) ^ 2 + (e.y - d.y) ^ 2 <= N.QUEST_DROP_YD ^ 2 then
-      return true
-    end
+    if e.quest == d.quest and (e.turnin or false) == (d.turnin or false) then return true end
   end
   return false
+end
+-- The group quests' choices (GPS.groupChoice: questID -> "keep" or "leave") and the stops removed (N.questDropped)
+-- saved per character (CharDB `groupChoice`, `questDropped`; the same keys as before 1.3.13, when they were kept with
+-- the route only).
+function N.SaveQuestChoices(cdb)
+  cdb = cdb or (ns.CharDB and ns.db and ns.CharDB())
+  if not cdb then return end
+  local group = {}
+  for id, v in pairs(ns.GPS and ns.GPS.groupChoice or {}) do
+    if v == "keep" or v == "leave" then group[id] = v end
+  end
+  cdb.groupChoice = next(group) and group or nil
+  local dropped = {}
+  for _, e in ipairs(N.questDropped or {}) do
+    dropped[#dropped + 1] = { quest = e.quest, turnin = e.turnin or nil, name = e.name }
+  end
+  cdb.questDropped = #dropped > 0 and dropped or nil
+end
+function N.RestoreQuestChoices(cdb)
+  N.questDropped = {}
+  for _, e in ipairs(type(cdb.questDropped) == "table" and cdb.questDropped or {}) do
+    if type(e) == "table" and type(e.quest) == "number" then
+      N.questDropped[#N.questDropped + 1] = { quest = e.quest, turnin = e.turnin == true or nil,
+        name = type(e.name) == "string" and e.name or nil }
+    end
+  end
+  local G = ns.GPS
+  if G and G.groupChoice then
+    for id, v in pairs(type(cdb.groupChoice) == "table" and cdb.groupChoice or {}) do
+      if G.groupChoice[id] == nil and (v == "keep" or v == "leave") then G.groupChoice[id] = v end
+    end
+  end
+end
+-- Whether quest `id` is left out of quest routes: Leave Out on the popup, or a stop of it removed.
+function N.QuestLeftOut(id)
+  local G = ns.GPS
+  if G and G.groupChoice and G.groupChoice[id] == "leave" then return true end
+  for _, e in ipairs(N.questDropped or {}) do
+    if e.quest == id then return true end
+  end
+  return false
+end
+-- The quests left out: { { id, name }, ... } by name (Options > Routing > Quest Route lists them).
+function N.LeftOutQuests()
+  local out, seen = {}, {}
+  local function add(id, name)
+    if seen[id] then
+      if not out[seen[id]].name and name then out[seen[id]].name = name end
+      return
+    end
+    out[#out + 1] = { id = id, name = name }
+    seen[id] = #out
+  end
+  local G = ns.GPS
+  for id, v in pairs(G and G.groupChoice or {}) do
+    if v == "leave" then add(id, nil) end
+  end
+  for _, e in ipairs(N.questDropped or {}) do add(e.quest, not e.turnin and e.name or nil) end
+  local T = ns.Layers and ns.Layers.QuestTitle
+  for _, q in ipairs(out) do
+    local ok, t = pcall(function() return T and T(q.id) end)
+    if ok and type(t) == "string" and t ~= "" and not (ns.IsSecret and ns.IsSecret(t)) then q.name = t end
+    q.name = q.name or Format(L["Quest %d"], q.id)
+  end
+  table.sort(out, function(a, b) return a.name < b.name end)
+  return out
+end
+-- Quest `id` put back in quest routes (the player's choice: a group quest isn't asked about again, it's kept).
+function N.PutBackQuest(id)
+  local G = ns.GPS
+  if G and G.groupChoice and G.groupChoice[id] == "leave" then G.groupChoice[id] = "keep" end
+  for i = #(N.questDropped or {}), 1, -1 do
+    if N.questDropped[i].quest == id then table.remove(N.questDropped, i) end
+  end
+  N.SaveQuestChoices()
+end
+function N.PutBackAllQuests()
+  for _, q in ipairs(N.LeftOutQuests()) do N.PutBackQuest(q.id) end
+end
+-- Quest `id` gone from the log (turned in or abandoned): its choices let go. Not pruning the player's data (the
+-- project's rule: player data is kept forever, never capped or pruned by itself): a choice about a quest no longer in
+-- the log is moot, and one picked up again is asked about afresh.
+function N.ForgetQuest(id)
+  local G = ns.GPS
+  local had = false
+  if G and G.groupChoice and G.groupChoice[id] ~= nil then G.groupChoice[id], had = nil, true end
+  for i = #(N.questDropped or {}), 1, -1 do
+    if N.questDropped[i].quest == id then
+      table.remove(N.questDropped, i)
+      had = true
+    end
+  end
+  if had then N.SaveQuestChoices() end
+end
+-- The same for every quest not in `ids` (the quest log's questIDs, Layers.LogQuests), for quests turned in or
+-- abandoned while the addon wasn't watching. An empty log isn't taken as one: the game may not have sent it yet.
+function N.ForgetGoneQuests(ids)
+  if not ids or #ids == 0 then return end
+  local inLog = {}
+  for _, id in ipairs(ids) do inLog[id] = true end
+  local G = ns.GPS
+  local gone = {}
+  for id in pairs(G and G.groupChoice or {}) do
+    if not inLog[id] then gone[#gone + 1] = id end
+  end
+  for _, e in ipairs(N.questDropped or {}) do
+    if not inLog[e.quest] then gone[#gone + 1] = e.quest end
+  end
+  for _, id in ipairs(gone) do N.ForgetQuest(id) end
 end
 
 -- Remove stop i from the route (the route is recomputed).
 function N.RemoveStop(i)
   local d = N.stops[i]
   if not d then return end
-  if d.questRoute and d.quest then
+  if d.questRoute and d.quest and not N.QuestDropped(d) then
     N.questDropped = N.questDropped or {}
     local list = N.questDropped
-    list[#list + 1] = { quest = d.quest, turnin = d.turnin or nil, x = d.x, y = d.y, cont = d.cont, name = d.name }
+    list[#list + 1] = { quest = d.quest, turnin = d.turnin or nil, name = d.name }
+    -- (said, with where to put it back: it stays out of quest routes from now on)
+    if ns.Print then
+      ns.Print(Format(L["Quest Route: %s stays out of your quest routes. To put it back: Options > Routing > Quest Route."], d.name or "?"))
+    end
   end
   table.remove(N.stops, i)
   N.reorderDue = true -- (a quest route: the rest in order again, N.MaybeReorder)
@@ -1215,7 +1314,6 @@ function N.Version() return version end
 function N.Clear()
   N.stops, N.loop, N.keepOrder = {}, false, false
   N.paused, N.pauseWatch = nil, nil
-  N.questDropped = {}
   N.redOk, N.skipLearn, N.noWalk, N.walkKept, N.riskOk, N.riskQuestion, N.riskAsking = {}, {}, {}, {}, {}, nil, nil
   N.hostileSaid, N.noSwim, N.swimBans = {}, nil, {}
   N.trip = N.trip + 1
@@ -1255,12 +1353,7 @@ function N.Restore()
   for _, name in ipairs(#N.stops > 0 and type(cdb.hostileSaid) == "table" and cdb.hostileSaid or {}) do
     if type(name) == "string" then N.hostileSaid[name] = true end
   end
-  local G = ns.GPS
-  if G and G.groupChoice then
-    for id, v in pairs(#N.stops > 0 and type(cdb.groupChoice) == "table" and cdb.groupChoice or {}) do
-      if G.groupChoice[id] == nil and (v == "keep" or v == "leave") then G.groupChoice[id] = v end
-    end
-  end
+  N.RestoreQuestChoices(cdb) -- (with or without a route since 1.3.13)
   N.skipLearn = {}
   for _, node in ipairs(#N.stops > 0 and cdb.skipLearn or {}) do N.skipLearn[node] = true end
   N.skipRides = {}
@@ -1271,10 +1364,6 @@ function N.Restore()
     local ok = type(b) == "table" and type(b.cont) == "number" and type(b.rows) == "table" and #b.rows % 3 == 0
     for _, v in ipairs(ok and b.rows or {}) do ok = ok and type(v) == "number" end
     if ok then N.swimBans[#N.swimBans + 1] = { cont = b.cont, rows = b.rows, n = b.n, lifted = b.lifted == true or nil } end
-  end
-  N.questDropped = {}
-  for _, e in ipairs(#N.stops > 0 and cdb.questDropped or {}) do
-    if type(e) == "table" and e.quest and e.x and e.y and e.cont then N.questDropped[#N.questDropped + 1] = Copy(e) end
   end
   if next(N.skipRides) then N.FlightsChanged() end
   N.dest = N.stops[1]
@@ -4241,6 +4330,49 @@ end
 N.REORDER_GAIN_SECONDS, N.REORDER_GAIN_SHARE = 15, 0.10
 N.PART_ROUNDS = 3 -- a quest's area in parts: rounds of choosing the parts, then the order again
 N.PART_GAIN_SECONDS = 5 -- ... another part only when it saves at least this much
+-- The quest route ordered by level (players' request relayed by Kooki3z 2026-11-21: "Be able to prioritize quests by
+-- level (i.e. prefer lower level or quests that are about to turn grey)"; `questLevelOrder`, Options > Routing > Quest
+-- Route): each quest route stop gets a band, and N.OrderStops visits the bands in turn, the stops of each in the fastest
+-- order (from where the band before ended). Bands, not a strict sort by level: a strict sort zigzags across the map for
+-- a level's difference, while within a band the route is as fast as ever. "low": bands of LEVEL_BAND levels from the
+-- lowest quest's up. "gray": the quests that turn gray within GRAY_SOON_LEVELS more levels of the player's
+-- (Layers.QuestGrayLevel, the game's gray rule) first, then the rest; a quest gray already has little left to lose.
+-- A turn-in counts at its quest's level (its reward shrinks the same way). Stops with no level known (not a quest's,
+-- or the log doesn't say) have no band and go wherever is fastest. Nil when the option is off or no stop has a band.
+N.LEVEL_BAND = 3
+N.GRAY_SOON_LEVELS = 2
+function N.QuestLevelOrder()
+  local st = ns.settings and ns.settings.gps
+  local v = st and st.questLevelOrder
+  return (v == "low" or v == "gray") and v or nil
+end
+function N.QuestBands(stops)
+  local mode = N.QuestLevelOrder()
+  local Lay = ns.Layers
+  if not (mode and Lay and Lay.QuestLevel) then return nil end
+  local levels, low = {}, nil
+  for i, d in ipairs(stops) do
+    local lvl = d.questRoute and d.quest and Lay.QuestLevel(d.quest)
+    if lvl then
+      levels[i] = lvl
+      low = math.min(low or lvl, lvl)
+    end
+  end
+  if not low then return nil end
+  local gray = mode == "gray" and Lay.QuestGrayLevel and Lay.QuestGrayLevel()
+  if mode == "gray" and not gray then return nil end
+  local bands = {}
+  for i, lvl in pairs(levels) do
+    if mode == "low" then
+      bands[i] = math.floor((lvl - low) / N.LEVEL_BAND)
+    else
+      local left = lvl - gray -- (levels the player can still gain before it's gray)
+      bands[i] = (left >= 1 and left <= N.GRAY_SOON_LEVELS) and 0 or 1
+    end
+  end
+  return bands
+end
+
 function N.OrderStops(px, py, cont, onlyIfFaster)
   local n = #N.stops
   if n < 2 then return false end
@@ -4309,6 +4441,38 @@ function N.OrderStops(px, py, cont, onlyIfFaster)
     end
     return true
   end
+  -- (a quest's turn-in after its objectives' stops; the level bands in turn, N.QuestBands)
+  local band = {}
+  for i, b in pairs(N.QuestBands(N.stops) or {}) do band[i + 1] = b end
+  local needs = {} -- [j] = { k, ... }: stops that must come before j
+  for j = 2, n + 1 do
+    local d = N.stops[j - 1]
+    for k = 2, n + 1 do
+      local e = N.stops[k - 1]
+      if k ~= j and ((d.turnin and d.quest and e.quest == d.quest and not e.turnin)
+          or (band[j] and band[k] and band[k] < band[j])) then
+        needs[j] = needs[j] or {}
+        needs[j][#needs[j] + 1] = k
+      end
+    end
+  end
+  local function ready(j, used)
+    for _, k in ipairs(needs[j] or {}) do
+      if not used[k] then return false end
+    end
+    return true
+  end
+  -- (a run of the order that can be turned round: none of its stops must come before another of them)
+  local function canFlip(order, a, b)
+    for x = a, b do
+      for _, k in ipairs(needs[order[x]] or {}) do
+        for y = a, b do
+          if order[y] == k then return false end
+        end
+      end
+    end
+    return true
+  end
   local best, bestT
   local function Order()
     if n <= 7 then
@@ -4320,7 +4484,7 @@ function N.OrderStops(px, py, cont, onlyIfFaster)
           return
         end
         for j = 2, n + 1 do
-          if not used[j] and inTurn(j, used) then
+          if not used[j] and inTurn(j, used) and ready(j, used) then
             used[j], order[k] = true, j
             perm(k + 1)
             used[j] = false
@@ -4334,7 +4498,10 @@ function N.OrderStops(px, py, cont, onlyIfFaster)
       for k = 1, n do
         local pick
         for j = 2, n + 1 do
-          if not used[j] and (not pick or cost[prev][j] < cost[prev][pick]) then pick = j end
+          if not used[j] and ready(j, used) and (not pick or cost[prev][j] < cost[prev][pick]) then pick = j end
+        end
+        for j = 2, n + 1 do -- (never: the rules have no loop; any stop left, should one)
+          if not pick and not used[j] then pick = j end
         end
         used[pick], best[k], prev = true, pick, pick
       end
@@ -4353,7 +4520,7 @@ function N.OrderStops(px, py, cont, onlyIfFaster)
             local before = a > 1 and best[a - 1] or 1
             local after = best[b + 1]
             local delta = S(before, best[b]) + S(best[a], after) - S(before, best[a]) - S(best[b], after)
-            if delta < -1e-6 then
+            if delta < -1e-6 and canFlip(best, a, b) then
               for k = 0, math.floor((b - a) / 2) do best[a + k], best[b - k] = best[b - k], best[a + k] end
               improved = true
             end
@@ -5156,6 +5323,7 @@ end
 function N.OnQuestGone(id, title)
   if not id then return 0 end
   N.questsGone[id] = true
+  N.ForgetQuest(id) -- (left out of quest routes: moot now)
   local removed = 0
   for i = #N.stops, 1, -1 do
     local d = N.stops[i]
@@ -5206,7 +5374,7 @@ function N.CheckQuestsDone(ids, seed)
     if not (secret and secret(done)) then -- (hidden in combat: looked at again after it)
       if done and not N.questsDoneSeen[id] then
         N.questsDoneSeen[id] = true
-        if onRoute and not N.HasTurnIn(id) then
+        if onRoute and not N.HasTurnIn(id) and N.QuestRouteTakes(id) then
           found = found or id
           if not N.QuestAutoReroute() then
             ns.Print(L["Quest complete: click the quest route button (Sprint) again to add its turn-in to your route."])
@@ -5219,6 +5387,16 @@ function N.CheckQuestsDone(ids, seed)
   end
   if found then N.MarkQuestRouteStale() end
   return found
+end
+-- Whether the quest route would take finished quest `id`'s turn-in: not one the player left out, and with "only tracked
+-- quests" on (`questTrackedOnly`) one tracked. (Else the Sprint icon pulsed, and the route was made again, for a turn-in
+-- it never takes.)
+function N.QuestRouteTakes(id)
+  if N.QuestDropped({ quest = id, turnin = true }) then return false end
+  local st = ns.settings and ns.settings.gps
+  local Lay = ns.Layers
+  if st and st.questTrackedOnly and Lay and Lay.QuestTracked and not Lay.QuestTracked(id) then return false end
+  return true
 end
 -- The quest route lacks a quest picked up or finished: the Sprint icon pulses in the directions, or with the option on
 -- (asked 2026-11-12, `questAutoReroute`, Options > Routing; offered once at the icon's first click,

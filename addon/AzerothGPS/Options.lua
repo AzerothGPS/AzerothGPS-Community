@@ -2497,12 +2497,59 @@ local function BuildWindow()
   Key("questTrackedOnly")
   check(L["Quest route: only tracked quests"], L["The Quest Route button takes only the quests you track: the ones Questie's tracker shows when it's on, else the ones ticked to track in the quest log. Off: every quest in your log."],
     function() return GPS().questTrackedOnly end, function(v) GPS().questTrackedOnly = v end)
+  -- (players' request relayed by Kooki3z 2026-11-21: "Be able to prioritize quests by level (i.e. prefer lower level or
+  -- quests that are about to turn grey)": Nav.QuestBands, the stops in level bands, the fastest order within each)
+  Key("questLevelOrder")
+  Choice(L["Quest route: order by level"], {
+    { value = "off", text = L["Off (the fastest order)"] },
+    { value = "low", text = L["Lowest level first"],
+      tip = L["The lowest level quests first, a few levels at a time, each few in the fastest order."] },
+    { value = "gray", text = L["About to turn gray first"],
+      tip = L["The quests that turn gray within two more levels of yours first (their experience drops then), then the rest in the fastest order."] },
+  }, function() return GPS().questLevelOrder or "off" end, function(v)
+    GPS().questLevelOrder = v
+    if ns.Nav.OnQuestRoute() and #ns.Nav.stops > 1 and not ns.Nav.keepOrder then ns.Nav.OrderStops() end
+  end)
   Key("questAutoReroute")
-  check(L["Quest route: reroute by itself"], L["When you pick up or finish a quest on a quest route, the route is made again with it by itself, as clicking the pulsing Sprint icon in the directions does. Off: the icon pulses until you click it. (Either way, quest stops you removed stay out of the route until it ends.)"],
+  check(L["Quest route: reroute by itself"], L["When you pick up or finish a quest on a quest route, the route is made again with it by itself, as clicking the pulsing Sprint icon in the directions does. Off: the icon pulses until you click it. (Either way, quests you left out stay out until you put them back.)"],
     function() return GPS().questAutoReroute end, function(v) GPS().questAutoReroute = v end)
   Key("questPickRoute")
   check(L["Quest route: the quest you pick"], L["Pick a quest in your quest log or in the objective tracker (click it to focus it) and the route goes to that quest's objectives and turn-in. Off: only the Quest Route button makes a quest route."],
     function() return GPS().questPickRoute end, function(v) GPS().questPickRoute = v end)
+  -- The quests left out of quest routes (Leave Out on the group quest question, or a quest's stop removed; players'
+  -- request relayed by Kooki3z 2026-11-21: they stay out until put back, Nav.QuestLeftOut), and Put Back All. One at a
+  -- time: the Put Back beside each in the directions on a quest route.
+  do
+    local tip = L["Quests you left out (Leave Out when asked, or a quest's stop removed) stay out of every quest route until you put them back. One at a time: Put Back beside it in the directions on a quest route."]
+    StartGroup("setting", L["Left out of quest routes"])
+    AddText(group, tip)
+    local list = page:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
+    list:SetWidth(PAGE_W - 48)
+    list:SetJustifyH("LEFT")
+    list:SetWordWrap(true)
+    list:SetHeight(40) -- (a long list cut short at three lines)
+    place(list, 42, 4)
+    local back = Button(page, L["Put Back All"], 140, function()
+      ns.Nav.PutBackAllQuests()
+      if ns.Nav.OnQuestRoute() then ns.Nav.MarkQuestRouteStale() end -- (the Sprint icon pulses, or remade by itself)
+    end)
+    back:SetScript("OnEnter", function(self)
+      GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+      GameTooltip:SetText(L["Put Back All"], 1, 1, 1)
+      GameTooltip:AddLine(tip, nil, nil, nil, true)
+      GameTooltip:Show()
+    end)
+    back:SetScript("OnLeave", GameTooltip_Hide)
+    place(back, 30, 4)
+    O.questLeftOutText, O.questPutBackAll = list, back -- (the tests)
+    controls[#controls + 1] = function()
+      local names = {}
+      for _, q in ipairs(ns.Nav.LeftOutQuests()) do names[#names + 1] = q.name end
+      list:SetText(#names > 0 and Format(L["Left out of quest routes: %s"], table.concat(names, L[", "]))
+        or L["No quests are left out of your quest routes."])
+      back:SetEnabled(#names > 0)
+    end
+  end
   header(L["Waypoints and sharing"])
   Key("acceptWay")
   check(L["Accept TomTom /way commands"], L["/way lines typed or pasted in chat add stops to the route (several pasted lines at once become several stops). With TomTom installed, its waypoint is set too. Questie's \"Set TomTom Target\" adds a stop the same way."],

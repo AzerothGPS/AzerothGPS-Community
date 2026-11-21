@@ -4729,6 +4729,7 @@ def test_with_the_option_on_the_quest_picked_in_the_log_is_the_route(game):
                     "AGPS_NS.Print = AGPS_PK.print")
         N.Clear()
         G.groupChoice = lua.eval("{}")
+        N.questDropped = lua.eval("{}")  # (the stop removed stays out of quest routes since 1.3.13: let go)
         G.pickedQuest = None
 
 
@@ -5004,8 +5005,9 @@ def test_drawing_a_road_suggests_record_first(game):
 def test_a_group_quest_left_out_shows_in_the_directions_with_a_button_to_put_it_back(game):
     # (asked 2026-10-07 for 1.1.6, about Keep / Leave Out after a reroute: "show my choice and let me change it") the
     # quest route's group quests show in the directions, kept or left out, with Leave Out or Put Back: the quest route is
-    # made again with the change, and still not asked again this session. Every quest found left out: asked again (else
-    # no route to show the choices on, and no way back); the route's only quest isn't offered to leave out
+    # made again with the change, and still not asked again. Every quest found left out: since 1.3.13 (Kooki3z
+    # 2026-11-21: a quest left out "comes up again every time the route regenerates") not asked again, said with where
+    # to put them back (Options > Routing > Quest Route); the route's only quest isn't offered to leave out
     lua, ns = game
     G, N = ns.GPS, ns.Nav
     lua.execute("""
@@ -5055,7 +5057,7 @@ def test_a_group_quest_left_out_shows_in_the_directions_with_a_button_to_put_it_
         # (a route of other stops: no rows)
         N.SetStops(lua.eval("{ { x = 2254, y = 900, cont = 0, name = 'Far' } }"), False, "red")
         assert rows() == []
-        # the group quest the only quest: Leave Out isn't offered; all left out: asked again
+        # the group quest the only quest: Leave Out isn't offered; all left out: not asked again, said
         lua.execute("table.remove(AGPS_QR_LIST, 1)")
         G.groupChoice = lua.eval("{ [2] = 'keep' }")
         N.Clear()
@@ -5066,11 +5068,17 @@ def test_a_group_quest_left_out_shows_in_the_directions_with_a_button_to_put_it_
         G.groupChoice = lua.eval("{ [2] = 'leave' }")
         N.Clear()
         G.askBox._shown = False
+        lua.execute("AGPS_QR.print = AGPS_NS.Print AGPS_PRINTS = {} "
+                    "AGPS_NS.Print = function(m) AGPS_PRINTS[#AGPS_PRINTS + 1] = m end")
         G.QuestRoute()
-        assert G.askBox._shown and "Ogre Mound" in G.askBox.text._text
-        G.askBox.yes._scripts.OnClick(G.askBox.yes)
-        assert names() == ["Ogre Mound"]
+        assert not G.askBox._shown and names() == []
+        said = [str(m) for m in lua.eval("AGPS_PRINTS").values()]
+        assert any("every quest found is one you left out" in m and "Options > Routing > Quest Route" in m for m in said)
+        N.PutBackQuest(2)  # (Options' Put Back All)
+        G.QuestRoute()
+        assert not G.askBox._shown and names() == ["Ogre Mound"]
     finally:
+        lua.execute("if AGPS_QR.print then AGPS_NS.Print = AGPS_QR.print end")
         lua.execute("AGPS_NS.Layers.QuestStops, AGPS_NS.Layers.QuestGroup = AGPS_QR.stops, AGPS_QR.group")
         N.Clear()
         G.groupChoice = lua.eval("{}")
@@ -10673,10 +10681,11 @@ def test_with_the_option_on_a_quest_change_remakes_the_quest_route_out_of_combat
         N.Clear()
 
 
-def test_quest_stops_removed_stay_out_of_the_quest_route_run(game):
+def test_quest_stops_removed_stay_out_of_quest_routes_until_put_back(game):
     # (asked 2026-11-12: "Remember the quest stops they've dropped from the route and/or not included (like elite
-    # quests) for this current route run"; "quest stops removed stay out of the current quest route regardless of this
-    # setting") made again, by hand or by itself, the stops removed stay out until the run is over
+    # quests) for this current route run"; since 1.3.13, players' request relayed by Kooki3z 2026-11-21: a quest left
+    # out "comes up again every time the route regenerates") made again, by hand or by itself, the stops removed stay
+    # out of every later quest route, a new route and the route cleared too, until put back
     lua, ns = game
     G, N = ns.GPS, ns.Nav
     c = lua.eval("{ elsewhere = 0, missing = {} }")
@@ -10693,16 +10702,20 @@ def test_quest_stops_removed_stay_out_of_the_quest_route_run(game):
         # kept over a /reload with the stops
         N.Restore()
         assert len(N.questDropped) == 1
-        # another route: the run is over, the removed stop comes back on the next quest route
+        # another route, or the route cleared: still out of the next quest route
         N.SetStops(lua.eval('{ { x = -1000, y = -4000, cont = 1, name = "Mine" } }'))
-        assert len(N.questDropped) == 0
+        N.Clear()
+        assert len(N.questDropped) == 1
+        G.SetQuestRoute(lua.eval(QUEST_STOPS), c)
+        assert sorted(N.stops[k].quest for k in range(1, len(N.stops) + 1)) == [101, 102]
+        # its spot moved on (the next objective, far away): still the stop removed
+        assert N.QuestDropped(lua.eval("{ x = 3000, y = 3000, cont = 0, quest = 103 }"))
+        # put back: in the next one
+        N.PutBackQuest(103)
         G.SetQuestRoute(lua.eval(QUEST_STOPS), c)
         assert sorted(N.stops[k].quest for k in range(1, len(N.stops) + 1)) == [101, 102, 103]
-        # cleared: the same
-        N.RemoveStop(1)
-        N.Clear()
-        assert len(N.questDropped) == 0
     finally:
+        N.questDropped = lua.eval("{}")
         N.Clear()
 
 
