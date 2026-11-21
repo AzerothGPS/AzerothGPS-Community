@@ -430,6 +430,47 @@ local function EndSizing()
   textWait = 0 -- relist the stops for the new size
 end
 
+-- Smooth turns (Kooki3z 2026-11-20: "every direction arrow change starts slow, speeds up, then slows down again to its
+-- final position ... sudden jumps on direction change like approaching stairs aren't so violent"; option `arrowEase`, on
+-- by default): a jump of EASE_JUMP or more between two looks is eased over EASE_TIME for a half turn (shorter for less,
+-- EASE_MIN at least), smoothstep (slow, fast, slow); while it eases the way it heads for follows the route (the player
+-- turning meanwhile), not started again. Smaller changes, the player turning, are followed at once: never lagging.
+A.EASE_JUMP = math.rad(25)
+A.EASE_TIME = 0.45
+A.EASE_MIN = 0.2
+local function Wrap(a)
+  while a > math.pi do a = a - 2 * math.pi end
+  while a < -math.pi do a = a + 2 * math.pi end
+  return a
+end
+-- The angle to show for the route's `rel` after `dt` seconds, eased from `st.shown` (state kept in `st`: shown, ease).
+function A.EaseStep(st, rel, dt)
+  if st.shown == nil or S().arrowEase == false then
+    st.shown, st.ease = rel, nil
+    return rel
+  end
+  local e = st.ease
+  if e then
+    e.to = e.to + Wrap(rel - e.to) -- (the way it heads for, as the route turns meanwhile)
+  elseif math.abs(Wrap(rel - st.shown)) >= A.EASE_JUMP then
+    local d = Wrap(rel - st.shown)
+    e = { from = st.shown, to = st.shown + d, t = 0, dur = math.max(A.EASE_MIN, A.EASE_TIME * math.abs(d) / math.pi) }
+    st.ease = e
+  else
+    st.shown = rel
+    return rel
+  end
+  e.t = e.t + (dt or 0)
+  local f = math.min(1, e.t / e.dur)
+  local s = f * f * (3 - 2 * f) -- (slow, fast, slow)
+  local a = e.from + (e.to - e.from) * s
+  if f >= 1 then st.ease = nil end
+  st.shown = Wrap(a)
+  return st.shown
+end
+A.easeState = {}
+function A.Easing() return A.easeState.ease ~= nil end
+
 local function Update(dt)
   -- (the mouse let go where the corner didn't hear it: hidden meanwhile)
   if A.sizing and IsMouseButtonDown and not IsMouseButtonDown("LeftButton") then EndSizing() end
@@ -493,6 +534,8 @@ local function Update(dt)
   local tx, ty = ns.Turns.Target(path, px, py)
   if not tx then return end
   local rel = ns.Turns.RelativeAngle(px, py, Geo.Facing(), tx, ty)
+  local shown = A.EaseStep(A.easeState, rel, dt)
+  if A.Easing() then A.still = false end -- (turning: every frame till it's there)
   -- green when heading the right way, gold for a turn, red when it's behind you; orange at a
   -- drop off a ledge coming up: jump down there
   local a = math.abs(rel)
@@ -502,14 +545,14 @@ local function Update(dt)
   local color = drop and 4 or a < math.rad(20) and 1 or a < math.rad(100) and 2 or 3
   -- (running straight, nothing changes: the rotation, color and jump icon aren't set again every
   -- frame — they were most of the arrow's cost with arrowHz 0, the 2026-10-07 idle profile)
-  if math.abs(rel - (lastSet.rot or 99)) > A.SET_ROT or color ~= lastSet.color or jump ~= lastSet.jump then
-    arrow:SetRotation(rel)
+  if math.abs(shown - (lastSet.rot or 99)) > A.SET_ROT or color ~= lastSet.color or jump ~= lastSet.jump then
+    arrow:SetRotation(shown)
     if color == 1 then arrow:SetVertexColor(0.45, 1, 0.45)
     elseif color == 2 then arrow:SetVertexColor(1, 1, 1)
     elseif color == 3 then arrow:SetVertexColor(1, 0.45, 0.35)
     else arrow:SetVertexColor(1, 0.55, 0.1) end
     jumpIcon:SetShown(jump)
-    lastSet.rot, lastSet.color, lastSet.jump = rel, color, jump
+    lastSet.rot, lastSet.color, lastSet.jump = shown, color, jump
   end
   if jump then
     jumpIcon:SetAlpha(0.55 + 0.45 * math.sin(GetTime() * 7))
