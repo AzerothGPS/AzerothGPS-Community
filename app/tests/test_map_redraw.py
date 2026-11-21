@@ -3382,6 +3382,50 @@ def test_characters_sharing_a_first_name_are_saved_apart_by_their_surnames(game)
             ns.db.chars[realm + k] = None
 
 
+def test_an_empty_realm_name_never_forgets_a_characters_flight_paths(game):
+    # (players' reports, 2026-11-21: "AzerothGPS forgot all my unlocked flight paths since the latest update"; Kooki3z's
+    # saved file had "-Bowna Lisa", a record with no realm and no flight paths known, beside his realm's own: the
+    # client gave an empty realm name at that login) the character's own record by its realm, and a no-realm record
+    # already saved taken into it, every flight path either knew kept
+    lua, ns = game
+    realm = lua.eval("GetRealmName and GetRealmName() or '?'")
+    lua.execute("AGPS_UN, AGPS_RN = UnitName, GetRealmName")
+    try:
+        ns.db.chars[realm + "-Bowna Lisa"] = lua.eval(
+            "{ faction = 'Alliance', bind = { name = 'Razor Hill' }, quiet = true, taxiNodes = { [1415] = { time = 100,"
+            " nodes = { { nodeID = 11, known = true }, { nodeID = 12, known = false } } } }, flights = {} }")
+        ns.db.chars["-Bowna Lisa"] = lua.eval(
+            "{ faction = 'Alliance', bind = { name = 'The Crossroads' }, taxiNodes = { [1415] = { time = 200,"
+            " nodes = { { nodeID = 11, known = false }, { nodeID = 12, known = true } } },"
+            " [1464] = { time = 200, nodes = { { nodeID = 30, known = true } } } } }")
+        ns.db.transports = ns.db.transports or lua.table()
+        ns.db.transports[""] = lua.eval("{ ['Boat | Dock'] = { side = 1, at = 5 } }")
+        ns.db.lastChar = "-Bowna Lisa"
+        lua.execute("UnitName = function() return 'Bowna', 'Lisa' end; GetRealmName = function() return '' end")
+        # (the realm's name empty: the character's own record, by its realm)
+        assert ns.CharKey() == realm + "-Bowna Lisa"
+        own = ns.CharDB()
+        nodes = own.taxiNodes[1415].nodes
+        assert nodes[1].known and nodes[2].known  # (known in either record: known)
+        assert own.taxiNodes[1464].nodes[1].known  # (learned while saved under no realm)
+        assert ns.db.chars["-Bowna Lisa"] is None and ns.db.lastChar == realm + "-Bowna Lisa"
+        # (since the issue started: the record used last wins, the other fills in what it lacks)
+        assert own.bind.name == "The Crossroads" and own.quiet is True
+        # (a boat's time learned meanwhile: the realm's)
+        assert ns.db.transports[""] is None and ns.db.transports[realm]["Boat | Dock"].at == 5
+        # (no record of its own and no realm named yet this session: the last realm the client named)
+        lua.execute("UnitName = function() return 'Brand', 'New' end")
+        assert ns.CharKey() == realm + "-Brand New"
+        # (the boats' and zeppelins' timetables too: by the realm, never "")
+        assert lua.eval("function(ns, r) return ns.Taxi.Sightings() == ns.db.transports[r] end")(ns, realm)
+    finally:
+        lua.execute("UnitName, GetRealmName = AGPS_UN, AGPS_RN")
+        for k in (realm + "-Bowna Lisa", "-Bowna Lisa", realm + "-Brand New"):
+            ns.db.chars[k] = None
+        if ns.db.transports and ns.db.transports[realm]:
+            ns.db.transports[realm]["Boat | Dock"] = None
+
+
 def test_a_dungeon_entrance_shows_on_the_inside_map_it_is_in(game):
     # (asked 2026-10-01: the Deadmines' entrance on the Defias Hideout's map too) indoors down in the hideout,
     # by the dungeon's door: its inside map, and the Deadmines' entrance icon on it (click for its map)
