@@ -2009,6 +2009,8 @@ L["road end picked (%s%s): Shift + drag from it to go on with it. Click it again
 L["went on with that %s (#%d, %s): its other end is picked, Shift + drag from it to go on."] = "已接着画%s（#%d，%s）：已选中它的另一端，按住 Shift 从那里拖动可继续。"
 L["Flip Lift"] = "翻转升降梯"
 L["Foot and top swapped: the lift's other end is its top now. Save Road to keep it."] = "已交换底部和顶部：升降梯的另一端现在是顶部。保存道路即可保留。"
+L["Shade the route by slope"] = "按坡度为路线着色"
+L["The route is drawn lighter where it goes uphill and darker where it goes downhill, more for a steeper slope; flat ground keeps the route's color. Where the map has no heights, the route is drawn as usual. Boats, zeppelins, flights and swims keep their color."] = "路线上坡处画得更亮，下坡处画得更暗，坡越陡越明显；平地保持路线原来的颜色。地图没有高度数据的地方，路线照常绘制。船只、飞艇、飞行和游泳路段保持原来的颜色。"
 L["Smooth arrow turns"] = "箭头平滑转动"
 L["A big change of direction (a turn coming up, stairs) swings the arrow round smoothly: slow, then faster, then slow again. Turning yourself, it follows at once."] = "方向大幅变化（即将转弯、楼梯）时，箭头会平滑转过去：先慢、再快、再慢。你自己转向时，它立即跟随。"
 L["Record: Stairs on/off"] = "录制：楼梯开/关"

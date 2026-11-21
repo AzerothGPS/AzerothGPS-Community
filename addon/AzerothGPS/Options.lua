@@ -1887,6 +1887,16 @@ local function BuildWindow()
   Dropdown(L["Route color"], { { value = "blue", text = L["Blue"] },
     { value = "rainbow", text = L["Rainbow"], tip = L["The colors of the rainbow along the route."] } },
     function() return GPS().routeColor == "rainbow" and "rainbow" or "blue" end, function(v) GPS().routeColor = v end)
+  -- (Kooki3z 2026-11-20: "since we have height indication now, can we use shades of lighter or darker path colors to
+  -- indicate elevation or de-elevation of a route?": GPSFrame's G.SlopeColor; both maps drawn again at once)
+  Key("routeSlopeShade")
+  check(L["Shade the route by slope"], L["The route is drawn lighter where it goes uphill and darker where it goes downhill, more for a steeper slope; flat ground keeps the route's color. Where the map has no heights, the route is drawn as usual. Boats, zeppelins, flights and swims keep their color."],
+    function() return GPS().routeSlopeShade ~= false end, function(v)
+      GPS().routeSlopeShade = v and true or false
+      for _, g in ipairs({ ns.GPS or false, ns.mapClone or false }) do
+        if g and g.Redraw then g.Redraw() end
+      end
+    end)
   header(L["Following and zooming"])
   Key("rotate")
   check(L["Turn the map with me"], L["On: the map turns so that where you face is up (heading-up). Off: north stays up and the arrow turns. Not in the game's world map: north stays up there, as on the game's map."],
