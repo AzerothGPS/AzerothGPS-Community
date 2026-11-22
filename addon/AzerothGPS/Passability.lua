@@ -1534,7 +1534,7 @@ end
 
 -- The walk's cells by blocks: { {c, r}, ... }; or nil and "none" (no way through the blocks
 -- over the search box), or nil and "cells" (search it cell by cell after all).
-local function ByBlocks(g, H, cont, c1, r1, c2, r2, step, box, hostile, pause)
+local function ByBlocks(g, H, cont, c1, r1, c2, r2, step, box, danger, pause)
   local K, nx, ny = H.K, H.nx, H.ny
   local function BlockOf(c, r) return math.floor((r - 1) / K) * nx + math.floor((c - 1) / K) end
   local blocks = hpaBlocks[cont]
@@ -1578,7 +1578,7 @@ local function ByBlocks(g, H, cont, c1, r1, c2, r2, step, box, hostile, pause)
   end
   local sdist, scame, slines = Reach(S, bs, c1, r1, false)
   local gdist, gcame, glines = Reach(Gb, bg, c2, r2, true)
-  local HF = ns.Router and ns.Router.HOSTILE_FACTOR or 1
+  local HF = danger and true or false -- (a step's cost factor about: the guards' reach, the zones too high)
   local WF = P.SwimCost() / P.SWIM_COST -- (swimming left out: the blocks' walks across water pay the rest)
   local function h(r, c) return math.sqrt((c - c2) ^ 2 + (r - r2) ^ 2) end
   local gs, came, closed, open = {}, {}, {}, {}
@@ -1621,12 +1621,12 @@ local function ByBlocks(g, H, cont, c1, r1, c2, r2, step, box, hostile, pause)
       for j = 1, n do
         local d = j ~= i and bl.cost[(i - 1) * n + j]
         if d then
-          if HF ~= 1 then -- (the share of five points along the way that are in their reach)
-            local cj, rj, inside = bl.c[j], bl.r[j], 0
+          if HF then -- (five points along the way: their factors, the guards' reach and the zones too high)
+            local cj, rj, extra = bl.c[j], bl.r[j], 0
             for q = 0, 4 do
-              if hostile(math.floor(c + (cj - c) * q / 4 + 0.5), math.floor(r + (rj - r) * q / 4 + 0.5)) then inside = inside + 1 end
+              extra = extra + danger(math.floor(c + (cj - c) * q / 4 + 0.5), math.floor(r + (rj - r) * q / 4 + 0.5)) - 1
             end
-            d = d * (1 + inside / 5 * (HF - 1))
+            d = d * (1 + extra / 5)
           end
           if WF ~= 1 then -- (and the share of them in water, P.avoidSwim)
             local cj, rj, wet = bl.c[j], bl.r[j], 0
@@ -1716,7 +1716,7 @@ end
 -- none nearby. `road1`/`road2`: that end is a road's point (a walk onto or off the roads), which keeps END_SLACK
 -- even in blocked ground: the road is walkable along its line, not the slope round it (Ironforge's gate road on its
 -- mountain shelf, all blocked cells: STOP_SLACK took a walk up the cliff from Misty Pine Refuge, 2026-10-08).
-function P.FindPath(cont, x1, y1, x2, y2, road1, road2)
+local function Search(cont, x1, y1, x2, y2, road1, road2, priceRed)
   EnsureWalls()
   local g = ns.Terrain and ns.Terrain[cont]
   if not g then return nil end
@@ -1751,6 +1751,29 @@ function P.FindPath(cont, x1, y1, x2, y2, road1, road2)
       row[c] = h
     end
     return h
+  end
+  -- (priceRed: the zones too high for the player, Router.RedZones, cost Router.LEVEL_FACTOR a step, as the Router
+  -- prices a leg there; not the zones the walk starts and ends in. P.FindPath, below)
+  local red = priceRed and Rt and Rt.RedZones and not g.slack and Rt.RedZones() or nil
+  local redExempt = red and { [Rt.ZoneAt(cont, x1, y1)] = true, [Rt.ZoneAt(cont, x2, y2)] = true }
+  local redCell = {} -- (by row: Row)
+  local function inRed(c, r)
+    if not red then return false end
+    local row = Row(redCell, r)
+    local v = row[c]
+    if v == nil then
+      local cx, cy = CellCentre(g, c, r)
+      local z = Rt.ZoneAt(cont, cx, cy)
+      v = (red[z] and not redExempt[z]) and true or false
+      row[c] = v
+    end
+    return v
+  end
+  local LF = Rt and Rt.LEVEL_FACTOR or 1
+  local function danger(c, r) -- (a step's cost factor there)
+    if hostile(c, r) then return Rt.HOSTILE_FACTOR end
+    if inRed(c, r) then return LF end
+    return 1
   end
   local wc = wallCells[g]
   -- (a building's cells: crossed near an end only when that end is in a building itself, as SegmentCost)
@@ -1801,7 +1824,10 @@ function P.FindPath(cont, x1, y1, x2, y2, road1, road2)
     local m = row[c]
     if m == nil then
       m = cost0(c, r) or false
-      if m and hostile(c, r) then m = m * Rt.HOSTILE_FACTOR end
+      if m then -- (the guards' reach times its factor; a zone too high LEVEL_FACTOR - 1 more a yard, as the Router
+        -- adds it to a leg's cost: water there at the swim cost and that, not their product)
+        if hostile(c, r) then m = m * Rt.HOSTILE_FACTOR elseif inRed(c, r) then m = m + LF - 1 end
+      end
       row[c] = m
     end
     if m and fc and cliffs and steep(c, r, fc, fr) then return nil end
@@ -1823,7 +1849,8 @@ function P.FindPath(cont, x1, y1, x2, y2, road1, road2)
   local H = ns.TerrainHPA and ns.TerrainHPA[cont]
   if H and not g.slack and H.w == g.w and H.h == g.h
       and (math.abs(c1 - c2) >= P.HPA_MIN_CELLS or math.abs(r1 - r2) >= P.HPA_MIN_CELLS) then
-    cells, how = ByBlocks(g, H, cont, c1, r1, c2, r2, step, { cmin, cmax, rmin, rmax }, hostile, pause)
+    cells, how = ByBlocks(g, H, cont, c1, r1, c2, r2, step, { cmin, cmax, rmin, rmax }, (side or red) and danger or nil,
+      pause)
     if how == "none" then return nil end
   end
   if not cells then
@@ -1845,6 +1872,9 @@ function P.FindPath(cont, x1, y1, x2, y2, road1, road2)
   -- not back into the other faction's guards' reach where the path went round it)
   -- (the path's yards in their reach so far, from its start: a shortcut may not add any)
   local hostileSoFar = { 0 }
+  -- (and the zones too high: a shortcut priced as the path was, its yards in them at LEVEL_FACTOR, no dearer than the
+  -- path between; forbidding any yard more there kept walks hugging a zone's border the cells' middles judge it by)
+  local redSoFar, lenSoFar = red and { 0 } or nil, red and { 0 } or nil
   -- (swimming left out, P.avoidSwim: nor across water the path went round. Else straightened both ways, the cheaper
   -- kept at the swim cost: checked only for being open, a shortcut swam straight across a pond the walk went round,
   -- 2026-11-19 south of Tarren Mill; kept from the water the path went round, a walk across a lake hugged the path's
@@ -1854,6 +1884,10 @@ function P.FindPath(cont, x1, y1, x2, y2, road1, road2)
     local inside = hostile(cells[k][1], cells[k][2])
     local d = math.sqrt((pts[k][1] - pts[k - 1][1]) ^ 2 + (pts[k][2] - pts[k - 1][2]) ^ 2)
     hostileSoFar[k] = hostileSoFar[k - 1] + (inside and d or 0)
+    if redSoFar then
+      redSoFar[k] = redSoFar[k - 1] + (inRed(cells[k][1], cells[k][2]) and d or 0)
+      lenSoFar[k] = lenSoFar[k - 1] + d
+    end
     if wetSoFar then wetSoFar[k] = wetSoFar[k - 1] + (Cell(g, cells[k][2], cells[k][1]) == 1 and d or 0) end
   end
   local keepDry
@@ -1867,6 +1901,15 @@ function P.FindPath(cont, x1, y1, x2, y2, road1, road2)
     if side then
       local h = Rt.HostileYards(cont, pts[i][1], pts[i][2], pts[j][1], pts[j][2], side)
       if h > hostileSoFar[j] - hostileSoFar[i] + g.cell then return false end
+    end
+    if redSoFar then
+      local yd = 0
+      for z, v in pairs(Rt.ZoneYards(cont, pts[i][1], pts[i][2], pts[j][1], pts[j][2])) do
+        if red[z] and not redExempt[z] then yd = yd + v end
+      end
+      if yd > 0 and sc + yd * (LF - 1) > lenSoFar[j] - lenSoFar[i] + (redSoFar[j] - redSoFar[i]) * (LF - 1) + g.cell then
+        return false
+      end
     end
     return true
   end
@@ -1919,6 +1962,39 @@ function P.FindPath(cont, x1, y1, x2, y2, road1, road2)
     if t2 < total and wet - (t2 - Yards(o2)) / (swimCost - 1) >= P.KEEP_DRY_MIN_YD then total, out = t2, o2 end
   end
   return total, out
+end
+
+-- A walk over the grid from (x1, y1) to (x2, y2): its cost (yards, water at the swim cost) and its points, or nil.
+-- Searched by yards; when that walk goes P.RED_SEARCH_YD or more through zones too high for the player (not its ends'
+-- zones), searched again with them priced (Router.LEVEL_FACTOR a yard, as the Router prices a leg there), and the
+-- cheaper of the two by that pricing kept. The Router weighs the one walk it's given: 1.3.14's grid opened Silverpine's
+-- hills into Alterac, and a level 20 walk to Light's Hope took 2k yd of it, 800 yd shorter and 556 s slower than the way
+-- by Tirisfal. (Priced always, walks crossing a zone they can't avoid wandered along its border: the zones' 33 yd grid.)
+P.RED_SEARCH_YD = 100
+function P.FindPath(cont, x1, y1, x2, y2, road1, road2)
+  local c, path = Search(cont, x1, y1, x2, y2, road1, road2, false)
+  if c == nil then return nil end -- (one value, as before: callers count them)
+  local Rt = ns.Router
+  local g = ns.Terrain and ns.Terrain[cont]
+  local red = c and path and g and not g.slack and Rt and Rt.RedZones and Rt.RedZones()
+  if not red then return c, path end
+  local exempt = { [Rt.ZoneAt(cont, x1, y1)] = true, [Rt.ZoneAt(cont, x2, y2)] = true }
+  local function RedYards(pts)
+    local yd = 0
+    for i = 1, #pts - 3, 2 do
+      for z, v in pairs(Rt.ZoneYards(cont, pts[i], pts[i + 1], pts[i + 2], pts[i + 3])) do
+        if red[z] and not exempt[z] then yd = yd + v end
+      end
+    end
+    return yd
+  end
+  local ry = RedYards(path)
+  if ry < P.RED_SEARCH_YD then return c, path end
+  local c2, path2 = Search(cont, x1, y1, x2, y2, road1, road2, true)
+  if not (c2 and path2) then return c, path end
+  local LF = Rt.LEVEL_FACTOR or 1
+  if c2 + RedYards(path2) * (LF - 1) < c + ry * (LF - 1) then return c2, path2 end
+  return c, path
 end
 
 function P.ClearCache()

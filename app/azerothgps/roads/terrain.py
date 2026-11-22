@@ -71,10 +71,11 @@ def chunk_tops(mcvt: np.ndarray) -> np.ndarray:
     return np.maximum.reduce([outer[:-1, :-1], outer[:-1, 1:], outer[1:, :-1], outer[1:, 1:], inner])
 
 
-def tile_grid(root: bytes, hills: bool = False, swim_types=None, deep_out=None, sea_out=None):
+def tile_grid(root: bytes, hills: bool = False, swim_types=None, deep_out=None, sea_out=None, z_out=None):
     """(steep, water) as 128x128 quad grids for one ADT tile [row = south, col = east];
     with `hills`, also the quads that are a climb (steeper than HILL_SLOPE). `deep_out` (a 128x128 bool array, or
-    None): set where the water is deep (fatigue). With `swim_types` (the
+    None): set where the water is deep (fatigue). `z_out` (a 128x128 float array, or None): each quad's middle's
+    height (world). With `swim_types` (the
     LiquidType ids swum through: the sea's), a quad SWIM_DEPTH under one of those liquids isn't steep: a
     steep seabed is swum over (Alterac's coast to Silverpine, walked: issue #271)."""
     steep = np.zeros((128, 128), bool)
@@ -95,6 +96,9 @@ def tile_grid(root: bytes, hills: bool = False, swim_types=None, deep_out=None, 
                     steep[iy * 8 : iy * 8 + 8, ix * 8 : ix * 8 + 8] = sl > MAX_SLOPE
                     hill[iy * 8 : iy * 8 + 8, ix * 8 : ix * 8 + 8] = sl > HILL_SLOPE
                     top[iy * 8 : iy * 8 + 8, ix * 8 : ix * 8 + 8] = chunk_tops(mcvt) + base
+                    if z_out is not None:
+                        z_out[iy * 8 : iy * 8 + 8, ix * 8 : ix * 8 + 8] = np.array(
+                            [mcvt[i * 17 + 9 : i * 17 + 17] for i in range(8)]) + base
                     break
         elif magic == "MH2O":
             for ci in range(256):
@@ -163,12 +167,15 @@ def _continent_grid(cd: ClientData, continent: int, log=print) -> dict:
     hill = np.zeros((H, W), bool)
     deep = np.zeros((H, W), bool)
     sea = np.zeros((H, W), bool)
+    z = np.zeros((H, W), np.float32)
     swim = sea_types(cd)
     for (tx, ty) in tiles:
         try:
             dp = np.zeros((qpt, qpt), bool)
             se = np.zeros((qpt, qpt), bool)
-            s, w, hl = tile_grid(cd.casc.read(wdt.tiles[(tx, ty)].root), hills=True, swim_types=swim, deep_out=dp, sea_out=se)
+            zq = np.zeros((qpt, qpt), np.float32)
+            s, w, hl = tile_grid(cd.casc.read(wdt.tiles[(tx, ty)].root), hills=True, swim_types=swim, deep_out=dp, sea_out=se,
+                                 z_out=zq)
         except Exception:
             continue
         r, c = (ty - ty0) * qpt, (tx - tx0) * qpt
@@ -177,6 +184,7 @@ def _continent_grid(cd: ClientData, continent: int, log=print) -> dict:
         steep[r : r + qpt, c : c + qpt] = s
         water[r : r + qpt, c : c + qpt] = w
         hill[r : r + qpt, c : c + qpt] = hl
+        z[r : r + qpt, c : c + qpt] = zq
         land[r : r + qpt, c : c + qpt] = True
     k = CELL_QUADS
     def pool(a):
@@ -193,6 +201,7 @@ def _continent_grid(cd: ClientData, continent: int, log=print) -> dict:
     far |= open_sea
     cells[pool(land) < 0.5] = 2  # no terrain: void / off the map
     cells = despeckle(cells)
+    cells = reopen_reached(cells, steep, land, z, pool(water) >= 0.5)
     # (closed after the despeckle, which would otherwise turn the specks of sea they leave into land: the coast
     # masks read DEEP_VALUE as sea)
     far &= cells == 1  # (water till now: what Data/Terrain.lua writes as DEEP_VALUE)
@@ -246,6 +255,60 @@ def despeckle(cells: np.ndarray) -> np.ndarray:
         sizes = ndimage.sum(out != 2, lab, range(1, n + 1))
         out[np.isin(lab, np.flatnonzero(sizes < MIN_OPEN) + 1)] = 2
     out[small(out == 1)] = 0  # puddles
+    return out
+
+
+# Ground the cells' own rule closes but the quads show is walked (Kooki3z 2026-11-21, 1.3.14: "in the Barrens a lot
+# of the mountains are actually climbable in certain paths"; his drawn roads and recorded walks outdoors lay 15% on
+# closed cells, 57% in Stonetalon, and most of that not on steep quads but on cells the ridge filling and the pockets
+# closed: valleys and paths between the hills, ~8 yd wide). A closed cell whose four quads are all gentle and in the
+# land's own gentle ground (4-connected over gentle quads, REACH_QUADS or more: reached at the quads' scale, not a
+# plateau's top) opens again. Not a cell whose ground differs from an open neighbor's (8 ways) more than REOPEN_SLOPE a
+# yard: the step there is a cliff the coarser cells don't see (the Great Lift's rim over Thousand Needles' canyon,
+# whose open cells carry its cliff lines a quad wide). Loosening the rule itself (the faces' share, no ridge filling,
+# 3 of 4 quads) opened walls the tests pin (issue #271): the cells' rule is unchanged.
+REACH_QUADS = 100000
+REOPEN_SLOPE = MAX_SLOPE
+
+
+def reopen_reached(cells: np.ndarray, steep: np.ndarray, land: np.ndarray, z: np.ndarray, water: np.ndarray):
+    """`cells` with the closed cells the quads show are walked opened again (above); 0, or 1 where they're water."""
+    from scipy import ndimage
+
+    gentle = ~steep & land
+    lab, _n = ndimage.label(gentle)
+    sizes = np.bincount(lab.ravel())
+    sizes[0] = 0
+    ok = gentle & (sizes[lab] >= REACH_QUADS)
+    del lab
+    k = CELL_QUADS
+    m = ok[0::k, 0::k] & ok[0::k, 1::k] & ok[1::k, 0::k] & ok[1::k, 1::k] & (cells == 2)
+    H, W = m.shape
+    zc = z.reshape(H, k, W, k).mean(axis=(1, 3))
+    out = cells.copy()
+    out[m] = np.where(water[m], 1, 0)
+    cell = QUAD_YD * k
+    while True:  # (a reopened cell over a cliff from an open neighbor closes again, and so on)
+        op = out != 2
+        bad = np.zeros_like(m)
+        for dr in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                if not (dr or dc):
+                    continue
+                lim = REOPEN_SLOPE * cell * (np.sqrt(2) if dr and dc else 1)
+                a = (slice(max(-dr, 0), H - max(dr, 0)), slice(max(-dc, 0), W - max(dc, 0)))  # (the cell)
+                b = (slice(max(dr, 0), H - max(-dr, 0)), slice(max(dc, 0), W - max(-dc, 0)))  # (its neighbor)
+                bad[a] |= m[a] & op[b] & (np.abs(zc[a] - zc[b]) > lim)
+        if not bad.any():
+            break
+        out[bad] = 2
+        m &= ~bad
+    # (and, as the pockets above, reopened cells in an open piece under MIN_OPEN (4-connected, as the walk's diagonals
+    # only past two open cells): a valley the cells join only corner to corner had route-check's routes hop its corners)
+    lab, n = ndimage.label(out != 2)
+    if n:
+        sizes = ndimage.sum(out != 2, lab, range(1, n + 1))
+        out[np.isin(lab, np.flatnonzero(sizes < MIN_OPEN) + 1) & m] = 2
     return out
 
 

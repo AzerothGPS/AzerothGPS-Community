@@ -594,11 +594,6 @@ def test_a_walk_takes_zones_too_high_before_the_other_factions_towns():
     sx, sy, tx, ty = -12407.0, 212.0, -8160.19, -2522.21
     r = R.Route(0, sx, sy, tx, ty, lua.table(offroad=False))
     assert not r.noWay and R.WalkGuardYards(0, r, sx, sy, tx, ty) < R.HOSTILE_OVER_RED_YD
-    # (searched with the zones too high priced, as before: through the towns, the case this is about)
-    old, R.GuardsOverHighZones = R.GuardsOverHighZones, lua.eval("function(_, r) return r end")
-    try:
-        R.Reset()
-        before = R.Route(0, sx, sy, tx, ty, lua.table(offroad=False))
-        assert R.WalkGuardYards(0, before, sx, sy, tx, ty) >= R.HOSTILE_OVER_RED_YD
-    finally:
-        R.GuardsOverHighZones = old
+    # (Searched with the zones too high priced, as before, this went through the towns until 1.3.14. Its terrain grid
+    # opens the valley the road into Redridge's west runs up (gentle quads the cells' ridge filling had closed), and the
+    # old pricing then walks it too, past no guards: this trip no longer tells the two apart.)

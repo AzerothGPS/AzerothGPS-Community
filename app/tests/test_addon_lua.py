@@ -3196,10 +3196,13 @@ THUNDER_BLUFF_BELOW = (-1334.0, 176.0)  # (on Mulgore's road at the foot of the 
 def test_the_great_lift_is_taken_and_said(capitals_env):
     # (asked: the lifts outside the capitals, roads/lifts.py) the Barrens down to Thousand Needles by the
     # Great Lift: its road (source 5) taken, "Take the lift down"; up the other way. Before, the two roads'
-    # ends were joined by a straight link down the cliff
+    # ends were joined by a straight link down the cliff. With the map's ground heights, as the game has them (1.3.12):
+    # the cliff checks are what keep a walk off the canyon's terraced walls (1.3.14's grid reopens gentle cells by its
+    # rim, within a start's slack; test_cliff_heights' Great Lift trips walk them with the whole addon)
     lua, ns = capitals_env
     R = ns.Router
-    load(lua, ns, "Turns.lua")
+    load(lua, ns, "Turns.lua", "Ground.lua", "Data/Heights.lua")
+    ns.Passability.ClearCache()
     for a, b, kind, text in (((-4550.0, -1720.0), (-4900.0, -1900.0), R.KIND_LIFT_DOWN, "Take the lift down"),
                              ((-4900.0, -1900.0), (-4550.0, -1720.0), R.KIND_LIFT_UP, "Take the lift up")):
         R.Reset()
@@ -5435,14 +5438,15 @@ def test_a_hearthstone_kept_for_a_later_stop_is_said_where_its_step_is_not_liste
 
 def test_offroad_start_on_rocks_walks_off_them(env):
     # Zephras Isle, Rise of Spirits: the player stands on a rock outcrop the slope data calls
-    # impassable. The route walks off it and around (about 180 yd), not via the village road.
+    # impassable. The route walks off it and around (about 160 yd), not via the village road.
+    # (17 yd north of the first report's spot, 4007, 1556: 1.3.14's grid opens that cell, its quads all gentle)
     lua, ns = env
     load(lua, ns, "Data/Roads.lua", "Data/Terrain.lua", "Passability.lua", "Router.lua")
     ns.Router.Reset()
     ns.Router.SYNC_WALKS = True
     ns.Passability.ClearCache()
-    assert ns.Passability.At(2991, 4007.0, 1556.0) == 2  # standing on "blocked" ground
-    r = ns.Router.Route(2991, 4007.0, 1556.0, 4158.0, 1607.0, lua.table(offroad=True))
+    assert ns.Passability.At(2991, 4024.0, 1556.0) == 2  # standing on "blocked" ground
+    r = ns.Router.Route(2991, 4024.0, 1556.0, 4158.0, 1607.0, lua.table(offroad=True))
     assert r.length < 260
 
 

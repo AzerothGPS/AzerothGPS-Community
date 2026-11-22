@@ -71,3 +71,28 @@ def test_a_quad_deep_enough_under_water_isnt_steep():
     assert water[:8, :8].all()
     steep, _ = T.tile_grid(_tile(3), swim_types={2})  # (magma isn't swum)
     assert steep[:8, :8].all()
+
+
+def test_closed_cells_the_quads_show_are_walked_reopen(monkeypatch):
+    # (1.3.14, Kooki3z: "in the Barrens a lot of the mountains are actually climbable in certain paths") a valley 3 cells
+    # wide through a ridge, its quads all gentle and reached from the land's ground, closed by the cells' rule (the
+    # ridge filling, a pocket), opens; a gentle plateau top no gentle quad reaches stays closed; a gentle valley up on
+    # the ridge ends over a cliff above the open ground: its last cell stays closed
+    monkeypatch.setattr(T, "REACH_QUADS", 500)
+    H = W = 120  # cells
+    steep = np.zeros((2 * H, 2 * W), bool)
+    land = np.ones_like(steep)
+    z = np.zeros(steep.shape, np.float32)
+    cells = np.zeros((H, W), np.uint8)
+    cells[:, 50:70] = 2  # the ridge (closed) ...
+    steep[:, 100:140] = True  # ... steep at the quads' scale too
+    steep[118:124, 100:140] = False  # but for a valley through it, 3 cells wide, gentle
+    steep[10:40, 110:130] = True  # a plateau's steep rim ...
+    steep[16:34, 116:124] = False  # ... round a gentle top no gentle quad reaches
+    steep[200:206, 100:140] = False  # a second gentle valley, 40 yd up from the west ...
+    z[196:210, :140] = 40.0  # (and the west's ground beside it) ... over a cliff down to the open ground east of the ridge
+    out = T.reopen_reached(cells, steep, land, z, np.zeros((H, W), bool))
+    assert (out[59:62, 50:70] == 0).all()  # the valley through
+    assert (out[8:17, 58:62] == 2).all()  # the plateau's top
+    assert (out[100:103, 50:69] == 0).all() and (out[100:103, 69] == 2).all()  # the high valley, but not over the cliff
+    assert (out[:, :50] == 0).all() and (out[:, 70:] == 0).all()  # the open ground as it was

@@ -3228,8 +3228,11 @@ local function Walk(cont, x1, y1, x2, y2, transient, road1, road2, low, fresh)
   local key = string.format("%d:%.0f:%.0f:%.0f:%.0f%s%s", cont, x1, y1, x2, y2, road1 and "r" or "", road2 and "R" or "")
   local tkey = string.format("%d:%.0f:%.0f", cont, x2, y2)
   local w = walks[key]
-  if w == nil and transient and not fresh then -- (`fresh`: its own search, SwimWalk's: a reused walk can swim more)
-    local c, path = Reuse(cont, x1, y1, tkey)
+  -- (not from closed ground, a start the player stands on: its walk crosses up to Passability.START_SLACK of it, and a
+  -- walk searched from open ground beside it goes round instead. 1.3.14's grid, the Burning Steppes' Under Attack: its
+  -- walk to Morgan's Vigil's flight master joined one from 23 yd off, open ground, 1,125 yd round for its own 673)
+  if w == nil and transient and not fresh and not (not road1 and ns.Passability.At(cont, x1, y1) == 2) then
+    local c, path = Reuse(cont, x1, y1, tkey) -- (`fresh`: its own search, SwimWalk's: a reused walk can swim more)
     if c then return c, path end
   end
   if w == nil then
