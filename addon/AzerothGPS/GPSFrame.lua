@@ -14926,6 +14926,10 @@ function G.MakeRouteHere()
 end
 function G.HookQuestMenus()
   if G.questMenus then return true end
+  -- (never with the controller UI on, issue #887: "Route Here" added to the quest log's and the tracker's menus, the
+  -- ones with Abandon Quest, and abandoning quests got AzerothGPS blocked: the game's own calls in a menu an addon
+  -- changed are blamed on it there, as the world map's were, 1.2.2)
+  if G.ControllerUI() then return false end
   local M = rawget(_G, "Menu")
   if not (type(M) == "table" and type(M.ModifyMenu) == "function") then return false end
   G.questMenus = true
@@ -14963,7 +14967,7 @@ function G.InitRouteHere()
     G.MakeRouteHere()
     G.HookQuestMenus()
     G.HookQuestDoubleClicks()
-    return G.questMenus and (G.routeHereBtn or G.ControllerUI())
+    return (G.questMenus or G.ControllerUI()) and (G.routeHereBtn or G.ControllerUI())
   end
   if Try() or G.routeHereEvents or not CreateFrame then return end
   local f = CreateFrame("Frame") -- (the quest map or the menus loaded later: tried again as addons load)
