@@ -42,11 +42,12 @@ MAX_SIZE_YD = 250.0  # bigger models aren't buildings (a city, a mountain's insi
 
 
 def grid_frames(path: Path | None = None) -> dict:
-    """The continents' grids as Data/Terrain.lua has them: cont -> (tx0, ty0, cell, w, h)."""
+    """The continents' grids as Data/Terrain.lua has them: cont -> (tx0, ty0, cell, w, h). (`deep = 3` stands between
+    `h` and `rows` since #687: read past it, or no grid is found.)"""
     text = (path or ADDON_DIR / "Data" / "Terrain.lua").read_text(encoding="utf-8")
     text = text[:text.find("ns.Hills")]  # (the hills' coarser grids come after, in the same form)
     out = {}
-    for m in re.finditer(r"^  \[(\d+)\] = \{ tx0 = (-?\d+), ty0 = (-?\d+), cell = ([\d.]+), w = (\d+), h = (\d+), rows",
+    for m in re.finditer(r"^  \[(\d+)\] = \{ tx0 = (-?\d+), ty0 = (-?\d+), cell = ([\d.]+), w = (\d+), h = (\d+),[^\n]*? rows",
                          text, re.M):
         out[int(m.group(1))] = (int(m.group(2)), int(m.group(3)), float(m.group(4)), int(m.group(5)), int(m.group(6)))
     return out

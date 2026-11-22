@@ -54,6 +54,7 @@ STAIR_MIN_Z = 3.0  # an edge whose ends are this far apart in height is stairs (
 FLOOR_GAP = 4.0  # node heights this far apart are two floors
 DOOR_JOIN_YD = 12.0  # a door this near the land's road: a straight road from it onto that road
 WALK_JOIN_YD = 150.0  # one further, up to this: the walk to that road on the terrain, the addon's own (walk_joins)
+FAR_WALK_YD = 600.0  # (a door's walk to that road this long at most: Booty Bay's house, 1,500 yd round the bay)
 INSIDE_PAD = 1  # cells round the model's floors still inside (a doorstep)
 LAYER_REACH = 6.0  # yards: a point's floor, this near the height it's followed at (as cities.py's)
 LEDGE = 3.0
@@ -678,15 +679,129 @@ def npc_buildings(cd: ClientData, log=print) -> dict:
     return out
 
 
-def npc_insides(cd: ClientData, log=print) -> list:
-    """Phase 6's buildings as built, before the pruning: every building with an NPC upstairs or in a cellar, but those
-    in TOWNS (built whole), each inside built (its NPCs as the walk's seeds only, no spurs) and joined onto the land's
-    road (join_doors, then walk_joins: the ways in known before the pruning). Each with `npcs` for the check."""
+# Phase 7 (asked 2026-11-21: "if routing to an NPC in the building you just get a dotted line to it through walls, not
+# directions to go around to the entrance then inside"): every building with a shipped NPC (Data/Npcs.lua, since
+# 2026-11-14) standing inside it where Data/Buildings.lua blocks the ground, built as phase 6's (no spurs, pruned). Its
+# NPC within NPC_IN_YD of the building's footprint (buildings.footprint: its walls, doorways closed, the inside filled)
+# and on one of its blocked cells: an NPC by a hut too small to block a cell is walked to over the land as ever.
+NPC_IN_YD = 1
+SHIPPED = "Npcs.lua"  # (phase 7's NPCs' fifth value, where phase 6's has the floors report's place)
+
+
+def shipped_spawns(path: Path | None = None) -> list:
+    """Data/Npcs.lua's spawns on the continents (0 and 1; not Undercity's): [(name, cont, x, y, z), ...]."""
+    text = (path or ADDON_DIR / "Data" / "Npcs.lua").read_text(encoding="utf-8")
+    body = text.split("ns.NpcsPacked = [==[", 1)[1].split("]==]", 1)[0]
+    out = []
+    for line in body.strip().splitlines():
+        f = line.split("|")
+        if len(f) < 7:
+            continue
+        for s_ in f[6].split(";"):
+            q = s_.split()
+            if len(q) == 4 and q[0] in ("0", "1"):
+                out.append((f[1], int(q[0]), float(q[1]), float(q[2]), float(q[3])))
+    return out
+
+
+def blocked_building_cells(path: Path | None = None) -> dict:
+    """Data/Buildings.lua's blocked cells: { cont: {row * 65536 + col} }."""
+    import re
+
+    text = (path or ADDON_DIR / "Data" / "Buildings.lua").read_text(encoding="utf-8")
+    out = {}
+    for m in re.finditer(r"\[(\d+)\] = \{([^}]*)\}", text):
+        vals = [int(v) for v in re.findall(r"-?\d+", m.group(2))]
+        cells = set()
+        for i in range(0, len(vals) - 2, 3):
+            r, c, n = vals[i:i + 3]
+            cells.update(r * 65536 + c + k for k in range(n))
+        out[int(m.group(1))] = cells
+    return out
+
+
+def shipped_npc_buildings(cd: ClientData, log=print) -> dict:
+    """Phase 7's buildings: those with a shipped NPC standing inside on a blocked cell (NPC_IN_YD of the footprint),
+    { cont: { placement uid: [(name, x, y, z, SHIPPED), ...] } }, as npc_buildings'. Capitals' and caves' models aren't
+    buildings (buildings.buildings); an NPC over a capital's or a cave's own grid is left out (its own roads)."""
+    from . import buildings as BL
+    from .gameharness import start
+
+    _lua, ns = start()
+    P = ns.Passability
+
+    def own_grid(cont, x, y):
+        r = P.OverlayRaw(cont, x, y)
+        v, grid = r if isinstance(r, tuple) else (r, None)
+        return v is not None and grid is not None and bool(grid.cave or grid.capital)
+    frames = BL.grid_frames()
+    cells = blocked_building_cells()
+    spawns = shipped_spawns()
+    out: dict = {}
+    for cont in (0, 1):
+        mine = [q for q in spawns if q[1] == cont]
+        if not mine or cont not in frames:
+            continue
+        X = np.array([q[2] for q in mine])
+        Y = np.array([q[3] for q in mine])
+        rr, cc = BL.to_cell(frames[cont], X, Y)
+        on = [i for i, k in enumerate((rr * 65536 + cc).tolist()) if k in cells.get(cont, ())
+              and not own_grid(cont, mine[i][2], mine[i][3])]
+        ground = Ground(cd, cont)
+        taken: set = set()
+        for p in BL.buildings(cd, cont):
+            x0, y0, x1, y1 = p.bounds
+            hit = [i for i in on if i not in taken and x0 - NPC_IN_YD <= X[i] <= x1 + NPC_IN_YD
+                   and y0 - NPC_IN_YD <= Y[i] <= y1 + NPC_IN_YD]
+            if not hit:
+                continue
+            fp = BL.footprint(BL.cut(cd, p, ground))
+            if fp is None:
+                continue
+            fx, fy, m = fp
+            inside = []
+            for i in hit:
+                a, b = int(X[i] - fx), int(Y[i] - fy)
+                if m[max(0, a - NPC_IN_YD):max(0, a + NPC_IN_YD + 1), max(0, b - NPC_IN_YD):max(0, b + NPC_IN_YD + 1)].any():
+                    inside.append(i)
+            if not inside:
+                continue
+            taken.update(inside)
+            seen = set()
+            for i in inside:
+                name, _c, x, y, z = mine[i]
+                if (name, round(x), round(y)) not in seen:
+                    seen.add((name, round(x), round(y)))
+                    out.setdefault(cont, {}).setdefault(p.uid, []).append((name, x, y, z, SHIPPED))
+        log(f"  [{cont}] {len(out.get(cont, {}))} buildings with a shipped NPC inside ({len(taken)} spawns)")
+    return out
+
+
+def all_npc_buildings(cd: ClientData, log=print) -> dict:
+    """Phase 6's buildings (an NPC upstairs or in a cellar, npc_buildings) and phase 7's (a shipped NPC inside,
+    shipped_npc_buildings), each building's NPCs both lists' (the same spot once)."""
+    out: dict = {}
+    for src in (npc_buildings(cd, log), shipped_npc_buildings(cd, log)):
+        for cont, by_uid in src.items():
+            for uid, npcs in by_uid.items():
+                have = out.setdefault(cont, {}).setdefault(uid, [])
+                for q in npcs:
+                    if not any(o[0] == q[0] and math.hypot(o[1] - q[1], o[2] - q[2]) < 2 for o in have):
+                        have.append(q)
+    return out
+
+
+def npc_insides(cd: ClientData, log=print, by_cont: dict | None = None, skip=()) -> list:
+    """Phase 6's and 7's buildings as built, before the pruning: every building with an NPC upstairs or in a cellar or
+    a shipped NPC inside (`by_cont`, else all_npc_buildings), but those in TOWNS (built whole) and those whose middle is
+    within 3 yd of one in `skip` ((cont, x, y): ones built already), each inside built (its NPCs as the walk's seeds
+    only, no spurs) and joined onto the land's road (join_doors, then walk_joins: the ways in known before the pruning).
+    Each with `npcs` for the check."""
     from .townplaces import _labels
 
     labels = _labels("23")  # (the map's town and place names: the building's, the nearest within NPC_PLACE_MAX_YD)
     built = []
-    for cont, by_uid in sorted(npc_buildings(cd, log).items()):
+    for cont, by_uid in sorted((all_npc_buildings(cd, log) if by_cont is None else by_cont).items()):
         ground = Ground(cd, cont)
         roads = shipped_roads(cont)
         placed = {p.uid: p for p in buildings(cd, cont)}
@@ -699,6 +814,8 @@ def npc_insides(cd: ClientData, log=print) -> list:
             mx, my = (x0 + x1) / 2, (y0 + y1) / 2
             if any(math.hypot(mx - X, my - Y) <= R for X, Y, R in towns):
                 continue  # (a town's: built whole with it)
+            if any(c == cont and math.hypot(mx - X, my - Y) <= 3 for c, X, Y in skip):
+                continue  # (built already: the shipped file's, spliced onto)
             try:
                 b = build_building(cd, p, ground, [q[:4] for q in npcs], log=lambda *a: None, spurs=False)
             except Exception as ex:  # (a model this reader can't take)
@@ -711,18 +828,36 @@ def npc_insides(cd: ClientData, log=print) -> list:
             b["town"] = near[1] if near and near[0] <= NPC_PLACE_MAX_YD else "the wilds"
             b["cont"], b["npcs"] = cont, [q[:4] for q in npcs]
             built.append(b)
-    walk_joins(built, log)
+    walk_joins(built, log, longest=FAR_WALK_YD)  # (no walk far round to a road)
     for b in built:
         b["walked"] = True  # (walk_joins again leaves it be)
     return built
 
 
-def build_npc_buildings(cd: ClientData, log=print, built: list | None = None) -> list:
+STAIR_STEEP = 1.6  # yards up a yard of road: no stair is that steep (test_indoors_stairs.py's STEEP)
+STAIR_RISE = 2.0  # (and at least this much in all)
+
+
+def steep_stairs(b: dict) -> int:
+    """How many of building `b`'s stairs roads (source 6) rise more than STAIR_STEEP a yard, STAIR_RISE at least."""
+    n = 0
+    for a, c, pts, src in b["edges"]:
+        za, zc = b["zs"][a], b["zs"][c]
+        if src != 6 or za is None or zc is None:
+            continue
+        d = max(math.dist(b["nodes"][a], b["nodes"][c]),
+                sum(math.dist(pts[i], pts[i + 1]) for i in range(len(pts) - 1)))
+        if abs(zc - za) >= STAIR_RISE and abs(zc - za) / max(d, 0.1) > STAIR_STEEP:
+            n += 1
+    return n
+
+
+def build_npc_buildings(cd: ClientData, log=print, built: list | None = None, skip=()) -> list:
     """Phase 6: npc_insides (or `built`, those), each with its ways in spread out (spread_joins), pruned (prune_cover)
     and its chains one road each (collapse_chains). One with no door joined to the land's road is left out: a route couldn't get in, and went
     straight to the NPC over everything (Sen'jin Village's huts, 260 yd from a road; 2026-10-06)."""
     out = []
-    for b in npc_insides(cd, log) if built is None else built:
+    for b in npc_insides(cd, log, skip=skip) if built is None else built:
         if not b["joins"]:
             log(f"  {b['town']}: {b['name']} ({b['uid']}): left out, no door joined to the land's road")
             continue
@@ -732,6 +867,10 @@ def build_npc_buildings(cd: ClientData, log=print, built: list | None = None) ->
         fewer = collapse_chains(b)
         compact(b)
         if not b["edges"] or not b["doors"]:
+            continue
+        steep = steep_stairs(b)
+        if steep:  # (a ledge, not a stair: the walk up it fails in game, #842; none added, test_indoors_stairs.py)
+            log(f"  {b['town']}: {b['name']} ({b['uid']}): left out, {steep} stairs roads steeper than a stair")
             continue
         b["bridge"] = []  # (no gap links: in by its joins, indoors_lua)
         log(f"  {b['town']}: {b['name']} ({b['uid']}): floors {b['floors']}, {before} roads, {thinned} joins thinned, "
@@ -800,9 +939,9 @@ def join_doors(b: dict, roads, ground=None, others=()) -> int:
     return n
 
 
-def walk_joins(built: list, log=print) -> int:
+def walk_joins(built: list, log=print, reach: float = WALK_JOIN_YD, longest: float | None = None) -> int:
     """The doors no short straight road joined (join_doors), each walked on the terrain to the land's road nearest it
-    within WALK_JOIN_YD: the addon's own walk search (Passability.FindPath in the game harness: round the buildings'
+    within `reach` (WALK_JOIN_YD): the addon's own walk search (Passability.FindPath in the game harness: round the buildings'
     cells and the cliffs), the walk a road from the door onto that road (a node there). A building with a door joined
     so isn't walked from again. Returns how many were joined."""
     from .gameharness import start
@@ -827,7 +966,7 @@ def walk_joins(built: list, log=print) -> int:
                 continue
             x, y = b["nodes"][d]
             near = nearest_road(A, B, x, y)
-            if not near or near[2] > WALK_JOIN_YD:
+            if not near or near[2] > reach:
                 continue
             tried.append((near[2], d, x, y, near[0], near[1]))
         for _dist, d, x, y, qx, qy in sorted(tried):
@@ -838,6 +977,8 @@ def walk_joins(built: list, log=print) -> int:
             pts = [(float(path[i]), float(path[i + 1])) for i in range(1, len(path), 2)]
             if len(pts) < 2:
                 continue
+            if longest and sum(math.dist(pts[i], pts[i + 1]) for i in range(len(pts) - 1)) > longest:
+                continue  # (a walk far round, FAR_WALK_YD)
             pts[0], pts[-1] = (x, y), (qx, qy)
             j = len(b["nodes"])
             b["nodes"].append((qx, qy))
@@ -878,6 +1019,35 @@ def build_town(cd: ClientData, town: str, log=print) -> list:
     return out
 
 
+def _cont_parts(lst: list, base: int = 0, attach: bool = False) -> dict:
+    """One continent's buildings as Indoors.lua's pieces, their nodes numbered on from `base` (how many come before):
+    `n`, `nz` (the numbers as text), `e` (each road's line), `joins`, `bridge` (1-based), `info` (ns.Indoors' lines)."""
+    n_all, nz, e_lines, joins, bridge, info = [], [], [], [], [], []
+    for b in lst:
+        off = base + len(n_all) // 2
+        n_all += [f"{v:.1f}" for xy in b["nodes"] for v in xy]
+        nz += ["0" if z is None else f"{z:.1f}" for z in b["zs"]]
+        for a, c, pts, src in b["edges"]:
+            P = [(int(round(q[0])), int(round(q[1]))) for q in pts]
+            P = [q for i, q in enumerate(P) if i == 0 or q != P[i - 1]]
+            if len(P) == 1:
+                P = P * 2
+            length = sum(math.hypot(q[0] - p_[0], q[1] - p_[1]) for p_, q in zip(pts, pts[1:]))
+            e_lines.append(f"    {{{a + off + 1},{c + off + 1},{max(1.0, length):.0f},{src},\"{pack_points(P)}\"}},")
+        joins += [j + off + 1 for j in b["joins"]]
+        # (the nodes gap links may use: a town's doors; phase 6's none, its joins are its ways in: a door is any road's
+        # end out of the model, a balcony's too, and a gap link went straight up to one; and each door's six links
+        # cost memory)
+        bridge += [d + off + 1 for d in (b["doors"] if b.get("bridge") is None else b["bridge"])]
+        x0, y0, x1, y1 = b["bounds"]
+        mx, my, r = (x0 + x1) / 2, (y0 + y1) / 2, max(x1 - x0, y1 - y0) / 2
+        info.append(f'  {{ "{b["town"]}: {b["name"]}", x = {mx:.0f}, y = {my:.0f}, r = {r:.0f}, '
+                    + ("attach = true, " if attach else "") + 'floors = { '
+                    + ", ".join(f"{z:.1f}" for z in b["floors"]) + " } },")
+    return {"n": n_all, "nz": nz, "e": e_lines, "joins": [str(j) for j in joins],
+            "bridge": [str(j) for j in sorted(set(bridge))], "info": info}
+
+
 def indoors_lua(cd: ClientData, built: list) -> str:
     """Data/Indoors.lua: per continent one ns.RoadOverlays entry with every building's inside, and ns.Indoors (each
     building's name, middle and floors: the plans and the tracker's checks)."""
@@ -893,45 +1063,62 @@ def indoors_lua(cd: ClientData, built: list) -> str:
     for b in built:
         by_cont.setdefault(b["cont"], []).append(b)
     for cont, lst in sorted(by_cont.items()):
-        n_all, nz, e_all, joins, bridge, info = [], [], [], [], [], []
-        for b in lst:
-            base = len(n_all)
-            n_all += b["nodes"]
-            nz += b["zs"]
-            for a, c, pts, src in b["edges"]:
-                P = [(int(round(q[0])), int(round(q[1]))) for q in pts]
-                P = [q for i, q in enumerate(P) if i == 0 or q != P[i - 1]]
-                if len(P) == 1:
-                    P = P * 2
-                length = sum(math.hypot(q[0] - p_[0], q[1] - p_[1]) for p_, q in zip(pts, pts[1:]))
-                e_all.append((a + base, c + base, max(1.0, length), src, P))
-            joins += [j + base for j in b["joins"]]
-            # (the nodes gap links may use: a town's doors; phase 6's none, its joins are its ways in: a door is any road's
-            # end out of the model, a balcony's too, and a gap link went straight up to one; and each door's six links
-            # cost memory)
-            bridge += [d + base for d in (b["doors"] if b.get("bridge") is None else b["bridge"])]
-            x0, y0, x1, y1 = b["bounds"]
-            info.append((b["town"], b["name"], (x0 + x1) / 2, (y0 + y1) / 2, max(x1 - x0, y1 - y0) / 2, b["floors"]))
+        q = _cont_parts(lst)
         out.append(f"ns.Indoors[{cont}] = {{")
-        for town, name, mx, my, r, floors in info:
-            out.append(f'  {{ "{town}: {name}", x = {mx:.0f}, y = {my:.0f}, r = {r:.0f}, floors = {{ '
-                       + ", ".join(f"{z:.1f}" for z in floors) + " } },")
+        out += q["info"]
         out.append("}")
         out.append("do")
         out.append(f"  local overlays = ns.RoadOverlays[{cont}] or {{}}")
         out.append(f"  ns.RoadOverlays[{cont}] = overlays")
         out.append("  overlays[#overlays + 1] = { indoor = true,")
-        out.append("  n = {" + ",".join(f"{x:.1f},{y:.1f}" for x, y in n_all) + "},")
-        out.append("  nz = {" + ",".join("0" if z is None else f"{z:.1f}" for z in nz) + "},")
+        out.append("  n = {" + ",".join(q["n"]) + "},")
+        out.append("  nz = {" + ",".join(q["nz"]) + "},")
         out.append("  e = {")
-        for a, c, length, src, P in e_all:
-            out.append(f"    {{{a + 1},{c + 1},{length:.0f},{src},\"{pack_points(P)}\"}},")
+        out += q["e"]
         out.append("  },")
-        out.append("  joins = {" + ",".join(str(j + 1) for j in joins) + "},")
-        out.append("  bridge = {" + ",".join(str(j + 1) for j in sorted(set(bridge))) + "},")
+        out.append("  joins = {" + ",".join(q["joins"]) + "},")
+        out.append("  bridge = {" + ",".join(q["bridge"]) + "},")
         out.append("  }")
         out.append("end")
     return "\n".join(out) + "\n"
+
+
+def shipped_middles(text: str | None = None) -> list:
+    """The buildings in the shipped Data/Indoors.lua (or `text`): [(cont, x, y), ...], their middles (ns.Indoors)."""
+    import re
+
+    text = FILE.read_text(encoding="utf-8") if text is None else text
+    out = []
+    for m in re.finditer(r"^ns\.Indoors\[(\d+)\] = \{\n(.*?)^\}", text, re.S | re.M):
+        out += [(int(m.group(1)), float(x), float(y)) for x, y in re.findall(r"x = (-?\d+), y = (-?\d+)", m.group(2))]
+    return out
+
+
+def splice_lua(text: str, built: list) -> str:
+    """`text` (the shipped Data/Indoors.lua) with the buildings in `built` added, `attach`ed (phase 7, 2026-11-21): their
+    ns.Indoors lines after each continent's list (`attach = true`), their roads an ns.RoadOverlays entry of their own
+    after the continent's (`attach = true`: the Router doesn't split the land's road at their joins; a trip to or from
+    one goes in by them, R.AttachTrip; joined as the others, they changed other trips' roads, 12 sample trips worse).
+    Every building already in it is left as it is (a full --write moves every building: the client and the land's roads
+    have changed under them since; #846 spliced Brill's inn the same way)."""
+    by_cont: dict = {}
+    for b in built:
+        by_cont.setdefault(b["cont"], []).append(b)
+    lines = text.split("\n")
+    for cont, lst in sorted(by_cont.items()):
+        head = lines.index(f"ns.Indoors[{cont}] = {{")
+        close = lines.index("}", head)
+        start = lines.index(f"  local overlays = ns.RoadOverlays[{cont}] or {{}}", close)
+        end = lines.index("end", start)
+        q = _cont_parts(lst, attach=True)
+        block = ["do", f"  local overlays = ns.RoadOverlays[{cont}] or {{}}", f"  ns.RoadOverlays[{cont}] = overlays",
+                 "  overlays[#overlays + 1] = { indoor = true, attach = true,",
+                 "  n = {" + ",".join(q["n"]) + "},", "  nz = {" + ",".join(q["nz"]) + "},", "  e = {"] + q["e"] + [
+                 "  },", "  joins = {" + ",".join(q["joins"]) + "},", "  bridge = {" + ",".join(q["bridge"]) + "},",
+                 "  }", "end"]
+        lines[end + 1:end + 1] = block
+        lines[close:close] = q["info"]
+    return "\n".join(lines)
 
 
 CHECK_FROM = 40.0  # yards out from a building's edge: where a check's route starts (on the land's road there)
@@ -943,13 +1130,15 @@ CHECK_GROUND_Z = 2.0  # a place no inside road leads to, standing on the terrain
 # (Bloodhoof's trainers under a tent's canvas, open at the sides)
 
 
-def check(cd: ClientData, built: list, log=print) -> list[dict]:
+def check(cd: ClientData, built: list, log=print, onto: str | None = None) -> list[dict]:
     """Each town place inside a building, routed to from outside as the addon does (the game harness, with this data
     in place of Data/Indoors.lua): {town, building, place, ok, floor, z, last, why}. Reached: the route ends on the
-    building's roads, on the place's floor (CHECK_FLOOR_Z), its last stretch off the roads at most CHECK_LAST_YD."""
+    building's roads, on the place's floor (CHECK_FLOOR_Z), its last stretch off the roads at most CHECK_LAST_YD.
+    `onto`: a shipped Indoors.lua's text, `built` spliced onto it (splice_lua) for the routes."""
     from .gameharness import start
 
-    lua, ns = start(replace={"Data/Indoors.lua": indoors_lua(cd, built)})
+    text = indoors_lua(cd, built) if onto is None else splice_lua(onto, built)
+    lua, ns = start(replace={"Data/Indoors.lua": text})
     R = ns.Router
     places = {q[0]: q for q in town_places(0)}
     grounds: dict = {}
@@ -994,6 +1183,18 @@ def check(cd: ClientData, built: list, log=print) -> list[dict]:
                 i -= 1
             res["last"] = round(last, 1)
             res["floor"] = fz and round(fz[-1], 1)
+            # (through the inside first: phase 7's NPCs stand on the ground floor, and the walk over the land
+            # straight in to one (SegmentCost: a stop in a building's cells is reached) was "reached", and every
+            # building of theirs left out as reaching none)
+            if not fz or fz[-1] is None:
+                res["why"] = "never on the building's roads"
+            elif abs(fz[-1] - pz) > CHECK_FLOOR_Z:
+                res["why"] = f"ends on the {fz[-1]:.1f} floor"
+            elif last > (CHECK_NPC_LAST_YD if b.get("npcs") else CHECK_LAST_YD):
+                res["why"] = f"{last:.0f} yd off the roads at the end"
+            else:
+                res["ok"] = True
+                continue
             if name not in b.get("spurred", ()):
                 if cont not in grounds:
                     grounds[cont] = Ground(cd, cont)
@@ -1003,15 +1204,6 @@ def check(cd: ClientData, built: list, log=print) -> list[dict]:
                 if (math.isfinite(float(h[0])) and abs(float(h[0]) - pz) <= CHECK_GROUND_Z
                         and ns.Passability.SegmentCost(cont, ax, ay, px, py) is not None):
                     res["ok"], res["why"] = True, "on the ground, reached over the land"
-                    continue
-            if not fz:
-                res["why"] = "never on the building's roads"
-            elif abs(fz[-1] - pz) > CHECK_FLOOR_Z:
-                res["why"] = f"ends on the {fz[-1]:.1f} floor"
-            elif last > (CHECK_NPC_LAST_YD if b.get("npcs") else CHECK_LAST_YD):
-                res["why"] = f"{last:.0f} yd off the roads at the end"
-            else:
-                res["ok"] = True
         n_here = len(b.get("npcs") or b["places"])
         for res in out[-n_here:] if n_here else []:
             log(f"  {'ok' if res['ok'] else '! '} {res['town']}: {res['building']}: {res['place']} (z {res['z']:.1f})"
@@ -1019,12 +1211,12 @@ def check(cd: ClientData, built: list, log=print) -> list[dict]:
     return out
 
 
-def npc_reached(cd: ClientData, built: list, log=print) -> list:
+def npc_reached(cd: ClientData, built: list, log=print, onto: str | None = None) -> list:
     """Of phase 6's buildings (`npcs`), those whose inside the check takes a route to one of their NPCs by at least
     (not one standing on the ground, reached over the land: the inside didn't); the rest left out, their insides don't
     get to the floors their NPCs stand on (Theramore's barracks upstairs, Nethergarde's mage tower's top: no stairs
     found up), so they'd only cost memory."""
-    res = check(cd, built, log=lambda *a: None)
+    res = check(cd, built, log=lambda *a: None, onto=onto)
     out, i = [], 0
     for b in built:
         n = len(b.get("npcs") or b["places"])

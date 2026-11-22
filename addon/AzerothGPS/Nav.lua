@@ -2023,7 +2023,9 @@ local trackLook = { at = -math.huge } -- (a building's: when it was last looked 
 -- grid of BUILDING_CELL yards made the first time per level: not every building on the continent each status update)
 N.BUILDING_CELL = 64
 local buildingGrid = {} -- level -> { list = ns.Indoors[level], cells = { [key] = { building, ... } } }
-function N.InBuilding(level, px, py)
+-- (`which`: "joined", only the buildings whose doors are joined into the land's roads; "attach", only those attached,
+-- Router.AttachTrip's: the Router's own rules go by the joined ones, so the land's routes are as without the others)
+function N.InBuilding(level, px, py, which)
   local list = ns.Indoors and ns.Indoors[level]
   if not list then return nil end
   local C = N.BUILDING_CELL
@@ -2045,7 +2047,8 @@ function N.InBuilding(level, px, py)
   end
   for _, b in ipairs(grid.cells[math.floor(px / C) * 4096 + math.floor(py / C)] or {}) do
     local r = b.r + N.TRACK_YD
-    if math.abs(b.x - px) <= r and math.abs(b.y - py) <= r then return b end
+    if math.abs(b.x - px) <= r and math.abs(b.y - py) <= r
+        and (not which or (which == "attach") == (b.attach or false)) then return b end
   end
   return nil
 end
