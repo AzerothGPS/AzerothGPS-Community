@@ -61,6 +61,7 @@ def _pts(r) -> tuple[list[tuple[float, float]], list[int]]:
     return [(flat[i], flat[i + 1]) for i in range(0, len(flat), 2)], kinds
 
 
+TILE = 1600 / 3
 GRID_WRONG_YD = 40.0  # blocked cells this close to a road that runs over blocked cells: the grid's error
 
 
@@ -73,12 +74,33 @@ def _in_cave(P, cont, x, y) -> bool:
     return v is not None and grid is not None and bool(grid.cave or grid.capital)
 
 
-def _blocked_run(P, cont, pts, kinds, start, stop) -> float:
+def _walked_at(P, cont, x, y, terrain, rows) -> int:
+    """The grid's value at (x, y) as the walks judge it: over a cave's own grid, closed only where both it and the
+    continent's cell under it are (FindPath walks the continent's cells, ignoring the caves' grids; a straight leg
+    goes by the cave's: its mouth open to the sky over the land's closed cells, Blasted Lands. 1.3.14's grid opened a
+    valley in the Wetlands over a cave's tunnels, whose rock the cave's grid closes there). `terrain`: ns.Terrain[cont];
+    `rows`: Passability.BaseRow's rows, remembered by the caller."""
+    r = P.OverlayRaw(cont, x, y) if P.OverlayRaw else None
+    v, grid = r if isinstance(r, tuple) else (r, None)
+    at = P.At(cont, x, y)
+    if at != 2 or terrain is None or v is None or grid is None or not grid.cave or grid.capital:
+        return at
+    k = TILE / terrain.cell  # (as Passability's ToCell)
+    col = math.floor(((32 - y / TILE) - terrain.tx0) * k) + 1
+    row = math.floor(((32 - x / TILE) - terrain.ty0) * k) + 1
+    if row < 1 or row > terrain.h or col < 1 or col > terrain.w:
+        return 2
+    if row not in rows:
+        rows[row] = P.BaseRow(cont, row)
+    return int(rows[row][col - 1])
+
+
+def _blocked_run(P, cont, pts, kinds, start, stop, terrain=None) -> float:
     """Longest run (yards) of impassable ground crossed by the route's off-road stretches,
     ignoring END_ALLOW_YD around the start and the stop, and ground beside a road that
     itself runs over "impassable" cells (a road there, e.g. drawn in game, says the grid is
     wrong there: getting on or off it isn't a routing error)."""
-    wrong = []
+    wrong, rows = [], {}
     for i, k in enumerate(kinds):
         if k == 0:
             for (x, y) in (pts[i], pts[i + 1]):
@@ -93,7 +115,7 @@ def _blocked_run(P, cont, pts, kinds, start, stop) -> float:
             x, y = x1 + (x2 - x1) * j / n, y1 + (y2 - y1) * j / n
             near_end = math.hypot(x - start[0], y - start[1]) < END_ALLOW_YD or                 math.hypot(x - stop[0], y - stop[1]) < END_ALLOW_YD
             beside = any(math.hypot(x - wx, y - wy) < GRID_WRONG_YD for wx, wy in wrong)
-            if k == 1 and not near_end and not beside and P.At(cont, x, y) == 2:
+            if k == 1 and not near_end and not beside and _walked_at(P, cont, x, y, terrain, rows) == 2:
                 run += seg / n
                 worst = max(worst, run)
             else:
@@ -158,7 +180,7 @@ def check(samples: int = 20, seed: int = 1, only: str | None = None, log=print, 
                 R.Reset()
                 r = R.Route(cont, sx, sy, tx, ty, lua.table(offroad=(mode == "offroad")))
                 pts, kinds = _pts(r)
-                run = _blocked_run(P, cont, pts, kinds, (sx, sy), (tx, ty))
+                run = _blocked_run(P, cont, pts, kinds, (sx, sy), (tx, ty), ns.Terrain[cont])
                 share, extra = (DETOUR_SHARE, DETOUR_YD) if mode == "offroad" else (ROAD_DETOUR_SHARE, ROAD_DETOUR_YD)
                 issue = None
                 if r.length > max(grid * share, grid + extra):

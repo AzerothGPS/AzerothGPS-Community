@@ -484,3 +484,10 @@ def test_route_check_takes_a_way_round_the_other_factions_guards_for_no_detour()
     assert guard_yards(R, 0, ref, None) == 0 and guard_yards(R, 0, ref, "H") < 50
     r = R.Route(0, 937.1, -147.8, 2003.9, -298.9, lua.table(offroad=True))
     assert r.length > ref[0] * 1.4  # (round them: the detour the guards explain)
+
+
+def test_the_wetlands_valley_1314_opens_is_walked_up_not_hopped(world):
+    # (1.3.14's grid reopens a valley through the Wetlands' hills, its quads all gentle; route-check flagged its walks
+    # as crossing blocked ground: the cave's grid under it (Data/Caves.lua's rock), which the terrain walk ignores, as
+    # route-check now does. On the land's own grid the walk is over open ground)
+    check_trip(world, 0, (-3642.8, -3143.4), (-3554.3, -2199.9), "offroad")
