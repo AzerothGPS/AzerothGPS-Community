@@ -85,6 +85,7 @@ Questify.lua
 AzerothPilot.lua
 Layers.lua
 GPSFrame.lua
+QuestWays.lua
 OtherPins.lua
 Arrow.lua
 Looks.lua

@@ -2892,7 +2892,8 @@ function Lay.Init()
     elseif event == "QUEST_ACCEPTED" then
       -- on a quest route: it doesn't have the new quest yet
       questCache, areaLists = {}, {}
-      if ns.Nav and ns.Nav.OnQuestRoute and ns.Nav.OnQuestRoute() then
+      -- (not on one made "Turn-ins only": a quest picked up has nothing to turn in yet)
+      if ns.Nav and ns.Nav.OnQuestRoute and ns.Nav.OnQuestRoute() and ns.Nav.QuestRouteTakesNew() then
         -- (the arrow window shows the Sprint icon until rebuilt; or rebuilt by itself, the option on)
         ns.Nav.MarkQuestRouteStale()
         if not ns.Nav.QuestAutoReroute() then

@@ -845,7 +845,7 @@ function T.BuildSections()
         shown = function(run) return not run.mark.has end,
         done = function(run) return N.Version() ~= run.mark.v and #N.stops > 0 end },
       { title = L["What it does"],
-        text = L["It visits your quests' objectives in the fastest order, then the turn-ins. A stop is done when its quest is, not when you get there."],
+        text = L["It visits your quests' objectives in the fastest order, then the turn-ins. A stop is done when its quest is, not when you get there. Right-click the button for other ways."],
         enter = function() if #N.stops == 0 then T.DemoQuests() end end, target = T.MapFrame },
       { when = function() return T.OtherAddons() ~= nil end, title = L["With your other addons"],
         text = function() return Format(L["AzerothGPS also works with: %s."], T.OtherAddons() or "") end },

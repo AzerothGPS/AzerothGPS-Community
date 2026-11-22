@@ -103,7 +103,8 @@ def quests(game):
     N.questDropped = lua.eval("{}")
     N.SaveQuestChoices()
     G.groupQuests = lua.eval("{}")
-    G.askBox._shown = False
+    if G.askBox is not None:  # (made by the first question: a test run alone may have asked none)
+        G.askBox._shown = False
     G.autoQuestPending, N.questRouteStale = None, None
 
 
