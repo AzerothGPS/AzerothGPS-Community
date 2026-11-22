@@ -54,6 +54,7 @@ M.GetMaxLetters = function(s) return s._maxLetters or 0 end
 M.GetText = function(s) return s._text end
 M.SetFormattedText = function(s, f, ...) s._text = string.format(f, ...) end
 M.SetAttribute = function(s, k, v) s._attr[k] = v end
+M.RegisterForClicks = function(s, ...) s._clicks = { ... } end -- (recorded: a secure button's halves)
 M.GetAttribute = function(s, k) return s._attr[k] end
 M.GetParent = function(s) -- (UIParent has none: a walk up the frames ends, as the stitched map's Live.Under does)
   if s == UIParent then return nil end
@@ -306,7 +307,16 @@ GetRealmName = function() return "Realm" end
 UnitName = function() return "Tester" end
 UnitIsPlayer = function(unit) return unit == "player" end -- (the Import and Share window: your target, a player?)
 UnitIsUnit = function(a, b) return a == b end
-UnitGUID = function() return "Player-1-00000001" end
+-- (AGPS_GUIDS[unit]: a test's other units, "target" an NPC; else the player's)
+UnitGUID = function(unit) return AGPS_GUIDS and AGPS_GUIDS[unit] or "Player-1-00000001" end
+-- The game's protected (and, in this client, restricted) unit calls: an addon calling one is blocked in game. Here each
+-- call is listed in AGPS_PROTECTED and fails, so a test sees it (AzerothGPS targets nothing by itself: the Target
+-- button's secure macro, the player's own click, does).
+AGPS_PROTECTED = {}
+for _, f in ipairs({ "TargetUnit", "FocusUnit", "AssistUnit", "InteractUnit", "SetRaidTarget", "ClearRaidMarker",
+  "PlaceRaidMarker", "RunMacroText" }) do
+  _G[f] = function() AGPS_PROTECTED[#AGPS_PROTECTED + 1] = f error(f .. " is protected: blocked from an addon", 2) end
+end
 UnitFactionGroup = function() return "Horde" end
 UnitRace = function() return "Undead", "Scourge" end
 UnitClass = function() return "Mage", "MAGE" end

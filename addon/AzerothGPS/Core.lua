@@ -162,6 +162,9 @@ ns.DEFAULTS = {
     dirShown = true, -- the directions panel (off: the arrow alone)
     dirStopsOnly = false, -- the directions list the stops only, no turns
     dirTextScale = 1, -- the directions' text size
+    targetNpcButton = true, -- near the next stop's NPC, a Target button under the directions panel (1.3.14)
+    targetNpcMarkSolo = true, -- ... its click also marks the NPC with the stop's route marker, solo
+    targetNpcMarkGroup = false, -- ... and in a party or raid (a raid: with lead or assist only)
     -- click-through: the map and the arrow ignore the mouse (clicks go to the game world)
     clickThroughMoving = false, -- while moving
     clickThroughCombat = false, -- in combat (off by default: asked, 2026-10-01)
@@ -321,6 +324,8 @@ end
 -- Quick Search (asked 2026-11-14: "a key binding to open the map and select the search function so player can
 -- immediately start typing", "call it quick search"): GPSFrame's G.QuickSearch
 BINDING_NAME_AZEROTHGPS_SEARCH = L["Quick Search"]
+-- (the Target button's key, 1.3.14: Bindings.xml's CLICK binding, GPSFrame's G.MakeTargetButton)
+_G["BINDING_NAME_CLICK AzerothGPSTargetButton:LeftButton"] = L["Target the NPC stop"]
 function AzerothGPS_QuickSearch()
   if not ns.settings then return end
   if ns.GPS and ns.GPS.QuickSearch then return ns.GPS.QuickSearch() end

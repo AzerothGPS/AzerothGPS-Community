@@ -111,6 +111,7 @@ local function Copy(d)
     questify = d.questify, -- (a Questify step's: its key, Questify.lua)
     apr = d.apr, -- (an Azeroth Pilot Reloaded step's: its key, AzerothPilot.lua)
     questie = d.questie, -- (Questie's "Set TomTom Target", Import.QuestieTarget)
+    npcId = d.npcId, npcName = d.npcName, -- (an NPC's from the search or its pin: its creature id and name, the Target button's)
     listed = d.listed } -- (a trip in its listed order's, N.keepOrder)
 end
 

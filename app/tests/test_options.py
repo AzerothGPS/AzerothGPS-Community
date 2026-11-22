@@ -55,7 +55,8 @@ NEW = ["extraWindow", "followOnMove", "arrowEase", "allowSwim", "language", "lay
        "importKeepOrder",  # (1.3.9: imports routed in the order listed; the Import and Share window's box too)
        "questTrackedOnly",  # (1.3.10: the quest route from the tracked quests only, Questie's tracker's or the game's)
        "questLevelOrder",  # (Kooki3z 2026-11-21: the quest route by level, lowest or about to turn gray first)
-       "routeSlopeShade"]  # (Kooki3z 2026-11-20: the route lighter uphill, darker downhill)
+       "routeSlopeShade",  # (Kooki3z 2026-11-20: the route lighter uphill, darker downhill)
+       "targetNpcButton", "targetNpcMarkSolo", "targetNpcMarkGroup"]  # (1.3.14, Kooki3z: a Target button near an NPC stop)
 # Where each setting's control is: the page a player would look on.
 HOME = {
     "General": "shown showCoords distanceUnits language quietChat searchCommonNpcs",
@@ -80,7 +81,7 @@ HOME = {
     "Routing": "useFlights flightMapRing useHearthstone useTeleports avoidHighZones avoidHostile allowSwim roadTolerance fastestOrder "
                "cityKeepOrder importKeepOrder questZoneOnly questTrackedOnly questLevelOrder questAutoReroute questPickRoute navCloseClears acceptWay acceptMapPins acceptShared",
     "Directions": "arrow arrowLocked arrowEase arrowPx arrowBg dirShown dirLocked dirStopsOnly arrowSnap arrowSide dirTextScale dirBg "
-                  "questing",
+                  "questing targetNpcButton targetNpcMarkSolo targetNpcMarkGroup",
     "Quick buttons": "keyBlockedInCombat",  # (2026-11-19: the keys with the buttons)
     "Performance": "hz rerouteSeconds stopsAhead autoPauseRouting autoPauseSeconds stutterPause gentleBackground arrowHz",
     "Tools": "showRoads showWalls pinning",
