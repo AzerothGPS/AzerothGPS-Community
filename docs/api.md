@@ -1,6 +1,6 @@
 # Public API for plugin addons
 
-`Api.lua` publishes a global table `AzerothGPS` (version 22) so other addons, such as
+`Api.lua` publishes a global table `AzerothGPS` (version 23) so other addons, such as
 AzerothGPS-StreetView, can read the map's geometry and draw on the map. It stays display
 only, like the rest of AzerothGPS. Declare `## Dependencies: AzerothGPS` in your toc.
 
@@ -109,6 +109,25 @@ center, +x right and +y up.
   `{ time, level, zone, kind, pts = { x1, y1, x2, y2, ... }, zs, stairs, yd }`. `time` is the walk's key, `level` its
   continent (Undercity's 10001 down there), `kind` nil for ground, `zs` a height per point or nil, `yd` its length. A
   walk's time is when it began, so read with the time the player was asked to start. Read only: nothing changes.
+
+## Setting the route, and previewing a recorded walk (version 23)
+
+For a companion that reviews routes with the player: the live route set to a place, and to a walk the player just
+recorded, so the directions panel and the arrow show what AzerothGPS does there. Nothing moves the character.
+
+- `RouteTo(level, x, y, z, name)`: replaces the route with one stop at `x, y` on `level` (as `PlayerLevel()` gives:
+  Undercity's 10001 down there), `z` its height (picks its floor; nil when unknown), `name` its label, as a stop the
+  player made on the map. The route is worked out from wherever the player is. True when set; false when not (with a
+  second value true while AzerothGPS first asks about a zone too high for the player).
+- `PreviewWalk(times, done)`: routes take the player's recorded walks with those times (`RecordedWalks`' `time`s: a
+  list, or one) as the way, far ahead of any other road, as they will once the walk replaces the route there in the
+  road data. The roads are built again and the route worked out again at once. Only the walks on the oldest one's
+  level count. True and how many walks are previewed; false, `"none"` when none of those times is a recorded walk.
+  `done(share, along, total)`, when given, is called once the route from the walks' start to their end has been
+  worked out with the preview on (in the background, a moment later): `share` is the part of it along the walks (0 to
+  1; nil when there's no way), `along` and `total` its yards. It isn't called if the preview was changed or ended
+  first. `PreviewWalk(nil)` ends the preview. Never saved: a /reload ends it too.
+- `Previewing()`: whether a walk is being previewed.
 
 ## Your options page and Save Now (version 13)
 
