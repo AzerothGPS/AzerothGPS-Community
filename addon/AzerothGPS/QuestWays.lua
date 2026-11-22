@@ -15,6 +15,13 @@
 -- The menu is our own frame, never the game's menus (MenuUtil, dropdowns): with the game's controller UI on, the
 -- game's menus with an addon's entries got AzerothGPS blocked (issue #887). /agps questroute <way> makes the same
 -- routes (a controller's macro).
+--
+-- With a controller (asked 2026-11-22 for 1.3.14: "add controller support for quest route sub menu, just fade between
+-- the 2 buttons for activating and opening the submenu"): the button in the map menu's focus, its hint fades from the
+-- button that presses it (Set Stop's, A) to the one that opens this menu (Remove's, X: its right-click) and back
+-- (Pad.lua's HintTargets, SWAP_SECONDS). Open: the D-pad's up and down move a highlight of ours over the entries (round
+-- at the ends), starting on the "(default)" one (or the first); A picks it, B (or X again) shuts the menu, the focus
+-- back on the button.
 local _, ns = ...
 local L = ns.L
 local G = ns.GPS
@@ -140,6 +147,10 @@ local function Build()
   m.line:SetHeight(1)
   m.line:SetColorTexture(1, 0.82, 0, 0.25)
   m.rows = {}
+  -- (the controller's highlight: the entry A picks)
+  m.sel = m:CreateTexture(nil, "ARTWORK", nil, 1)
+  m.sel:SetColorTexture(1, 0.82, 0, 0.3)
+  m.sel:Hide()
   -- (a click anywhere else shuts it: under the menu, over everything else)
   local catch = CreateFrame("Button", nil, m)
   catch:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -153,6 +164,7 @@ local function Build()
     local b = self.owner
     if not (b and b:IsVisible()) then G.CloseQuestWays() return end
     if G.mapMenu then G.mapMenu.idle = 0 end
+    G.QuestWaysShowSel() -- (the highlight: the controller's only, gone while the mouse is in use)
   end)
   if ns.TimeScript then ns.TimeScript(m, "OnUpdate", "map buttons") end
   m:Hide()
@@ -211,7 +223,10 @@ function G.OpenQuestWays(owner)
   end
   if GameTooltip:GetOwner() == owner then GameTooltip:Hide() end
   if G.mapMenu then G.mapMenu.idle = 0 end
+  m.count = #G.QuestWayRows()
+  m.at = G.QuestWaysStart()
   m:Show()
+  G.QuestWaysShowSel()
   return m
 end
 function G.ToggleQuestWays(owner)
@@ -220,4 +235,91 @@ function G.ToggleQuestWays(owner)
     return false
   end
   return G.OpenQuestWays(owner) ~= nil
+end
+
+-- The controller ------------------------------------------------------------------------------------------------------
+
+-- The entry the highlight starts on: the first marked "(default)", else the first.
+function G.QuestWaysStart()
+  for i, e in ipairs(G.QUEST_WAYS) do
+    if G.QuestWayIsDefault(e) then return i end
+  end
+  return 1
+end
+-- The controller in use on the map (its buttons bound, a pad pressed since the mouse was).
+function G.QuestWaysPadOn()
+  local P = ns.Pad
+  return (P and P.bound and P.used) and true or false
+end
+-- The highlighted entry's row (shown), or nil.
+function G.QuestWaysSelRow()
+  local m = G.questWays
+  if not (m and m:IsShown() and m.at) then return nil end
+  local row = m.rows[m.at]
+  return (row and row:IsShown()) and row or nil
+end
+function G.QuestWaysShowSel()
+  local m = G.questWays
+  if not m then return end
+  local row = G.QuestWaysPadOn() and G.QuestWaysSelRow() or nil
+  if row then
+    if m.sel.row ~= row then
+      m.sel:ClearAllPoints()
+      m.sel:SetAllPoints(row)
+      m.sel.row = row
+    end
+    m.sel:Show()
+  else
+    m.sel:Hide()
+  end
+end
+-- the highlight `step` entries on, round at the ends
+function G.QuestWaysMove(step)
+  local m = G.questWays
+  if not (m and m:IsShown()) then return false end
+  local n = m.count or #G.QuestWayRows()
+  if n == 0 then return false end
+  m.at = (((m.at or G.QuestWaysStart()) - 1 + step) % n) + 1
+  G.QuestWaysShowSel()
+  return true
+end
+-- Shut, the controller's focus back on the button that opened it.
+function G.QuestWaysBack()
+  local m = G.questWays
+  local owner = m and m.owner
+  G.CloseQuestWays()
+  local P = ns.Pad
+  if P and owner and owner:IsShown() and P.MenuOpen and P.MenuOpen() then
+    P.SetFocus(nil) -- (its tooltip again, as the focus coming onto it shows)
+    P.SetFocus(owner)
+  end
+  return true
+end
+-- A pad's controls while the menu is open (`has`: the pressed controls' ids, Pad.Run's): true when taken, nil to leave
+-- them to the map menu's (Map menu: the menu shut with it).
+function G.QuestWaysPad(has)
+  if not G.QuestWaysOpen() then return nil end
+  if has.panUp then return G.QuestWaysMove(-1) end
+  if has.panDown then return G.QuestWaysMove(1) end
+  if has.select or has.yes or has.click then
+    local row = G.QuestWaysSelRow()
+    if not row then return G.QuestWaysMove(0) end
+    local P = ns.Pad
+    local owner = G.questWays.owner
+    G.QuestWayPick(row.id)
+    -- (the map menu still open: the focus back on the button; shut, the map's own marks)
+    if P and P.MenuOpen and P.MenuOpen() then
+      if owner and owner:IsShown() and not G.QuestWaysOpen() then P.SetFocus(owner) end
+    elseif P then
+      P.SetFocus(nil)
+      if P.ShowMarks then P.ShowMarks(P.bound) end
+    end
+    return true
+  end
+  if has.back or has.remove then return G.QuestWaysBack() end
+  if has.menu then
+    G.CloseQuestWays()
+    return nil
+  end
+  return true -- (the rest: nothing while the menu is open)
 end

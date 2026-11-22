@@ -10,13 +10,9 @@ import pytest
 ADDON = Path(__file__).resolve().parents[2] / "addon" / "AzerothGPS"
 
 
-@pytest.fixture()
-def pad():
-    pytest.importorskip("lupa.lua51")
-    from azerothgps.gameharness import start
-
-    lua, ns = start()
-    lua.execute("""
+# a fake pad (C_GamePad) and the game's binding calls, recorded (blocked in combat lockdown, as the game blocks them);
+# AGPS_PRESS(key, down) runs the bound button as the client does
+PAD_STUBS = """
       AGPS_PAD = { enabled = true, id = 1, style = "Letters", sticks = { { x = 0, y = 0 }, { x = 0, y = 0 } } }
       C_GamePad = {
         IsEnabled = function() return AGPS_PAD.enabled end,
@@ -44,7 +40,16 @@ def pad():
         btn._scripts.OnClick(btn, "LeftButton", down)
         return true
       end
-    """)
+    """
+
+
+@pytest.fixture()
+def pad():
+    pytest.importorskip("lupa.lua51")
+    from azerothgps.gameharness import start
+
+    lua, ns = start()
+    lua.execute(PAD_STUBS)
     # (the defaults that take LB and RB, 2026-11-16: off here, these tests' free buttons as before; the defaults
     # themselves: test_the_defaults_put_the_route_controls_on_lb)
     lua.execute("""

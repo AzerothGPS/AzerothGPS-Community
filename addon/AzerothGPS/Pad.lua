@@ -638,6 +638,25 @@ end
 Pad.HINT_PERIOD, Pad.HINT_FADE, Pad.HINT_UNITS = 3, 1, 20
 Pad.HINT_LOOK = 0.1 -- (what's under the crosshair looked at this often, seconds)
 Pad.hints, Pad.hintT = {}, 0
+-- A button with two controls (the Quest Route button: A presses it, X its right-click, the menu of other ways; asked
+-- 2026-11-22 for 1.3.14, "just fade between the 2 buttons for activating and opening the submenu"): its two hints over
+-- it in turn, each shown SWAP_SECONDS, cross-fading over SWAP_FADE at each change; steady, not the pulse.
+Pad.SWAP_SECONDS, Pad.SWAP_FADE = 1, 0.4
+-- hint `which` (1, 2) of a pair's alpha `t` seconds in: the first from 0 to SWAP_SECONDS, the second the next as long
+function Pad.SwapAlpha(t, which)
+  local S, F = Pad.SWAP_SECONDS, Pad.SWAP_FADE
+  local p = (t or 0) % (2 * S)
+  local function ramp(x) return math.min(1, math.max(0, (x + F / 2) / F)) end -- (x: seconds past a change)
+  local first
+  if p < S / 2 then
+    first = ramp(p)
+  elseif p < S * 3 / 2 then
+    first = 1 - ramp(p - S)
+  else
+    first = ramp(p - 2 * S)
+  end
+  return which == 2 and 1 - first or first
+end
 -- the hints' alpha `t` seconds into the pulse: up and back down in the first HINT_FADE of each HINT_PERIOD
 function Pad.HintAlpha(t)
   local p = (t or 0) % Pad.HINT_PERIOD
@@ -654,8 +673,8 @@ end
 function Pad.HintTargets()
   local out = {}
   if not (Pad.bound and Pad.marksOn) or (InCombatLockdown and InCombatLockdown()) then return out end
-  local function add(b, id)
-    if b and b.IsShown and b:IsShown() and Pad.Key(id) then out[#out + 1] = { b, id } end
+  local function add(b, id, swap)
+    if b and b.IsShown and b:IsShown() and Pad.Key(id) then out[#out + 1] = { b, id, swap } end
   end
   local q = Pad.Question()
   if q then
@@ -664,6 +683,13 @@ function Pad.HintTargets()
     return out
   end
   local g = G()
+  -- (the Quest Route button's menu of other ways open, QuestWays.lua: A's over the highlighted entry, Back's over the
+  -- button it goes back to)
+  if g and g.QuestWaysOpen and g.QuestWaysOpen() then
+    add(g.QuestWaysSelRow(), "select")
+    add(g.questWays.owner, "back")
+    return out
+  end
   add(g and g.mapButton, "menu")
   -- (routing paused: Pause/Unpause's button over the glowing Resume Routing buttons, the quick bar's and the minimap
   -- square's while it's kept beside the map; asked 2026-11-18 for 1.3.9, "when map is open and controller in use and
@@ -673,7 +699,14 @@ function Pad.HintTargets()
     add(g.mmResume, "pause")
   end
   if Pad.MenuOpen() then
-    add(Pad.focus, "select")
+    local f = Pad.focus
+    if f and f.agpsRightClick and Pad.Key("remove") then
+      -- (a button with a right-click of its own: Set Stop's and Remove's in turn, Pad.SwapAlpha)
+      add(f, "select", 1)
+      add(f, "remove", 2)
+    else
+      add(f, "select")
+    end
     -- (a group or Quick Find open: Back's icon over the button that opened it, where Back goes; asked 2026-11-16, "we
     -- should fade the button to go back when in a map menu sub menu")
     add(Pad.MenuParent(), "back")
@@ -736,7 +769,7 @@ function Pad.HintTick(dt)
     -- (a wide button, the game's red ones: Confirm Route, a question's Yes and No, Remove?: its icon at its right end,
     -- steady, not over its text and not faded; asked 2026-11-16, "Anytime there is a red button being used on the
     -- map, including zone too high level popups lets move the button to press to this pink area and not fade")
-    local wide = Pad.HintWide(b)
+    local wide = Pad.HintWide(b) and not e[3]
     local out = wide and (along[b] or 0) or 0
     if h.target ~= b or h.wide ~= wide or h.out ~= out then
       h.out = out
@@ -761,7 +794,7 @@ function Pad.HintTick(dt)
       h.id, h.shown = id, text
     end
     if wide then along[b] = out + (h.text:GetStringWidth() or Pad.HINT_UNITS) + 4 end
-    local ha = wide and 1 or a
+    local ha = wide and 1 or (e[3] and Pad.SwapAlpha(Pad.hintT, e[3])) or a
     h:SetAlpha(ha)
     h.alpha = ha
     h:Show()
@@ -1124,6 +1157,12 @@ function Pad.Run(acts, down)
   -- (searching with the controller: the search's own controls first, its keyboard's too, PadKeys.lua; over the map
   -- menu's, which stays open behind a search opened from it. Kooki3z 2026-11-20: "A fading on highlighted letter,
   -- D-Pad also closes keyboard and navigates the list")
+  -- (the Quest Route button's menu of other ways open: its own controls, QuestWays.lua's G.QuestWaysPad)
+  local g0 = G()
+  if down and g0 and g0.QuestWaysPad then
+    local r = g0.QuestWaysPad(has)
+    if r ~= nil then return r end
+  end
   local PK = ns.PadKeys
   local searching = PK and PK.Wants()
   if searching then
@@ -1571,6 +1610,13 @@ function Pad.MenuRun(has, down)
       Pad.SetFocus(nil)
       Pad.Move(0)
     end
+    return true
+  end
+  -- (a button with a right-click of its own, the Quest Route button's menu of other ways: Remove's button, X, as its
+  -- right-click; asked 2026-11-22 for 1.3.14)
+  if has.remove and Pad.focus and Pad.focus.agpsRightClick then
+    local on = Pad.focus:GetScript("OnClick")
+    if on then on(Pad.focus, "RightButton") end
     return true
   end
   if has.panUp then return Pad.MoveDir("up") end

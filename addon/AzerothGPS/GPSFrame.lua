@@ -16629,6 +16629,7 @@ function G.Init()
     G.QuestRoute()
   end)
   G.questRouteButton = qr
+  qr.agpsRightClick = true -- (the controller's X: its right-click, Pad.MenuRun; its hint swapping with A's)
   qr:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     GameTooltip:SetText(L["Quest Route"], 1, 1, 1)
