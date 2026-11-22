@@ -6,6 +6,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 ### New
 
+- Roads: new roads and stairs in Ironforge.
 - For plugin addons (API 23): set the route to a place, and preview a recorded walk as the route. See docs/api.md.
 
 ### Changed

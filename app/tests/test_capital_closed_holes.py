@@ -67,8 +67,19 @@ def test_ironforge_npcs_in_closed_holes_end_on_an_open_last_step(game, name):
     last = math.dist(pts[-2], pts[-1])
     assert (r.blocked or 0) == 0
     assert r.length <= 600, r.length  # (not round the city: Ginny Longberry's was 1002 yd, Thistleheart's 811)
-    assert last <= 40, last
+    # (40 before Kooki3z's walks into Pithwick's shop, issue #862: Jondor's route by them is 15 yd shorter in all and
+    # comes to his shop from the south, 43 yd over open floor)
+    assert last <= 45, last
     assert _open(lua, pts[-2], pts[-1])
+
+
+def test_pithwick_is_reached_by_kooki3zs_walk_into_his_shop(game):
+    # (issue #862: walked in game up into his shop, its Stairs walk on the shop's floor at 503.9, not the landing 510.5
+    # over it; the route ended 21 yd off him before)
+    lua, ns = game
+    r, pts = _route(lua, ns, FORGE, HOLES["Pithwick"])
+    assert math.dist(pts[-2], pts[-1]) <= 5
+    assert all(abs(r.fz[i] - 504) <= 2 for i in range(len(pts) - 2, len(pts) + 1))
 
 
 def test_cave_near_down_only_under_the_citys_floor(game):

@@ -324,6 +324,12 @@ def test_the_watchers_walks_take_records_marks_picks_and_levels(monkeypatch):
     logs.clear()
     out = w(dict(walk_, stairs=[], pk=[(b + 7, 7.0)]))
     assert out[-1]["zs"][-1] == 7.0 and not logs
+    # (Record's Stairs road type, #764, has no marks: the walk whole is stairs, climbed free but not made to climb (a
+    # step up into a shop with it, issue #862). Its own `zs`, the map's ground over Ironforge, never taken)
+    up = [list(p) for p in pts[a:b + 1]]
+    out = w({"time": 6, "continent": 0, "coords": up, "ind": "1" * len(up), "stairs": [], "pk": [],
+             "kind": "stairs", "stair": True, "zs": [700.0] * len(up)})
+    assert [p["stair"] for p in out] == [True] and all(z in (1.0, 7.0) for z in out[0]["zs"])
     # (Undercity's level: the model's floors only, so no piece is on the ground)
     out = w(dict(walk_, continent=10001, coords=[list(p) for p in pts if p[0] > 10]))
     assert all(p["zs"] is not None for p in out)
@@ -374,6 +380,61 @@ def test_a_recorded_walk_in_a_saved_file_ships_with_its_floors(client, tmp_path)
     assert abs(last["zs"][-1] - up) <= 1.0  # (the walk ends upstairs, at the upstairs roads' height)
 
 
+def test_records_walks_split_by_road_type_get_their_floors_as_one_walk(monkeypatch, tmp_path):
+    # (issue #862, Ironforge: Record's road type switch, #764, saves the walk so far and goes on from its last point,
+    # so a Stairs walk is a walk of its own. Alone, a short one there was on the mountain's top, 200 yd over the halls:
+    # the game says outdoors in them, and nothing tied its ends to the floors either side, where it said indoors.
+    # As one walk it climbs)
+    import json
+
+    from azerothgps.roads.tracks import import_tracks
+
+    hall = [(float(x), 0.0) for x in range(0, 12, 2)]  # (the hall at 501.6)
+    stairs = [(10.0 + k, 2.0 * k) for k in range(1, 6)]  # (up to the landing at 510.5)
+    landing = [(15.0, 10.0 + 2.0 * k) for k in range(1, 5)]
+    heights = {**{p: 501.6 for p in hall}, **dict(zip(stairs, [503.3, 506.6, 509.1, 510.5, 510.5])),
+               **{p: 510.5 for p in landing}}
+
+    def candidates(cd, cont, ps, ground=None, placements=None, log=print):
+        out = R.Cands([[R.Cand(heights[tuple(p)], "model"), R.Cand(700.0 + p[1], "ground")] for p in ps])
+        out.pts, out.top = list(ps), [530.0] * len(ps)
+        return out
+
+    monkeypatch.setattr(R, "candidates", candidates)
+    monkeypatch.setattr(R, "Ground", lambda cd, cont: None)
+    monkeypatch.setattr(R.I, "placements", lambda cd, cont: None)
+    w = R.Walks(lambda: object(), log=lambda *a: None)
+    a = {"time": 100, "continent": 0, "coords": [list(p) for p in hall], "ind": "1" * 6, "recorded": True}
+    b = {"time": 110, "continent": 0, "coords": [list(p) for p in [hall[-1]] + stairs], "ind": "0" * 6,
+         "recorded": True, "kind": "stairs"}
+    c = {"time": 120, "continent": 0, "coords": [list(p) for p in [stairs[-1]] + landing], "ind": "1" * 5,
+         "recorded": True}
+    far = dict(c, time=120 + R.CHAIN_GAP_S + 50)
+    assert [[t["time"] for t in ch] for ch in R.chains([c, a, b])] == [[100, 110, 120]]
+    assert [[t["time"] for t in ch] for ch in R.chains([a, b, far])] == [[100, 110], [far["time"]]]
+    alone = w(b)
+    assert all(z >= 700 for z in alone[0]["zs"])  # (what the watcher shipped alone: the mountain's top)
+    pa, pb, pc = w.chain([a, b, c])
+    assert pb[0]["stair"] and pb[0]["zs"] == [501.6, 503.3, 506.6, 509.1, 510.5, 510.5]
+    assert pa[0]["zs"] == [501.6] * 6 and pc[0]["zs"] == [510.5] * 5
+    # (the watcher's import takes them so, those already in only for their floors)
+    lines = []
+    for t in (a, b, c):
+        pts = " ".join(f"{v:g}" for q in t["coords"] for v in q)
+        kind = f', ["kind"] = "{t["kind"]}"' if t.get("kind") else ""
+        lines.append(f'{{ ["op"] = "add", ["drawn"] = true, ["recorded"] = true, ["continent"] = 0, '
+                     f'["zone"] = "Ironforge", ["time"] = {t["time"]}, ["pk"] = "{pts}", '
+                     f'["rec"] = {{ ["ind"] = "{t["ind"]}", ["ts"] = "0" }}{kind} }},')
+    sv = tmp_path / "WTF" / "ACC#1" / "SavedVariables"
+    sv.mkdir(parents=True)
+    (sv / "AzerothGPS.lua").write_text('AzerothGPSDB = {\n  ["tracks"] = {\n' + "\n".join(lines) + "\n  },\n}\n",
+                                       encoding="utf-8")
+    ov = tmp_path / "overrides"
+    assert import_tracks(tmp_path / "WTF", ov, walks=w, only=lambda t: t["time"] == 110) == 1
+    feats = json.loads((ov / "roads_0.geojson").read_text())["features"]
+    assert [f["properties"]["time"] for f in feats] == [110] and max(feats[0]["properties"]["zs"]) == 510.5
+
+
 def test_a_walk_through_a_portal_gets_its_floors_either_side_on_their_own(monkeypatch):
     # (Stormwind's Wizard's Sanctum, 2026-11-17: up the tower's stairs, through the portal at the top into the trainers'
     # room under the city, 9 yd on on the map. As one walk its floors dropped into the room halfway up the stairs, and
@@ -389,7 +450,7 @@ def test_a_walk_through_a_portal_gets_its_floors_either_side_on_their_own(monkey
     def candidates(cd, cont, ps, ground=None, placements=None, log=print):
         return [[R.Cand(0.0, "model")] for _ in ps]
 
-    def assign(cands, indoors, stairs, picked=None, pts=None):
+    def assign(cands, indoors, stairs, picked=None, pts=None, loose=()):
         seen.append((len(cands), list(stairs), indoors, picked))
         z0 = 130.0 if len(seen) == 1 else 30.0
         return [z0 + k for k in range(len(cands))], ["model"] * len(cands), []
