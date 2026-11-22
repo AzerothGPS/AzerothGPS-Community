@@ -17,6 +17,10 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Road and wall drawing and Record are no longer part of AzerothGPS; roads you drew still guide your routes.
 - Options: the grayed-out "Show the GPS map in the game's world map" now says why when you hover it (the game's controller UI is on).
 
+### Fixed
+
+- Controller UI: abandoning quests no longer gets AzerothGPS blocked (Route Here stays out of the quest menus there).
+
 ## 1.3.13
 
 ### New

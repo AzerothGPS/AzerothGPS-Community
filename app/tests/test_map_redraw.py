@@ -4756,6 +4756,12 @@ def test_route_here_in_the_quest_details_and_the_quest_menus(game):
         # never with the controller UI on
         lua.execute("AGPS_NS.GPS.ControllerUI = function() return true end")
         assert G.MakeRouteHere() is None
+        # nor in the quest menus (issue #887: abandoning quests from them got AzerothGPS blocked there)
+        G.InitRouteHere()
+        assert not G.questMenus and not G.routeHereEvents
+        assert not lua.eval("AGPS_MENU_CLICK")("MENU_QUEST_MAP_LOG_TITLE", lua.eval("{ questID = 3 }"))
+        assert not lua.eval("AGPS_MENU_CLICK")("MENU_QUEST_OBJECTIVE_TRACKER", lua.eval("QuestObjectiveTracker"))
+        assert names() == []
         lua.execute("AGPS_NS.GPS.ControllerUI = AGPS_RH.cui")
         G.InitRouteHere()
         b = G.routeHereBtn
