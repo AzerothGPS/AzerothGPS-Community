@@ -9,6 +9,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Quest Route: order by level, lowest level first or about to turn gray first (Options > Routing > Quest Route).
 - Quest Route: ordered by level, it sorts itself again when you level up.
 - Quest Route: Options lists the quests you left out, with Put Back All.
+- Roads: new roads and walls in Stonetalon Mountains.
 
 ### Fixed
 
