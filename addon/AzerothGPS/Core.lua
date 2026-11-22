@@ -114,6 +114,10 @@ ns.DEFAULTS = {
     questing = true, -- a stop in a quest area is done when the quest's objectives are
     questZoneOnly = false, -- the quest route: only the quests in the zone you're in
     questTrackedOnly = false, -- the quest route: only the quests you track (Questie's tracker's, else the game's; Layers.QuestTracked)
+    -- (1.3.14, the Quest Route button's right-click toggles too: QuestWays.lua; at most one of these two and
+    -- questTrackedOnly on, G.SetQuestToggle)
+    questTurninsOnly = false, -- the quest route: only the finished quests' turn-ins
+    questObjectivesOnly = false, -- the quest route: only the objectives, no turn-ins
     questLevelOrder = "off", -- the quest route by level: "off" (fastest), "low" (lowest first), "gray" (about to turn gray first); Nav.QuestBands
     questAutoReroute = false, -- the quest route made again by itself on a quest picked up or finished (Nav.MarkQuestRouteStale)
     questPickRoute = false, -- the route to the quest picked in the quest log or tracker (C_SuperTrack; G.PickedQuestRoute)

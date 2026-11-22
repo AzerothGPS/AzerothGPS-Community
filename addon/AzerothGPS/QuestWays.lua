@@ -1,40 +1,46 @@
--- The Quest Route button's other ways (asked 2026-11-22: "lets extend the quest route button with a sub menu to route
--- in different ways like by level, turn ins only, tracked quest only, etc"). Right-click the button: a small menu of
--- ours, each entry a quest route made at once in that way, for that route only: the saved Quest Route options
--- (Options > Routing > Quest Route) are left as they are, and a left-click is the route by them as before.
+-- The Quest Route button's choices (asked 2026-11-22: "lets extend the quest route button with a sub menu to route in
+-- different ways like by level, turn ins only, tracked quest only, etc"; then, for 1.3.14: "make these quick buttons
+-- that can be toggled on/off. If any of them conflict with another auto turn it on/off like picking turn-ins only and
+-- tracked quests only for example, only 1 should be on at a time or both off"). Right-click the button: a small menu
+-- of ours, each entry a toggle with a check box: the player's saved Quest Route options (Options > Routing > Quest
+-- Route is their home; this menu is a second control for them), and a left-click makes the route by them.
 --
--- Each way sets only its own part; the rest is the player's saved choice:
---   Fastest order (all quests): no level order, every zone, tracked or not.
---   Lowest level first / About to turn gray first: that level order (Nav.QuestBands).
---   Turn-ins only: just the finished quests' turn-ins. Objectives only: no turn-ins.
---   Tracked quests only / This zone only: that filter on.
--- Quests left out (Leave Out, a removed stop) stay out whichever way. The way is the route's (Nav.questWay, saved with
--- it): its reorders (a turn-in, a level-up) and its remakes (the Sprint icon, by itself, Put Back) keep it; the
--- entries the player's own options give are marked "(default)".
+-- The toggles and their groups (at most one on in a group, or none):
+--   Order: Lowest level first, About to turn gray first (`questLevelOrder` "low" / "gray"). Fastest order is neither:
+--     on while neither is, turning it on turns both off (clicked while on it stays on: the others turn it off).
+--   What's routed: Turn-ins only (`questTurninsOnly`), Objectives only (`questObjectivesOnly`), Tracked quests only
+--     (`questTrackedOnly`): one turned on turns the other two off. The Options page's check boxes keep the same rule
+--     (G.SetQuestToggle).
+--   This zone only (`questZoneOnly`): its own, with anything.
+-- A toggle clicked on a quest route makes it again at once with the new options; on any other route (or none) it's
+-- only saved. The menu stays open for more; it shuts on a click anywhere else, the button again, B or Escape (Escape
+-- shuts only the menu: not the map, nor the game's menu). Quests left out (Leave Out, a removed stop) stay out.
 --
 -- The menu is our own frame, never the game's menus (MenuUtil, dropdowns): with the game's controller UI on, the
--- game's menus with an addon's entries got AzerothGPS blocked (issue #887). /agps questroute <way> makes the same
--- routes (a controller's macro).
+-- game's menus with an addon's entries got AzerothGPS blocked (issue #887). /agps questroute <way> [off] turns a
+-- toggle on (or off) as the menu does, then makes the quest route (a controller's macro).
 --
 -- With a controller (asked 2026-11-22 for 1.3.14: "add controller support for quest route sub menu, just fade between
 -- the 2 buttons for activating and opening the submenu"): the button in the map menu's focus, its hint fades from the
 -- button that presses it (Set Stop's, A) to the one that opens this menu (Remove's, X: its right-click) and back
 -- (Pad.lua's HintTargets, SWAP_SECONDS). Open: the D-pad's up and down move a highlight of ours over the entries (round
--- at the ends), starting on the "(default)" one (or the first); A picks it, B (or X again) shuts the menu, the focus
+-- at the ends), starting on the first; A toggles it (the menu stays open), B (or X again) shuts the menu, the focus
 -- back on the button.
 local _, ns = ...
 local L = ns.L
 local G = ns.GPS
 
+-- Each toggle: `key` the setting it is (with `value`: on when the setting is that), `group` the ones of which at most
+-- one is on.
 G.QUEST_WAYS = {
-  { id = "fastest", word = "fastest", label = L["Fastest order (all quests)"],
-    way = { level = "off", zone = false, tracked = false } },
-  { id = "low", word = "low", label = L["Lowest level first"], way = { level = "low" } },
-  { id = "gray", word = "gray", label = L["About to turn gray first"], way = { level = "gray" } },
-  { id = "turnins", word = "turnins", label = L["Turn-ins only"], way = { only = "turnin" } },
-  { id = "objectives", word = "objectives", label = L["Objectives only"], way = { only = "objectives" } },
-  { id = "tracked", word = "tracked", label = L["Tracked quests only"], way = { tracked = true } },
-  { id = "zone", word = "zone", label = L["This zone only"], way = { zone = true } },
+  { id = "fastest", word = "fastest", label = L["Fastest order"], group = "order" },
+  { id = "low", word = "low", label = L["Lowest level first"], key = "questLevelOrder", value = "low", group = "order" },
+  { id = "gray", word = "gray", label = L["About to turn gray first"], key = "questLevelOrder", value = "gray",
+    group = "order" },
+  { id = "turnins", word = "turnins", label = L["Turn-ins only"], key = "questTurninsOnly", group = "what" },
+  { id = "objectives", word = "objectives", label = L["Objectives only"], key = "questObjectivesOnly", group = "what" },
+  { id = "tracked", word = "tracked", label = L["Tracked quests only"], key = "questTrackedOnly", group = "what" },
+  { id = "zone", word = "zone", label = L["This zone only"], key = "questZoneOnly" },
 }
 
 local function Settings() return ns.settings and ns.settings.gps or {} end
@@ -45,45 +51,64 @@ function G.QuestWayEntry(id)
   end
   return nil
 end
--- The way `id` for Nav.questWay: { id, level, zone, tracked, only } with only its own parts set; nil when unknown.
-function G.QuestWayOf(id)
+-- Whether toggle `id` is on (the saved options).
+function G.QuestToggleOn(id)
   local e = G.QuestWayEntry(id)
-  if not e then return nil end
-  local w = { id = e.id }
-  for k, v in pairs(e.way) do w[k] = v end
-  return w
+  if not e then return false end
+  local st = Settings()
+  if e.id == "fastest" then
+    return st.questLevelOrder ~= "low" and st.questLevelOrder ~= "gray"
+  end
+  if e.value then return st[e.key] == e.value end
+  return st[e.key] and true or false
 end
--- The way the quest route now was made by (its remakes keep it), or nil: the saved options.
-function G.QuestWayNow()
-  local N = ns.Nav
-  local w = N and N.questWay
-  return (w and N.OnQuestRoute() and G.QuestWayEntry(w.id)) and w.id or nil
+-- Turn toggle `id` on or off, the others of its group off when it goes on. Fastest order on: both level orders off;
+-- Fastest order off: nothing (it's what's left with neither on). Returns whether a toggle changed.
+function G.SetQuestToggle(id, on)
+  local e = G.QuestWayEntry(id)
+  if not e then return false end
+  local st = Settings()
+  local before = {}
+  for _, o in ipairs(G.QUEST_WAYS) do before[o.id] = G.QuestToggleOn(o.id) end
+  on = on and true or false
+  if e.id == "fastest" then
+    if on then st.questLevelOrder = "off" end
+  elseif e.value then
+    if on then
+      st[e.key] = e.value
+    elseif st[e.key] == e.value then
+      st[e.key] = "off"
+    end
+  else
+    st[e.key] = on
+    if on and e.group then
+      for _, o in ipairs(G.QUEST_WAYS) do
+        if o.group == e.group and o ~= e and o.key and not o.value then st[o.key] = false end
+      end
+    end
+  end
+  for _, o in ipairs(G.QUEST_WAYS) do
+    if before[o.id] ~= G.QuestToggleOn(o.id) then return true end
+  end
+  return false
 end
--- `stops` (Layers.QuestStops') with only the turn-ins (`only` "turnin") or none of them ("objectives").
+-- What the quest route takes by the saved options: "turnin" (turn-ins only), "objectives" (no turn-ins) or nil (both).
+function G.QuestOnly()
+  local st = Settings()
+  if st.questTurninsOnly then return "turnin" end
+  if st.questObjectivesOnly then return "objectives" end
+  return nil
+end
+-- `stops` (Layers.QuestStops') with only the turn-ins (`only` "turnin") or none of them ("objectives"); nil: all.
 function G.QuestWayStops(stops, only)
+  if not only then return stops end
   local out = {}
   for _, d in ipairs(stops) do
     if (only == "turnin") == (d.turnin and true or false) then out[#out + 1] = d end
   end
   return out
 end
--- Whether entry `e` is what a left-click does (the saved options): the level order picked, each filter on; Fastest
--- order with none of them.
-function G.QuestWayIsDefault(e)
-  local st = Settings()
-  local level = st.questLevelOrder
-  if level ~= "low" and level ~= "gray" then level = "off" end
-  if e.id == "fastest" then return level == "off" and not st.questZoneOnly and not st.questTrackedOnly end
-  if e.id == "low" or e.id == "gray" then return level == e.id end
-  if e.id == "tracked" then return st.questTrackedOnly and true or false end
-  if e.id == "zone" then return st.questZoneOnly and true or false end
-  return false
-end
-function G.QuestWayLabel(e)
-  if G.QuestWayIsDefault(e) then return e.label .. " |cff9d9d9d" .. L["(default)"] .. "|r" end
-  return e.label
-end
--- /agps questroute <word>: the way by its word (fastest, low, gray, turnins, objectives, tracked, zone), or nil.
+-- /agps questroute <word>: the toggle by its word (fastest, low, gray, turnins, objectives, tracked, zone), or nil.
 function G.QuestWayByWord(word)
   word = tostring(word or ""):lower()
   if word == "grey" then word = "gray" end
@@ -92,20 +117,37 @@ function G.QuestWayByWord(word)
   end
   return nil
 end
+-- Toggle `id` turned on or off by the player (`on` nil: flipped): saved, the options window's controls and the menu
+-- shown again, and a quest route made again with it at once (`always`: the quest route made whatever the route is,
+-- the slash command's). Returns whether a toggle changed.
+function G.QuestToggle(id, on, always)
+  if on == nil then on = not G.QuestToggleOn(id) end
+  local changed = G.SetQuestToggle(id, on)
+  if changed and ns.Options and ns.Options.Refresh then ns.Options.Refresh() end
+  G.RefreshQuestWays()
+  local N = ns.Nav
+  if always or (changed and N and N.OnQuestRoute and N.OnQuestRoute()) then
+    G.QuestRoute()
+    -- (a group quest's question came up: the menu shut, so the question takes the next click)
+    if G.askBox and G.askBox.IsShown and G.askBox:IsShown() then G.CloseQuestWays() end
+  end
+  return changed
+end
 
 -- The menu ---------------------------------------------------------------------------------------------------------
 
-G.QUEST_WAYS_W, G.QUEST_WAYS_ROW, G.QUEST_WAYS_PAD = 210, 18, 5
+G.QUEST_WAYS_W, G.QUEST_WAYS_ROW, G.QUEST_WAYS_PAD, G.QUEST_WAYS_BOX = 210, 18, 5, 10
 
--- An entry picked: the menu shut, then its quest route ("options": Options > Routing at Quest Route).
+-- An entry clicked: a toggle flipped, the menu kept open; Quest Route options... shuts it and opens Options > Routing
+-- at Quest Route.
 function G.QuestWayPick(id)
-  G.CloseQuestWays()
   if id == "options" then
+    G.CloseQuestWays()
     local O = ns.Options
     if O and O.ShowSettingsAt then O.ShowSettingsAt("Routing", L["Quest Route"]) end
     return true
   end
-  G.QuestRoute(id)
+  G.QuestToggle(id)
   return true
 end
 
@@ -116,8 +158,23 @@ local function Row(m, i)
   local hl = row:CreateTexture(nil, "HIGHLIGHT")
   hl:SetAllPoints()
   hl:SetColorTexture(1, 0.82, 0, 0.15)
+  -- (the toggle's check box, drawn: an edge, its inside, and a gold fill while on)
+  local B = G.QUEST_WAYS_BOX
+  row.box = row:CreateTexture(nil, "ARTWORK")
+  row.box:SetSize(B, B)
+  row.box:SetPoint("LEFT", 5, 0)
+  row.box:SetColorTexture(0.6, 0.55, 0.4, 1)
+  row.boxIn = row:CreateTexture(nil, "ARTWORK", nil, 1)
+  row.boxIn:SetPoint("TOPLEFT", row.box, "TOPLEFT", 1, -1)
+  row.boxIn:SetPoint("BOTTOMRIGHT", row.box, "BOTTOMRIGHT", -1, 1)
+  row.boxIn:SetColorTexture(0.08, 0.08, 0.08, 1)
+  row.check = row:CreateTexture(nil, "ARTWORK", nil, 2)
+  row.check:SetPoint("TOPLEFT", row.box, "TOPLEFT", 2, -2)
+  row.check:SetPoint("BOTTOMRIGHT", row.box, "BOTTOMRIGHT", -2, 2)
+  row.check:SetColorTexture(1, 0.82, 0, 1)
+  row.check:Hide()
   row.text = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-  row.text:SetPoint("LEFT", 6, 0)
+  row.text:SetPoint("LEFT", B + 11, 0)
   row.text:SetPoint("RIGHT", -4, 0)
   row.text:SetJustifyH("LEFT")
   row.text:SetWordWrap(false)
@@ -167,16 +224,50 @@ local function Build()
     G.QuestWaysShowSel() -- (the highlight: the controller's only, gone while the mouse is in use)
   end)
   if ns.TimeScript then ns.TimeScript(m, "OnUpdate", "map buttons") end
+  -- (Escape shuts the menu only, taken from the game out of combat: not the map, nor the game's menu. Every other key
+  -- goes on to the game; in combat the keys can't be taken, so Escape shuts it and goes on too: G.QuestWaysKey)
+  m:SetScript("OnKeyDown", function(self, key) G.QuestWaysKey(self, key) end)
   m:Hide()
   return m
 end
+local function Combat() return (InCombatLockdown and InCombatLockdown()) and true or false end
+function G.QuestWaysKey(m, key)
+  local eat = key == "ESCAPE" and not Combat()
+  if m.SetPropagateKeyboardInput then pcall(m.SetPropagateKeyboardInput, m, not eat) end
+  if key == "ESCAPE" then G.CloseQuestWays() end
+end
+-- The keys while open: only out of combat (in it, a keyboard-taking frame couldn't let the other keys through).
+function G.QuestWaysKeys(m)
+  if not m.EnableKeyboard then return end
+  local on = not Combat()
+  if on and m.SetPropagateKeyboardInput then on = pcall(m.SetPropagateKeyboardInput, m, true) end
+  m:EnableKeyboard(on and true or false)
+end
 
--- The entries as shown: { id, text }, the ways then Quest Route options...
+-- The entries as shown: { id, text, on } (`on` nil: no check box), the toggles then Quest Route options...
 function G.QuestWayRows()
   local out = {}
-  for _, e in ipairs(G.QUEST_WAYS) do out[#out + 1] = { id = e.id, text = G.QuestWayLabel(e) } end
+  for _, e in ipairs(G.QUEST_WAYS) do out[#out + 1] = { id = e.id, text = e.label, on = G.QuestToggleOn(e.id) } end
   out[#out + 1] = { id = "options", text = L["Quest Route options..."], gap = true }
   return out
+end
+-- The rows' texts and check boxes as the saved options are now (a toggle clicked, or one it turned off).
+function G.RefreshQuestWays()
+  local m = G.questWays
+  if not m then return end
+  for i, r in ipairs(G.QuestWayRows()) do
+    local row = m.rows[i]
+    if row then
+      row.id = r.id
+      row.on = r.on
+      row.text:SetText(r.text)
+      local box = r.on ~= nil
+      row.box:SetShown(box)
+      row.boxIn:SetShown(box)
+      row.check:SetShown(r.on == true)
+      row.text:SetPoint("LEFT", box and G.QUEST_WAYS_BOX + 11 or 6, 0)
+    end
+  end
 end
 
 function G.QuestWaysOpen()
@@ -203,14 +294,13 @@ function G.OpenQuestWays(owner)
       y = y - 7
     end
     local row = m.rows[i] or Row(m, i)
-    row.id = r.id
-    row.text:SetText(r.text)
     row:ClearAllPoints()
     row:SetPoint("TOPLEFT", P, y)
     row:Show()
     y = y - R
   end
   m:SetHeight(-y + P)
+  G.RefreshQuestWays()
   local where
   for _, t in ipairs(G.QUICK or {}) do
     if t.id == "questRoute" then where = t.where end
@@ -226,6 +316,7 @@ function G.OpenQuestWays(owner)
   m.count = #G.QuestWayRows()
   m.at = G.QuestWaysStart()
   m:Show()
+  G.QuestWaysKeys(m)
   G.QuestWaysShowSel()
   return m
 end
@@ -239,11 +330,8 @@ end
 
 -- The controller ------------------------------------------------------------------------------------------------------
 
--- The entry the highlight starts on: the first marked "(default)", else the first.
+-- The entry the highlight starts on: the first.
 function G.QuestWaysStart()
-  for i, e in ipairs(G.QUEST_WAYS) do
-    if G.QuestWayIsDefault(e) then return i end
-  end
   return 1
 end
 -- The controller in use on the map (its buttons bound, a pad pressed since the mouse was).
@@ -307,7 +395,9 @@ function G.QuestWaysPad(has)
     local P = ns.Pad
     local owner = G.questWays.owner
     G.QuestWayPick(row.id)
-    -- (the map menu still open: the focus back on the button; shut, the map's own marks)
+    if G.QuestWaysOpen() then return true end -- (a toggle: the menu stays open, the highlight where it was)
+    -- (shut by Quest Route options... or a question: the map menu still open, the focus back on the button; shut, the
+    -- map's own marks)
     if P and P.MenuOpen and P.MenuOpen() then
       if owner and owner:IsShown() and not G.QuestWaysOpen() then P.SetFocus(owner) end
     elseif P then

@@ -10,6 +10,12 @@ local window
 local controls = {} -- refresh functions, run when the window opens or settings change
 
 local function GPS() return ns.settings.gps end
+-- A Quest Route toggle set here (QuestWays.lua): the others of its group off, the button's menu shown again.
+local function QuestToggle(id, on)
+  local G = ns.GPS
+  if G and G.SetQuestToggle then G.SetQuestToggle(id, on) end
+  if G and G.RefreshQuestWays then G.RefreshQuestWays() end
+end
 
 local function Apply()
   ns.GPS.ApplySettings()
@@ -2500,10 +2506,30 @@ local function BuildWindow()
   header(L["Quest Route"])
   Key("questZoneOnly")
   check(L["Quest route: only this zone"], L["The Quest Route button takes only the quests whose objective or turn-in is in the zone you're in (a city counts as its zone). Off: every quest in your log, anywhere."],
-    function() return GPS().questZoneOnly end, function(v) GPS().questZoneOnly = v end)
+    function() return GPS().questZoneOnly end, function(v)
+      GPS().questZoneOnly = v
+      QuestToggle("zone", v)
+    end)
   Key("questTrackedOnly")
   check(L["Quest route: only tracked quests"], L["The Quest Route button takes only the quests you track: the ones Questie's tracker shows when it's on, else the ones ticked to track in the quest log. Off: every quest in your log."],
-    function() return GPS().questTrackedOnly end, function(v) GPS().questTrackedOnly = v end)
+    function() return GPS().questTrackedOnly end, function(v)
+      GPS().questTrackedOnly = v
+      QuestToggle("tracked", v)
+    end)
+  -- (1.3.14, Kooki3z: the Quest Route button's right-click toggles, QuestWays.lua: this page is their home, the menu a
+  -- second control; turn-ins only, objectives only and tracked quests only: one on at most, G.SetQuestToggle)
+  Key("questTurninsOnly")
+  check(L["Quest route: only turn-ins"], L["The Quest Route button takes only the finished quests' turn-ins. Turns off \"only objectives\" and \"only tracked quests\"."],
+    function() return GPS().questTurninsOnly end, function(v)
+      GPS().questTurninsOnly = v
+      QuestToggle("turnins", v)
+    end)
+  Key("questObjectivesOnly")
+  check(L["Quest route: only objectives"], L["The Quest Route button takes only your quests' objectives, no turn-ins. Turns off \"only turn-ins\" and \"only tracked quests\"."],
+    function() return GPS().questObjectivesOnly end, function(v)
+      GPS().questObjectivesOnly = v
+      QuestToggle("objectives", v)
+    end)
   -- (players' request relayed by Kooki3z 2026-11-21: "Be able to prioritize quests by level (i.e. prefer lower level or
   -- quests that are about to turn grey)": Nav.QuestBands, the stops in level bands, the fastest order within each)
   Key("questLevelOrder")
@@ -2515,6 +2541,7 @@ local function BuildWindow()
       tip = L["The quests that turn gray within two more levels of yours first (their experience drops then), then the rest in the fastest order."] },
   }, function() return GPS().questLevelOrder or "off" end, function(v)
     GPS().questLevelOrder = v
+    if ns.GPS.RefreshQuestWays then ns.GPS.RefreshQuestWays() end
     if ns.Nav.OnQuestRoute() and #ns.Nav.stops > 1 and not ns.Nav.keepOrder then ns.Nav.OrderStops() end
   end)
   Key("questAutoReroute")

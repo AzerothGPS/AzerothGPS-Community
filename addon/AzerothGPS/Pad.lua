@@ -638,7 +638,7 @@ end
 Pad.HINT_PERIOD, Pad.HINT_FADE, Pad.HINT_UNITS = 3, 1, 20
 Pad.HINT_LOOK = 0.1 -- (what's under the crosshair looked at this often, seconds)
 Pad.hints, Pad.hintT = {}, 0
--- A button with two controls (the Quest Route button: A presses it, X its right-click, the menu of other ways; asked
+-- A button with two controls (the Quest Route button: A presses it, X its right-click, the menu of its toggles; asked
 -- 2026-11-22 for 1.3.14, "just fade between the 2 buttons for activating and opening the submenu"): its two hints over
 -- it in turn, each shown SWAP_SECONDS, cross-fading over SWAP_FADE at each change; steady, not the pulse.
 Pad.SWAP_SECONDS, Pad.SWAP_FADE = 1, 0.4
@@ -683,7 +683,7 @@ function Pad.HintTargets()
     return out
   end
   local g = G()
-  -- (the Quest Route button's menu of other ways open, QuestWays.lua: A's over the highlighted entry, Back's over the
+  -- (the Quest Route button's menu of toggles open, QuestWays.lua: A's over the highlighted entry, Back's over the
   -- button it goes back to)
   if g and g.QuestWaysOpen and g.QuestWaysOpen() then
     add(g.QuestWaysSelRow(), "select")
@@ -1157,7 +1157,7 @@ function Pad.Run(acts, down)
   -- (searching with the controller: the search's own controls first, its keyboard's too, PadKeys.lua; over the map
   -- menu's, which stays open behind a search opened from it. Kooki3z 2026-11-20: "A fading on highlighted letter,
   -- D-Pad also closes keyboard and navigates the list")
-  -- (the Quest Route button's menu of other ways open: its own controls, QuestWays.lua's G.QuestWaysPad)
+  -- (the Quest Route button's menu of toggles open: its own controls, QuestWays.lua's G.QuestWaysPad)
   local g0 = G()
   if down and g0 and g0.QuestWaysPad then
     local r = g0.QuestWaysPad(has)
@@ -1612,7 +1612,7 @@ function Pad.MenuRun(has, down)
     end
     return true
   end
-  -- (a button with a right-click of its own, the Quest Route button's menu of other ways: Remove's button, X, as its
+  -- (a button with a right-click of its own, the Quest Route button's menu of toggles: Remove's button, X, as its
   -- right-click; asked 2026-11-22 for 1.3.14)
   if has.remove and Pad.focus and Pad.focus.agpsRightClick then
     local on = Pad.focus:GetScript("OnClick")
