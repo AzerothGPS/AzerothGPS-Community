@@ -7,4 +7,7 @@
   <Binding name="AZEROTHGPS_SEARCH" category="ADDONS">
     AzerothGPS_QuickSearch()
   </Binding>
+  <!-- Target the route's next stop's NPC (1.3.14): the Target button's click, the player's own key (GPSFrame's
+       G.MakeTargetButton; it does nothing while the button has no NPC to target). -->
+  <Binding name="CLICK AzerothGPSTargetButton:LeftButton" category="ADDONS"/>
 </Bindings>

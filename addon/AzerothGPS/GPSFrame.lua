@@ -4721,7 +4721,9 @@ local function PoiButton(i)
     if G.PadClickedJustNow() then return end
     if G.Held() then return HeldClick(self.wx, self.wy, self.level or view.cont) end -- (the holder's)
     -- (like a double-click on the map, with its name and icon; a pin's, on its own level; a quest's, its quest)
-    G.AddStopAt(self.wx, self.wy, self.name, self.level, self.stopTex, self.z, self.pin ~= nil, self.questID)
+    local pin = type(self.pin) == "table" and self.pin or nil -- (a pin made from an NPC's search row: that NPC's stop)
+    G.AddStopAt(self.wx, self.wy, self.name, self.level, self.stopTex, self.z, self.pin ~= nil, self.questID,
+      pin and pin.npc, pin and (pin.npcName or pin.name))
   end)
   poiButtons[i] = b
   return b
@@ -13732,7 +13734,8 @@ function G.SearchPlacesPlain(text, max)
     for _, pin in ipairs(ns.Pins.All()) do
       if pin.name and pin.x and pin.level then
         all[#all + 1] = { name = pin.name, lower = G.SearchLower(pin.name), sub = ns.Pins.PlaceName(pin) or L["Pin"],
-          cont = pin.level, x = pin.x, y = pin.y, z = pin.z, tex = ns.Pins.IconTexture(pin.icon), pin = true }
+          cont = pin.level, x = pin.x, y = pin.y, z = pin.z, tex = ns.Pins.IconTexture(pin.icon), pin = true,
+          npcId = pin.npc, npcName = pin.npcName } -- (one made from an NPC's row: that NPC's stop, the Target button's)
       end
     end
   end
@@ -14153,7 +14156,8 @@ function G.CliffShade(w, p, s)
   return ax + lx, ay + ly, bx + lx, by + ly
 end
 
-function G.AddStopAt(x, y, name, stopCont, tex, z, exact, questID)
+-- (`npcId`, `npcName`: an NPC's stop, its creature id and name: the Target button's, G.TargetNpcStop)
+function G.AddStopAt(x, y, name, stopCont, tex, z, exact, questID, npcId, npcName)
   local px, py, cont = Geo.PlayerWorld()
   if not px then return false end
   if ns.Nav.DungeonLocked() then ns.Nav.SayLocked() return false end
@@ -14193,6 +14197,7 @@ function G.AddStopAt(x, y, name, stopCont, tex, z, exact, questID)
   end
   -- (`z`: its height, the game's, when known: a city place's, its floor where floors lie over each other)
   local stop = { x = x, y = y, cont = sc, name = name, icon = ns.Nav.NextMarker(ns.Nav.stops, pending), tex = tex, z = z }
+  if tonumber(npcId) and not inst and not via then stop.npcId, stop.npcName = tonumber(npcId), npcName end
   -- (a quest's icon: the stop carries its quest, done by it and not by getting there; Nav.QuestStop)
   if questID and ns.Nav.QuestStop then ns.Nav.QuestStop(stop, questID) end
   if #ns.Nav.stops > 0 then
@@ -14611,6 +14616,159 @@ local function PlaceUse(b) b:SetPoint("BOTTOMRIGHT", b.panel, "BOTTOMRIGHT", G.n
 function G.UpdateUseButton(t)
   if G.MinimapMode() then t = nil end
   G.SetUseButton(G.useBtn, t, PlaceUse)
+end
+
+-- The Target button (asked by Kooki3z for 1.3.14): the route's next stop an NPC (picked from the search, or a pin made
+-- from its row: the stop's `npcId` and `npcName`, G.AddStopAt) and the player near it, a "Target <name>" button under
+-- the directions panel; clicked (or its key, Bindings.xml's CLICK AzerothGPSTargetButton), the game targets that NPC.
+-- The player's own click only: a secure button with the macro "/targetexact <name>" (TargetUnit is protected, and
+-- AzerothGPS never targets anything by itself), set only out of combat and hidden as combat starts, on UIParent as the
+-- use button is. "Near" is by the player's x and y alone (the game gives no height): within TARGET_NPC_YD of the stop,
+-- on its level; shown, it stays till TARGET_NPC_LEAVE_YD. Hidden while that NPC is the target already (its creature id
+-- in the target's GUID). Off with the option (`targetNpcButton`, Options > Directions).
+-- The same click also marks it (asked by Kooki3z, 2026-11-22: "target button should set the same raid mark"): the
+-- macro's "/tm" line puts the stop's route marker over it (the stop's `icon` is a raid icon number, Nav.MARKER_COLORS'
+-- order). Only by that click: SetRaidTarget and ClearRaidMarker are restricted in this client, so AzerothGPS never
+-- marks or clears a mark by itself, and the mark stays till the player or the game clears it. "~" leaves a unit that
+-- has any mark already alone (a second click never toggles ours off, nor takes the player's or another addon's), and
+-- "/cleartarget" first with "[@target,exists]" marks nothing else when the NPC isn't found. Options: solo
+-- (`targetNpcMarkSolo`, on), in a party or raid (`targetNpcMarkGroup`, off: the others see the marks, and the
+-- leader may do the marking); in a raid only with lead or assist (the game's rule). Otherwise the macro targets only.
+G.TARGET_NPC_YD = 40 -- shown this close to the NPC's stop (about where /targetexact finds it)
+G.TARGET_NPC_LEAVE_YD = 50 -- ... and hidden again beyond this
+G.TARGET_NPC_EVERY = 0.25 -- seconds between looks (the map closed too: its key works then)
+G.TARGET_NPC_MIN_W, G.TARGET_NPC_MAX_W = 90, 240
+
+-- The stop whose NPC the Target button targets: the route's next stop when it's an NPC, the option on and the player
+-- (px, py on level `cont`) near it (`shown`: within the farther LEAVE_YD); else nil.
+function G.TargetNpcStop(px, py, cont, shown)
+  if S().targetNpcButton == false then return nil end
+  local N = ns.Nav
+  local d = N.dest
+  if not (d and d.npcId and px and d.x) or N.PlayerLevel(cont) ~= d.cont then return nil end
+  local dd = math.sqrt((d.x - px) ^ 2 + (d.y - py) ^ 2)
+  if dd > (shown and G.TARGET_NPC_LEAVE_YD or G.TARGET_NPC_YD) then return nil end
+  return d
+end
+-- Its name as the game shows it (in the client's language when known: ns.NpcName), for the macro and the button.
+function G.TargetNpcName(d)
+  local name = ns.NpcName and ns.NpcName(d.npcId, d.npcName or d.name) or d.npcName or d.name
+  if type(name) ~= "string" then return nil end
+  name = name:gsub("[%c;]", " "):gsub("^%s+", ""):gsub("%s+$", "") -- (one line; ";" would split the macro's options)
+  return name ~= "" and name or nil
+end
+function G.TargetNpcMacro(d)
+  local name = d and G.TargetNpcName(d)
+  if not name then return nil end
+  local icon = tonumber(d.icon)
+  if icon and icon >= 1 and icon <= 8 and icon % 1 == 0 and G.TargetNpcMarkOk() then
+    return "/cleartarget\n/targetexact " .. name .. "\n/tm [@target,exists] ~" .. icon
+  end
+  return "/targetexact " .. name
+end
+-- Whether the Target button's click may mark the NPC too: solo by `targetNpcMarkSolo`; in a party by
+-- `targetNpcMarkGroup`; in a raid by that and the player leading or assisting (unreadable: no).
+function G.TargetNpcMarkOk()
+  local st = S()
+  local raid = IsInRaid and IsInRaid() and true or false
+  local group = raid or (IsInGroup and IsInGroup() and true or false)
+  if not group then return st.targetNpcMarkSolo ~= false end
+  if st.targetNpcMarkGroup ~= true then return false end
+  if not raid then return true end
+  local ok, lead, assist = pcall(function()
+    return UnitIsGroupLeader and UnitIsGroupLeader("player"), UnitIsGroupAssistant and UnitIsGroupAssistant("player")
+  end)
+  if not ok or ns.IsSecret(lead) or ns.IsSecret(assist) then return false end
+  return (lead or assist) and true or false
+end
+-- Whether the player's target is NPC `id` (its creature id in the target's GUID; a hidden GUID: not known, no).
+function G.TargetIsNpc(id)
+  if not (id and UnitGUID) then return false end
+  local ok, guid = pcall(UnitGUID, "target")
+  return ok and ns.CreatureId(guid) == id or false
+end
+
+function G.MakeTargetButton(panel)
+  if G.targetBtn or not CreateFrame or G.clone then return end
+  -- (the secure template last: its OnClick is the one kept, as ns.SecureReloadButton's)
+  local ok, b = pcall(CreateFrame, "Button", "AzerothGPSTargetButton", UIParent,
+    "UIPanelButtonTemplate, SecureActionButtonTemplate")
+  if not ok or not b then return end
+  -- (both halves: this client's secure buttons act on the key's down while "cast on key down" is on, its default, and
+  -- an up-only button does nothing; a mouse click acts on the up)
+  b:RegisterForClicks("AnyUp", "AnyDown")
+  b:SetSize(G.TARGET_NPC_MIN_W, 22)
+  b.panel = panel
+  b:Hide()
+  b:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
+    GameTooltip:SetText(self.who and Format(L["Target %s"], self.who) or L["Target"], 1, 1, 1)
+    GameTooltip:AddLine(L["Your route's next stop. A key for it: Key Bindings > AddOns > AzerothGPS."], nil, nil, nil, true)
+    GameTooltip:Show()
+  end)
+  b:SetScript("OnLeave", GameTooltip_Hide)
+  local ev = CreateFrame("Frame")
+  ev:RegisterEvent("PLAYER_REGEN_DISABLED") -- (fired before combat's lockdown: still allowed)
+  -- (the group changed: the macro made again at once, with or without its mark; out of combat only)
+  ev:RegisterEvent("GROUP_ROSTER_UPDATE")
+  ev:RegisterEvent("PARTY_LEADER_CHANGED")
+  ev:SetScript("OnEvent", function(_, event)
+    if event ~= "PLAYER_REGEN_DISABLED" then return G.UpdateTargetButton() end
+    -- (off the directions panel too: a protected button anchored to it makes the map window protected in combat)
+    b:Hide()
+    b:ClearAllPoints()
+    b.placed = nil
+  end)
+  local wait = 0
+  ev:SetScript("OnUpdate", function(_, dt)
+    wait = wait - (dt or 0)
+    if wait > 0 then return end
+    wait = G.TARGET_NPC_EVERY
+    G.UpdateTargetButton()
+  end)
+  if ns.TimeScript then ns.TimeScript(ev, "OnUpdate", "target button") end
+  G.targetBtn = b
+end
+
+-- Set and shown or hidden by where the player is (out of combat only: a secure button).
+function G.UpdateTargetButton()
+  local b = G.targetBtn
+  if not b or (InCombatLockdown and InCombatLockdown()) then return end
+  local dest = ns.Nav.dest
+  if b.macro == nil and not b:IsShown() and not (dest and dest.npcId) then return end -- (no NPC stop: nothing to do)
+  local px, py, cont = Geo.PlayerWorld()
+  local d = G.TargetNpcStop(px, py, cont, b.macro ~= nil and b.stop == ns.Nav.dest)
+  local macro = G.TargetNpcMacro(d)
+  if macro ~= b.macro then
+    b.macro, b.stop = macro, macro and d or nil
+    b.who = macro and G.TargetNpcName(d) or nil
+    -- (no macro: no type, so its key does nothing)
+    b:SetAttribute("type", macro and "macro" or nil)
+    b:SetAttribute("macrotext", macro)
+    if macro then
+      b:SetText(Format(L["Target %s"], b.who))
+      local fs = b.GetFontString and b:GetFontString()
+      local w = (fs and fs.GetStringWidth and fs:GetStringWidth() or 0) + 24
+      b:SetWidth(math.max(G.TARGET_NPC_MIN_W, math.min(G.TARGET_NPC_MAX_W, w)))
+    end
+  end
+  local panel = b.panel
+  -- (shown under the directions panel while it shows; not on the minimap square, nor with the panel's buttons hidden,
+  -- nor with that NPC targeted already. Its key works with the map closed too)
+  local show = macro and panel and panel:IsVisible() and not G.MinimapMode() and not G.NavBare()
+    and not G.TargetIsNpc(d.npcId) and true or false
+  if not show then
+    if b:IsShown() then b:Hide() end
+    return
+  end
+  if not b.placed or not b:IsShown() then
+    b:ClearAllPoints()
+    b:SetPoint("TOPRIGHT", panel, "BOTTOMRIGHT", 0, -2)
+    b:SetFrameStrata(panel:GetFrameStrata())
+    b:SetFrameLevel(panel:GetFrameLevel() + 20)
+    b.placed = true
+    b:Show()
+  end
 end
 
 -- Near the next stop (option): the map zooms in smoothly for the last yards, and back out
@@ -16202,7 +16360,8 @@ function G.Init()
       recenter:Show()
     end
     if e.pin or e.npc then -- (on the pin's level, at its height: as a double-click on it; an NPC's where it was talked to)
-      G.AddStopAt(e.x, e.y, e.name, e.cont, e.tex, e.z, true)
+      -- (an NPC's, or a pin of one: its creature id and name, the Target button's)
+      G.AddStopAt(e.x, e.y, e.name, e.cont, e.tex, e.z, true, nil, e.npc and e.id or e.npcId, e.npc and e.name or e.npcName)
     elseif e.place then -- (a city place: its full name, icon and floor, as a double-click on it)
       G.AddStopAt(e.x, e.y, e.place, e.cont, e.tex, e.z)
     else
@@ -17458,6 +17617,7 @@ function G.Init()
   stepsText:SetPoint("TOPLEFT", navText, "BOTTOMLEFT", 0, -4)
   stepsText:SetPoint("RIGHT", -32, 0) -- (clear of the use button)
   G.MakeUseButton(navPanel)
+  G.MakeTargetButton(navPanel)
   stepsText:SetJustifyH("LEFT")
   stepsText:SetSpacing(G.NAV_STEPS_SPACING)
   G.stepsText = stepsText -- (the tests)

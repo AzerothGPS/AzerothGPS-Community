@@ -2687,6 +2687,18 @@ local function BuildWindow()
   slider(L["Directions background"], 0, 100, 5, "%d%%",
     function() return math.floor((GPS().dirBg or GPS().arrowBg or 0) * 100 + 0.5) end, function(v) GPS().dirBg = v / 100 end, DirOn,
     L["How dark the panel behind the directions is. At 0, the text alone."])
+  -- (1.3.14, asked by Kooki3z: the Target button, GPSFrame's G.UpdateTargetButton)
+  header(L["NPC stops"])
+  Key("targetNpcButton")
+  check(L["Show a Target button near an NPC stop"], L["When your route's next stop is an NPC you picked in the search (or a pin made from one) and you're near it, a button under the map's directions targets it when you click it. It also has a key: Key Bindings > AddOns > AzerothGPS."],
+    function() return GPS().targetNpcButton ~= false end, function(v) GPS().targetNpcButton = v and true or false end)
+  local function TargetOn() return GPS().targetNpcButton ~= false end
+  Key("targetNpcMarkSolo")
+  check(L["Mark the NPC when solo"], L["Clicking the Target button also puts your route's marker for that stop (the star, square, moon...) over the NPC. It never replaces a mark the NPC already has, and the mark stays until you or the game clears it."],
+    function() return GPS().targetNpcMarkSolo ~= false end, function(v) GPS().targetNpcMarkSolo = v and true or false end, TargetOn, INDENT)
+  Key("targetNpcMarkGroup")
+  check(L["Mark the NPC in a party or raid"], L["The same in a group. Everyone in it sees the mark, so it's off by default. In a raid it marks only while you're the leader or an assistant."],
+    function() return GPS().targetNpcMarkGroup == true end, function(v) GPS().targetNpcMarkGroup = v and true or false end, TargetOn, INDENT)
   header(L["How it works"], nil, true)
   note(L["The arrow points along the route: |cff73ff73green|r straight ahead, |cffffffffwhite|r for a turn coming up, |cffff7359red|r when the route is behind you. On a flight it shows where you land and when."])
   note(L["The directions' lines: the next turn and its distance, the road or place you're heading toward, the stop with its distance and ETA, then the turn after that. With List the stops only, just the stops."])

@@ -11,6 +11,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Roads: new roads and stairs in Ironforge.
 - For plugin addons (API 23): set the route to a place, and preview a recorded walk as the route. See docs/api.md.
 - Roads: the trail up from Cragpool Lake in Stonetalon Mountains.
+- Near an NPC you picked in the search as your next stop, a Target button under the directions targets it with your click and marks it with the stop's route marker (also a key; Options > Directions).
 
 ### Changed
 
