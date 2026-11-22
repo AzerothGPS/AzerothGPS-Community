@@ -276,15 +276,13 @@ O.LANGUAGES = { { "enUS", "English" }, { "deDE", "Deutsch" }, { "esES", "Espa\19
 -- prep, like the toc's version (Kooki3z 2026-11-20: "part of release prep like how we update the version number in
 -- the addon in game should be the What's New section in help"): test_options checks it's never older than the toc,
 -- release.yml that it's the tag's.
-O.WHATS_NEW_VERSION = "1.3.12.1"
+O.WHATS_NEW_VERSION = "1.3.13"
 O.WHATS_NEW = {
-  L["- Fixed: learned flight paths no longer go missing, and missing ones come back."],
-  L["- No Map style: our route and icons over the world map, or over OpenMap's (Options > Map)."],
-  L["- An extra GPS map window you can keep open, on a second monitor too (Options > Map)."],
-  L["- Routes keep off cliffs and take safe jumps down ledges."],
-  L["- The route is shaded by slope, and near your stop the directions say how far above or below you it is."],
-  L["- Controller: an on-screen keyboard for Search Places and the Options search; the D-pad picks results."],
-  L["- Record: pick the road type you're walking (Ground, Floor, Bridge, Stairs, Lift); heights come from the map."],
+  L["- Quest Route: order by level, lowest first or about to turn gray first (Options > Routing > Quest Route)."],
+  L["- Quest Route: a quest you leave out stays out until you put it back."],
+  L["- Routes to an NPC inside a building go round to its door and in."],
+  L["- Less stutter while a route is worked out on slower PCs."],
+  L["- Fixed: with Questie, quest turn-ins no longer show twice on the map."],
 }
 -- A page's old id, still asked for by other code and addons (API.ShowOptions): the page it's on now.
 O.PAGE_ALIASES = { ["Help improve"] = "Help" }
