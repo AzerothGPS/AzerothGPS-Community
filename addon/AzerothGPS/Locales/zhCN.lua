@@ -1348,6 +1348,7 @@ L["There's already a profile with that name."] = "已有同名的配置文件。
 L["Copy every option from |cffffd100%s|r into this profile?"] = "要将|cffffd100%s|r的所有选项复制到此配置文件吗？"
 L["Delete the profile |cffffd100%s|r? Characters using it go back to Default."] = "要删除配置文件|cffffd100%s|r吗？使用它的角色将回到“默认”。"
 L["With the game's controller UI on, the GPS map can't show in the game's world map: it opens in its own window instead."] = "启用游戏的手柄界面时，GPS地图无法显示在游戏的世界地图中：它会在自己的窗口中打开。"
+L["Not available with the game's controller UI on: the game blocks addons that change its world map then. The GPS map opens in its own window instead."] = "启用游戏的手柄界面时不可用：此时游戏会阻止修改其世界地图的插件。GPS地图会在自己的窗口中打开。"
 L["|cff9d9d9dDrag to move, corner to resize, right-click to lock.|r"] = "|cff9d9d9d拖动可移动，拖动角落可调整大小，右键点击可锁定。|r"
 L["The arrow points the way and the panel beside it lists the turns. Each can be dragged until you lock it."] = "箭头指明方向，旁边的面板列出每个转弯。在你锁定之前，两者都可以分别拖动。"
 L["After the tutorial, right-click the arrow or the panel to lock that one in place: each has its own lock. The arrow's size, the text size and both locks are in Options > Directions."] = "教程结束后，右键点击箭头或面板可将那一个锁定在原位：两者各有各的锁定。箭头大小、文字大小和两个锁定都在 选项 > 导航 中。"

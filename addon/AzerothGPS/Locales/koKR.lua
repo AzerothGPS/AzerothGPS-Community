@@ -1348,6 +1348,7 @@ L["There's already a profile with that name."] = "같은 이름의 프로필이 
 L["Copy every option from |cffffd100%s|r into this profile?"] = "|cffffd100%s|r의 모든 설정을 이 프로필로 복사할까요?"
 L["Delete the profile |cffffd100%s|r? Characters using it go back to Default."] = "프로필 |cffffd100%s|r을(를) 삭제할까요? 이 프로필을 쓰던 캐릭터는 기본값으로 돌아갑니다."
 L["With the game's controller UI on, the GPS map can't show in the game's world map: it opens in its own window instead."] = "게임의 컨트롤러 UI가 켜져 있으면 GPS 지도를 게임의 세계 지도에 표시할 수 없습니다. 대신 자체 창에서 열립니다."
+L["Not available with the game's controller UI on: the game blocks addons that change its world map then. The GPS map opens in its own window instead."] = "게임의 컨트롤러 UI가 켜져 있으면 사용할 수 없습니다. 이때 게임은 세계 지도를 변경하는 애드온을 차단합니다. 대신 GPS 지도는 자체 창에서 열립니다."
 L["|cff9d9d9dDrag to move, corner to resize, right-click to lock.|r"] = "|cff9d9d9d끌어서 이동, 모서리로 크기 조절, 우클릭으로 잠금.|r"
 L["The arrow points the way and the panel beside it lists the turns. Each can be dragged until you lock it."] = "화살표는 길을 가리키고 옆의 패널은 방향 안내를 보여 줍니다. 잠그기 전까지 각각 끌어서 옮길 수 있습니다."
 L["After the tutorial, right-click the arrow or the panel to lock that one in place: each has its own lock. The arrow's size, the text size and both locks are in Options > Directions."] = "튜토리얼이 끝난 뒤 화살표나 패널을 우클릭하면 그것만 그 자리에 잠급니다. 각각 따로 잠깁니다. 화살표 크기, 글자 크기, 두 잠금은 설정 > 길 안내에 있습니다."

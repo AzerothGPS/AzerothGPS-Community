@@ -63,6 +63,11 @@ local function Checkbox(parent, label, tooltip, get, set, enabled)
       GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
       GameTooltip:SetText(label, 1, 1, 1)
       GameTooltip:AddLine(tooltip, nil, nil, nil, true)
+      -- (`agpsOffTip`: why it's gray, shown only while it is)
+      if self.agpsOn == false and self.agpsOffTip then
+        GameTooltip:AddLine(" ")
+        GameTooltip:AddLine(self.agpsOffTip, 1, 0.5, 0.25, true)
+      end
       GameTooltip:Show()
     end)
     cb:SetScript("OnLeave", GameTooltip_Hide)
@@ -1858,10 +1863,13 @@ local function BuildWindow()
   header(L["Where the map shows"])
   -- (asked 2026-11-10: the GPS map in the game's own world map window, GPSFrame's G.WorldMapHosted)
   Key("useWorldMap")
-  check(L["Show the GPS map in the game's world map"], L["The GPS map shows in the game's own world map window (M) instead of a window of its own, with its route, buttons and map styles. The show/hide key, and the logo on the minimap square, open the world map."],
+  local worldMapBox = check(L["Show the GPS map in the game's world map"], L["The GPS map shows in the game's own world map window (M) instead of a window of its own, with its route, buttons and map styles. The show/hide key, and the logo on the minimap square, open the world map."],
     function() return GPS().useWorldMap == true end, function(v) GPS().useWorldMap = v and true or false end,
     -- (gray with the game's controller UI on: GPSFrame's G.WorldMapWanted)
     function() return not (ns.GPS and ns.GPS.ControllerUI and ns.GPS.ControllerUI()) end)
+  -- (asked 2026-11-22: say why it's gray. With the controller UI on, the game blames an addon that touched its world
+  -- map for its own protected calls on every open and close: "AzerothGPS has been blocked from an action", 1.2.2)
+  worldMapBox.agpsOffTip = L["Not available with the game's controller UI on: the game blocks addons that change its world map then. The GPS map opens in its own window instead."]
   -- (asked 2026-11-20: "Esc by default closes the map, add an option for disabling this")
   Key("escClosesMap")
   check(L["Escape closes the map"], L["In the game's world map, Escape closes it with the GPS map, as the game's own map does. Off: Escape leaves it open; close it with its key or button. In combat, Escape always closes it. The GPS map in its own window never closes on Escape."],

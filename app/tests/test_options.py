@@ -246,6 +246,35 @@ def test_a_dependent_option_is_gray_while_its_parent_is_off(game):
         O.Refresh()
 
 
+def test_the_world_map_option_says_why_its_gray_with_the_controller_ui(game):
+    # (asked 2026-11-22: grayed with the game's controller UI on, its tooltip says why; on, it says nothing more)
+    lua, ns = game
+    O = ns.Options
+    cb = {c.key: c.control for c in _controls(ns)}["useWorldMap"]
+    lua.execute("AGPS_TIP_LINES = {}; GameTooltip.AddLine = function(_, t) AGPS_TIP_LINES[#AGPS_TIP_LINES + 1] = t end")
+    real = ns.GPS.ControllerUI
+    why = "Not available with the game's controller UI on"
+
+    def hovered():
+        lua.execute("AGPS_TIP_LINES = {}")
+        cb.GetScript(cb, "OnEnter")(cb)
+        t = lua.globals().AGPS_TIP_LINES
+        return [t[i] for i in range(1, len(t) + 1)]
+    try:
+        ns.GPS.ControllerUI = lua.eval("function() return true end")
+        O.Refresh()
+        assert cb.agpsOn is False and cb._enabled is False
+        assert any(str(t).startswith(why) for t in hovered())
+        ns.GPS.ControllerUI = lua.eval("function() return false end")
+        O.Refresh()
+        assert cb.agpsOn is True
+        assert not any(str(t).startswith(why) for t in hovered())
+    finally:
+        ns.GPS.ControllerUI = real
+        lua.execute("GameTooltip.AddLine = nil")
+        O.Refresh()
+
+
 def test_dependent_options_sit_indented_under_their_parent(game):
     lua, ns = game
     by_key = {c.key: c.control for c in _controls(ns)}
