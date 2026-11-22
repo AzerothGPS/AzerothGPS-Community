@@ -68,3 +68,34 @@ def test_with_no_rule_the_dev_tools_go_nowhere(tmp_path, monkeypatch):
         return real(name, *a, **kw)
     monkeypatch.setattr(builtins, "__import__", no_private)
     assert cli.private_client(tmp_path) is False
+
+
+def test_the_dev_tools_lists_written_into_the_installed_copy_are_kept(tmp_path, monkeypatch):
+    # (2026-11-22: an install from a checkout without the review's data, data/ being git-ignored, wiped the route review's
+    # list written earlier) the files the dev addon's toc lists that its checkout hasn't, kept over the copy; the
+    # maintainers' after-install step run; a folder listed twice counted once
+    other = tmp_path / "Other" / "beta" / "Interface" / "AddOns"
+    other.mkdir(parents=True)
+    dev = tmp_path / "dev" / "DevTools"
+    dev.mkdir(parents=True)
+    (dev / "DevTools.toc").write_text("Dev.lua\nLists\Review.lua\nGone.lua\n", encoding="utf-8")
+    (dev / "Dev.lua").write_text("-- new", encoding="utf-8")
+    (other / "DevTools" / "Lists").mkdir(parents=True)
+    (other / "DevTools" / "Lists" / "Review.lua").write_text("-- the list", encoding="utf-8")
+    (other / "DevTools" / "Dev.lua").write_text("-- old", encoding="utf-8")
+    (other / "DevTools" / "Stale.lua").write_text("-- not listed", encoding="utf-8")
+    listed = tmp_path / "installs"
+    listed.write_text(f"{other}\n{other}\n", encoding="utf-8")
+    monkeypatch.setattr(cli, "EXTRA_INSTALLS", listed)
+    monkeypatch.setattr(cli, "_dev_addon", lambda: dev)
+    monkeypatch.setattr(cli, "private_client", lambda addons: Path(addons) == other)
+    monkeypatch.setattr("azerothgps.hpa.refresh", lambda: None)
+    after = []
+    import azerothgps.private_paths as PP
+    monkeypatch.setattr(PP, "after_dev_install", lambda addons, ddst, log: after.append(ddst.name), raising=False)
+    rc = cli.cmd_install_addon(SimpleNamespace(wow_path=str(tmp_path / "Other"), flavor="beta", dev=True))
+    assert rc == 0 and after == ["DevTools"]
+    d = other / "DevTools"
+    assert (d / "Lists" / "Review.lua").read_text(encoding="utf-8") == "-- the list"  # (kept)
+    assert (d / "Dev.lua").read_text(encoding="utf-8") == "-- new" and not (d / "Stale.lua").exists()
+    assert cli._survey_dirs(SimpleNamespace(wow_path=str(tmp_path / "Other"), flavor="beta")) == [other]
