@@ -1237,6 +1237,7 @@ function R.FinishWalk(goOn)
   if r.stairOpen and n > r.stairOpen then stairs[#stairs + 1], stairs[#stairs + 2] = r.stairOpen, n end
   local kind = r.kind ~= "ground" and r.kind or nil
   if n >= 2 and r.yd >= (kind and R.REC_KIND_MIN_YD or R.REC_MIN_YD) then
+    R.NotePicks(r) -- (before it's saved: the floors there as the player had them, the roads not yet rebuilt)
     local G = ns.GPS
     local zs = G and G.StrokeHeights and G.StrokeHeights(r.zs, n) or nil
     -- (a kind: its heights from the map when no floor was picked, R.AutoHeights)
@@ -1248,7 +1249,9 @@ function R.FinishWalk(goOn)
       stairs = #stairs > 0 and stairs or nil })
     r.saved = (r.saved or 0) + 1
     R.lastPiece = { kind = kind or "ground", yd = r.yd } -- (the window's "Last:")
+    if kind == "stairs" then r.stairRoads = (r.stairRoads or 0) + 1 end
   end
+  r.recYd = (r.recYd or 0) + (r.yd or 0) -- (the recording's yards before the next walk: the summary's "from 80 yd")
   local last
   if n > 0 then
     local indoors -- (as sampled: true, false, or nil when unknown)
@@ -1342,10 +1345,136 @@ function R.RecordTick(now, force)
   R.RecordSample(x, y, level, now, indoors, zt, fz, force)
 end
 
+-- The floor picked, in the Record window (Kooki3z 2026-11-21: Shift + wheel with the road tools on was the only way to
+-- pick one, and Record never said which floor it took you to be on). The game gives no height: the pick (G.editFloor,
+-- the road tools' too) is a hint the walk carries (`rec.pk`), and the road watcher's import works each point's floor
+-- out with it. The window's Floor line says it at the player's own spot: "Auto" (no pick), "Floor 2 of 3 (counting
+-- up)", worked out again only when the player moved FLOOR_LINE_YD, the pick changed, or FLOOR_LINE_MAX_S went by.
+R.FLOOR_LINE_YD = 3
+R.FLOOR_LINE_MAX_S = 2
+R.FLOOR_LINE_SECONDS = 0.25 -- (the window's own refresh while not recording; recording refreshes it every REC_TICK)
+-- The player's level and spot (nil where the game hides it).
+function R.PlayerSpot()
+  local Geo, N = ns.Geo, ns.Nav
+  local x, y, cont
+  if Geo and Geo.RealPlayerWorld then x, y, cont = Geo.RealPlayerWorld() end
+  if not x then return nil end
+  return N and N.PlayerLevel and N.PlayerLevel(cont) or cont, x, y
+end
+-- The floors with heights at (x, y) of `level`, bottom up (the road tools' G.EditFloors; over a cave's floor with no
+-- heights, none: a walk carries heights only).
+function R.HeightFloorsAt(level, x, y)
+  local G = ns.GPS
+  if not (G and G.EditFloors and level and x) then return {} end
+  local ok, floors = pcall(G.EditFloors, level, x, y)
+  local out = {}
+  for _, f in ipairs(ok and floors or {}) do
+    if f.z then out[#out + 1] = f end
+  end
+  return out
+end
+-- Height `z`'s floor at (x, y) of `level`: its number counting up (0: not one there) and how many there are.
+function R.FloorNumberAt(level, x, y, z)
+  local floors = R.HeightFloorsAt(level, x, y)
+  local G = ns.GPS
+  local i = (z and G and G.FloorIndex) and G.FloorIndex(floors, { z = z }) or 0
+  return i, #floors
+end
+-- The Floor line now: { text, note, n (the floors here), i, z (false: Auto) }; `force`: worked out again whatever.
+function R.FloorState(force)
+  local G = ns.GPS
+  local z = G and G.editFloor and G.editFloor.z or false
+  local level, x, y = R.PlayerSpot()
+  local now = GetTime and GetTime() or 0
+  local c = R.floorState
+  if not force and c and x and c.x and c.level == level and c.z == z and now - c.t < R.FLOOR_LINE_MAX_S
+      and (x - c.x) ^ 2 + (y - c.y) ^ 2 < R.FLOOR_LINE_YD ^ 2 then
+    return c
+  end
+  local i, n = 0, 0
+  if level then i, n = R.FloorNumberAt(level, x, y, z) end
+  local text
+  if not z then
+    text = L["Floor: Auto"]
+  elseif i > 0 then
+    text = Format(L["Floor %d of %d (counting up)"], i, n)
+  else
+    text = L["Floor: the one picked (none here)"]
+  end
+  local note
+  if n < 2 then
+    note = L["One floor here."]
+  elseif not z then
+    note = L["Auto: the import works your floor out. Up and Down pick it."]
+  else
+    note = L["The pick goes with the walk to the import."]
+  end
+  c = { level = level, x = x, y = y, z = z, t = now, i = i, n = n, text = text, note = note }
+  R.floorState = c
+  return c
+end
+-- Up (delta > 0) or Down: the floor picked stepped at the player's spot (Auto past the top and the bottom, as the road
+-- tools' Shift + wheel: G.StepFloorAt). Whether there were floors to step.
+function R.StepFloor(delta)
+  local G = ns.GPS
+  local level, x, y = R.PlayerSpot()
+  if not (G and G.StepFloorAt and level) or #R.HeightFloorsAt(level, x, y) < 2 then return false end
+  local ok = G.StepFloorAt(level, x, y, delta)
+  R.RefreshWindow(true)
+  return ok
+end
+-- Auto: no floor picked (the import works it out).
+function R.AutoFloor()
+  local G = ns.GPS
+  if G and G.editFloor then
+    G.editFloor, G.floorLine = nil, nil
+    if G.floorBuilding and G.floorPicks then G.floorPicks[G.floorBuilding.key] = false end
+    if G.Redraw then G.Redraw() end
+    if G.RoadHint and (G.roadMode or G.wallMode) then G.RoadHint() end
+  end
+  R.RefreshWindow(true)
+end
+-- A saved walk's floor picks (its `rec.pk`) kept for the summary at Stop & Save: where along the recording each pick
+-- began (yards) and its number there; the same pick carried on into the next walk counted once.
+function R.NotePicks(r)
+  local pk = r.pk
+  if not (pk and #pk > 0) then return end
+  r.picks = r.picks or {}
+  local pts, along, k = r.pts, 0, 1
+  for j = 1, #pk - 1, 2 do
+    local i, z = pk[j], pk[j + 1]
+    while k < i and pts[2 * k + 2] do
+      along = along + math.sqrt((pts[2 * k + 1] - pts[2 * k - 1]) ^ 2 + (pts[2 * k + 2] - pts[2 * k]) ^ 2)
+      k = k + 1
+    end
+    if z ~= (r.sumPk or false) then
+      r.sumPk = z
+      local fi, fn = 0, 0
+      if z and pts[2 * i] then fi, fn = R.FloorNumberAt(r.level, pts[2 * i - 1], pts[2 * i], z) end
+      r.picks[#r.picks + 1] = { yd = (r.recYd or 0) + along, z = z, i = fi, n = fn }
+    end
+  end
+end
+-- What a recording's walks carry for the import, one line: the floors picked along it and the Stairs roads.
+function R.PickSummary(r)
+  local parts, any = {}, false
+  for _, p in ipairs(r.picks or {}) do
+    any = any or p.z ~= false
+    local what = not p.z and L["Auto"] or (p.i or 0) > 0 and Format(L["%d of %d"], p.i, p.n) or L["a height not there"]
+    parts[#parts + 1] = p.yd < 1 and Format(L["%s at the start"], what)
+      or Format(L["%s from %s"], what, ns.Nav.FormatDistance(p.yd))
+  end
+  local stairs = r.stairRoads or 0
+  if not any then return Format(L["No floor picked: worked out when imported. Stairs roads: %d."], stairs) end
+  return Format(L["Floors picked: %s. Stairs roads: %d. The import works out the floors from these."],
+    table.concat(parts, ", "), stairs)
+end
+
 -- Recording on: samples every REC_TICK (a frame of its own, shown only while recording).
 function R.StartRecording(quiet)
   if R.rec then return end
-  R.rec = { saved = 0, kind = R.recKind or "ground" }
+  R.lastSummary = nil
+  R.rec = { saved = 0, kind = R.recKind or "ground", recYd = 0, picks = {}, sumPk = false, stairRoads = 0 }
   NewWalk(R.rec)
   if not R.recFrame and CreateFrame then
     local f = CreateFrame("Frame")
@@ -1382,6 +1511,7 @@ function R.StopRecording()
     -- (the game gives no height: a walk up stairs looks flat until it's imported, 2026-11-18)
     if (r.saved or 0) > 0 then ns.Print(L["Recorded walks show flat until they're added to the road data, which works out their heights and stairs."]) end
     R.lastSaved = r.saved
+    R.lastSummary = (r.saved or 0) > 0 and R.PickSummary(r) or nil -- (the window's line on what the walks carry)
   end
   R.RefreshWindow()
   if ns.GPS and ns.GPS.RefreshQuick then ns.GPS.RefreshQuick() end
@@ -1489,7 +1619,7 @@ function R.RecordStatus()
   return w.state
 end
 
-function R.RefreshWindow()
+function R.RefreshWindow(force)
   local f = R.window
   if not (f and f:IsShown()) then return end
   local w = R.WindowLines()
@@ -1501,6 +1631,14 @@ function R.RefreshWindow()
   f.saved:SetText(w.saved)
   f.hint:SetText(w.hint)
   local r = R.rec
+  -- the floor picked at the player's spot, and after Stop & Save what the walks carry for the import
+  local fs = R.FloorState(force)
+  f.floor:SetText(fs.text)
+  f.floorNote:SetText(fs.note)
+  f.up:SetEnabled(fs.n >= 2)
+  f.down:SetEnabled(fs.n >= 2)
+  f.auto:SetEnabled(fs.z ~= false)
+  f.summary:SetText(not r and R.lastSummary or "")
   f.rec:SetText(not r and L["Record"] or r.userPaused and L["Resume"] or L["Pause"])
   f.stop:SetEnabled(r ~= nil)
   local kind = r and r.kind or R.recKind or "ground"
@@ -1517,7 +1655,7 @@ end
 function R.ShowWindow()
   local f = R.window
   if not f then
-    f = ns.Window("AzerothGPSRecord", 392, 240, L["Record"])
+    f = ns.Window("AzerothGPSRecord", 420, 312, L["Record"])
     local function Text(font, x, y)
       local t = f:CreateFontString(nil, "ARTWORK", font)
       t:SetPoint("TOPLEFT", x, f.top - y)
@@ -1546,11 +1684,36 @@ function R.ShowWindow()
       b:SetScript("OnClick", function() R.SetRecordKind(kind) end)
       f.kinds[k] = b
     end
-    -- this road, the stairs, what's saved, what to do
-    f.road = Text("GameFontHighlight", 14, 90)
-    f.saved = Text("GameFontHighlightSmall", 14, 112)
+    -- the floor picked at the player's spot, with Up / Down / Auto beside it (R.FloorState)
+    f.floor = Text("GameFontHighlight", 14, 88)
+    f.floor:SetPoint("RIGHT", -162, 0)
+    local function Small(label, w, x, fn)
+      local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
+      b:SetSize(w, 22)
+      b:SetPoint("TOPRIGHT", x, f.top - 83)
+      b:SetText(label)
+      b:SetScript("OnClick", fn)
+      return b
+    end
+    f.auto = Small(L["Auto"], 46, -12, function() R.AutoFloor() end)
+    f.down = Small(L["Down"], 50, -62, function() R.StepFloor(-1) end)
+    f.up = Small(L["Up"], 44, -116, function() R.StepFloor(1) end)
+    f.floorNote = Text("GameFontDisableSmall", 14, 108)
+    -- this road, what's saved, what the walks carry for the import, what to do
+    f.road = Text("GameFontHighlight", 14, 128)
+    f.saved = Text("GameFontHighlightSmall", 14, 150)
     f.saved:SetTextColor(0.45, 1, 0.45)
-    f.hint = Text("GameFontDisableSmall", 14, 136)
+    f.summary = Text("GameFontHighlightSmall", 14, 168)
+    f.hint = Text("GameFontDisableSmall", 14, 198)
+    -- (the Floor line kept up to date while the window shows and nothing records: recording refreshes it itself)
+    local acc = 0
+    f:SetScript("OnUpdate", function(_, elapsed)
+      acc = acc + (elapsed or 0)
+      if acc < R.FLOOR_LINE_SECONDS or R.rec then return end
+      acc = 0
+      R.RefreshWindow()
+    end)
+    if ns.TimeScript then ns.TimeScript(f, "OnUpdate", "record window") end
     local function Button(label, w, x, fn)
       local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
       b:SetSize(w, 22)
