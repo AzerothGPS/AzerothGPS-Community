@@ -949,7 +949,9 @@ def test_running_a_route_with_a_flight_stays_within_the_frame(game):
         R.WARM, R.SYNC_WALKS = True, False
         N.SetStops(lua.eval("{ { x = -1441, y = -2332, cont = 0 } }"), False, "red")
         t = 600.0
-        for _ in range(600):  # (the roads built, the first route, the comparison: the flight)
+        # (the roads built, the first route, the comparison: the flight; about 600 frames of 5 ms here, so the cap is
+        # far past that: a loaded CI runner needed more and the test failed before the setup was done)
+        for _ in range(4000):
             t += 0.05
             lua.execute(f"AGPS_T = {t}")
             G.Update()
@@ -1711,7 +1713,9 @@ def test_the_first_route_shown_off_teldrassil_takes_the_teleporter():
             lua.execute("AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = %f, %f, 1" % (sx, sy))
             N.SetStops(lua.eval("{ { x = %f, y = %f, cont = 1, name = '%s' } }" % (dx, dy, dname)), False, "red")
             shown = 0
-            for f in range(600):  # (up to 60 s of game time)
+            # (up to 200 s of game time: the first route comes after about 430 frames of 5 ms here, and a loaded CI
+            # runner showed none by 600; every route shown is checked, however late)
+            for f in range(2000):
                 lua.execute("AGPS_T = AGPS_T + 0.1")
                 G.Update()
                 R.Pump(clock() + 5, clock)
