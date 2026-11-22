@@ -539,14 +539,14 @@ def patch_lua(text: str, over: dict, rooms_of: dict) -> str:
 SURVEY_FILE = "FloorSurvey.lua"
 
 
-def survey_addons(addons: Path) -> list[tuple[Path, str]]:
-    """The addons in AddOns folder `addons` that load SURVEY_FILE: [(their folder, their saved variable)]."""
+def survey_addons(addons: Path, file: str = SURVEY_FILE) -> list[tuple[Path, str]]:
+    """The addons in AddOns folder `addons` that load `file` (SURVEY_FILE): [(their folder, their saved variable)]."""
     out = []
     if not Path(addons).is_dir():
         return out
     for toc in sorted(Path(addons).glob("*/*.toc")):
         text = toc.read_text(encoding="utf-8", errors="replace")
-        if not re.search(r"^\s*" + re.escape(SURVEY_FILE) + r"\s*$", text, re.M):
+        if not re.search(r"^\s*" + re.escape(file) + r"\s*$", text, re.M):
             continue
         m = re.search(r"^## SavedVariables:\s*(\w+)", text, re.M)
         out.append((toc.parent, m.group(1) if m else ""))

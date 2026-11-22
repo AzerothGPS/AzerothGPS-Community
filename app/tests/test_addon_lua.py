@@ -6461,11 +6461,41 @@ def test_public_api_exposes_documented_functions(api):
                  "AddOptionsPage", "RefreshOptions", "ShowOptions", "SetUnsaved", "SaveNow",
                  "PlayerLevel", "ShownLevel",
                  "SetPlayerArrow", "SetRouteLook", "SetFrameLook", "OnArrive", "TitleBarSlot",
-                 "RegisterLookFrame", "FrameLook", "SeamKnobs", "AddCharm", "RegisterPopup"):
+                 "RegisterLookFrame", "FrameLook", "SeamKnobs", "AddCharm", "RegisterPopup",
+                 "ShowRecorder", "Recording", "RecordedWalks"):
         assert A[name] is not None, name
-    assert A.version == 21
+    assert A.version == 22
     assert A.TopPanelInset() == 4  # (no window frame in the tests)
     assert A.MapButton("recenter") is None  # (no map built in the tests)
+
+
+def test_public_api_reads_recorded_walks_since_a_time(api):
+    # (API 22: a companion asks the player to walk a way with Record, then reads that walk back) only recorded walks,
+    # from `since` on, oldest first, as copies with their length; nothing in the saved tracks changes
+    lua, ns, A = api
+    if ns.db is None:
+        ns.db = lua.eval("{}")
+    db = ns.db
+    saved = db.tracks
+    try:
+        db.tracks = lua.eval("""{
+          { op = "add", drawn = true, recorded = true, continent = 1, zone = "Orgrimmar", time = 2000,
+            pts = { 0, 0, 3, 4, 3, 10 }, zs = { 5, 5, 6 } },
+          { op = "add", drawn = true, continent = 1, time = 2001, pts = { 0, 0, 1, 1 } },
+          { op = "remove", continent = 1, time = 2002, pts = { 0, 0, 1, 1 } },
+          { op = "add", drawn = true, recorded = true, continent = 10001, time = 1500, pts = { 0, 0, 1, 0 } },
+          { op = "add", drawn = true, recorded = true, continent = 0, time = 1999, kind = "stairs", pts = { 0, 0, 0, 2 } },
+        }""")
+        walks = A.RecordedWalks(1999)
+        got = [(walks[i].time, walks[i].level, round(walks[i].yd, 3)) for i in range(1, len(walks) + 1)]
+        assert got == [(1999, 0, 2.0), (2000, 1, 11.0)]
+        walks[2].pts[1] = 99
+        assert db.tracks[1].pts[1] == 0  # (a copy)
+        assert walks[2].zs[3] == 6 and walks[1].kind == "stairs"
+        assert len(A.RecordedWalks(None)) == 3
+    finally:
+        db.tracks = saved
+    assert A.Recording() is False
 
 
 def test_public_api_shift_click_on_a_boss_goes_to_another_addon(api):
