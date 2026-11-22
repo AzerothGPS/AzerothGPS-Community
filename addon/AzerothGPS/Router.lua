@@ -1138,7 +1138,7 @@ function R.WithTracks(roads, tracks, cont)
         -- stays the land's, joined and crossed as before)
         local mk = math.floor(#pts / 4) * 2 + 1
         local mx, my = pts[mk], pts[mk + 1]
-        if R.CapitalAt(cont, mx, my) or (ns.Nav and ns.Nav.InBuilding and ns.Nav.InBuilding(cont, mx, my)) then
+        if R.CapitalAt(cont, mx, my) or (ns.Nav and ns.Nav.InBuilding and ns.Nav.InBuilding(cont, mx, my, "joined")) then
           tzs = R.RampHeights(pts, endFloor(pts[1], pts[2]), endFloor(pts[#pts - 1], pts[#pts]))
         end
       end
@@ -1306,7 +1306,7 @@ function R.WithTracks(roads, tracks, cont)
                 if s1 == M then raisedEnd[nb] = true else raisedNode[nb] = true end
               end
               local mk = math.floor(#line / 4) * 2 + 1
-              if nzs and fl and fl.zs and ns.Nav and ns.Nav.InBuilding and ns.Nav.InBuilding(cont, line[mk], line[mk + 1]) then
+              if nzs and fl and fl.zs and ns.Nav and ns.Nav.InBuilding and ns.Nav.InBuilding(cont, line[mk], line[mk + 1], "joined") then
                 inside[ed] = true
               end
               e[#e + 1] = ed
@@ -2107,7 +2107,7 @@ end
 -- never a drop or a lift. The data's build joins drawn roads to the land's roads only, not to the caves'
 -- and capitals' merged in here (Dun Algaz's, drawn between two cave mouths' roads, was a piece of its
 -- own, 2026-10-01). `nodes`, `edges` are changed in place; `caveOf`, `dropOf` by edge. Returns the joins.
-function R.JoinDrawnEnds(nodes, edges, caveOf, dropOf, mouth)
+function R.JoinDrawnEnds(nodes, edges, caveOf, dropOf, mouth, attachedOf)
   local deg, own = {}, {}
   for ei, e in ipairs(edges) do
     Breathe(ei, 2000)
@@ -2154,7 +2154,9 @@ function R.JoinDrawnEnds(nodes, edges, caveOf, dropOf, mouth)
   end
   for ei, ed in ipairs(edges) do
     Breathe(ei, 50)
-    if not (caveOf and caveOf[ed]) and not (dropOf and dropOf[ed]) and ed[4] ~= 3 and ed[4] ~= 5 then
+    -- (nor onto an attached building's roads, `attachedOf`: a drawn road's end by Splintertree Post's flight master went onto
+    -- its hut's, not the road it ends at, and the road east of it was lost, 2026-11-21)
+    if not (caveOf and caveOf[ed]) and not (dropOf and dropOf[ed]) and not (attachedOf and attachedOf[ed]) and ed[4] ~= 3 and ed[4] ~= 5 then
       local bb = EdgeBox(ed)
       each(bb[1], bb[2], bb[3], bb[4], function(j)
         if own[j] ~= ed and ed[1] ~= j and ed[2] ~= j then
@@ -2258,12 +2260,21 @@ function BuildGraph(cont)
   -- (a building's inside, Data/Indoors.lua: from its own model, out only by its doors; the walls drawn round a
   -- building, to keep the land's routes out of it, don't cut it: Brill's inn's came apart in 13 pieces, 2026-10-06)
   local indoorOf = {}
+  -- (and those of its buildings `attach`ed, not joined (indoors.py's phase 7): their joins don't split the land's road;
+  -- a trip to or from one goes in by them, R.AttachTrip; every other route is on the land's roads as without them)
+  local attachOf, attachJoin = {}, {}
   local nodeZ = {} -- (a capital's road nodes' floor heights, its data's `nz`: a stop with a height on its floor)
   local noBridge = {} -- (a cave's nodes inside it: joined to the rest only by its roads out)
   -- (the continent's roads with its overlays merged in don't depend on the player's drawn roads
   -- or walls: worked out once and kept, so an edit rebuilds only what they change; copies of the
   -- lists, which the walls below add to)
   local merged = mergedRoads[cont]
+  -- (an attached building's roads after all the rest, the drawn roads and the player's too: every other road and node
+  -- numbered as without them, so every search goes the same way; R.AttachTrip)
+  local joined, attached = {}, {}
+  for _, extra in ipairs(ns.RoadOverlays and ns.RoadOverlays[cont] or {}) do
+    if extra.attach then attached[#attached + 1] = extra else joined[#joined + 1] = extra end
+  end
   local overlays = ns.RoadOverlays and ns.RoadOverlays[cont]
   if merged and merged.roads == roads and merged.overlays == overlays and merged.nOverlays == (overlays and #overlays or 0) then
     nodes, edges = {}, {}
@@ -2300,7 +2311,9 @@ function BuildGraph(cont)
     end
     return false
   end
-  for _, extra in ipairs(ns.RoadOverlays and ns.RoadOverlays[cont] or {}) do
+  -- (an attached building's roads after all the rest, the drawn roads' ends joined too: every other road and node
+  -- numbered as without them, so the search goes the same way)
+  for _, extra in ipairs(joined) do
     local base = #nodes / 2
     local n2, e2 = {}, {}
     for i = 1, #nodes do
@@ -2371,7 +2384,7 @@ function BuildGraph(cont)
     end
     nodes, edges = n2, e2
   end
-  if not roads.z then R.JoinDrawnEnds(nodes, edges, caveOf, dropOf, noBridge) end -- (not a level with heights: by floor there)
+  if not roads.z then R.JoinDrawnEnds(nodes, edges, caveOf, dropOf, noBridge, attachOf) end -- (not a level with heights: by floor there)
   local keep ={ roads = roads, overlays = overlays, nOverlays = overlays and #overlays or 0,
     nodes = {}, edges = {}, dropOf = {}, caveOf = {}, noBridge = noBridge, nodeZ = nodeZ, indoorOf = indoorOf }
   -- (a pause every KEEP_BREATHE: a copy's growing table is moved and the garbage collector's share comes with it,
@@ -2527,7 +2540,40 @@ function BuildGraph(cont)
     end
     edges = kept
   end
+  if attached[1] then
+    if nodes == roads.n then -- (the data's own lists aren't changed)
+      local n2, e2 = {}, {}
+      for i = 1, #nodes do n2[i] = nodes[i] end
+      for i = 1, #edges do e2[i] = edges[i] end
+      nodes, edges = n2, e2
+    end
+    local nz2 = {} -- (a copy: the merged one is kept as it was)
+    for k, v in pairs(nodeZ) do nz2[k] = v end
+    nodeZ = nz2
+    local nb = {}
+    for k, v in pairs(noBridge) do nb[k] = v end
+    noBridge = nb
+    for _, extra in ipairs(attached) do
+      local base = #nodes / 2
+      for i = 1, #extra.n do
+        BreatheIfOver(i, 500)
+        nodes[#nodes + 1] = extra.n[i]
+      end
+      for k, e in ipairs(extra.e) do
+        Breathe(k, 50)
+        local c = Unpacked(e, extra.n, base)
+        edges[#edges + 1] = c
+        indoorOf[c], attachOf[c] = true, true
+      end
+      for i, h in ipairs(extra.nz or {}) do
+        if h ~= 0 then nodeZ[base + i] = h end
+      end
+      for i = 1, #extra.n / 2 do noBridge[base + i] = true end
+      for _, j in ipairs(extra.joins or {}) do attachJoin[base + j] = true end
+    end
+  end
   local drops, caveEdges, indoorEdges = {}, {}, {}
+  local attachedEdges = {} -- (an attached building's roads, its doors' ways to its joins too)
   local kinds, raisedEdges = {}, {} -- (the edited roads' kinds, R.TRACK_KINDS, and the raised ones: by edge number)
   local flooredEdges = {} -- (and those of tracks with their heights)
   local tk, tr, tf = trackInfo and trackInfo.kind, trackInfo and trackInfo.raised, trackInfo and trackInfo.floored
@@ -2540,6 +2586,7 @@ function BuildGraph(cont)
     if tf and tf[ed] then flooredEdges[ei] = true end
     -- (a building's own roads, both ends on its floors: not a door's join onto the land's road)
     if indoorOf[ed] and nodeZ[ed[1]] and nodeZ[ed[2]] then indoorEdges[ei] = true end
+    if attachOf[ed] then attachedEdges[ei] = true end
   end
   P1("router: build roads: drawn roads", pt)
   pt = P0()
@@ -2647,6 +2694,7 @@ function BuildGraph(cont)
     zoneId = hasZones and zoneId or nil, zoneYd = hasZones and zoneYd or nil,
     zonesOver = next(zonesOver) and zonesOver or nil,
     indoor = next(indoorEdges) and indoorEdges or nil,
+    attached = next(attachedEdges) and attachedEdges or nil, attachJoin = next(attachedEdges) and attachJoin or nil,
     kind = next(kinds) and kinds or nil, raised = next(raisedEdges) and raisedEdges or nil,
     floored = next(flooredEdges) and flooredEdges or nil,
     raisedEnd = next(raisedEdges) and trackInfo and trackInfo.raisedEnd or nil }
@@ -3493,7 +3541,7 @@ local function OnRoad(g, x, y)
       if b then
         for j = 1, #b - 2, 3 do
           local ei, i = b[j], b[j + 1]
-          if not (g.cave and g.cave[ei]) then
+          if not (g.cave and g.cave[ei]) and not (g.attached and g.attached[ei]) then -- (nor an attached building's)
             local e = g.e[ei]
             if SegDist2(x, y, e[i], e[i + 1], e[i + 2], e[i + 3]) <= r2 then return true end
           end
@@ -3634,7 +3682,8 @@ local function NearestEdgesRaw(cont, x, y, z)
           for j = 1, #bucket - 2, 3 do
             local ei, i, along = bucket[j], bucket[j + 1], bucket[j + 2]
             local sk = ei * 100000 + i
-            if not seen[sk] then
+            -- (an attached building's roads never: the land's nearest, and their order, as without it; R.NearAttached)
+            if not seen[sk] and not (g.attached and g.attached[ei]) then
               seen[sk] = true
               local e = g.e[ei]
               local ax, ay, cx, cy = e[i], e[i + 1], e[i + 2], e[i + 3]
@@ -4060,7 +4109,7 @@ function R.RaisedNear(cont, x, y, r)
 end
 
 function R.OnFloors(cont, x, y, z)
-  if ns.Nav and ns.Nav.InBuilding and ns.Nav.InBuilding(cont, x, y) then return true end
+  if ns.Nav and ns.Nav.InBuilding and ns.Nav.InBuilding(cont, x, y, "joined") then return true end
   return R.InLayeredCave(cont, x, y) and (z == nil or R.CaveDown(cont, x, y, nil, z)) or false
 end
 
@@ -4228,7 +4277,7 @@ local function NearestAllScan(g, x, y, ok, keep)
   local list, K = {}, keep or R.NEAREST_ALL_KEEP
   for ei, e in ipairs(g.e) do
     Breathe(ei, 300)
-    if not (g.drops and g.drops[ei]) and (not ok or ok(ei)) then -- (a drop: not a road to get on or off at)
+    if not (g.drops and g.drops[ei]) and not (g.attached and g.attached[ei]) and (not ok or ok(ei)) then -- (a drop: not a road to get on or off at; nor an attached building's)
       local along, bd2, bi, bt, bAlong = 0, nil, nil, nil, nil
       for i = 5, #e - 3, 2 do
         local ax, ay, bx, by = e[i], e[i + 1], e[i + 2], e[i + 3]
@@ -4276,7 +4325,7 @@ function R.NearestEdgesAll(cont, x, y, ok, keep)
         if bk then
           for j = 1, #bk - 2, 3 do
             local ei = bk[j]
-            if not ok or ok(ei) then
+            if (not ok or ok(ei)) and not (g.attached and g.attached[ei]) then -- (nor an attached building's)
               local i, e = bk[j + 1], g.e[ei]
               local d2, t = SegDist2(x, y, e[i], e[i + 1], e[i + 2], e[i + 3])
               local c = best[ei]
@@ -4760,15 +4809,15 @@ function R.ThroughDoors(cont, r, sx, sy, tx, ty, opts)
   local Nav = ns.Nav
   if not (opts and (opts.z or opts.tz) and r and r.pts and r.kinds and #r.pts >= 6 and not r.zs and not r.noWay
       and not r.unconnected and Nav and Nav.InBuilding) then return nil end
-  local bs = opts.z and Nav.InBuilding(cont, sx, sy) or nil
-  local bt = opts.tz and Nav.InBuilding(cont, tx, ty) or nil
+  local bs = opts.z and Nav.InBuilding(cont, sx, sy, "joined") or nil
+  local bt = opts.tz and Nav.InBuilding(cont, tx, ty, "joined") or nil
   if (not bs and not bt) or bs == bt then return nil end -- (within one building: its own roads)
   local pts, n = r.pts, #r.pts / 2
   local i, j = 1, n -- (the route's first point out of the start's building, and its last one before the stop's)
   if bs then
     i = nil
     for k = 2, n do
-      if Nav.InBuilding(cont, pts[2 * k - 1], pts[2 * k]) ~= bs then
+      if Nav.InBuilding(cont, pts[2 * k - 1], pts[2 * k], "joined") ~= bs then
         i = k
         break
       end
@@ -4777,7 +4826,7 @@ function R.ThroughDoors(cont, r, sx, sy, tx, ty, opts)
   if bt then
     j = nil
     for k = n - 1, 1, -1 do
-      if Nav.InBuilding(cont, pts[2 * k - 1], pts[2 * k]) ~= bt then
+      if Nav.InBuilding(cont, pts[2 * k - 1], pts[2 * k], "joined") ~= bt then
         j = k
         break
       end
@@ -4858,8 +4907,241 @@ function R.Route(cont, sx, sy, tx, ty, opts)
   end
   return R.RouteOwn(cont, sx, sy, tx, ty, opts)
 end
+-- A trip to or from inside an attached building (Data/Indoors.lua's `attach` entries: indoors.py's phase 7, asked
+-- 2026-11-21: "if routing to an NPC in the building you just get a dotted line to it through walls"): its joins aren't
+-- tied into the land's roads (a split road changed which road other trips left from, which node a straight link went
+-- to, and 12 sample trips by Splintertree Post, Southshore and the like came out worse), so the trip is worked out in
+-- parts: on the land's roads to each of its joins (RouteBody, as to any spot on a road), and from there in along the
+-- building's own roads (InsideWay), the best one in all; and the same out of the start's. A spot is
+-- in one when it's in its bounds (Nav.InBuilding) with one of its own roads within ATTACH_REACH: on the spot's floor,
+-- or (no height) nearer than any of the land's with the spot on a cell the buildings close. Nil when neither end is.
+R.ATTACH_REACH = 12 -- yards (indoors.py's CHECK_NPC_LAST_YD)
+-- The attached buildings' roads within `reach` of (x, y), nearest first: { edge, px, py, d2, along, dist } as
+-- NearestEdges' (which leaves them out).
+function R.NearAttached(cont, x, y, reach)
+  local g = GraphQuery(cont, x, y)
+  if not (g and g.attached) then return {} end
+  local idx = SegIndex(g)
+  local best, r2 = {}, reach * reach
+  local bx, by, k = math.floor(x / SEG_BUCKET), math.floor(y / SEG_BUCKET), math.ceil(reach / SEG_BUCKET)
+  for kx = bx - k, bx + k do
+    for ky = by - k, by + k do
+      local bk = idx[Key(kx, ky)]
+      for j = 1, bk and #bk - 2 or 0, 3 do
+        local ei, i, along = bk[j], bk[j + 1], bk[j + 2]
+        if g.attached[ei] then
+          local e = g.e[ei]
+          local ax, ay, cx, cy = e[i], e[i + 1], e[i + 2], e[i + 3]
+          local d2, t = SegDist2(x, y, ax, ay, cx, cy)
+          if d2 <= r2 and (not best[ei] or d2 < best[ei].d2) then
+            best[ei] = { edge = ei, px = ax + (cx - ax) * t, py = ay + (cy - ay) * t, d2 = d2,
+              along = along + Dist(ax, ay, cx, cy) * t, dist = math.sqrt(d2) }
+          end
+        end
+      end
+    end
+  end
+  local list = {}
+  for _, c in pairs(best) do list[#list + 1] = c end
+  table.sort(list, function(a, c) return a.dist < c.dist or (a.dist == c.dist and a.edge < c.edge) end)
+  return list
+end
+R.ATTACH_JOINS = 3 -- the nearest this many of a building's joins tried
+local function AttachJoins(g, cont, x, y, z)
+  local Nav, Pass = ns.Nav, ns.Passability
+  if not (g and g.attached and g.attachJoin and Nav and Nav.InBuilding) then return nil end
+  if not Nav.InBuilding(cont, x, y, "attach") then return nil end
+  -- (with a height, one of its own roads on that floor (STOP_FLOOR_Z) within ATTACH_REACH; without, the spot on a
+  -- cell the buildings close and one of its own roads nearer than any of the land's: a flight master by Splintertree
+  -- Post's inn stood in its bounds on a closed cell, 15 yd from the land's road, 16 from the inn's)
+  if not z and not (Pass and Pass.At and Pass.At(cont, x, y) == 2) then return nil end
+  local land = R.NearestEdges(cont, x, y)[1]
+  land = land and land.dist or math.huge
+  local seen, queue = {}, {}
+  for _, c in ipairs(R.NearAttached(cont, x, y, R.ATTACH_REACH)) do
+    if g.indoor and g.indoor[c.edge] and (z or c.dist < land) then
+      local h = z and R.RoadFloor(g, c)
+      if not z or (h and math.abs(h - z) <= R.STOP_FLOOR_Z) then
+        local e = g.e[c.edge]
+        for k = 1, 2 do
+          if not seen[e[k]] then seen[e[k]], queue[#queue + 1] = true, e[k] end
+        end
+      end
+    end
+  end
+  if not queue[1] then return nil end
+  local joins, qi = {}, 1
+  while queue[qi] do
+    local n = queue[qi]
+    qi = qi + 1
+    if g.attachJoin[n] then joins[#joins + 1] = n end
+    for ai = g.adjIdx[n] or 0, (g.adjIdx[n + 1] or 0) - 1 do
+      local se = g.adjE[ai]
+      local m = g.adjTo[ai]
+      if g.attached[se >= 0 and se or -se] and not seen[m] then seen[m], queue[#queue + 1] = true, m end
+    end
+  end
+  if not joins[1] then return nil end
+  table.sort(joins, function(a, c)
+    return Dist(g.n[2 * a - 1], g.n[2 * a], x, y) < Dist(g.n[2 * c - 1], g.n[2 * c], x, y)
+  end)
+  for k = #joins, R.ATTACH_JOINS + 1, -1 do joins[k] = nil end
+  return joins, seen
+end
+-- Routes `a` then `b` (b starting where a ends) as one.
+local function Joined(a, b)
+  local out, kinds, fz = {}, {}, (a.fz or b.fz) and {} or nil
+  local function Put(x, y, f)
+    local n = #out
+    if n >= 2 and math.abs(out[n - 1] - x) < 0.01 and math.abs(out[n] - y) < 0.01 then return false end
+    out[n + 1], out[n + 2] = x, y
+    if fz then fz[#fz + 1] = f or false end
+    return true
+  end
+  for _, r in ipairs({ a, b }) do
+    local p = r.pts
+    for k = 1, #p / 2 do
+      if Put(p[2 * k - 1], p[2 * k], r.fz and r.fz[k]) and #out > 2 then kinds[#kinds + 1] = r.kinds[k - 1] or R.KIND_OFFROAD end
+    end
+  end
+  if fz then -- (the land's points: the nearest floor along, as Build's)
+    local last
+    for i = 1, #fz do if fz[i] then last = fz[i] elseif last then fz[i] = last end end
+    for i = #fz, 1, -1 do if fz[i] then last = fz[i] elseif last then fz[i] = last end end
+    if not fz[1] then fz = nil end
+  end
+  local length, road = 0, 0
+  for m = 1, #kinds do
+    local d = Dist(out[2 * m - 1], out[2 * m], out[2 * m + 1], out[2 * m + 2])
+    length = length + d
+    if kinds[m] == R.KIND_ROAD then road = road + d end
+  end
+  return { pts = out, kinds = kinds, length = length, road = road, fz = fz,
+    blocked = ((a.blocked or 0) + (b.blocked or 0)) > 0 and (a.blocked or 0) + (b.blocked or 0) or nil,
+    pending = a.pending or b.pending or nil }
+end
+-- The way from join `j` along the building's own roads (`only`: its nodes) to the spot (x, y), height z: onto the
+-- nearest of its rooms' roads (both ends on its floors) within ATTACH_REACH on that floor (STOP_FLOOR_Z), the least of
+-- the way there and the straight last stretch (dearer past INSIDE_LEG_FREE, INSIDE_LEG_FACTOR, as RouteOne's). A route
+-- (Build's), or nil.
+local function InsideWay(g, cont, j, x, y, z, only)
+  local cands = {}
+  for _, c in ipairs(R.NearAttached(cont, x, y, R.ATTACH_REACH)) do
+    local e = g.e[c.edge]
+    if g.indoor and g.indoor[c.edge] and only[e[1]] then
+      local h = z and R.RoadFloor(g, c)
+      if not z or (h and math.abs(h - z) <= R.STOP_FLOOR_Z) then cands[#cands + 1] = c end
+    end
+  end
+  if not cands[1] then return nil end
+  -- (its roads from the join: a small search, the building's few dozen nodes)
+  local dist, prev, open, done = { [j] = 0 }, {}, { j }, {}
+  while #open > 0 do
+    local bi = 1
+    for k = 2, #open do if dist[open[k]] < dist[open[bi]] then bi = k end end
+    local n = table.remove(open, bi)
+    if not done[n] then
+      done[n] = true
+      for ai = g.adjIdx[n] or 0, (g.adjIdx[n + 1] or 0) - 1 do
+        local se = g.adjE[ai]
+        local ei, m = se >= 0 and se or -se, g.adjTo[ai]
+        if g.attached[ei] and only[m] then
+          local d = dist[n] + (g.adjLen[ai] or g.e[ei][3])
+          if not dist[m] or d < dist[m] then
+            dist[m], prev[m] = d, { n, ei }
+            open[#open + 1] = m
+          end
+        end
+      end
+    end
+  end
+  local best, bestCost
+  for _, c in ipairs(cands) do
+    local e = g.e[c.edge]
+    local last = c.dist + math.max(0, c.dist - R.INSIDE_LEG_FREE) * (R.INSIDE_LEG_FACTOR - 1)
+    for k = 1, 2 do
+      local n = e[k]
+      if dist[n] then
+        local cost = dist[n] + (k == 1 and c.along or math.max(0, e[3] - c.along)) + last
+        if cost < (bestCost or math.huge) then best, bestCost = { c, n, k }, cost end
+      end
+    end
+  end
+  if not best then return nil end
+  local c, n, k = best[1], best[2], best[3]
+  local chain, cur = {}, n
+  while prev[cur] do
+    local p, ei = prev[cur][1], prev[cur][2]
+    local e = g.e[ei]
+    table.insert(chain, 1, { kind = R.KIND_ROAD, edge = ei, from = e[1] == p and 0 or e[3], to = e[1] == p and e[3] or 0 })
+    cur = p
+  end
+  local e = g.e[c.edge]
+  chain[#chain + 1] = { kind = R.KIND_ROAD, edge = c.edge, from = k == 1 and 0 or e[3], to = c.along }
+  chain[#chain + 1] = { R.KIND_OFFROAD, c.px, c.py, x, y }
+  return Build(g, chain)
+end
+-- Route `r` the other way round.
+local function Reversed(r)
+  local p, n = r.pts, #r.pts / 2
+  local pts, kinds, fz = {}, {}, r.fz and {} or nil
+  for k = n, 1, -1 do
+    pts[#pts + 1], pts[#pts + 2] = p[2 * k - 1], p[2 * k]
+    if fz then fz[#fz + 1] = r.fz[k] end
+    if k > 1 then kinds[#kinds + 1] = r.kinds[k - 1] end
+  end
+  return { pts = pts, kinds = kinds, length = r.length, road = r.road, fz = fz }
+end
+function R.AttachTrip(cont, sx, sy, tx, ty, opts)
+  local g = Graph(cont)
+  if not (g and g.attached) then return nil end
+  opts = opts or {}
+  local js, ns_ = AttachJoins(g, cont, sx, sy, opts.z)
+  local jt, nt = AttachJoins(g, cont, tx, ty, opts.tz)
+  if not js and not jt then return nil end
+  if js and jt and ns_[jt[1]] then return nil end -- (within one building: RouteOne's, as before)
+  local outs, ins = { false }, { false }
+  if js then
+    outs = {}
+    for _, j in ipairs(js) do
+      local r = InsideWay(g, cont, j, sx, sy, opts.z, ns_)
+      if r then outs[#outs + 1] = { j, Reversed(r) } end
+    end
+  end
+  if jt then
+    ins = {}
+    for _, j in ipairs(jt) do
+      local r = InsideWay(g, cont, j, tx, ty, opts.tz, nt)
+      if r then ins[#ins + 1] = { j, r } end
+    end
+  end
+  if #outs == 0 or #ins == 0 then return nil end -- (`false`: that end not in one)
+  local best, bestLen
+  for _, a in ipairs(outs) do
+    for _, c in ipairs(ins) do
+      local fx, fy = sx, sy
+      if a then fx, fy = g.n[2 * a[1] - 1], g.n[2 * a[1]] end
+      local ex, ey = tx, ty
+      if c then ex, ey = g.n[2 * c[1] - 1], g.n[2 * c[1]] end
+      local o = {}
+      for k, v in pairs(opts) do o[k] = v end
+      if a then o.z, o.indoors, o.transient, o.swimming = nil, nil, nil, nil end
+      if c then o.tz = nil end
+      local mid = RouteBody(cont, fx, fy, ex, ey, o)
+      if mid and mid.pts and #mid.pts >= 2 and not mid.noWay and not mid.unconnected then
+        local len = mid.length + (a and a[2].length or 0) + (c and c[2].length or 0)
+        if len < (bestLen or math.huge) then best, bestLen = { a, mid, c }, len end
+      end
+    end
+  end
+  if not best then return nil end
+  local r = best[2]
+  if best[1] then r = Joined(best[1][2], r) end
+  if best[3] then r = Joined(r, best[3][2]) end
+  return r
+end
 function R.RouteOwn(cont, sx, sy, tx, ty, opts)
-  local r = RouteBody(cont, sx, sy, tx, ty, opts)
+  local r = R.AttachTrip(cont, sx, sy, tx, ty, opts) or RouteBody(cont, sx, sy, tx, ty, opts)
   if r.unconnected and not r.pending then r = R.ToCaveWayIn(cont, sx, sy, tx, ty, opts) or r end
   r = R.BendRoundGuards(cont, R.Smooth(cont, r), sx, sy, tx, ty)
   return R.GuardsOverHighZones(cont, r, sx, sy, tx, ty, opts)
@@ -5502,7 +5784,7 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
   -- floor was taken 79 yd straight from the road outside, its stairs being the longer way, 2026-10-06)
   if not layered and g.indoor and ns.Nav and ns.Nav.InBuilding then
     local function outside(list, x, y)
-      if ns.Nav.InBuilding(cont, x, y) then return list end
+      if ns.Nav.InBuilding(cont, x, y, "joined") then return list end
       local out = {}
       for _, c in ipairs(list) do
         if not g.indoor[c.edge] then out[#out + 1] = c end
@@ -5668,7 +5950,7 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
     -- (on the open land only: not in a capital, a city's or a building's floors, whose roads near are its own floors')
     if R.ENTRY_QUARTERS and qx and not sides and last < #list and last >= R.ENTRY_CANDIDATES and not layered
         and not cityPenalty and not R.CapitalAt(cont, qx, qy) and not (ns.Nav and ns.Nav.InBuilding
-        and ns.Nav.InBuilding(cont, qx, qy)) then
+        and ns.Nav.InBuilding(cont, qx, qy, "joined")) then
       local quarter = {}
       for _, c in ipairs(out) do quarter[sideOf(c, qx, qy)] = true end
       for i = last + 1, #list do

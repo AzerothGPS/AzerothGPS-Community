@@ -517,11 +517,27 @@ def cmd_indoors(args) -> int:
 
     cd = _client(args)
     t = time.time()
+    if args.splice:  # (only the NPCs' buildings the shipped file hasn't, added onto it: splice_lua)
+        onto = D.FILE.read_text(encoding="utf-8")
+        built = D.npc_reached(cd, D.build_npc_buildings(cd, skip=D.shipped_middles(onto)), onto=onto)
+        print(f"{len(built)} buildings to add to the shipped {D.FILE.name} ({time.time() - t:.0f} s)")
+        out = DATA / "debug" / "indoors"
+        for b in built:
+            safe = re.sub(r'[<>:"/\|?*]', "_", f"{b['town']}_{b['uid']}_{b['name']}")
+            D.render(cd, b, out / f"{safe}.png")
+        if args.check:
+            res = D.check(cd, built, onto=onto)
+            bad = [r for r in res if not r["ok"]]
+            print(f"{len(res) - len(bad)} of {len(res)} NPCs reached through their buildings' insides")
+        if args.write:
+            D.FILE.write_text(D.splice_lua(onto, built), encoding="utf-8", newline="\n")
+            print(f"wrote {D.FILE} ({D.FILE.stat().st_size // 1024} KB)")
+        return 0
     towns = args.town or ([] if args.npcs else list(D.TOWNS))
     built = []
     for town in towns:
         built += D.build_town(cd, town)
-    if not args.town:  # (and every building with an NPC upstairs or in a cellar: phase 6, those its inside helps)
+    if not args.town:  # (and every building with an NPC upstairs, in a cellar or shipped inside: phases 6 and 7)
         built += D.npc_reached(cd, D.build_npc_buildings(cd))
     D.walk_joins(built)  # (the doors further from a road: walked to it on the terrain)
     print(f"{len(built)} buildings in {', '.join(towns + ([] if args.town else ['the NPCs buildings']))}"
@@ -1304,7 +1320,10 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--write", action="store_true", help="write Data/Indoors.lua")
     sp.add_argument("--town", action="append", help="only this town (indoors.TOWNS or TOWNS_NEXT); again for more")
     sp.add_argument("--check", action="store_true", help="route from outside to every town place inside (the game harness)")
-    sp.add_argument("--npcs", action="store_true", help="only the buildings with an NPC upstairs or in a cellar (phase 6)")
+    sp.add_argument("--npcs", action="store_true", help="only the buildings with an NPC upstairs or in a cellar or a"
+                    " shipped NPC inside (phases 6 and 7)")
+    sp.add_argument("--splice", action="store_true", help="only those the shipped Data/Indoors.lua hasn't, added onto it"
+                    " (--check, --write: that file); every building in it left as it is")
     sp.set_defaults(fn=cmd_indoors)
 
     sp = sub.add_parser("floors", help="NPCs and quest objectives upstairs or under the ground: data/debug/floors/")
