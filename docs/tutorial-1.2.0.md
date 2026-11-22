@@ -107,7 +107,7 @@ The option is really turned on for this section.
    Without quests: "You have no quests with known places right now, so these stops are examples."
    Noticed by: a new route with stops.
 2. **What it does** (shown)
-   It visits your quests' objectives in the fastest order, then the turn-ins. A stop is done when its quest is, not when you get there. Right-click the button for other ways.
+   It visits your quests' objectives in the fastest order, then the turn-ins. A stop is done when its quest is, not when you get there. Right-click the button to choose how it routes.
 3. **With your other addons** (shown; only when RestedXP Guides, Zygor Guides Viewer, Questie or TomTom is loaded,
    listing those that are)
    AzerothGPS also works with: RestedXP Route, Zygor Route, and Questie.

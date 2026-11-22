@@ -71,10 +71,11 @@ def quests(game):
     tracked, elite. Chat is kept (quests.said()); every choice and setting put back afterward."""
     lua, ns = game
     G, N, st = ns.GPS, ns.Nav, ns.settings.gps
-    was = (st.questTrackedOnly, st.questAutoReroute, st.questLevelOrder, st.questZoneOnly, ns.db.questAutoAsked, ns.Print)
+    was = (st.questTrackedOnly, st.questAutoReroute, st.questLevelOrder, st.questZoneOnly, ns.db.questAutoAsked, ns.Print,
+           st.questTurninsOnly, st.questObjectivesOnly)
     lua.execute("C_QuestLog = AGPS_QL_STUB AGPS_SAID = {}")
     ns.Print = lua.eval("function(m) AGPS_SAID[#AGPS_SAID + 1] = m end")
-    st.questTrackedOnly = st.questAutoReroute = st.questZoneOnly = False
+    st.questTrackedOnly = st.questAutoReroute = st.questZoneOnly = st.questTurninsOnly = st.questObjectivesOnly = False
     st.questLevelOrder = "off"
     N.Clear()
     G.groupChoice = lua.eval("{}")
@@ -97,7 +98,7 @@ def quests(game):
     yield set_log
     lua.execute("C_QuestLog = AGPS_OLD_QL AGPS_QL = {}")
     (st.questTrackedOnly, st.questAutoReroute, st.questLevelOrder, st.questZoneOnly, ns.db.questAutoAsked,
-     ns.Print) = was
+     ns.Print, st.questTurninsOnly, st.questObjectivesOnly) = was
     N.Clear()
     G.groupChoice = lua.eval("{}")
     N.questDropped = lua.eval("{}")

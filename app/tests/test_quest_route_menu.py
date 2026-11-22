@@ -1,16 +1,19 @@
-"""The Quest Route button's right-click menu: other ways to make the quest route, for that route only (1.3.14; the whole
-addon, gameharness).
+"""The Quest Route button's right-click menu: toggles that stay on or off, the player's saved Quest Route options (1.3.14;
+the whole addon, gameharness).
 
 Kooki3z 2026-11-22: "lets extend the quest route button with a sub menu to route in different ways like by level, turn
-ins only, tracked quest only, etc".
+ins only, tracked quest only, etc"; then "make these quick buttons that can be toggled on/off. If any of them conflict
+with another auto turn it on/off like picking turn-ins only and tracked quests only for example, only 1 should be on
+at a time or both off."
 
-- Left-click: the quest route by the saved Quest Route options, as before. Right-click: our own menu (never the game's
-  menus: issue #887) with Fastest order (all quests), Lowest level first, About to turn gray first, Turn-ins only,
-  Objectives only, Tracked quests only, This zone only and Quest Route options...; the entries the saved options give
-  marked "(default)".
-- Each way sets only its own part (QuestWays.lua): the rest is the saved options, quests left out stay out, and the
-  saved options are never changed. The way is the route's (Nav.questWay): its remakes and reorders keep it, a /reload
-  too; a left-click goes back to the saved options.
+- Left-click: the quest route by the saved Quest Route options. Right-click: our own menu (never the game's menus:
+  issue #887) with Fastest order, Lowest level first, About to turn gray first, Turn-ins only, Objectives only, Tracked
+  quests only, This zone only (each a check box) and Quest Route options...
+- Each toggle is a saved setting (QuestWays.lua): Options > Routing > Quest Route is its home, the menu a second
+  control; one changes the other. Groups: the level order (Fastest order = neither), and turn-ins only / objectives
+  only / tracked quests only, at most one on; this zone only combines with anything.
+- A toggle on a quest route makes it again at once; on any other route (or none) it's only saved. The menu stays open
+  after a toggle; a click elsewhere, the button again or Escape (the menu only) shuts it.
 - It opens beside the button wherever the button is: the column going up, the row going right, the world map, the map
   grown out of the minimap square.
 
@@ -20,9 +23,10 @@ The quest log is test_quest_route_choices.py's stub: its quests around Brill on 
 import pytest
 
 from test_map_redraw import MM_SETUP, MM_TEARDOWN, _expand_setup, _tick
-from test_quest_route_choices import _names, _order, game, quests  # noqa: F401
+from test_quest_route_choices import BRILL, _names, _order, game, quests  # noqa: F401
 
 WAYS = ["fastest", "low", "gray", "turnins", "objectives", "tracked", "zone"]
+ALL4 = ["Boars", "Spiders", "Turn in: Letter", "Wolves"]
 
 
 def _qr(ns):
@@ -34,19 +38,40 @@ def _right_click(ns):
     b._scripts.OnClick(b, "RightButton")
 
 
+def _left_click(ns):
+    b = _qr(ns)
+    b._scripts.OnClick(b, "LeftButton")
+
+
 def _rows(ns):
     m = ns.GPS.questWays
     return [(str(r.id), str(r.text._text)) for r in m.rows.values() if r._shown]
 
 
-def _pick(ns, way):
+def _row(ns, way):
     m = ns.GPS.questWays
     (row,) = [r for r in m.rows.values() if r._shown and r.id == way]
+    return row
+
+
+def _pick(ns, way):
+    row = _row(ns, way)
     row._scripts.OnClick(row, "LeftButton")
 
 
+def _checked(ns):
+    """The ids whose check box shows on, as the menu draws them."""
+    m = ns.GPS.questWays
+    return [str(r.id) for r in m.rows.values() if r._shown and r.check._shown]
+
+
+def _on(ns):
+    """The toggles on by the saved options."""
+    return [w for w in WAYS if ns.GPS.QuestToggleOn(w)]
+
+
 def _saved(st):
-    return (st.questLevelOrder, st.questZoneOnly, st.questTrackedOnly)
+    return (st.questLevelOrder, st.questZoneOnly, st.questTrackedOnly, st.questTurninsOnly, st.questObjectivesOnly)
 
 
 def _log(quests):
@@ -68,32 +93,40 @@ def menu(game, quests):
     ns.GPS.CloseQuestWays()
 
 
-def test_right_click_opens_the_menu_and_left_click_is_the_saved_route(menu):
+def test_right_click_opens_the_toggles_and_left_click_is_the_route_by_them(menu):
     lua, ns = menu
     G, N = ns.GPS, ns.Nav
     b = _qr(ns)
     assert b is not None and lua.eval("rawequal")(b, next(t.button for t in G.QUICK.values() if t.id == "questRoute"))
     _right_click(ns)
     assert G.QuestWaysOpen() and len(N.stops) == 0  # (the menu only: no route yet)
-    ids = [i for i, _ in _rows(ns)]
-    assert ids == WAYS + ["options"]
+    assert [i for i, _ in _rows(ns)] == WAYS + ["options"]
     texts = dict(_rows(ns))
-    assert texts["turnins"] == "Turn-ins only" and texts["options"] == "Quest Route options..."
-    assert texts["low"] == "Lowest level first" and texts["fastest"].startswith("Fastest order (all quests)")
+    assert texts["fastest"] == "Fastest order" and texts["turnins"] == "Turn-ins only"
+    assert texts["options"] == "Quest Route options..."
+    assert not any("(default)" in t for t in texts.values())
+    # the saved options as check boxes: by default only Fastest order; Quest Route options... has none
+    assert _checked(ns) == ["fastest"]
+    assert all(_row(ns, w).box._shown for w in WAYS) and not _row(ns, "options").box._shown
     # right-click again: shut; a click anywhere else shuts it too
     _right_click(ns)
     assert not G.QuestWaysOpen()
     _right_click(ns)
     G.questWays.catch._scripts.OnClick(G.questWays.catch, "LeftButton")
     assert not G.QuestWaysOpen()
-    # left-click: the quest route by the saved options, as before (every quest), the menu shut
+    # left-click: the quest route by the saved options (every quest), the menu shut
     _right_click(ns)
-    b._scripts.OnClick(b, "LeftButton")
+    _left_click(ns)
     assert not G.QuestWaysOpen()
-    assert _names(ns) == ["Boars", "Spiders", "Turn in: Letter", "Wolves"] and N.questWay is None
+    assert _names(ns) == ALL4
+    # with a toggle on, a left-click routes by it
+    ns.settings.gps.questTurninsOnly = True
+    N.Clear()
+    _left_click(ns)
+    assert _names(ns) == ["Turn in: Letter"]
 
 
-def test_the_tooltip_says_right_click(menu):
+def test_the_tooltip_says_right_click_to_choose(menu):
     lua, ns = menu
     b = _qr(ns)
     lines = []
@@ -103,120 +136,207 @@ def test_the_tooltip_says_right_click(menu):
         b._scripts.OnEnter(b)
     finally:
         lua.execute("GameTooltip.AddLine = AGPS_OLD_ADD")
-    assert "Right-click for other ways." in lines
+    assert "Right-click to choose how it routes." in lines
 
 
-@pytest.mark.parametrize("saved_level", ["off", "low"])
-def test_each_way_makes_its_stops_and_leaves_the_options_alone(menu, saved_level):
+def test_a_toggle_is_saved_and_the_menu_stays_open(menu):
     lua, ns = menu
-    G, N, st = ns.GPS, ns.Nav, ns.settings.gps
-    st.questLevelOrder = saved_level
-    was = _saved(st)
-    calls = []
-    real = ns.Layers.QuestStops
-    note = lambda zone, tracked: calls.append((bool(zone), bool(tracked)))  # noqa: E731
-    ns.Layers.QuestStops = lua.eval("function(real, note) return function(z, t) note(z, t) return real(z, t) end end")(
-        real, note)
-    try:
-        made = {}
-        for way in WAYS:
-            _right_click(ns)
-            _pick(ns, way)
-            assert not G.QuestWaysOpen()
-            assert _saved(st) == was, way  # (the saved options untouched)
-            made[way] = (_names(ns), calls[-1], N.QuestLevelOrder(), [bool(N.stops[i].turnin) for i in
-                                                                      range(1, len(N.stops) + 1)])
-    finally:
-        ns.Layers.QuestStops = real
-    # turn-ins only: the finished quest's turn-in alone; objectives only: no turn-in
-    assert made["turnins"][0] == ["Turn in: Letter"] and all(made["turnins"][3])
-    assert made["objectives"][0] == ["Boars", "Spiders", "Wolves"] and not any(made["objectives"][3])
-    # tracked only: the tracked quests; this zone only: the zone's (asked of the quest log so)
-    assert made["tracked"][0] == ["Spiders", "Wolves"] and made["tracked"][1] == (False, True)
-    assert made["zone"][1] == (True, False)
-    # fastest order, all quests: no level order, whatever is saved; every quest
-    assert made["fastest"][2] is None and made["fastest"][1] == (False, False) and len(made["fastest"][0]) == 4
-    # by level: its order for this route; the other ways keep the saved one
-    assert made["low"][2] == "low" and made["gray"][2] == "gray"
-    assert made["tracked"][2] == (None if saved_level == "off" else "low")
-
-
-def test_lowest_level_first_puts_the_low_quests_first(menu):
-    lua, ns = menu
-    N, st = ns.Nav, ns.settings.gps
-    st.fastestOrder = True
-    _right_click(ns)
-    _pick(ns, "low")
-    # levels 10-12 (Wolves, Spiders) before 13-15 (Boars, the Letter's turn-in), each band the fastest order
-    assert sorted(_order(ns)[:2]) == ["Spiders", "Wolves"]
-    bands = N.QuestBands(N.stops)
-    assert bands is not None
-    assert st.questLevelOrder == "off"
-
-
-def test_the_way_holds_on_a_remake_and_a_left_click_goes_back(menu):
-    lua, ns = menu
-    G, N, st = ns.GPS, ns.Nav, ns.settings.gps
+    G, st = ns.GPS, ns.settings.gps
     _right_click(ns)
     _pick(ns, "turnins")
-    assert _names(ns) == ["Turn in: Letter"] and str(N.questWay.id) == "turnins"
-    # remade by the Sprint icon, by itself, a /reload: still turn-ins only
-    ns.db.questAutoAsked = True
-    G.QuestRerouteClick()
-    assert _names(ns) == ["Turn in: Letter"]
-    st.questAutoReroute = True
-    N.MarkQuestRouteStale()
-    G.autoQuestPending = None
-    G.AutoQuestTick()
-    assert _names(ns) == ["Turn in: Letter"]
-    N.questWay = None
-    N.Restore()
-    assert str(N.questWay.id) == "turnins" and str(G.QuestWayNow()) == "turnins"
-    # a quest picked up: nothing for a turn-ins only route to add; a quest finished: its turn-in wanted
-    assert not N.QuestRouteTakesNew() and N.QuestRouteTakes(603)
-    # objectives only: a finished quest's turn-in isn't wanted
+    assert G.QuestWaysOpen() and st.questTurninsOnly is True and "turnins" in _checked(ns)
+    _pick(ns, "zone")
+    assert G.QuestWaysOpen() and st.questZoneOnly is True and _checked(ns) == ["fastest", "turnins", "zone"]
+    # shut and opened again: as saved
+    G.CloseQuestWays()
     _right_click(ns)
+    assert _checked(ns) == ["fastest", "turnins", "zone"]
+    # clicked again: off
+    _pick(ns, "turnins")
+    _pick(ns, "zone")
+    assert st.questTurninsOnly is False and st.questZoneOnly is False and _checked(ns) == ["fastest"]
+
+
+def test_whats_routed_is_one_at_most(menu):
+    lua, ns = menu
+    st = ns.settings.gps
+    _right_click(ns)
+    what = ["turnins", "objectives", "tracked"]
+    for a in what:
+        for b in what:
+            _pick(ns, a)
+            if not ns.GPS.QuestToggleOn(a):
+                _pick(ns, a)
+            assert [w for w in what if w in _on(ns)] == [a]
+            if b != a:
+                _pick(ns, b)  # (turning another on turns this one off)
+                assert [w for w in what if w in _on(ns)] == [b] and [w for w in what if w in _checked(ns)] == [b]
+            _pick(ns, b)  # (and off: none on)
+            assert not [w for w in what if w in _on(ns)]
+    # Kooki3z's example: turn-ins only, then tracked quests only
+    _pick(ns, "turnins")
+    _pick(ns, "tracked")
+    assert st.questTrackedOnly is True and st.questTurninsOnly is False and st.questObjectivesOnly is False
+
+
+def test_the_level_order_and_fastest(menu):
+    lua, ns = menu
+    st = ns.settings.gps
+    _right_click(ns)
+    order = ["fastest", "low", "gray"]
+    assert [w for w in order if w in _checked(ns)] == ["fastest"]
+    # Fastest order clicked while on: stays on, nothing changes
+    _pick(ns, "fastest")
+    assert st.questLevelOrder == "off" and [w for w in order if w in _checked(ns)] == ["fastest"]
+    # a level order on: Fastest off; the other level order turns it off
+    _pick(ns, "low")
+    assert st.questLevelOrder == "low" and [w for w in order if w in _checked(ns)] == ["low"]
+    _pick(ns, "gray")
+    assert st.questLevelOrder == "gray" and [w for w in order if w in _checked(ns)] == ["gray"]
+    # Fastest order on: both level orders off
+    _pick(ns, "fastest")
+    assert st.questLevelOrder == "off" and [w for w in order if w in _checked(ns)] == ["fastest"]
+    # a level order turned off by itself: Fastest again
+    _pick(ns, "gray")
+    _pick(ns, "gray")
+    assert st.questLevelOrder == "off" and [w for w in order if w in _checked(ns)] == ["fastest"]
+
+
+def test_this_zone_only_combines_with_anything(menu):
+    lua, ns = menu
+    _right_click(ns)
+    _pick(ns, "zone")
+    for w in ("low", "turnins", "gray", "objectives", "tracked", "fastest"):
+        _pick(ns, w)
+        assert "zone" in _on(ns) and w in _on(ns), w
+    assert _on(ns) == ["fastest", "tracked", "zone"]
+
+
+def test_a_toggle_remakes_the_quest_route_at_once(menu):
+    lua, ns = menu
+    G, N, st = ns.GPS, ns.Nav, ns.settings.gps
+    st.fastestOrder = True
+    _left_click(ns)
+    assert _names(ns) == ALL4
+    _right_click(ns)
+    turnin = lambda: [bool(N.stops[i].turnin) for i in range(1, len(N.stops) + 1)]  # noqa: E731
+    _pick(ns, "turnins")
+    assert _names(ns) == ["Turn in: Letter"] and all(turnin())
+    assert not N.QuestRouteTakesNew() and N.QuestRouteTakes(603)
     _pick(ns, "objectives")
+    assert _names(ns) == ["Boars", "Spiders", "Wolves"] and not any(turnin())
     assert not N.QuestRouteTakes(603) and N.QuestRouteTakesNew()
-    # a left-click: the saved options again
-    b = _qr(ns)
-    b._scripts.OnClick(b, "LeftButton")
-    assert N.questWay is None and len(_names(ns)) == 4 and N.QuestRouteTakes(603)
-    N.Restore()
-    assert N.questWay is None
+    _pick(ns, "tracked")
+    assert _names(ns) == ["Spiders", "Wolves"]
+    _pick(ns, "tracked")
+    assert _names(ns) == ALL4 and N.QuestRouteTakes(603)
+    # by level: lowest first, levels 10-12 (Wolves, Spiders) before 13-15 (Boars, the Letter's turn-in)
+    _pick(ns, "low")
+    assert N.QuestLevelOrder() == "low" and N.QuestBands(N.stops) is not None
+    assert sorted(_order(ns)[:2]) == ["Spiders", "Wolves"]
+    _pick(ns, "fastest")
+    assert N.QuestLevelOrder() is None
+    assert G.QuestWaysOpen()  # (open the whole time)
+
+
+def test_a_toggle_doesnt_touch_another_route(menu):
+    lua, ns = menu
+    G, N = ns.GPS, ns.Nav
+    # no route: only saved
+    _right_click(ns)
+    _pick(ns, "turnins")
+    assert len(N.stops) == 0 and ns.settings.gps.questTurninsOnly is True
+    # a route of the player's own stops: kept as it is
+    N.SetStops(lua.eval(f"{{ {{ x = {BRILL[0] + 300}, y = {BRILL[1]}, cont = 0, name = 'Mine' }} }}"), True)
+    assert _order(ns) == ["Mine"] and not N.OnQuestRoute()
+    _pick(ns, "objectives")
+    _pick(ns, "low")
+    assert _order(ns) == ["Mine"] and ns.settings.gps.questObjectivesOnly is True
 
 
 def test_turn_ins_only_with_nothing_finished_says_so(menu, quests):
     lua, ns = menu
-    G, N = ns.GPS, ns.Nav
+    N = ns.Nav
     quests({"id": 611, "title": "Wolves", "dx": 60})
     _right_click(ns)
     _pick(ns, "turnins")
+    _left_click(ns)
     assert len(N.stops) == 0
     assert any("none of your quests are finished yet" in m for m in quests.said())
 
 
-def test_left_out_quests_stay_out_whichever_way(menu):
+def test_left_out_quests_stay_out_whichever_toggle(menu):
     lua, ns = menu
-    G, N = ns.GPS, ns.Nav
+    G = ns.GPS
     G.groupChoice[603] = "leave"
-    for way in ("fastest", "objectives", "low"):
-        _right_click(ns)
+    _left_click(ns)
+    _right_click(ns)
+    for way in ("objectives", "low", "zone"):
         _pick(ns, way)
-        assert "Boars" not in _names(ns), way
+        assert "Boars" not in _names(ns) and len(_names(ns)) > 0, way
 
 
-def test_the_default_is_marked(menu):
+def test_the_options_page_and_the_menu_stay_in_sync(menu):
     lua, ns = menu
-    G, st = ns.GPS, ns.settings.gps
+    G, O, st = ns.GPS, ns.Options, ns.settings.gps
+    O.Show()
+    try:
+        ctl = {c.key: c.control for c in O.settingControls.values() if not c.mirror}
+
+        def click(key, on):
+            cb = ctl[key]
+            cb.SetChecked(cb, on)
+            cb._scripts.OnClick(cb)
+
+        _right_click(ns)
+        # the options' check box: the menu shows it at once, the others of its group off
+        click("questTrackedOnly", True)
+        assert "tracked" in _checked(ns)
+        click("questTurninsOnly", True)
+        assert st.questTurninsOnly is True and st.questTrackedOnly is False
+        assert [w for w in ("turnins", "objectives", "tracked") if w in _checked(ns)] == ["turnins"]
+        assert ctl["questTrackedOnly"].GetChecked(ctl["questTrackedOnly"]) is False
+        click("questObjectivesOnly", True)
+        assert st.questTurninsOnly is False and [w for w in ("turnins", "objectives") if w in _checked(ns)] == ["objectives"]
+        # the menu's toggle: the options' check boxes follow
+        _pick(ns, "tracked")
+        assert ctl["questTrackedOnly"].GetChecked(ctl["questTrackedOnly"]) is True
+        assert ctl["questObjectivesOnly"].GetChecked(ctl["questObjectivesOnly"]) is False
+        _pick(ns, "zone")
+        assert ctl["questZoneOnly"].GetChecked(ctl["questZoneOnly"]) is True
+        click("questZoneOnly", False)
+        assert "zone" not in _checked(ns)
+        # the level order's choice, both ways
+        _pick(ns, "gray")
+        radios = ctl["questLevelOrder"]
+        assert [bool(radios[i].GetChecked(radios[i])) for i in range(1, len(radios) + 1)] == [False, False, True]
+        r = radios[2]  # (Lowest level first)
+        r._scripts.OnClick(r)
+        assert st.questLevelOrder == "low" and [w for w in ("fastest", "low", "gray") if w in _checked(ns)] == ["low"]
+    finally:
+        lua.execute("if AzerothGPSOptions then AzerothGPSOptions:Hide() end")
+
+
+def test_escape_shuts_only_the_menu(menu):
+    lua, ns = menu
+    G = ns.GPS
+    lua.execute("AGPS_NS.settings.gps.shown = true")
     _right_click(ns)
-    marked = [i for i, t in _rows(ns) if t.endswith("(default)|r")]
-    assert marked == ["fastest"]
-    G.CloseQuestWays()
-    st.questLevelOrder, st.questTrackedOnly = "gray", True
-    _right_click(ns)
-    marked = [i for i, t in _rows(ns) if t.endswith("(default)|r")]
-    assert marked == ["gray", "tracked"]
+    m = G.questWays
+    assert m._keyboard is True and m._propagate is True  # (other keys go on to the game)
+    m._scripts.OnKeyDown(m, "W")
+    assert G.QuestWaysOpen() and m._propagate is True
+    m._scripts.OnKeyDown(m, "ESCAPE")
+    assert not G.QuestWaysOpen() and m._propagate is False  # (taken: not the game's menu, nor the map)
+    # in combat the keys can't be taken: none are, so none are kept from the game
+    lua.execute("AGPS_OLD_ICL = InCombatLockdown InCombatLockdown = function() return true end")
+    try:
+        _right_click(ns)
+        assert m._keyboard is False
+        m._scripts.OnKeyDown(m, "ESCAPE")
+        assert not G.QuestWaysOpen()
+    finally:
+        lua.execute("InCombatLockdown = AGPS_OLD_ICL")
 
 
 def test_quest_route_options_opens_routing_at_the_quest_route_section(menu):
@@ -254,6 +374,7 @@ def test_with_the_controller_ui_the_menu_is_our_own(menu):
     try:
         assert G.ControllerUI()
         G.questWays = None  # (made afresh under the controller UI)
+        _left_click(ns)
         _right_click(ns)
         assert G.QuestWaysOpen() and lua.eval("AGPS_GAME_MENUS") == 0
         _pick(ns, "tracked")
@@ -318,6 +439,7 @@ def test_it_works_in_world_map_mode(menu):
         G.ApplySettings()
         lua.globals().AzerothGPS_ToggleMap()
         assert G.WorldMapHosted()
+        _left_click(ns)
         _right_click(ns)
         assert G.QuestWaysOpen()
         _pick(ns, "tracked")
@@ -341,6 +463,7 @@ def test_it_works_on_the_map_grown_out_of_the_minimap_square(menu):
         G.SetMinimapExpanded(True)
         _tick(lua, ns)
         assert G.mmState.expanded
+        _left_click(ns)
         _right_click(ns)
         assert G.QuestWaysOpen()
         _pick(ns, "turnins")
@@ -353,15 +476,58 @@ def test_it_works_on_the_map_grown_out_of_the_minimap_square(menu):
         G.ApplySettings()
 
 
-def test_the_slash_command_takes_a_way(menu, quests):
+def test_the_slash_command_sets_a_toggle_and_routes(menu, quests):
     lua, ns = menu
-    N = ns.Nav
+    st = ns.settings.gps
     run = lua.eval("function(m) SlashCmdList.AZEROTHGPS(m) end")
-    run("questroute turnins")
-    assert _names(ns) == ["Turn in: Letter"]
-    run("questroute tracked")
-    assert _names(ns) == ["Spiders", "Wolves"]
+    run("questroute turnins")  # (no route before: one made)
+    assert st.questTurninsOnly is True and _names(ns) == ["Turn in: Letter"]
+    run("questroute turnins")  # (set, not flipped: the same each time)
+    assert st.questTurninsOnly is True and _names(ns) == ["Turn in: Letter"]
+    run("questroute tracked")  # (its group: turn-ins only off)
+    assert st.questTrackedOnly is True and st.questTurninsOnly is False and _names(ns) == ["Spiders", "Wolves"]
+    run("questroute tracked off")
+    assert st.questTrackedOnly is False and _names(ns) == ALL4
+    run("questroute grey")
+    assert st.questLevelOrder == "gray"
+    run("questroute fastest")
+    assert st.questLevelOrder == "off"
     run("questroute sideways")
-    assert any("Quest Route ways:" in m for m in quests.said()) and _names(ns) == ["Spiders", "Wolves"]
+    assert any("Quest Route ways:" in m for m in quests.said()) and _names(ns) == ALL4
+    ns.Nav.Clear()
     run("questroute")
-    assert len(_names(ns)) == 4 and N.questWay is None
+    assert _names(ns) == ALL4
+
+
+def test_the_toggles_survive_a_reload(game):
+    # toggled in one session; its saved variables (the game writes AzerothGPSDB out) read by the next one
+    from azerothgps.gameharness import start
+
+    lua, ns = game
+    G, st = ns.GPS, ns.settings.gps
+    was = _saved(st)
+    try:
+        for k, v in (("questLevelOrder", "off"), ("questZoneOnly", False), ("questTrackedOnly", False),
+                     ("questTurninsOnly", False), ("questObjectivesOnly", False)):
+            st[k] = v
+        _right_click(ns)
+        _pick(ns, "objectives")
+        _pick(ns, "gray")
+        _pick(ns, "zone")
+        G.CloseQuestWays()
+        # (the saved variable's settings, written out as plain values)
+        saved = lua.eval("""function()
+          local out = {}
+          for k, v in pairs(AzerothGPSDB.settings.gps) do
+            if type(v) == "boolean" or type(v) == "number" then out[#out + 1] = k .. " = " .. tostring(v)
+            elseif type(v) == "string" then out[#out + 1] = k .. " = " .. string.format("%q", v) end
+          end
+          return "AzerothGPSDB = { settings = { gps = { " .. table.concat(out, ", ") .. " } } }"
+        end""")()
+        assert "questObjectivesOnly = true" in saved and 'questLevelOrder = "gray"' in saved
+        lua2, ns2 = start(saved=saved)
+        assert [w for w in WAYS if ns2.GPS.QuestToggleOn(w)] == ["gray", "objectives", "zone"]
+        _right_click(ns2)
+        assert _checked(ns2) == ["gray", "objectives", "zone"]
+    finally:
+        (st.questLevelOrder, st.questZoneOnly, st.questTrackedOnly, st.questTurninsOnly, st.questObjectivesOnly) = was

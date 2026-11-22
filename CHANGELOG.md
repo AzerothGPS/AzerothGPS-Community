@@ -11,8 +11,8 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Roads: new roads and stairs in Ironforge.
 - For plugin addons (API 23): set the route to a place, and preview a recorded walk as the route. See docs/api.md.
 - Roads: the trail up from Cragpool Lake in Stonetalon Mountains.
-- Quest Route: right-click the button for other ways to route: lowest level first, about to turn gray first, turn-ins only, objectives only, tracked quests only or this zone only, without changing your options.
-- Quest Route: with a controller, the button's hint switches between the buttons that route and that open the other ways; move through them with the D-pad.
+- Quest Route: right-click the button for toggles that stay on: lowest level first, about to turn gray first, turn-ins only, objectives only, tracked quests only, this zone only. A quest route remakes itself as you change them.
+- Quest Route: with a controller, the button's hint switches between the buttons that route and that open the toggles; move through them with the D-pad, A turns one on or off.
 - Near an NPC you picked in the search as your next stop, a Target button under the directions targets it with your click and marks it with the stop's route marker (also a key; Options > Directions).
 
 ### Changed

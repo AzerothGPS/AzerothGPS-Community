@@ -55,6 +55,7 @@ NEW = ["extraWindow", "followOnMove", "arrowEase", "allowSwim", "language", "lay
        "importKeepOrder",  # (1.3.9: imports routed in the order listed; the Import and Share window's box too)
        "questTrackedOnly",  # (1.3.10: the quest route from the tracked quests only, Questie's tracker's or the game's)
        "questLevelOrder",  # (Kooki3z 2026-11-21: the quest route by level, lowest or about to turn gray first)
+       "questTurninsOnly", "questObjectivesOnly",  # (1.3.14, Kooki3z: the Quest Route button's toggles)
        "routeSlopeShade",  # (Kooki3z 2026-11-20: the route lighter uphill, darker downhill)
        "targetNpcButton", "targetNpcMarkSolo", "targetNpcMarkGroup"]  # (1.3.14, Kooki3z: a Target button near an NPC stop)
 # Where each setting's control is: the page a player would look on.
@@ -79,7 +80,7 @@ HOME = {
     "Opacity": "alpha fadeMoving movingAlpha combatHideMap combatAlpha combatHideArrow arrowCombatAlpha "
                "clickThroughMoving clickThroughCombat",
     "Routing": "useFlights flightMapRing useHearthstone useTeleports avoidHighZones avoidHostile allowSwim roadTolerance fastestOrder "
-               "cityKeepOrder importKeepOrder questZoneOnly questTrackedOnly questLevelOrder questAutoReroute questPickRoute navCloseClears acceptWay acceptMapPins acceptShared",
+               "cityKeepOrder importKeepOrder questZoneOnly questTrackedOnly questTurninsOnly questObjectivesOnly questLevelOrder questAutoReroute questPickRoute navCloseClears acceptWay acceptMapPins acceptShared",
     "Directions": "arrow arrowLocked arrowEase arrowPx arrowBg dirShown dirLocked dirStopsOnly arrowSnap arrowSide dirTextScale dirBg "
                   "questing targetNpcButton targetNpcMarkSolo targetNpcMarkGroup",
     "Quick buttons": "keyBlockedInCombat",  # (2026-11-19: the keys with the buttons)
@@ -137,6 +138,18 @@ def test_every_setting_has_one_control_on_the_page_it_belongs_to(game):
     # the second controls kept on purpose: the Quick buttons page's "On" column, for buttons that are a setting
     mirrors = sorted((c.key, c.page) for c in ns.Options.settingControls.values() if c.mirror)
     assert mirrors == [("layerCity", "Quick buttons"), ("useHearthstone", "Quick buttons")]
+
+
+def test_the_quest_route_menus_toggles_are_a_second_control(game):
+    # (1.3.14, Kooki3z: "make these quick buttons that can be toggled on/off": the Quest Route button's right-click
+    # toggles, QuestWays.lua's G.QUEST_WAYS, are the Routing page's Quest Route settings, a mirror kept on purpose
+    # outside the options window; each still has its one home there)
+    lua, ns = game
+    home = {k: page for page, keys in HOME.items() for k in keys.split()}
+    keys = {str(e.key) for e in ns.GPS.QUEST_WAYS.values() if e.key}
+    assert keys == {"questLevelOrder", "questTurninsOnly", "questObjectivesOnly", "questTrackedOnly", "questZoneOnly"}
+    assert {k: home[k] for k in keys} == {k: "Routing" for k in keys}
+    assert keys <= set(ns.DEFAULTS.gps.keys())
 
 
 def test_every_setting_the_options_change_is_named_for_its_control(game):

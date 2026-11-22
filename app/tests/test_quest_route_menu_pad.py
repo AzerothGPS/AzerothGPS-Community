@@ -7,7 +7,8 @@ opening the submenu in 1.3.14".
 - The Quest Route button in the map menu's focus: its hint goes from Set Stop's button (A, which presses it) to
   Remove's (X, its right-click: the menu) and back, each Pad.SWAP_SECONDS, cross-fading; only while it has the focus.
 - X opens the menu; the D-pad's up and down move a highlight over its entries (round at the ends), starting on the
-  "(default)" one; A picks it (that way's route, the saved options untouched); B shuts it, the focus back on the button.
+  first; A toggles the highlighted one (saved, as a click does) and the menu stays open; B shuts it, the focus back on
+  the button.
 
 The quest log is test_quest_route_choices.py's stub; the pad test_controller.py's.
 """
@@ -16,7 +17,7 @@ import pytest
 
 from test_controller import PAD_STUBS, _frames, _plain, _press
 from test_quest_route_choices import _names, game, quests  # noqa: F401
-from test_quest_route_menu import _saved, menu  # noqa: F401
+from test_quest_route_menu import menu  # noqa: F401
 
 
 @pytest.fixture
@@ -117,21 +118,23 @@ def test_the_swap_follows_the_players_buttons(padmenu):
         P.ResetBinds()
 
 
-def test_x_opens_the_menu_and_the_d_pad_moves_its_highlight_from_the_default(padmenu):
+def test_x_opens_the_menu_and_the_d_pad_moves_its_highlight_from_the_first(padmenu):
     lua, ns = padmenu
     G, P, st = ns.GPS, ns.Pad, ns.settings.gps
-    st.questLevelOrder = "gray"  # (the default entry: About to turn gray first, the third)
+    st.questLevelOrder = "gray"  # (whatever is on: the highlight starts on the first)
     qr = _focus_qr(lua, ns)
     _press(lua, "PAD3")
     assert G.QuestWaysOpen() and len(ns.Nav.stops) == 0
     m = G.questWays
     same = lua.eval("rawequal")
-    assert m.at == 3 and str(G.QuestWaysSelRow().id) == "gray"
-    assert m.sel._shown and same(m.sel.row, m.rows[3])  # (the highlight over it)
+    assert m.at == 1 and str(G.QuestWaysSelRow().id) == "fastest"
+    assert m.sel._shown and same(m.sel.row, m.rows[1])  # (the highlight over it)
     # the hints now: A's over the highlighted entry, B's over the button it goes back to
     _tick_hints(lua, P, 0.1)
-    assert set(_hints_on(lua, ns, m.rows[3])) == {"select"} and set(_hints_on(lua, ns, qr)) == {"back"}
-    # down and up, round at the ends (8 entries: the seven ways and Quest Route options...)
+    assert set(_hints_on(lua, ns, m.rows[1])) == {"select"} and set(_hints_on(lua, ns, qr)) == {"back"}
+    # down and up, round at the ends (8 entries: the seven toggles and Quest Route options...)
+    _press(lua, "PADDDOWN")
+    _press(lua, "PADDDOWN")
     _press(lua, "PADDDOWN")
     assert str(G.QuestWaysSelRow().id) == "turnins" and same(m.sel.row, m.rows[4])
     _press(lua, "PADDUP")
@@ -149,36 +152,39 @@ def test_x_opens_the_menu_and_the_d_pad_moves_its_highlight_from_the_default(pad
     assert len(ns.Nav.stops) == 0
 
 
-def test_with_the_saved_options_the_highlight_starts_on_the_first(padmenu):
-    lua, ns = padmenu
-    G, st = ns.GPS, ns.settings.gps
-    st.questLevelOrder, st.questTrackedOnly = "off", True  # (default: Tracked quests only, the sixth)
-    _focus_qr(lua, ns)
-    _press(lua, "PAD3")
-    assert str(G.QuestWaysSelRow().id) == "tracked"
-    _press(lua, "PAD2")
-    st.questTrackedOnly = False  # (Fastest order the default: the first)
-    _press(lua, "PAD3")
-    assert str(G.QuestWaysSelRow().id) == "fastest"
-
-
-def test_a_picks_the_highlighted_way_and_leaves_the_options_alone(padmenu):
+def test_a_toggles_the_highlighted_entry_and_the_menu_stays_open(padmenu):
     lua, ns = padmenu
     G, P, N, st = ns.GPS, ns.Pad, ns.Nav, ns.settings.gps
-    was = _saved(st)
+    same = lua.eval("rawequal")
     qr = _focus_qr(lua, ns)
     _press(lua, "PAD3")
-    _press(lua, "PADDDOWN")
-    _press(lua, "PADDDOWN")
-    _press(lua, "PADDDOWN")
+    for _ in range(5):
+        _press(lua, "PADDDOWN")
+    assert str(G.QuestWaysSelRow().id) == "tracked"
+    _press(lua, "PAD1")
+    m = G.questWays
+    assert G.QuestWaysOpen() and st.questTrackedOnly is True and m.rows[6].check._shown
+    assert str(G.QuestWaysSelRow().id) == "tracked" and same(P.focus, qr) and P.MenuOpen()
+    # another of its group: the first one off, shown at once
+    _press(lua, "PADDUP")
+    _press(lua, "PADDUP")
     assert str(G.QuestWaysSelRow().id) == "turnins"
     _press(lua, "PAD1")
-    assert not G.QuestWaysOpen()
-    assert _names(ns) == ["Turn in: Letter"] and str(N.questWay.id) == "turnins"
-    assert _saved(st) == was
-    same = lua.eval("rawequal")
-    if P.MenuOpen():  # (the map menu still open: the focus back on the button)
-        assert same(P.focus, qr)
+    assert st.questTurninsOnly is True and st.questTrackedOnly is False and not m.rows[6].check._shown
+    assert len(N.stops) == 0  # (no quest route: only saved)
+    # on a quest route: A remakes it at once, the menu still open
+    _press(lua, "PAD2")
+    G.QuestRoute()
+    assert _names(ns) == ["Turn in: Letter"]
+    _focus_qr(lua, ns)
+    _press(lua, "PAD3")
+    for _ in range(3):
+        _press(lua, "PADDDOWN")
+    _press(lua, "PAD1")  # (Turn-ins only off: every quest again)
+    assert G.QuestWaysOpen() and st.questTurninsOnly is False and len(_names(ns)) == 4
+    # B: shut, the focus back on the button
+    _press(lua, "PAD2")
+    assert not G.QuestWaysOpen() and same(P.focus, qr)
 
 
 def test_b_shuts_the_menu_and_the_focus_is_back_on_the_button(padmenu):
@@ -227,4 +233,4 @@ def test_the_mouse_sees_no_highlight(padmenu):
     assert m.sel._shown
     # left-click: the saved route, as ever
     qr._scripts.OnClick(qr, "LeftButton")
-    assert not G.QuestWaysOpen() and len(_names(ns)) == 4 and ns.Nav.questWay is None
+    assert not G.QuestWaysOpen() and len(_names(ns)) == 4
