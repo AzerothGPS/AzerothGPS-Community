@@ -1590,6 +1590,26 @@ end
 -- show only while on that city's level). `questsOnly`: the quests' marks alone (the seamless map's world stage).
 -- `shown` (optional): { quests, city, herbs, ore = false } leaves that kind out (GPSFrame's G.IconKinds: past the zoom it
 -- shows out to, asked 2026-11-14)
+-- Questie shows the turn-ins itself (its "?" over the quest giver), and its icons are on the GPS map (OtherPins, option
+-- otherAddonPins) or on the game's minimap under the GPS map's square: ours left out, or each showed twice (reported
+-- 2026-11-21 by players with Questie). Its objectives stay ours: those are areas and spots, Questie's are its NPCs and
+-- items.
+function Lay.QuestieTurnIns()
+  local loaded = type(rawget(_G, "Questie")) == "table"
+  if not loaded then
+    local AO = rawget(_G, "C_AddOns")
+    local f = AO and AO.IsAddOnLoaded or rawget(_G, "IsAddOnLoaded")
+    if type(f) == "function" then
+      local ok, on = pcall(f, "Questie")
+      loaded = ok and on and true or false
+    end
+  end
+  if not loaded then return false end
+  local OP, G = ns.OtherPins, ns.GPS
+  if OP and OP.On and OP.On() then return true end
+  return G and G.MinimapMode and G.MinimapMode() and true or false
+end
+
 function Lay.Marks(cont, cx, cy, reach, mapIDs, level, questsOnly, shown)
   local st = ns.settings.gps
   shown = shown or {}
@@ -1615,7 +1635,7 @@ function Lay.Marks(cont, cx, cy, reach, mapIDs, level, questsOnly, shown)
           if x then
             if kind == "objective" and st.layerQuests then
               put(x, y, Lay.ICON.objective, m[5] or L["Quest objective"], L["Quest objective"], 16, nil, nil, nil, m[6])
-            elseif kind == "turnin" and st.layerQuests then
+            elseif kind == "turnin" and st.layerQuests and not Lay.QuestieTurnIns() then
               put(x, y, Lay.ICON.turnin, m[5] or L["Quest"], L["Ready to turn in"], 16, nil, nil, nil, m[6])
             end
           end

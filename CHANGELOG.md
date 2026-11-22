@@ -17,6 +17,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 ### Fixed
 
+- Questie: quest turn-ins no longer show twice on the map.
 - Quest Route: a quest you leave out stays out, rerouted or after a /reload, until you put it back.
 - Quest Route: a group quest is asked about once, not every time the route is made.
 - Quest Route: with only tracked quests on, finishing an untracked quest no longer asks for a reroute.

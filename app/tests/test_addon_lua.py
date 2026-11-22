@@ -1371,6 +1371,40 @@ def test_quest_area_without_a_map_icon_is_traced(env):
     assert list(L.QuestsAt(1, ox, oy).values()) == [9]
 
 
+def test_questies_turn_ins_are_not_drawn_twice(env):
+    # (reported 2026-11-21: with Questie on, each turn-in's "?" showed twice on the GPS map, ours and Questie's copied
+    # icon): with Questie loaded and its icons on our map, our turn-ins are left out; objectives stay
+    lua, ns = env
+    ns.db = lua.eval("{}")
+    ns.settings = lua.eval("{ gps = { layerQuests = true } }")
+    lua.execute("""
+      GetTime = function() return 10 end
+      Questie = nil
+      C_QuestLog = {
+        GetQuestsOnMap = function() return { { questID = 7, x = 0.4, y = 0.6 }, { questID = 8, x = 0.5, y = 0.5 } } end,
+        IsComplete = function(q) return q == 7 end,
+        GetTitleForQuestID = function(q) return "Quest " .. q end,
+      }
+    """)
+    load(lua, ns, "Data/Maps.lua", "Layers.lua")
+    L = ns.Layers
+    turnin = L.ICON.turnin
+
+    def icons():
+        x, y, _ = L.MapToWorld(1411, 0.45, 0.55)
+        return [m[3] for m in L.Marks(1, x, y, 1e6, lua.table(1411), 1, True).values()]
+
+    assert icons().count(turnin) == 1  # (no Questie: ours)
+    lua.execute("Questie = { db = {} }")
+    ns.OtherPins = lua.eval("{ On = function() return true end }")
+    got = icons()
+    assert turnin not in got and len(got) == 1  # (Questie's shown: only the objective is ours)
+    ns.OtherPins = lua.eval("{ On = function() return false end }")
+    assert icons().count(turnin) == 1  # (Questie's icons not on our map: ours again)
+    lua.execute("Questie = nil")
+    ns.OtherPins = None
+
+
 def test_quest_route_stops_from_the_quest_log(env):
     # Log: 1 open (pin on Durotar), 2 finished (turn-in pin), 3 open with no pin (next
     # waypoint), 4 nowhere. Stops for 1-3, named; 4 reported missing.
