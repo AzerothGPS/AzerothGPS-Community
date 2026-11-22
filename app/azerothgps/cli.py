@@ -807,7 +807,13 @@ def cmd_interior_floors(args) -> int:
 
 def _survey_dirs(args) -> list:
     dirs = [Path(args.wow_path) / args.flavor / "Interface" / "AddOns"] + extra_addons_dirs()
-    return [d for d in dirs if d.is_dir()]
+    out, seen = [], set()
+    for d in dirs:  # (each folder once: --wow-path the one ~/.agps-installs lists too counted its addons twice)
+        key = str(d.resolve()).lower() if d.is_dir() else None
+        if key and key not in seen:
+            seen.add(key)
+            out.append(d)
+    return out
 
 
 def cmd_floor_survey(args) -> int:
@@ -1058,6 +1064,19 @@ def cmd_install_addon(args) -> int:
     return rc
 
 
+def _toc_files(folder: Path) -> list:
+    """The files an addon folder's toc (named as the folder) lists, as paths relative to it."""
+    toc = folder / f"{folder.name}.toc"
+    if not toc.is_file():
+        return []
+    out = []
+    for line in toc.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#"):
+            out.append(line.replace("\\", "/"))
+    return out
+
+
 def private_client(addons: Path) -> bool:
     """Whether the developer addon may go into the AddOns folder `addons` (never the live game's): the maintainers' rule
     in private_paths.py (`is_dev_client`); without it, nowhere."""
@@ -1101,10 +1120,30 @@ def _install_into(addons: Path, dev: bool) -> int:
             print(f"dev tools not copied to {addons}: they don't go into this game client"
                   + (f" (an {src.name} is there: remove it)" if ddst.is_dir() else ""))
         else:
+            # (the files its toc lists that the checkout hasn't, written into the installed copy by the lists below or by
+            # hand, `agps route-review export`: kept over the copy, as they were before it; a list written from a
+            # checkout without its data, data/ being git-ignored, would otherwise be gone)
+            kept = {}
             if ddst.is_dir():
+                for name in _toc_files(src):
+                    if not (src / name).exists() and (ddst / name).is_file():
+                        kept[name] = (ddst / name).read_bytes()
                 shutil.rmtree(ddst)
             shutil.copytree(src, ddst)
-            print(f"copied dev tools to {ddst} (new files: log out and back in, or restart WoW, the first time)")
+            for name, data in kept.items():
+                (ddst / name).parent.mkdir(parents=True, exist_ok=True)
+                (ddst / name).write_bytes(data)
+            print(f"copied dev tools to {ddst} (new files: log out and back in, or restart WoW, the first time)"
+                  + (f"; kept {', '.join(sorted(kept))}" if kept else ""))
+            try:  # (the maintainers' own step after it, private_paths.after_dev_install; never fails an install)
+                from .private_paths import after_dev_install
+            except ImportError:
+                after_dev_install = None
+            if after_dev_install:
+                try:
+                    after_dev_install(addons, ddst, print)
+                except Exception as e:
+                    print(f"after the dev tools' install: {e}")
     try:  # (the floor height survey's list, where an addon there takes it: kept up to date with every install)
         from .interiorfloors import export_survey
         export_survey([addons])
