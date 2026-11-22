@@ -82,7 +82,9 @@ def test_the_map_is_laid_over_the_world_map_while_it_is_open(wm):
         assert part is None or not part._shown
     lua.globals().AzerothGPS_ToggleMap()
     assert lua.eval("AGPS_TOGGLES") == 2 and not G.WorldMapHosted() and not f._shown
-    assert f._strata == "BACKGROUND" and lua.eval("rawequal")(f.GetParent(f), lua.eval("UIParent"))
+    # (back on the screen, its own window's strata: over the game's windows since 1.3.14, as the map grown out of the
+    # minimap square)
+    assert f._strata == G.MINIMAP_EXPANDED_STRATA and lua.eval("rawequal")(f.GetParent(f), lua.eval("UIParent"))
     st.useWorldMap = False
     G.ApplySettings()
     assert f._shown and (f._w, f._h) == own  # (off: its own window again, as it was)
