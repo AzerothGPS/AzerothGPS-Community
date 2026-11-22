@@ -244,6 +244,9 @@ def cmd_route_quality(args) -> int:
     for r in res.get("deep", []):
         print(f"  slower where the older route swam fatigue water this change closes (not worse): {r['trip']}: "
               f"{r['before']} s -> {r['after']} s, {r['deep_before']} -> {r['deep_after']} yd of it")
+    for r in res.get("onto_roads", []):
+        print(f"  slower onto the roads by a road this change drew (not worse): {r['trip']}: {r['before']} s -> "
+              f"{r['after']} s, its changed stretch {r['stretch_before']} -> {r['stretch_after']} yd")
     return 1 if res["errors"] else 0
 
 

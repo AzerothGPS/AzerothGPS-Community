@@ -504,6 +504,36 @@ def test_the_shipped_road_data_has_every_drawn_road_in_the_overrides():
     assert sorted(shipped - drawn) == [], "Data/Roads.lua has roads overrides/ doesn't: rebuild their continents"
 
 
+def test_the_shipped_floor_tracks_are_every_drawn_road_with_heights_in_the_overrides():
+    # (issue #875: the road import's conflict merge kept the four Stonetalon walks' times in ns.RoadTracksIn but lost
+    # their ns.FloorTracks lines; the addon then dropped the player's copies as shipped and routed the trail nowhere)
+    import re
+
+    from azerothgps.paths import ADDON_DIR, RESOURCES
+    from azerothgps.roads.tracks import floor_tracks
+
+    text = (ADDON_DIR / "Data" / "Roads.lua").read_text(encoding="utf-8")
+    block = text[text.index("ns.FloorTracks = {"):]
+    cont, lua = None, set()
+    for ln in block.splitlines():
+        m = re.match(r"^  \[(\d+)\] = \{", ln)
+        if m:
+            cont = int(m.group(1))
+            continue
+        m = re.match(r'^    \{ op = "(\w+)", time = (\d+), pts = \{([^}]*)\}', ln)
+        if m:
+            part = re.search(r"\bpart = (\d+)", ln)
+            lua.add((cont, m.group(1), int(m.group(2)), int(part.group(1)) if part else 0,
+                     len(m.group(3).split(",")) // 2))
+    drawn = {(c, t["op"], t["time"], t["part"], len(t["pts"]) // 2)
+             for c, lst in floor_tracks(RESOURCES / "overrides").items() for t in lst}
+    assert sorted(drawn - lua) == [], "overrides/ has floor tracks ns.FloorTracks doesn't: rebuild their continents"
+    assert sorted(lua - drawn) == [], "ns.FloorTracks has floor tracks overrides/ doesn't: rebuild their continents"
+    line = next(ln for ln in text.splitlines() if ln.startswith("ns.RoadTracksIn"))
+    shipped = {int(t) for t in re.findall(r"\[(\d+)\]=true", line)}
+    assert sorted({t for _, _, t, _, _ in lua} - shipped) == [], "ns.FloorTracks has times ns.RoadTracksIn doesn't"
+
+
 def test_despeckle_closes_ridge_gaps_and_fills_pockets():
     from azerothgps.roads.terrain import MIN_OPEN, despeckle
 

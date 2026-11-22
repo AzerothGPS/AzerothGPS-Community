@@ -61,6 +61,15 @@ or, with an end out at sea or over a strait, the same swim weighed now as closed
 to Southshore swum over the strait into fatigue): 13 trips 20 to 4,250 s slower, among them a 3,105 yd straight line
 down Feralas' coast that cut 17 yd out to sea off a headland (now 70 yd longer, along the coast), ten trips to or from
 "The Great Sea" and the like, and Sun Rock Retreat to Dolanaar over Teldrassil's strait (the same route).
+
+A slower trip with the same rides whose older stretch that changed walked over the land (at most OFF_ROAD_SHARE of it
+along the older version's roads, old_roads) and whose new stretch takes a changed road (along it or at its end) onto
+the roads is `onto_roads`, listed but not worse, while that stretch is at most ROAD_DIRECT_PENALTY times the yards it
+replaced and the trip slower by no greater share than it grew: the router keeps to the roads unless the walk straight
+there is about half as long (Router.ROAD_DIRECT_PENALTY), and a new road up a cliff makes roads it couldn't reach
+before the way. #875: Kooki3z's recorded trail up from Cragpool Lake (ns.FloorTracks, changed roads too since then):
+a trip's walk to Sun Rock Retreat went 74 yd onto the trail, up it to the road above and along the roads, 2,595 yd
+for the 1,785 walked west over the land before (1.45 times), 700 s to 811 s.
 """
 
 from __future__ import annotations
@@ -86,6 +95,8 @@ GUARD_YD = 100  # yards fewer within reach of the other faction's guards that ma
 LIGHT_YD = 100  # ... or of their other NPCs that would flag a player (Data/Hostile.lua's a/h, 2026-11-16)
 UNGUARDED_YD = 25  # yards nearer the older version's guards that make it `unguarded` (a few HOSTILE_STEP samples)
 HOP_YD = 100  # yards fewer straight over blocked ground (the router's `blocked`) on the older route's walks: `unhopped`
+ROAD_DIRECT_PENALTY = 2  # Router.ROAD_DIRECT_PENALTY: the roads kept unless the walk straight there is this much shorter
+OFF_ROAD_SHARE = 0.1  # an older stretch at most this share along the older version's roads walked over the land
 DEEP_YD = 10  # yards an older route's walks swam through deep water the working tree closes (new_deep, more than a
 # cell's 8.33) that make a slower trip `deep`
 TILE = 1600 / 3
@@ -157,6 +168,32 @@ def cave_road_lines(text: str) -> dict:
     return lines
 
 
+_FLOOR_TRACK = re.compile(r'^    \{ op = "add", time = \d+, pts = \{([-\d.,]+)\}')
+
+
+def floor_track_lines(text: str) -> dict:
+    """ns.FloorTracks' roads (drawn with their heights, put on the roads in game) in a Roads.lua's text: as road_lines,
+    {cont: {(x1, y1, x2, y2, ...), ...}}, by their points alone; the erasures left out (#875: a trip onto a newly
+    shipped floor track is on a changed road)."""
+    lines, cont, inside = {}, None, False
+    for line in text.splitlines():
+        if line.startswith("ns."):
+            if inside:
+                break
+            inside = line.startswith("ns.FloorTracks ")
+            continue
+        if not inside:
+            continue
+        m = _SECTION.match(line)
+        if m:
+            cont = int(m.group(1))
+            continue
+        m = _FLOOR_TRACK.match(line)
+        if m and cont is not None:
+            lines.setdefault(cont, set()).add(tuple(float(v) for v in m.group(1).split(",")))
+    return lines
+
+
 def _lines_at(ref: str | None, path: str, read) -> dict:
     """read() of `path`'s text at `ref` (None: the working tree's); {} when it isn't there."""
     if ref is None:
@@ -184,9 +221,9 @@ def changed_roads(ref: str) -> dict:
     """The roads (as road_lines) in only one of `ref`'s data and the working tree's: removed and added. Data/Roads.lua's
     ns.Roads and the caves' roads in Data/Caves.lua (#349: a cave's roads rebuilt are redrawn roads too), and a cave's
     road kept as it was but joined at an end to other roads (`rejoined`: the Slag Pit's south mouth's 438 yd road, a
-    dead end before PR #332's floors, a way into the pit after)."""
+    dead end before PR #332's floors, a way into the pit after); and ns.FloorTracks' roads (floor_track_lines, #875)."""
     out = {}
-    for path, read in ((ROADS_FILE, road_lines), (CAVES_FILE, cave_road_lines)):
+    for path, read in ((ROADS_FILE, road_lines), (ROADS_FILE, floor_track_lines), (CAVES_FILE, cave_road_lines)):
         old, new = _lines_at(ref, path, read), _lines_at(None, path, read)
         for c in set(old) | set(new):
             if old.get(c) != new.get(c):
@@ -360,16 +397,35 @@ def share_along_changed_roads(before: list, after: list, changed: dict) -> float
     first again) whose pieces lie along a changed road (`changed`, changed_roads): their middles on one."""
     if not changed or not before or not after:
         return 0.0
-    stretch = _stretches(before, after)[1]
+    return share_along(_stretches(before, after)[1], changed)
+
+
+def share_along(stretch: list, roads: dict) -> float:
+    """The share of the yards of `stretch` (its points, [cont, x, y]) whose pieces lie along one of `roads` (as
+    road_lines): their middles on one. Only the roads whose box is within ON_ROAD_YD of a middle are looked at (a
+    continent's whole network is thousands)."""
+    boxes = {c: [(min(p[0::2]) - ON_ROAD_YD, min(p[1::2]) - ON_ROAD_YD, max(p[0::2]) + ON_ROAD_YD,
+                  max(p[1::2]) + ON_ROAD_YD, p) for p in lines] for c, lines in roads.items()}
     total = along = 0.0
     for (c1, x1, y1), (c2, x2, y2) in zip(stretch, stretch[1:]):
         if c1 != c2:
             continue
         d = math.hypot(x2 - x1, y2 - y1)
         total += d
-        if any(_near_line((x1 + x2) / 2, (y1 + y2) / 2, pts, ON_ROAD_YD) for pts in changed.get(c1, ())):
+        mx, my = (x1 + x2) / 2, (y1 + y2) / 2
+        if any(x0 <= mx <= xx and y0 <= my <= yy and _near_line(mx, my, pts, ON_ROAD_YD)
+               for x0, y0, xx, yy, pts in boxes.get(c1, ())):
             along += d
     return along / total if total else 0.0
+
+
+def old_roads(ref: str) -> dict:
+    """`ref`'s roads (as road_lines): Data/Roads.lua's ns.Roads and ns.FloorTracks and the caves' roads, for `onto_roads`."""
+    out = {}
+    for path, read in ((ROADS_FILE, road_lines), (ROADS_FILE, floor_track_lines), (CAVES_FILE, cave_road_lines)):
+        for c, lines in _lines_at(ref, path, read).items():
+            out.setdefault(c, set()).update(lines)
+    return out
 
 
 def at_changed_road_end(before: list, after: list, changed: dict) -> bool:
@@ -528,7 +584,7 @@ def weigh_trips(count: int, seed: int, replace: dict | None = None, log=print,
 
 
 def compare(before: list[dict], after: list[dict], changed: dict | None = None, walls: dict | None = None,
-            deep: dict | None = None) -> dict:
+            deep: dict | None = None, roads: dict | None = None) -> dict:
     """Trip by trip: same, better, worse (by more than NOISE_S), a way found where there was none, or lost; a slower
     one with the same rides whose route changed only on `changed` roads (changed_roads), or mostly along them and a
     little slower (share_along_changed_roads, ALONG_MAX, ALONG_MAX_S, ALONG_STRETCH) or onto the roads at a changed
@@ -537,9 +593,11 @@ def compare(before: list[dict], after: list[dict], changed: dict | None = None, 
     faction's guards (its older route's by either version's guards, `old_guard`) is `safer`; one whose older route's walks, routed by the newer version (`old_walks_blocked`), go
     HOP_YD less straight over blocked ground (a hop gone) is `unhopped`; one the game asks "risk it?" about, the safe way
     shown meanwhile (`asking`) and no nearer the guards, is `asking`; one whose older route's walks swam DEEP_YD or more
-    through `deep` water (new_deep, fatigue) and its new ones no more is `deep`; none of them is worse."""
+    through `deep` water (new_deep, fatigue) and its new ones no more is `deep`; one whose older stretch walked off
+    `roads` (the older version's, old_roads) and whose new one takes a changed road onto the roads, at most
+    ROAD_DIRECT_PENALTY times as long and slower by no greater share, is `onto_roads`; none of them is worse."""
     res = {"same": 0, "better": [], "worse": [], "redrawn": [], "walled": [], "safer": [], "unguarded": [], "unhopped": [],
-           "asking": [], "deep": [], "found": [], "lost": [], "errors": []}
+           "asking": [], "deep": [], "onto_roads": [], "found": [], "lost": [], "errors": []}
     for x, y in zip(before, after):
         if x.get("error") or y.get("error"):
             res["errors"].append({"trip": x["trip"], "before": x.get("error"), "after": y.get("error")})
@@ -575,6 +633,12 @@ def compare(before: list[dict], after: list[dict], changed: dict | None = None, 
             # change dropped, the roads by them free now; listed, not worse. 2026-11-16: "Accept them")
             unguarded = (y.get("new_old_guard") or 0) - (x.get("guard") or 0) >= UNGUARDED_YD
             unhopped = "old_walks_blocked" in y and (x.get("blocked") or 0) - y["old_walks_blocked"] >= HOP_YD
+            # (#875: a changed road the new way onto the roads, where the older route walked over the land: the router
+            # keeps to the roads while they're under ROAD_DIRECT_PENALTY times the walk)
+            onto = (not redrawn and x.get("rides") == y.get("rides") and roads is not None and old_yd > 0
+                    and new_yd <= old_yd * ROAD_DIRECT_PENALTY and sy * old_yd <= sx * new_yd
+                    and (share_along_changed_roads(bp, ap, changed) > 0 or at_changed_road_end(bp, ap, changed))
+                    and share_along(_stretches(bp, ap)[0], roads) <= OFF_ROAD_SHARE)
             # (the game asks the player "risk it?" and shows the safe way meanwhile, the faster one a "yes" away, its
             # route no nearer the guards than the older one went: Nav's own check counts HOSTILE_RIDE_YD fewer, by its
             # walks from the rounded spot, where `guard` here may count fewer)
@@ -584,8 +648,9 @@ def compare(before: list[dict], after: list[dict], changed: dict | None = None, 
             row["deep_before"] = round(walk_deep_yards(x.get("guard_walks"), deep or {}))
             row["deep_after"] = round(walk_deep_yards(y.get("guard_walks"), deep or {}))
             swum = row["deep_before"] >= DEEP_YD and row["deep_after"] <= row["deep_before"]
+            row["stretch_before"], row["stretch_after"] = round(old_yd), round(new_yd)
             res["redrawn" if redrawn else "walled" if walled else "safer" if safer else "unguarded" if unguarded
-                else "unhopped" if unhopped else "asking" if asking else "deep" if swum
+                else "unhopped" if unhopped else "asking" if asking else "deep" if swum else "onto_roads" if onto
                 else "worse"].append(row)
         else:
             res["same"] += 1
@@ -598,6 +663,7 @@ def compare(before: list[dict], after: list[dict], changed: dict | None = None, 
     res["unguarded"].sort(key=lambda r: r["before"] - r["after"])
     res["asking"].sort(key=lambda r: r["before"] - r["after"])
     res["deep"].sort(key=lambda r: r["before"] - r["after"])
+    res["onto_roads"].sort(key=lambda r: r["before"] - r["after"])
     return res
 
 
@@ -651,6 +717,6 @@ def run(count: int, seed: int, against: str, log=print, jobs: int = 1) -> dict:
     if older:  # (the newer routes past the older version's guards: `unguarded`)
         for row, yd in zip(after, guards_by(older, after)):
             row["new_old_guard"] = yd
-    res = compare(before, after, changed_roads(against), new_walls(against), new_deep(against))
+    res = compare(before, after, changed_roads(against), new_walls(against), new_deep(against), old_roads(against))
     res.update(seed=seed, trips=count, against=against, differing=sorted(older))
     return res
