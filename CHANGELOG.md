@@ -13,6 +13,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Roads: new roads and a wall in Stonetalon Mountains.
 - Record: pick the floor you are on with Up, Down and Auto; after Stop & Save it says the floors picked.
 - For plugin addons (API 22): open Record and read back the walks recorded. See docs/api.md.
+- For plugin addons (API 23): set the route to a place, and preview a recorded walk as the route. See docs/api.md.
 
 ### Fixed
 

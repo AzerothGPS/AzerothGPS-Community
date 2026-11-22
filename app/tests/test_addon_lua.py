@@ -6462,9 +6462,9 @@ def test_public_api_exposes_documented_functions(api):
                  "PlayerLevel", "ShownLevel",
                  "SetPlayerArrow", "SetRouteLook", "SetFrameLook", "OnArrive", "TitleBarSlot",
                  "RegisterLookFrame", "FrameLook", "SeamKnobs", "AddCharm", "RegisterPopup",
-                 "ShowRecorder", "Recording", "RecordedWalks"):
+                 "ShowRecorder", "Recording", "RecordedWalks", "RouteTo", "PreviewWalk", "Previewing"):
         assert A[name] is not None, name
-    assert A.version == 22
+    assert A.version == 23
     assert A.TopPanelInset() == 4  # (no window frame in the tests)
     assert A.MapButton("recenter") is None  # (no map built in the tests)
 

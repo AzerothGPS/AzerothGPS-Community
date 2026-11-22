@@ -2600,6 +2600,8 @@ function BuildGraph(cont)
   local zoneId, zoneYd, zonesOver = {}, {}, {}
   local hasZones = ns.Zones and ns.Zones[cont] ~= nil
   local side = HostileSide()
+  local pv = R.preview and R.preview.level == cont and R.preview or nil -- (a walk previewed on this level)
+  local previewed = {} -- [edge] = true: along it
   for ei, e in ipairs(edges) do
     Breathe(ei, 4) -- (each road: the guards and zones along it, sampled its whole length — 20 between
     -- pauses was the seed-31 sweep's 40-50 ms slice when a graph built inside the ride check, 2026-10-07)
@@ -2621,9 +2623,12 @@ function BuildGraph(cont)
         if light > 0 then cost, edgeLight[ei] = cost + light, light end
       end
       if e[4] == R.SOURCE_SWIM then cost = cost * R.SWIM_FACTOR end -- (swum: never by choice)
+      -- (along a recorded walk being previewed, R.SetPreview: the way, far cheaper than any other)
+      local along = pv and R.AlongPreview(pv, e)
+      if along then cost, previewed[ei] = cost * R.PREVIEW_FACTOR, true end
       adj[a][#adj[a] + 1] = { b, len, ei, true, cost }
       adj[b][#adj[b] + 1] = { a, len, ei, false, cost }
-      if cost > len then
+      if cost > len or along then
         ratio[ei] = cost / math.max(len, 1)
         edgeTowns[ei] = towns -- (the yards past each town's guards: a route to or from a town doesn't pay for it)
       end
@@ -2697,7 +2702,8 @@ function BuildGraph(cont)
     attached = next(attachedEdges) and attachedEdges or nil, attachJoin = next(attachedEdges) and attachJoin or nil,
     kind = next(kinds) and kinds or nil, raised = next(raisedEdges) and raisedEdges or nil,
     floored = next(flooredEdges) and flooredEdges or nil,
-    raisedEnd = next(raisedEdges) and trackInfo and trackInfo.raisedEnd or nil }
+    raisedEnd = next(raisedEdges) and trackInfo and trackInfo.raisedEnd or nil,
+    preview = next(previewed) and previewed or nil }
   -- (an underground city's floors over floors: the roads' heights near a spot, for the road and wall
   -- tools' floor (GPSFrame.OtherFloor, FloorText); not a dungeon's, where they can't be used)
   local lvl = ns.CityLevels and ns.CityLevels[cont]
@@ -3367,6 +3373,146 @@ local function SegDist2(x, y, ax, ay, bx, by)
 end
 
 local function Key(bx, by) return bx * 65536 + by end
+
+-- A preview of recorded walks (API 23, asked 2026-11-21 for a companion addon reviewing routes: the live route
+-- follows a walk just recorded, so its directions and arrow can be checked before it's sent in): while set, the roads
+-- along those walks (a walk's own pieces, and the roads its stretches along an existing road became, R.WithTracks)
+-- cost PREVIEW_FACTOR of their yards, so a route from the walk's start to its end takes it, as it will once the walk
+-- replaces that route in the data. In memory only (never saved: a /reload ends it); none set, routes are exactly as
+-- before. R.preview = { level, walks = { { pts, zs } }, cells (their pieces by PREVIEW_CELL), box, id }.
+R.PREVIEW_FACTOR = 0.2
+R.PREVIEW_NEAR_YD = 4 -- a road this near a walk all along is along it
+R.PREVIEW_STEP_YD = 2 -- (a road's pieces looked at this far apart)
+R.PREVIEW_CELL = 16
+R.PREVIEW_TRIES = 20 -- (the route from the walk's start to its end while walks it waits on are searched: again, at most)
+R.preview = nil
+local previewId = 0
+local function PreviewKey(cx, cy) return (cx + 32768) * 65536 + (cy + 32768) end
+-- Whether (x, y) is within PREVIEW_NEAR_YD of one of preview `pv`'s walks.
+function R.NearPreview(pv, x, y)
+  local c, near2 = R.PREVIEW_CELL, R.PREVIEW_NEAR_YD ^ 2
+  local list = pv.cells[PreviewKey(math.floor(x / c), math.floor(y / c))]
+  for i = 1, list and #list or 0, 4 do
+    if SegDist2(x, y, list[i], list[i + 1], list[i + 2], list[i + 3]) <= near2 then return true end
+  end
+  return false
+end
+-- Whether road `e` (an edge: its points from e[5] on) is along preview `pv`'s walks all its length.
+function R.AlongPreview(pv, e)
+  local n = #e
+  if n < 8 then return false end
+  local b = pv.box
+  for i = 5, n - 1, 2 do
+    local x, y = e[i], e[i + 1]
+    if x < b[1] or x > b[3] or y < b[2] or y > b[4] then return false end
+  end
+  for i = 5, n - 1, 2 do
+    local ax, ay = e[i], e[i + 1]
+    if not R.NearPreview(pv, ax, ay) then return false end
+    if i + 3 <= n then
+      local bx, by = e[i + 2], e[i + 3]
+      local steps = math.floor(math.sqrt((bx - ax) ^ 2 + (by - ay) ^ 2) / R.PREVIEW_STEP_YD)
+      for k = 1, steps do
+        local t = k / (steps + 1)
+        if not R.NearPreview(pv, ax + (bx - ax) * t, ay + (by - ay) * t) then return false end
+      end
+    end
+  end
+  return true
+end
+-- The yards of route `r` (R.Route's: pts; or Nav's, with `parts`) along preview `pv`'s walks, and all its yards.
+function R.PreviewYards(pv, r)
+  local along, total = 0, 0
+  for _, part in ipairs(r and (r.parts or { r }) or EMPTY) do
+    local p = part.pts
+    for i = 1, p and #p - 3 or 0, 2 do
+      local ax, ay, bx, by = p[i], p[i + 1], p[i + 2], p[i + 3]
+      local len = math.sqrt((bx - ax) ^ 2 + (by - ay) ^ 2)
+      local steps = math.max(1, math.ceil(len / R.PREVIEW_STEP_YD))
+      for k = 1, steps do
+        local t = (k - 0.5) / steps
+        if R.NearPreview(pv, ax + (bx - ax) * t, ay + (by - ay) * t) then along = along + len / steps end
+      end
+      total = total + len
+    end
+  end
+  return along, total
+end
+-- Preview recorded walks `walks` (tracks as ns.db.tracks keeps them: continent, time, pts, zs), or none (nil or {}):
+-- the roads built again and the route worked out again at once (as after a saved edit, Record.Apply). Only the walks
+-- on the oldest one's level count. `done(share, along, total)`, when given: called once the route from the walks'
+-- start to their end has been worked out with the preview on (in the background), `share` the part of it along them
+-- (0 to 1), or nil when there's no way; never once another preview, or none, was set meanwhile. True and how many
+-- walks are previewed.
+function R.SetPreview(walks, done)
+  local list = {}
+  for _, t in ipairs(walks or EMPTY) do
+    if type(t) == "table" and type(t.pts) == "table" and #t.pts >= 4 and tonumber(t.continent) then
+      list[#list + 1] = t
+    end
+  end
+  table.sort(list, function(a, b) return (tonumber(a.time) or 0) < (tonumber(b.time) or 0) end)
+  local pv
+  if list[1] then
+    previewId = previewId + 1
+    local level = list[1].continent
+    pv = { level = level, walks = {}, cells = {}, id = previewId, box = { math.huge, math.huge, -math.huge, -math.huge } }
+    local c, near, b = R.PREVIEW_CELL, R.PREVIEW_NEAR_YD, pv.box
+    for _, t in ipairs(list) do
+      if t.continent == level then
+        local p = t.pts
+        pv.walks[#pv.walks + 1] = { pts = p, zs = t.zs }
+        for i = 1, #p - 3, 2 do
+          local ax, ay, bx, by = p[i], p[i + 1], p[i + 2], p[i + 3]
+          local x0, x1 = math.min(ax, bx) - near, math.max(ax, bx) + near
+          local y0, y1 = math.min(ay, by) - near, math.max(ay, by) + near
+          b[1], b[2], b[3], b[4] = math.min(b[1], x0), math.min(b[2], y0), math.max(b[3], x1), math.max(b[4], y1)
+          for cx = math.floor(x0 / c), math.floor(x1 / c) do
+            for cy = math.floor(y0 / c), math.floor(y1 / c) do
+              local k = PreviewKey(cx, cy)
+              local cell = pv.cells[k] or {}
+              pv.cells[k] = cell
+              cell[#cell + 1], cell[#cell + 2], cell[#cell + 3], cell[#cell + 4] = ax, ay, bx, by
+            end
+          end
+        end
+      end
+    end
+  elseif not R.preview then
+    return true, 0 -- (none asked, none set: nothing changes)
+  end
+  R.preview = pv
+  R.Reset()
+  if ns.Nav and ns.Nav.Invalidate then ns.Nav.Invalidate(true, true) end
+  if ns.GPS and ns.GPS.Redraw then ns.GPS.Redraw() end
+  if pv and done then
+    local first, last = pv.walks[1], pv.walks[#pv.walks]
+    local sx, sy = first.pts[1], first.pts[2]
+    local tx, ty = last.pts[#last.pts - 1], last.pts[#last.pts]
+    local opts = {}
+    if type(first.zs) == "table" then opts.z = first.zs[1] end
+    if type(last.zs) == "table" then opts.tz = last.zs[#last.zs] end
+    local tries = 0
+    local function Try()
+      tries = tries + 1
+      R.Background("preview:" .. pv.id .. ":" .. tries, function()
+        if R.preview ~= pv then return false end
+        local r = R.Route(pv.level, sx, sy, tx, ty, opts)
+        if not r or r.unconnected or r.noWay then return { none = true, pending = r and r.pending } end
+        local along, total = R.PreviewYards(pv, r)
+        return { along = along, total = total, pending = r.pending }
+      end, function(res)
+        if R.preview ~= pv or not res then return end
+        -- (a route waiting on walks being searched: again after them, at the queue's end)
+        if res.pending and tries < R.PREVIEW_TRIES then return Try() end
+        if res.none then return done(nil, 0, 0) end
+        done(res.total > 0 and math.min(1, res.along / res.total) or 0, res.along, res.total)
+      end)
+    end
+    Try()
+  end
+  return true, pv and #pv.walks or 0
+end
 
 -- Offroad mode: straight links from road node n to up to NODE_LINKS nearby road nodes over
 -- passable ground, { { m, cost }, ... }. Terrain doesn't change, so they are cached.
@@ -4897,7 +5043,7 @@ local legProvider
 function R.SetLegProvider(fn) legProvider = fn end
 function R.LegProvider() return legProvider end
 function R.Route(cont, sx, sy, tx, ty, opts)
-  if legProvider then
+  if legProvider and not R.preview then -- (a walk previewed, R.SetPreview: the Router's own roads, which have it)
     local ok, got = pcall(legProvider, cont, sx, sy, tx, ty, opts or {})
     if ok and type(got) == "table" and type(got.pts) == "table" and #got.pts >= 4 and type(got.kinds) == "table" then
       return got
@@ -5624,6 +5770,7 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
         if not (exempt and exempt[t]) then extra = extra + yd end
       end
       v = 1 + (extra * (R.HOSTILE_FACTOR - 1) + (not near and g.light and g.light[ei] or 0)) / math.max(g.e[ei][3], 1)
+      if g.preview and g.preview[ei] then v = v * R.PREVIEW_FACTOR end -- (a previewed walk's: cheap still)
       roadRatio[ei] = v
     end
     return v
@@ -5911,9 +6058,12 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
   local START, GOAL = -1, -2
   -- (how each node was reached: from which, and by what: a list of pieces, or a road as its edge, + along it, - back)
   local gscore, cameFrom, cameBy, open, closed = { [START] = 0 }, {}, {}, { n = {}, f = {} }, {}
+  -- (a walk previewed, R.SetPreview: its roads cost less than their yards, so the estimate is scaled down with them and
+  -- is still never more than the way's cost; none: as always)
+  local hScale = g.preview and R.PREVIEW_FACTOR or 1
   local function h(n)
     if n < 0 then return 0 end
-    return Dist(g.n[n * 2 - 1], g.n[n * 2], tx, ty)
+    return Dist(g.n[n * 2 - 1], g.n[n * 2], tx, ty) * hScale
   end
   local function relax(from, to, cost, by)
     if not cost then return end

@@ -4,7 +4,7 @@
 -- order). Everything here is safe to call before the map exists; it returns nil then.
 local _, ns = ...
 
-local API = { version = 22 }
+local API = { version = 23 }
 _G.AzerothGPS = API
 
 local function GPS() return ns.GPS end
@@ -279,6 +279,45 @@ function API.RecordedWalks(since)
   end
   table.sort(out, function(a, b) return a.time < b.time end)
   return out
+end
+
+-- (API 23, for a companion reviewing routes: the live route set to a place, and to a recorded walk being checked)
+-- RouteTo(level, x, y, z, name): the route replaced by one stop there (`level` as PlayerLevel's, `z` its height, for its
+-- floor, or nil), as a stop the player made on the map; the route is worked out from wherever the player is. True when
+-- set; false (and true while a zone too high is asked about first) when not. Nothing moves the character.
+function API.RouteTo(level, x, y, z, name)
+  level, x, y = tonumber(level), tonumber(x), tonumber(y)
+  if not (level and x and y and ns.Nav and ns.Nav.SetStops) then return false end
+  local ok, asking = ns.Nav.SetStops({ { x = x, y = y, cont = level, z = tonumber(z), name = name, icon = 1 } })
+  if ok and GPS() then GPS().Redraw() end
+  return ok and true or false, asking and true or nil
+end
+-- PreviewWalk(times, done): routes take the player's recorded walks with those times (RecordedWalks' `time`s) as the
+-- way, far ahead of any other road, as they will once the walk replaces the route there in the data; the roads built
+-- again and the route worked out again at once. PreviewWalk(nil) ends it. Never saved (a /reload ends it too). True
+-- and how many walks (on the oldest one's level) are previewed; false, "none" when none of those times is a recorded
+-- walk. done(share, along, total), when given: once the route from the walks' start to their end is worked out with
+-- the preview on, `share` the part of it along them (0 to 1; nil: no way there), `along` and `total` its yards; never
+-- called once the preview was changed or ended. Previewing() is whether one is on.
+function API.PreviewWalk(times, done)
+  local R = ns.Router
+  if not (R and R.SetPreview) then return false, "none" end
+  if times == nil then return R.SetPreview(nil) end
+  local want = {}
+  for _, t in ipairs(type(times) == "table" and times or { times }) do
+    if tonumber(t) then want[tonumber(t)] = true end
+  end
+  local walks = {}
+  for _, t in ipairs(ns.db and type(ns.db.tracks) == "table" and ns.db.tracks or {}) do
+    if type(t) == "table" and t.recorded and (t.op == nil or t.op == "add") and want[tonumber(t.time) or false] then
+      walks[#walks + 1] = t
+    end
+  end
+  if not walks[1] then return false, "none" end
+  return R.SetPreview(walks, type(done) == "function" and done or nil)
+end
+function API.Previewing()
+  return (ns.Router and ns.Router.preview ~= nil) and true or false
 end
 
 -- (API 13, asked 2026-10-05 for a companion) A page of your own in AzerothGPS's options window, after the built-in
