@@ -444,11 +444,22 @@ def import_tracks(wtf_account_dir: Path, overrides_dir: Path, per_continent: dic
         doc = load_overrides(path)
         new = 0
         seen = {f["properties"].get("time") for f in doc["features"] if f["properties"].get("source") == "recorded"}
+        # (Record's walks going on one from the other, #764's road type switch, worked out together: recorded.chains,
+        # Walks.chain; those already in only for their floors)
+        chained: dict = {}
+        if walks is not None and hasattr(walks, "chain"):
+            from .recorded import chains
+
+            take = {t["time"] for t in tracks if t.get("recorded") and t["time"] not in seen
+                    and (only is None or only(t))}
+            for ch in chains([t for t in tracks if t.get("recorded")]):
+                if len(ch) > 1 and any(t["time"] in take for t in ch):
+                    chained.update(zip([t["time"] for t in ch], walks.chain(ch)))
         for t in tracks:
             if t["time"] in seen or (only is not None and not only(t)):
                 continue
             if t.get("recorded"):
-                pieces = walks(t) if walks else None
+                pieces = (chained[t["time"]] if t["time"] in chained else walks(t)) if walks else None
                 if not pieces:
                     continue
                 seen.add(t["time"])

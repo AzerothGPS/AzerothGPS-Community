@@ -386,7 +386,7 @@ def _at(seq, i):
     return seq[i] if i < len(seq) else None
 
 
-def assign(cands, indoors, stairs, picked=None, pts=None):
+def assign(cands, indoors, stairs, picked=None, pts=None, loose=()):
     """Each point's floor, by the best path over the whole walk (Viterbi over `cands`, candidates()'): a step a player
     walks (CLIMB) costs a little, a jump up a floor a lot (JUMP), a drop off a ledge some (DROP); along a Stairs
     stretch (`stairs`: (a, b) point indices, the steps a <= i < b; see stretches) any climb up to STAIR_STEP_Z + d *
@@ -399,7 +399,9 @@ def assign(cands, indoors, stairs, picked=None, pts=None):
     Returns (zs, kinds, ambiguous): heights rounded to 0.1; "ground" or "model" per point (the terrain with a model's
     floor on it: "model" indoors); and the stretches (i, j) (first and last point) where a floor AMBIG_Z or more from
     the one chosen is on a path within AMBIG_COST of the best (min-sum marginals: the best path's cost through each
-    floor, forward and backward), inside a Stairs stretch only at its ends (the climb between is the stairs')."""
+    floor, forward and backward), inside a Stairs stretch only at its ends (the climb between is the stairs').
+    `loose`: the marks among `stairs` whose stretch climbs free but needn't climb (Record's Stairs road type, #764: the
+    walk as it was picked, a step up into a shop with it; Stairs Start / End marks are put on a climb)."""
     n = len(cands)
     if not n:
         return [], [], []
@@ -427,7 +429,8 @@ def assign(cands, indoors, stairs, picked=None, pts=None):
             step_of[i] = (a, i == a)
         for i in range(a + 1, b + 1):
             S[i] = K[a]
-        ends[b] = a
+        if not any(a <= la and lb <= b for la, lb in loose):
+            ends[b] = a
     U = []
     for i in range(n):
         u = np.repeat(_own_costs(cl[i], top[i], ind[i], _at(picked, i)), S[i]).reshape(K[i], S[i])
@@ -569,6 +572,11 @@ class Walks:
             return None
         pts = [(float(p[0]), float(p[1])) for p in t["coords"]]
         stairs = [(a - 1, b - 1) for a, b in t.get("stairs") or ()]  # (Record's marks count points from 1)
+        if not stairs and t.get("kind") == "stairs" and len(pts) >= 2:
+            # (Record's Stairs road type, #764, which took the Stairs Start / End marks' place: the walk whole is
+            # stairs. Its own `zs` are the map's guess, the ground's height: never taken, the floors are worked out)
+            stairs = [(0, len(pts) - 1)]
+        loose = stairs if not t.get("stairs") else []
         # (through a portal: each side its own walk, no road across; portal_steps)
         cuts = portal_steps(pts)
         if cuts:
@@ -578,8 +586,8 @@ class Walks:
                 if b - a < 2:
                     continue
                 part = dict(t, coords=t["coords"][a:b],
-                            stairs=[(max(s0, a) - a + 1, min(s1, b - 1) - a + 1) for s0, s1 in stairs
-                                    if s1 > a and s0 < b - 1],
+                            stairs=[] if loose else [(max(s0, a) - a + 1, min(s1, b - 1) - a + 1)
+                                                     for s0, s1 in stairs if s1 > a and s0 < b - 1],
                             ind=ind[a:b] if isinstance(ind, (str, list)) else ind,
                             pk=_picks_from(pk, a, b))
                 got = self(part)
@@ -587,6 +595,16 @@ class Walks:
                     return None
                 out += got
             return out
+        got = self._floors(level, pts, t.get("ind"), stairs, picks_of(t.get("pk"), len(pts)),
+                           lambda i: (t["time"], i), loose)
+        if got is None:
+            return None
+        return pieces(pts, got[0], got[1], stairs)
+
+    def _floors(self, level: int, pts, ind, stairs, picked, where, loose=()):
+        """(zs, kinds) for the points (assign's), or None when they can't be worked out yet; each doubt logged at
+        where(i) = (the walk's time, its point i from 0)."""
+        cont = CITY_BASE.get(level, level)
         try:
             if self.cd is None:
                 self.cd = self.client()
@@ -597,11 +615,79 @@ class Walks:
             if level != cont:  # (down in an underground city: never on the terrain over it)
                 for i, cs in enumerate(cands):
                     cands[i] = [c for c in cs if not (c.kind == "ground" and c.uid is None)]
-            zs, kinds, ambiguous = assign(cands, t.get("ind"), stairs, picks_of(t.get("pk"), len(pts)))
+            zs, kinds, ambiguous = assign(cands, ind, stairs, picked, loose=loose)
         except (Exception, SystemExit) as ex:  # (no client (cli._client exits), no floor under any point: again next time)
-            self.log(f"  recorded walk {t['time']}: no heights yet ({ex!r}); it waits")
+            self.log(f"  recorded walk {where(0)[0]}: no heights yet ({ex!r}); it waits")
             return None
         for i, j in ambiguous:
-            self.log(f"  recorded walk {t['time']}: points {i + 1}-{j + 1} could be on another floor (mark the stairs, "
+            (ti, a), (tj, b) = where(i), where(j)
+            span = f"points {a + 1}-{b + 1}" if ti == tj else f"points {a + 1}- (to walk {tj}'s {b + 1})"
+            self.log(f"  recorded walk {ti}: {span} could be on another floor (mark the stairs, "
                      "or pick the floor with Shift + mouse wheel while recording)")
-        return pieces(pts, zs, kinds, stairs)
+        return zs, kinds
+
+    def chain(self, ts: list) -> list:
+        """Record's walks that go on one from the other (`chains`) worked out as one walk, each its own pieces: [pieces
+        or None per walk]. Record's road type switch (#764) saves the walk so far and goes on from its last point, so a
+        Stairs walk between two others is a walk of its own; alone, a short one in Ironforge was on the mountain's top,
+        200 yd over the halls (its ends joined to nothing: issue #862). A portal on the way: each alone."""
+        if len(ts) < 2:
+            return [self(t) for t in ts]
+        level = int(ts[0]["continent"])
+        if CITY_BASE.get(level, level) >= 20000:
+            return [self(t) for t in ts]
+        pts, ind, picked, stairs, loose, offs = [], [], [], [], [], []
+        for k, t in enumerate(ts):
+            own = [(float(p[0]), float(p[1])) for p in t["coords"]]
+            n, o = len(own), len(pts) - (1 if k else 0)  # (a walk's first point is the one before's last)
+            offs.append(o)
+            marks = [(a - 1, b - 1) for a, b in t.get("stairs") or ()]
+            if not marks and t.get("kind") == "stairs" and n >= 2:  # (as __call__)
+                marks = [(0, n - 1)]
+                loose.append((o, o + n - 1))
+            stairs += [(o + a, o + b) for a, b in marks]
+            wi = t.get("ind")
+            wi = list(wi) if isinstance(wi, (str, list)) else [None] * n
+            wi = (wi + [None] * n)[:n]
+            wp = picks_of(t.get("pk"), n) or [None] * n
+            skip = 1 if k else 0
+            pts += own[skip:]
+            ind += wi[skip:]
+            picked += wp[skip:]
+        if portal_steps(pts):
+            return [self(t) for t in ts]
+
+        def where(i):
+            k = max(j for j, o in enumerate(offs) if o <= i)
+            return ts[k]["time"], i - offs[k]
+        got = self._floors(level, pts, ind, stairs, picked if any(v is not None for v in picked) else None, where,
+                           loose)
+        if got is None:
+            return [None] * len(ts)
+        zs, kinds = got
+        out = []
+        for k, t in enumerate(ts):
+            o, n = offs[k], len(t["coords"])
+            own = [(float(p[0]), float(p[1])) for p in t["coords"]]
+            marks = [(a - o, b - o) for a, b in stairs if o <= a and b <= o + n - 1]
+            out.append(pieces(own, zs[o:o + n], kinds[o:o + n], marks))
+        return out
+
+
+CHAIN_GAP_S = 600  # (Record's walks going on one from the other: started at most this long after the one before)
+
+
+def chains(ts: list) -> list:
+    """Recorded walks in time order grouped where each starts at the exact point the one before ended (Record's road
+    type switch, #764: the walk so far saved, the next going on from its last point), on the same level, within
+    CHAIN_GAP_S of its start: [[walk, ...], ...]."""
+    out: list = []
+    for t in sorted(ts, key=lambda t: t["time"]):
+        prev = out[-1][-1] if out else None
+        if (prev is not None and prev["continent"] == t["continent"] and len(t["coords"]) >= 2
+                and len(prev["coords"]) >= 2 and 0 <= t["time"] - prev["time"] <= CHAIN_GAP_S
+                and [float(v) for v in prev["coords"][-1]] == [float(v) for v in t["coords"][0]]):
+            out[-1].append(t)
+        else:
+            out.append([t])
+    return out
