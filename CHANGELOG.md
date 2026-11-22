@@ -6,6 +6,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 ### New
 
+- Roads: new roads at Stormwind City's gate and in Thunder Bluff.
 - The GPS map window shows over the game's windows (quest log, bags, world map), as the map opened out of the minimap does; AzerothGPS's own windows stay on top.
 - Roads: new roads and stairs in Ironforge.
 - For plugin addons (API 23): set the route to a place, and preview a recorded walk as the route. See docs/api.md.
