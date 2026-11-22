@@ -18,7 +18,9 @@ REVIEW, one entry per candidate:
 x, y are AzerothGPS's world yards, the server's own (`.go xyz x y z map`); Undercity's level is drawn in its base
 continent's coordinates. z is the game's height (as `.gps` gives it).
 
-DECISIONS, by candidate id: "approve" or "reject" (plain strings), or for a corrected path an object
+DECISIONS, by candidate id: "ours" (keep AzerothGPS's route) or "spf" (take the other walk's line as it is: its `pts`,
+heights too, become the route), plain strings; the first review's "approve" is read as "spf" and "reject" as "ours".
+Or for a corrected path an object
     {"decision": "correct", "tracks": [<recorded walk time>, ...], "yd": N, "level": L}
 where `tracks` are the times (the keys) of the walks recorded with AzerothGPS's Record that replace that candidate's
 route: they are in the client's AzerothGPS SavedVariables (`tracks`, marked `recorded`) and reach the road data the way
@@ -40,7 +42,8 @@ REVIEW_FILE = "RouteReview.lua"
 REVIEW_DIR = data_dir() / "debug" / "city-spf"
 REVIEW = REVIEW_DIR / "review.json"
 DECISIONS = REVIEW_DIR / "decisions.json"
-DECIDED = ("approve", "reject", "correct")
+DECIDED = ("ours", "spf", "correct", "approve", "reject")
+OLD_NAMES = {"approve": "spf", "reject": "ours"}  # (the first review's buttons: Approve took the other walk)
 
 
 def review_addons(addons: Path) -> list[tuple[Path, str]]:
@@ -179,7 +182,7 @@ def read_decisions(addons_dirs, rows: list | None = None) -> tuple[dict, int]:
             out[key] = {"decision": "correct", "tracks": [int(t) for t in tracks],
                         "yd": round(float(v.get("yd") or 0)), "level": v.get("level")}
         else:
-            out[key] = v["decision"]
+            out[key] = OLD_NAMES.get(v["decision"], v["decision"])
     return out, stale
 
 
