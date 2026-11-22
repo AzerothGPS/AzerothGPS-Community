@@ -42,12 +42,12 @@ included), quests on the map, and TomTom `/way` import and sharing.
 |---|---|
 | <img src="https://github.com/user-attachments/assets/e3062cea-ce82-410f-b8ef-11eb23ae4431" alt="The direction arrow above the map in Mulgore: the next turn, the stop's distance and ETA, the stops after it" width="400"> | <img src="https://github.com/user-attachments/assets/ee5e73a8-0b70-4f17-8f6a-9d57b5fa2dd2" alt="Quest area outlines with a quest tooltip" width="400"> |
 | Next maneuver, the stop's distance and ETA, and the stops after it. | Quest areas outlined like on the minimap; hover for the objectives. |
-| **Sharing a route** | **Drawn roads** |
-| <img src="https://github.com/user-attachments/assets/134bff8b-795f-4a1a-b08a-28398172314a" alt="The waypoint window with a Mulgore route copied as /way lines" width="400"> | <img src="https://github.com/user-attachments/assets/06d4058a-a63c-4494-8c3e-200dc0befd10" alt="Road tools on near Razor Hill: a drawn road joining the road network" width="400"> |
-| Copy your route as <code>/way</code> lines, or send it in game. | Draw a missing road on the map and routes use it right away. |
-| **Search** | **Hearthstone in routes** |
-| <img src="https://github.com/user-attachments/assets/8012fb12-c9f1-4881-9889-e6c1b6563852" alt="Searching &quot;ri&quot; on Zephras Isle, each result with its kind" width="400"> | <img src="https://github.com/user-attachments/assets/7bdb905f-ca31-4046-8f06-bf88ab0de96c" alt="In the Barrens, a route whose first step is Use your Hearthstone, in the arrow window and the route panel" width="400"> |
-| Type a few letters and pick a town, zone, landmark, flight master or dock. | Hearth home when it's faster; one click on the button turns it on or off. |
+| **Sharing a route** | **Search** |
+| <img src="https://github.com/user-attachments/assets/134bff8b-795f-4a1a-b08a-28398172314a" alt="The waypoint window with a Mulgore route copied as /way lines" width="400"> | <img src="https://github.com/user-attachments/assets/8012fb12-c9f1-4881-9889-e6c1b6563852" alt="Searching &quot;ri&quot; on Zephras Isle, each result with its kind" width="400"> |
+| Copy your route as <code>/way</code> lines, or send it in game. | Type a few letters and pick a town, zone, landmark, flight master or dock. |
+| **Hearthstone in routes** | |
+| <img src="https://github.com/user-attachments/assets/7bdb905f-ca31-4046-8f06-bf88ab0de96c" alt="In the Barrens, a route whose first step is Use your Hearthstone, in the arrow window and the route panel" width="400"> | |
+| Hearth home when it's faster; one click on the button turns it on or off. | |
 | **Farming routes** | **Importing herb and ore nodes** |
 | <img src="https://github.com/user-attachments/assets/09e4ea32-aa55-4921-8526-1164ee2e7709" alt="On Zephras Isle: the herb and ore buttons, Draw a Farming Area, a loop drawn round the nodes, the route through them" width="400"> | <img src="https://github.com/user-attachments/assets/3e19339d-b59e-4764-9614-1e3c22e958cc" alt="The waypoint window with Import as herb/ore nodes ticked, Durotar herbs" width="400"> |
 | Draw around herb or ore nodes and the route loops through them. | Paste <code>/way</code> node lists; they show faded until you gather there. |
@@ -64,7 +64,7 @@ and extract the `AzerothGPS` folder into `_forever_\Interface\AddOns`. In game,
 
 **Documentation:** every feature, option and command is in the [wiki](https://github.com/AzerothGPS/AzerothGPS/wiki).
 
-**Community:** questions, news and road or wall fixes on the [AzerothGPS Discord](https://discord.gg/hHEguxVQFb).
+**Community:** questions, news and bad routes on the [AzerothGPS Discord](https://discord.gg/hHEguxVQFb).
 Bugs and road data can also go in [GitHub issues](https://github.com/AzerothGPS/AzerothGPS/issues).
 
 ## Repository

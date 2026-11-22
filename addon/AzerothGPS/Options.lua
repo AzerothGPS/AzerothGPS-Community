@@ -3118,55 +3118,25 @@ local function BuildWindow()
 
   ---------------------------------------------------------------- Tools
   Page(L["Tools"], nil, "Tools")
-  note(L["For fixing the map's data: roads the routes miss or that aren't there, and walls they walk through. Click |cffffd100Map Editing|r on the map for the tools: the roads and walls show while it's open (or /agps roads on, /agps walls on)."])
-  Key("devTools")
-  check(L["Map editing tools"], L["Adds the Map Editing button to the map's buttons: the road and wall tools, the magic eraser, Undo, Stairs and Record. Also /agps dev."],
-    function() return GPS().devTools end, function(v)
-      GPS().devTools = v
-      if not v and ns.GPS.SetMapEditOpen then ns.GPS.SetMapEditOpen(false) end
-      if ns.GPS.LayoutQuick then ns.GPS.LayoutQuick() end
-    end)
-  Key("mapEditIdle")
-  slider(L["Map Editing closes after"], 1, 30, 1, function(v) return Format(L["%d min"], v) end,
-    function() return tonumber(GPS().mapEditIdle) or 2 end,
-    function(v) GPS().mapEditIdle = math.floor(v + 0.5) end, nil,
-    L["How long the opened Map Editing menu stays open with the map unused (no click, drag, zoom or stroke on it). Then it closes, the roads and walls are hidden again and the tools turn off."])
-  header(L["Roads"], L["The road network the routes use."])
-  note(L["With the road tools on, on the map: left-drag along a road the routes miss, right-drag over a \"road\" that isn't there (red), middle-drag to pan. Routes use it right away. A drawn road joins the roads it meets; where it runs along one, that road stays."] .. " " .. L["Hold Shift to draw or erase; a plain drag pans the map and a click on a line opens its details."])
-  place(Button(page, L["Road Tools On/Off"], 150, function() ns.GPS.ToggleRoadMode() end), 28, 4)
-  Key("recordHint")
-  check(L["Suggest Record when drawing roads"], L["Starting to draw a road by hand asks whether to Record it instead: walked, a road keeps the floors and stairs it goes over."],
-    function() return GPS().recordHint ~= false end, function(v) GPS().recordHint = v end)
-  -- (1.2.0: /agps roads on|off's setting; the map's Show Roads and Walls button sets both)
+  -- (1.2.0: /agps roads on|off's setting)
   Key("showRoads")
-  check(L["Show the roads on the map"], L["Draws the road network the routes use on the map, with the road tools off too. Also /agps roads."],
+  check(L["Show the roads on the map"], L["Draws the road network the routes use on the map. Also /agps roads."],
     function() return GPS().showRoads and true or false end, function(v) GPS().showRoads = v end)
-  header(L["Walls"], L["What routes can't walk through: a town's wall, a fence, a cliff edge."])
-  note(L["With the wall tools on, on the map: left-drag along a wall the routes try to walk through, right-drag over a wall that isn't there, or a mountain edge that's really walkable (circle an area to open all of it), middle-drag to pan. Routes go around your walls right away, like a mountain, and a road a wall crosses is cut there: leave a gap for a gate. Flight paths still cross them. Shown in blood red: the edges of mountains and cliffs too steep to climb (the terrain data), buildings, and the walls drawn in (thicker)."] .. " " .. L["Hold Shift to draw or erase; a plain drag pans the map and a click on a line opens its details."])
-  place(Button(page, L["Wall Tools On/Off"], 150, function() ns.GPS.ToggleWallMode() end), 28, 4)
   -- (1.2.0: /agps walls on|off's setting)
   Key("showWalls")
-  check(L["Show the walls on the map"], L["Draws the walls routes go around on the map (blood red), with the wall tools off too. Also /agps walls."],
+  check(L["Show the walls on the map"], L["Draws the walls routes go around on the map (blood red). Also /agps walls."],
     function() return GPS().showWalls and true or false end, function(v) GPS().showWalls = v end)
-  header(L["Road and wall tools"], L["The magic eraser, Restore Zone and Restore Continent put the map's own roads or walls back where you changed them (those of the tools on). Undo puts them back."])
-  -- (Shift-click drawing always since 2026-11-19, its option gone)
-  note(L["Hold Shift to draw or erase; a plain drag pans the map and a click on a line opens its details."])
+  -- (other addons' controls on this page: the dev addon's map editor, O.AddToolsSection)
+  for _, build in ipairs(O.toolsSections) do
+    local ok, err = pcall(build, { page = page, header = header, note = note, check = check, slider = slider,
+      place = place, Button = Button, Key = Key, also = also, AddText = AddText, group = group, controls = controls })
+    if not ok and ns.Print then ns.Print("Options > Tools: " .. tostring(err)) end
+  end
   header(L["Pins"], L["Your own marks on the map: a name and an icon."])
   note(L["Shift + left-click on the map, then |cffffd100Create Pin|r: name it, pick an icon (any the game has, as for a macro) and, where floors lie over each other (a dungeon, Undercity, a cave), its floor. Double-click a pin for a stop there; right-click it to remove it. Pins are shared with your map data (Copy Map Data..., Help improve)."])
   Key("pinning")
   check(L["Pinning"], L["Shift + left-click on the map asks to create a pin there. Off: Shift + left-drag only moves the map's window."],
     function() return GPS().pinning ~= false end, function(v) GPS().pinning = v end)
-  header(L["Your changes"], L["Roads and walls you draw or erase, in the order drawn."])
-  local undoBtn = Button(page, L["Take Back the Last"], 150, function() ns.Record.Undo() end)
-  local listBtn = Button(page, L["List Your Changes"], 150, function() ns.Record.List() end)
-  place(undoBtn, 28, 4)
-  listBtn:SetPoint("LEFT", undoBtn, "RIGHT", 6, 0)
-  also(listBtn)
-  AddText(group, L["List Your Changes"])
-  controls[#controls + 1] = function()
-    local any = ns.db and ns.db.tracks and #ns.db.tracks > 0
-    undoBtn:SetEnabled(any and true or false)
-  end
 
   ---------------------------------------------------------------- Help
   -- (1.2.0: what's new, the tutorial's own sections (O.RegisterHelpSection), where to get help, and what the Help
@@ -3728,6 +3698,14 @@ function O.SectionName(owner)
   local short = s:gsub("^AzerothGPS[%s_%-%.:]*", "")
   return short ~= "" and short or s
 end
+-- A section of controls another addon puts on the Tools page (the dev addon's map editor), before Pins: build(ui), ui
+-- the page's own helpers (header, note, check, slider, place, Button, Key, also, AddText, controls). Added before the
+-- window is built (it's built once).
+O.toolsSections = O.toolsSections or {}
+function O.AddToolsSection(build)
+  O.toolsSections[#O.toolsSections + 1] = build
+end
+
 function O.AddPage(owner, title, build)
   if type(build) ~= "function" then return false end
   title = tostring(title or "General")

@@ -1055,6 +1055,16 @@ def cmd_install_addon(args) -> int:
     return rc
 
 
+def private_client(addons: Path) -> bool:
+    """Whether the developer addon may go into the AddOns folder `addons` (never the live game's): the maintainers' rule
+    in private_paths.py (`is_dev_client`); without it, nowhere."""
+    try:
+        from .private_paths import is_dev_client
+    except ImportError:
+        return False
+    return bool(is_dev_client(Path(addons)))
+
+
 def _install_into(addons: Path, dev: bool) -> int:
     import shutil
 
@@ -1075,6 +1085,23 @@ def _install_into(addons: Path, dev: bool) -> int:
         shutil.rmtree(old)  # replaced by AzerothGPS
         print(f"removed old {old}")
     print(f"copied addon to {dst} -- /reload in game to pick up changes")
+    if dev:
+        # the developer tools (a checkout next to this repo, _dev_addon()): never shipped, and only where private_client
+        # allows (Kooki3z, 2026-11-22, 1.3.14: the map editor is in it; never the live game). Copied before the lists
+        # below are written, which go into it too (its toc lists them).
+        src = _dev_addon()
+        if not src or not src.is_dir():
+            print(f"no developer addon {'at ' + str(src) if src else 'configured (app/azerothgps/private_paths.py)'}")
+            return 1
+        ddst = dst.parent / src.name
+        if not private_client(addons):
+            print(f"dev tools not copied to {addons}: they don't go into this game client"
+                  + (f" (an {src.name} is there: remove it)" if ddst.is_dir() else ""))
+        else:
+            if ddst.is_dir():
+                shutil.rmtree(ddst)
+            shutil.copytree(src, ddst)
+            print(f"copied dev tools to {ddst} (new files: log out and back in, or restart WoW, the first time)")
     try:  # (the floor height survey's list, where an addon there takes it: kept up to date with every install)
         from .interiorfloors import export_survey
         export_survey([addons])
@@ -1085,17 +1112,6 @@ def _install_into(addons: Path, dev: bool) -> int:
         export_review([addons])
     except Exception as e:  # (never fails an install)
         print(f"route review list not written: {e}")
-    if dev:
-        # the developer tools (a checkout next to this repo, _dev_addon()): never shipped
-        src = _dev_addon()
-        if not src or not src.is_dir():
-            print(f"no developer addon {'at ' + str(src) if src else 'configured (app/azerothgps/private_paths.py)'}")
-            return 1
-        ddst = dst.parent / src.name
-        if ddst.is_dir():
-            shutil.rmtree(ddst)
-        shutil.copytree(src, ddst)
-        print(f"copied dev tools to {ddst} (new files: log out and back in, or restart WoW, the first time)")
     return 0
 
 

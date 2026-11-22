@@ -242,44 +242,7 @@ function API.Redraw()
   if GPS() then GPS().Redraw() end
 end
 
--- (API 22) The road recorder (Record: a road walked and saved as a drawn road marked `recorded`), for a companion that
--- asks the player to walk a way and then reads it back. ShowRecorder opens its window (false when there's none);
--- Recording() is whether it's recording now; RecordedWalks(since) the recorded walks saved at `since` (a time()) or
--- after, oldest first, as copies: { time (its key), level (the continent, Undercity's 10001), zone, kind (nil: ground),
--- pts = { x1, y1, x2, y2, ... }, zs (a height per point, or nil), stairs, yd (its length) }. Read only: nothing changes.
-function API.ShowRecorder()
-  if not (ns.Record and ns.Record.ShowWindow) then return false end
-  ns.Record.ShowWindow()
-  return true
-end
-function API.Recording()
-  return (ns.Record and ns.Record.rec ~= nil) and true or false
-end
-function API.RecordedWalks(since)
-  since = tonumber(since) or 0
-  local out = {}
-  local tracks = ns.db and ns.db.tracks
-  if type(tracks) ~= "table" then return out end
-  local function Copy(t)
-    if type(t) ~= "table" then return nil end
-    local c = {}
-    for i, v in ipairs(t) do c[i] = v end
-    return c
-  end
-  for _, t in ipairs(tracks) do
-    if type(t) == "table" and t.recorded and (t.op == nil or t.op == "add") and tonumber(t.time)
-        and t.time >= since and type(t.pts) == "table" then
-      local pts, yd = Copy(t.pts), 0
-      for i = 3, #pts - 1, 2 do
-        yd = yd + math.sqrt((pts[i] - pts[i - 2]) ^ 2 + (pts[i + 1] - pts[i - 1]) ^ 2)
-      end
-      out[#out + 1] = { time = t.time, level = t.continent, zone = t.zone, kind = t.kind, pts = pts, zs = Copy(t.zs),
-        stairs = Copy(t.stairs), yd = yd }
-    end
-  end
-  table.sort(out, function(a, b) return a.time < b.time end)
-  return out
-end
+-- (API 22's ShowRecorder, Recording and RecordedWalks went in 1.3.14, with the recorder: no longer in this table.)
 
 -- (API 23, for a companion reviewing routes: the live route set to a place, and to a recorded walk being checked)
 -- RouteTo(level, x, y, z, name): the route replaced by one stop there (`level` as PlayerLevel's, `z` its height, for its
@@ -292,7 +255,7 @@ function API.RouteTo(level, x, y, z, name)
   if ok and GPS() then GPS().Redraw() end
   return ok and true or false, asking and true or nil
 end
--- PreviewWalk(times, done): routes take the player's recorded walks with those times (RecordedWalks' `time`s) as the
+-- PreviewWalk(times, done): routes take the player's recorded walks with those times (their `time`s in the saved roads) as the
 -- way, far ahead of any other road, as they will once the walk replaces the route there in the data; the roads built
 -- again and the route worked out again at once. PreviewWalk(nil) ends it. Never saved (a /reload ends it too). True
 -- and how many walks (on the oldest one's level) are previewed; false, "none" when none of those times is a recorded

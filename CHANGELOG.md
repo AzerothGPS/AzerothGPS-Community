@@ -6,8 +6,11 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 ### New
 
-- Record: pick the floor you are on with Up, Down and Auto; after Stop & Save it says the floors picked.
 - For plugin addons (API 23): set the route to a place, and preview a recorded walk as the route. See docs/api.md.
+
+### Changed
+
+- Road and wall drawing and Record are no longer part of AzerothGPS; roads you drew still guide your routes.
 
 ## 1.3.13
 

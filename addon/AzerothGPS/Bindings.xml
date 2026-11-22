@@ -7,8 +7,4 @@
   <Binding name="AZEROTHGPS_SEARCH" category="ADDONS">
     AzerothGPS_QuickSearch()
   </Binding>
-  <!-- The road tools' Record: the Stairs road type on, then back off. -->
-  <Binding name="AZEROTHGPS_RECORD_STAIRS" category="ADDONS">
-    AzerothGPS_RecordStairs()
-  </Binding>
 </Bindings>

@@ -160,67 +160,6 @@ def hover(lua, ns, x, y):
     return p
 
 
-def test_over_a_buildings_inside_map_its_roads_show_and_the_rest_fade(game):
-    lua, ns = game
-    G = ns.GPS
-    lua.execute("""
-      AGPS_REAL_SEAMLESS = AGPS_REAL_SEAMLESS or AGPS_NS.GPS.Seamless
-      AGPS_NS.GPS.Seamless = function() return true end
-    """)
-    try:
-        G.SetRoadMode(True)
-        p = hover(lua, ns, -9464.0, 36.0)  # (the Lion's Pride Inn, Goldshire: its east end, both floors)
-        assert G.zoomedInside == GOLDSHIRE_INN
-        assert G.editInterior is not None and G.editInterior[1][1] == GOLDSHIRE_INN and G.editInterior[1][2] == p[2]
-        assert G.InEditInterior(-9464.0, 36.0) and not G.InEditInterior(-9400.0, 100.0)
-        segs = G.LayoutRoads(-9464.0, 36.0, 0, 0, 80, 200, G.InEditInterior)
-        alphas = [segs[k][6] for k in range(1, len(segs) + 1)]
-        assert any(a == pytest.approx(G.INTERIOR_FADE_ALPHA) for a in alphas if a is not None)  # (Goldshire's roads)
-        assert any(a is None for a in alphas)  # (the inn's own)
-        # the hover: its floors' heights there, with the ground's
-        text = G.FloorHeightText(-9464.0, 36.0)
-        assert text is not None and text.startswith("Floors: ") and "57" in text and "64" in text, text
-        # the floors offered to Shift + mouse wheel: Goldshire's inn has roads on its floors (Data/Indoors.lua): theirs,
-        # as ever (a floor road's `zs`); a building with none offers its floors' heights, as ground heights (`gz`)
-        floors = G.EditFloors(0, -9464.0, 36.0)
-        assert len(floors) >= 2
-        lua.execute("AGPS_REAL_DEBUGGRAPH = AGPS_NS.Router.DebugGraph; AGPS_NS.Router.DebugGraph = function() return nil end")
-        try:
-            floors = G.EditFloors(0, -9464.0, 36.0)
-        finally:
-            lua.execute("AGPS_NS.Router.DebugGraph = AGPS_REAL_DEBUGGRAPH")
-        n = len(floors)
-        assert n >= 2 and all(floors[k].gz for k in range(1, n + 1))
-        upstairs = [floors[k] for k in range(1, n + 1) if abs(floors[k].z - 63.8) < 0.6][0]
-        G.editFloor = upstairs
-        assert G.EditFloor(0, None) is None
-        # a road drawn in it: the floor picked as its ground height there, the land's outside
-        saved = ns.db.tracks
-        try:
-            ns.db.tracks = lua.table()
-            G.FinishRoad(lua.table(pts=lua.table(-9464.0, 36.0, -9463.0, 35.0, -9420.0, 60.0), cont=0), False, False)
-            t = ns.db.tracks[1]
-            assert t.zs is None and t.z is None
-            assert t.gz[1] == pytest.approx(63.8, abs=0.6) and t.gz[2] == pytest.approx(63.8, abs=0.6)
-            assert t.gz[3] is not False and abs(t.gz[3] - 63.8) > 2  # (out in Goldshire: the ground's)
-            # no floor picked: the lowest floor there
-            G.editFloor = None
-            G.FinishRoad(lua.table(pts=lua.table(-9464.0, 36.0, -9460.0, 36.5, -9456.0, 37.0), cont=0), False, False)
-            low = ns.db.tracks[2].gz[1]
-            assert low < 63.8 - 2
-        finally:
-            ns.db.tracks = saved
-        # the mouse gone off it: nothing edited, the roads as ever
-        G.hoverInside, G.hoverInsideKey = None, None
-        G.Update()
-        assert G.editInterior is None
-    finally:
-        G.editFloor = None
-        G.SetRoadMode(False)
-        lua.execute("AGPS_NS.GPS.Seamless = AGPS_REAL_SEAMLESS")
-        G.Follow()
-
-
 ROW = {"id": "100:2", "map": 0, "x": 100.0, "y": 200.0, "z": 31.5, "expect": 30.0, "band": [20.0, 35.0],
        "ground": 21.0, "place": [90.0, 190.0, 20.0, 1.0], "need": "x", "go": ".go xyz 100 200 31.5 0"}
 

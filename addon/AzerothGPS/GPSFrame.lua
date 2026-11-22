@@ -31,8 +31,6 @@ local MAP_BUTTON = 32 -- the round map menu button (bottom-left)
 local MENU_IDLE = 20 -- seconds: the map menu (and its toggles column) closes by itself
 local SEARCH_IDLE = 20 -- ... and the search panel
 local LASSO_COLOR = { 1, 0.82, 0 } -- a farming area being drawn
-local DRAW_COLOR, ERASE_COLOR = { 0.3, 1, 0.3 }, { 1, 0.2, 0.2 } -- a road being drawn / erased
-local WALL_COLOR, UNWALL_COLOR = { 0.55, 0.02, 0.02 }, { 0.6, 0.6, 0.6 } -- a wall being drawn (blood red) / erased
 local CHROME_PORTRAIT_INSET = 46 -- the frame's portrait covers this much of the map's top-left
 
 -- Texture:SetRotation turns the image counter-clockwise for positive angles.
@@ -2988,53 +2986,6 @@ function G.FloorIndex(floors, f)
   end
   return i
 end
--- Shift + mouse wheel with the tools on: the next floor up (delta > 0) or down, "all floors" past the
--- ends, from the floors where the map is centered. Returns whether there were floors to pick from.
-function G.StepEditFloor(delta)
-  return G.StepFloorAt(G.shownLevel, view.x, view.y, delta)
-end
--- The same from the floors at (x, y) of `level`: the Record window's Up / Down step them at the player's own spot
--- (Kooki3z 2026-11-21: Record never said which floor it took you to be on), the road tools on or not.
-function G.StepFloorAt(level, x, y, delta)
-  local floors = G.EditFloors(level, x, y)
-  if #floors == 0 then return false end
-  local i = G.FloorIndex(floors, G.editFloor) -- (0: all floors)
-  -- (over a cave's floor: up = up top, the second; a level's floors are bottom up)
-  i = i + (delta > 0 and 1 or -1)
-  if i > #floors then i = 0 elseif i < 0 then i = #floors end
-  G.editFloor = floors[i]
-  G.floorLine = nil
-  if G.editFloor and G.editFloor.z then G.lastFloorZ = G.editFloor.z end -- (the hover's heights: those near it)
-  -- (over a building: its pick remembered, and its inside map that floor's, G.FloorArtRoom)
-  if G.floorBuilding then G.floorPicks[G.floorBuilding.key] = G.editFloor or false end
-  if G.Redraw then G.Redraw() end
-  if G.RoadHint and (G.roadMode or G.wallMode) then G.RoadHint() end
-  elapsed = 1
-  return true
-end
--- The floor of an edit on `level` (the stroke's points `pts`): the one picked, as the stroke's `z` (a
--- level with heights), or `indoors` and `down` (over a cave's floor); nil when none is picked (all
--- floors). With no pick over a cave's or capital's grid, `down` (third) is the game's word for its
--- middle (IsIndoors), for the data's build (roads/graph.py).
-function G.EditFloor(level, pts)
-  local f = G.editFloor
-  if f and f.gz then return nil end -- (a building's floor, 1.3.10: its height goes in the road's `gz`, G.BuildingFloorZ)
-  if f then
-    if f.z then return f.z, nil, nil end
-    return nil, f.down, f.down
-  end
-  local N, P, R = ns.Nav, ns.Passability, ns.Router
-  local roads = ns.Roads and ns.Roads[level]
-  if (roads and roads.z) or not pts or not (ns.CityHalls and ns.CityHalls[level]) then return nil end
-  if not (N and N.Indoors and P and P.OverlayRaw and R and R.CaveDown) then return nil end
-  local x, _, inst = Geo.PlayerWorld()
-  if not x or N.PlayerLevel(inst) ~= level then return nil end
-  local k = math.floor(#pts / 4) * 2 + 1
-  local v, o = P.OverlayRaw(level, pts[k], pts[k + 1])
-  if v == nil then return nil end
-  local indoors = N.Indoors()
-  return nil, indoors, (o and o.cave and R.CaveDown(level, pts[k], pts[k + 1], indoors, nil)) or nil
-end
 -- The picked floor while the tools are on (else nil): { z } or { down }.
 function G.ToolFloor(level)
   if not (G.roadMode or G.wallMode) then return nil end
@@ -3637,6 +3588,16 @@ local function AddSeg(ax, ay, bx, by, c, w, a, keep, dotted, sub)
   sg[10] = sub or 0
 end
 function G.DrawnSegs() return segPool, segN end -- (the tests: the last redraw's lines)
+-- The map's own, for the map editor (the dev addon's, through AzerothGPS_Extend; never shipped): the view drawn last,
+-- the file's grouped locals, the layers and frames it draws on and reads, the left-drag in progress, a redraw on the next
+-- frame, and a line on the map (AddSeg, during a redraw).
+G.view, G.fl, G.AddSeg = view, fl, AddSeg
+function G.LineLayer() return lineLayer end
+function G.NavPanel() return navPanel end
+function G.Frame() return frame end
+function G.Dragging() return drag end
+function G.SetDragging(d) drag = d end
+function G.Poke() elapsed = 1 end
 
 -- Drawing by other addons (the public API, Api.lua). G.overlays[name] = fn(ctx) runs on every
 -- redraw; ctx draws in world yards of the continent in view (ctx.cont) and its lines join the
@@ -5219,95 +5180,6 @@ end
 -- marker with a stairs badge
 G.STAIRS_COLOR = { 0.75, 0.55, 1 }
 G.FLOOR_LEG_YD = 25
-
--- A walk being recorded (the road tools' Record, Record.lua's R.rec), on the level in view: its line so far as a drawn
--- road, its stairs (marked, and one still open up to the player) in the stairs' color. Only what's in view, and points
--- under ROAD_STEP_UI pixels apart as one (a walk is up to REC_MAX_POINTS: a line a point, zoomed out, cost a redraw
--- what another addon's 2500 lines did). How many lines.
--- The road picked with Edit Road, drawn over the network (G.roadEdit): bright, its stairs stretch in the stairs color
--- with the stairs' icons from the foot picked to the top (the whole road set to stairs: from its lower end by its
--- heights, else as drawn), its foot and top as dots. The number of lines.
-G.EDIT_ROAD_COLOR = { 1, 1, 1 }
-function G.DrawRoadEdit(cx, cy, rot, s, viewCont, half)
-  local re = G.roadEdit
-  local t = re and re.sel and re.sel.t
-  if not (t and t.pts and re.level == viewCont) then return 0 end
-  local pts, n = t.pts, 0
-  local edge = (half or 1e9) * 1.45
-  local i0, j0 = re.foot, re.top
-  if i0 and j0 and j0 < i0 then i0, j0 = j0, i0 end
-  local sp, m = G.stairPts, 0 -- (the stairs' points on the screen, for their icons)
-  local lx, ly
-  for k = 1, #pts - 1, 2 do
-    local p = (k + 1) / 2
-    local dx, dy = Geo.ScreenOffset(cx, cy, pts[k], pts[k + 1])
-    local ax, ay = Geo.Rotate(dx * s, dy * s, rot)
-    if re.kind == "stairs" or (i0 and j0 and p >= i0 and p <= j0) then
-      sp[m + 1], sp[m + 2] = ax, ay
-      m = m + 2
-    end
-    if lx and not ((lx < -edge and ax < -edge) or (lx > edge and ax > edge) or (ly < -edge and ay < -edge)
-        or (ly > edge and ay > edge)) then
-      local stairs = (re.kind == "stairs") or (i0 and j0 and p - 1 >= i0 and p <= j0)
-      AddSeg(lx, ly, ax, ay, stairs and G.KIND_COLORS.stairs or G.EDIT_ROAD_COLOR, 5, 0.9, true)
-      n = n + 1
-    end
-    for _, m in ipairs({ re.foot, re.top }) do
-      if m == p then
-        AddSeg(ax - 4, ay, ax + 4, ay, G.KIND_COLORS.stairs, 8, 1, true)
-        n = n + 1
-      end
-    end
-    lx, ly = ax, ay
-  end
-  if m >= 4 then
-    -- (foot first: the foot picked, or the lower end)
-    local zs = t.zs
-    local down = (re.foot and re.top and re.foot > re.top)
-      or (not (re.foot and re.top) and type(zs) == "table" and #zs >= 2 and zs[1] > zs[#zs])
-    if down then
-      for a = 1, m / 2, 2 do
-        local b = m - a
-        sp[a], sp[b] = sp[b], sp[a]
-        sp[a + 1], sp[b + 1] = sp[b + 1], sp[a + 1]
-      end
-    end
-    G.StairGlyphsAlong(sp, m, edge)
-  end
-  return n
-end
-
-function G.DrawRecording(cx, cy, rot, s, viewCont, half)
-  local r = ns.Record and ns.Record.rec
-  local pts = r and r.pts
-  if not (pts and r.level == viewCont and #pts >= 4) then return 0 end
-  local st, k = r.stairs, 1
-  local open = r.stairOpen
-  local edge = (half or 1e9) * 1.45 -- (the view's corners, turned heading-up)
-  local step2 = G.ROAD_STEP_UI * G.ROAD_STEP_UI
-  local lx, ly, lp
-  local n = 0
-  local last = #pts - 1
-  for i = 1, last, 2 do
-    local p = (i + 1) / 2
-    local dx, dy = Geo.ScreenOffset(cx, cy, pts[i], pts[i + 1])
-    local ax, ay = Geo.Rotate(dx * s, dy * s, rot)
-    -- (the piece from the last point drawn to point p: on stairs when a mark's stretch holds it)
-    while st[k + 1] and st[k + 1] < p do k = k + 2 end
-    local stairs = (st[k] and st[k] <= p - 1 and p <= st[k + 1]) or (open and p - 1 >= open) or false
-    if not lx then
-      lx, ly, lp = ax, ay, stairs
-    elseif i == last or stairs ~= lp or (ax - lx) ^ 2 + (ay - ly) ^ 2 >= step2 then
-      if not ((lx < -edge and ax < -edge) or (lx > edge and ax > edge) or (ly < -edge and ay < -edge)
-          or (ly > edge and ay > edge)) then
-        AddSeg(lx, ly, ax, ay, stairs and G.KIND_COLORS.stairs or ROAD_COLORS[0], 3, 1, true)
-        n = n + 1
-      end
-      lx, ly, lp = ax, ay, stairs
-    end
-  end
-  return n
-end
 
 -- Marker buttons for the route's stops and the pending (not yet confirmed) ones.
 local function StopPin(i)
@@ -10089,7 +9961,7 @@ function G.Update()
   segN = 0
   G.stairGlyphN = 0
   G.DrawInsetFrames(cx, cy, rot, s)
-  G.RefreshFloorHint() -- (the tools on: which floor the player is on, as they move)
+  if G.RefreshFloorHint then G.RefreshFloorHint() end -- (the map editor's, the dev addon's: the floor the player is on)
   -- (the roads of the continent in view, the player's or another)
   local forced = not st.showRoads and G.ForcedRoadColor() or nil -- (asked for by another addon: Api.lua)
   -- (an underground city's map: its level's roads; not over another inside map, a building's)
@@ -10356,10 +10228,9 @@ function G.Update()
       end
     end
   end
-  G.DrawEraser(s) -- (the magic eraser's circle at the pointer)
-  G.DrawRecording(cx, cy, rot, s, viewCont, half) -- (a walk being recorded: the road tools' Record)
-  G.DrawRoadEdit(cx, cy, rot, s, viewCont, half) -- (the road picked with Edit Road)
-  G.DrawWallEdit(cx, cy, rot, s, viewCont, half) -- (the wall picked with Edit Wall: its sides)
+  -- (the map editor's own lines, when the dev addon has put it on the map: its eraser, a walk being recorded, the road
+  -- or wall picked)
+  if G.EditorDraw then G.EditorDraw(cx, cy, rot, s, viewCont, half) end
   -- (other addons' lines, through the API's SetOverlay: timed apart from AzerothGPS's own, `/agps debug perf`; their
   -- count in G.overlaySegs)
   local ot = ns.PerfStart()
@@ -14026,6 +13897,25 @@ function G.StopTools()
   if G.drawMode or G.lasso then G.StopDrawing() end
 end
 
+-- The hint under the top panel (the directions, a quest area's objectives): at DRAW_HINT_Y, or lower when that panel
+-- reaches further down (reported 2026-11-14: a quest's four lines hid the tools' hint).
+G.DRAW_HINT_Y = -46
+G.DRAW_HINT_GAP = 6
+function G.PlaceDrawHint()
+  if not G.drawHint then return end
+  local top = G.drawHint:GetParent()
+  local y = G.DRAW_HINT_Y
+  if G.NavOnMap() and top then
+    local tt, nb = top:GetTop(), navPanel:GetBottom()
+    if type(tt) == "number" and type(nb) == "number" then y = math.min(y, math.floor(nb - tt - G.DRAW_HINT_GAP)) end
+  end
+  if y == G.drawHintY then return end
+  G.drawHintY = y
+  G.drawHint:ClearAllPoints()
+  G.drawHint:SetPoint("TOPLEFT", top, "TOPLEFT", 14, y)
+  G.drawHint:SetPoint("TOPRIGHT", top, "TOPRIGHT", -14, y)
+end
+
 function G.StartDrawing(kind)
   if G.ToolsRefused() then return false end
   if (kind or "farm") == "farm" and ns.Nav.DungeonLocked() then ns.Nav.SayLocked() return end
@@ -14033,7 +13923,7 @@ function G.StartDrawing(kind)
   if drawHint then
     drawHint:SetText(G.DrawHintText())
     drawHint:Show()
-    G.HideToolLegend()
+    if G.HideToolLegend then G.HideToolLegend() end
   end
   G.PadMarksRefresh()
   elapsed = 1
@@ -14042,7 +13932,12 @@ end
 function G.StopDrawing()
   G.drawMode, G.lasso = false, nil
   if drawHint then
-    if G.roadMode or G.wallMode then G.RoadHint() else drawHint:Hide() G.HideToolLegend() end
+    if (G.roadMode or G.wallMode) and G.RoadHint then
+      G.RoadHint()
+    else
+      drawHint:Hide()
+      if G.HideToolLegend then G.HideToolLegend() end
+    end
   end
   G.PadMarksRefresh()
   elapsed = 1
@@ -14126,64 +14021,6 @@ function G.PadDrawFinish()
   return true
 end
 
--- The road and wall tools' legend (asked 2026-11-19 for 1.3.10: the hint at the map's top was "a wall of colored text"
--- and the hover tooltip covered it): on the map's left, where the controller's box is (G.PadBoxRoom), one action a
--- row, each with pixel icons for its input (Media\Tools\, toolicons.py: the mouse's buttons and wheel, Shift and Ctrl)
--- and a short label; the tool's name over them and the floor being edited under them. Drawing and erasing take Shift
--- (asked 2026-11-19: Shift-click drawing always, its option gone); a plain drag pans the map and a plain click on a
--- road or wall opens its details (G.ToolClick).
--- The legend's rows now: header, { { icons = { name, ... }, text }, ... }, state line (or nil).
-function G.ToolLegendRows()
-  local rows = {}
-  local function row(text, ...) rows[#rows + 1] = { icons = { ... }, text = text } end
-  local header
-  local re, we = G.roadEdit, G.wallEdit
-  if G.eraserMode then
-    header = Format(L["Magic Eraser: %d yd"], G.EraserYd())
-    row(L["Drag over your changes: the map's own back"], "Shift", "MouseLeft")
-    row(L["Circle size"], "Ctrl", "MouseWheel")
-  elseif G.wallMode then
-    local pick = we and we.pick and we.sel
-    header = G.editWallMode and L["Edit Wall"] or L["Wall Tools"]
-    if pick then
-      row(L["Click the section's end on the wall"], "MouseLeft")
-    else
-      row(L["Click a wall: edit it"], "MouseLeft")
-      if not G.editWallMode then
-        row(L["Draw a wall"], "Shift", "MouseLeft")
-        row(L["Erase walls (circle an area to erase all)"], "Shift", "MouseRight")
-      end
-    end
-  elseif G.stairMode then
-    header = L["Stairs"]
-    row(G.stairMode.x and L["Click the stairs' top"] or L["Click the stairs' foot"], "MouseLeft")
-  else
-    local pick = re and re.sel and re.pick
-    header = G.editRoadMode and L["Edit Road"] or L["Road Tools"]
-    if pick then
-      row(pick == "foot" and L["Click the stairs' foot on the road"] or L["Click the stairs' top on the road"], "MouseLeft")
-    else
-      row(L["Click a road: edit it"], "MouseLeft")
-      if not G.editRoadMode then
-        row(L["Draw a road"], "Shift", "MouseLeft")
-        row(L["Erase (circle an area to erase all)"], "Shift", "MouseRight")
-      end
-    end
-  end
-  row(L["Drag: pan the map"], "MouseLeft")
-  -- (where floors lie over each other: which one is edited, Shift + wheel steps it)
-  local state = G.FloorStateText()
-  if state then row(L["Pick a floor"], "Shift", "MouseWheel") end
-  return header, rows, state
-end
--- The legend's state line: which floor is edited (G.FloorText) and, where they have heights, the floors' list under
--- it (G.FloorListText: a building's whole list while the tools are over it, G.floorBuilding).
-function G.FloorStateText()
-  local state = G.FloorText()
-  if not state then return nil end
-  local list = G.FloorListText(G.EditFloors(G.shownLevel, view.x, view.y), G.editFloor)
-  return list and (state .. "\n" .. list) or state
-end
 -- The icons: each drawn at each of TOOL_ICON_PX pixels high (toolicons.py's ICON_PX), a keycap TOOL_ICON_WIDE times as
 -- wide, in the top-left corner of a square power-of-two canvas; shown TOOL_ICON_UNITS high, the size drawn nearest its
 -- pixels on the screen, pixel for pixel (no filter above LINEAR: the client crashes on it).
@@ -14191,18 +14028,16 @@ G.TOOL_ICON_DIR = "Interface\\AddOns\\AzerothGPS\\Media\\Tools\\"
 G.TOOL_ICON_PX = { 12, 14, 16, 18, 20, 24, 28, 32, 40 }
 G.TOOL_ICON_WIDE = { Shift = 2, Ctrl = 2 }
 G.TOOL_ICON_UNITS = 14
-G.TOOL_LEGEND_PAD, G.TOOL_LEGEND_GAP, G.TOOL_LEGEND_ROW_GAP = 6, 5, 3
-G.TOOL_LEGEND_MAX_W, G.TOOL_LEGEND_MIN_W = 230, 150
-G.TOOL_LEGEND_TINT = 0.55
-function G.ToolIconFile(name, px)
-  return G.TOOL_ICON_DIR .. name .. "_" .. px
+function G.ToolIconFile(name, px, dir)
+  return (dir or G.TOOL_ICON_DIR) .. name .. "_" .. px
 end
 -- Texture `t` showing icon `name` pixel for pixel at about TOOL_ICON_UNITS high on a frame of effective scale
 -- `effScale`: its width and height in units (nil when the client doesn't know the file yet: new files need a relog).
-function G.FitToolIcon(t, name, effScale)
+-- `dir`: another addon's icons (the dev addon's map editor's legend), else TOOL_ICON_DIR.
+function G.FitToolIcon(t, name, effScale, dir)
   local ppu = ns.PixelsPerUnit(effScale or 1)
   local px = G.NearestSize(G.TOOL_ICON_PX, G.TOOL_ICON_UNITS * ppu)
-  local file = G.ToolIconFile(name, px)
+  local file = G.ToolIconFile(name, px, dir)
   if not G.ArtFileKnown(file) then return nil end
   local wide = G.TOOL_ICON_WIDE[name] or 1
   local pot = 1
@@ -14230,537 +14065,11 @@ function G.SetSearchPinArt(btn, lit, eff)
   end
   btn:SetWidth(w and math.max(G.SEARCH_PIN_W, w + 4) or math.max(G.SEARCH_PIN_W, (btn.label and btn.label:GetStringWidth() or 0) + 8))
 end
--- The inputs' names, where an icon can't be shown yet (before a relog).
-G.TOOL_INPUT_NAMES = { MouseLeft = L["Left-click"], MouseRight = L["Right-click"],
-  MouseWheel = L["Mouse wheel"], Shift = L["Shift"], Ctrl = L["Ctrl"] }
--- The legend shown (built once), its rows as G.ToolLegendRows says; placed in the controller box's room.
-function G.ShowToolLegend()
-  local top = drawHint and drawHint:GetParent()
-  if not top then return end
-  local lg = G.toolLegend
-  if not lg then
-    lg = CreateFrame("Frame", nil, top)
-    lg.bg = lg:CreateTexture(nil, "BACKGROUND")
-    lg.bg:SetAllPoints()
-    lg.bg:SetColorTexture(0, 0, 0, G.TOOL_LEGEND_TINT)
-    lg.header = lg:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-    lg.header:SetJustifyH("LEFT")
-    lg.state = lg:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-    lg.state:SetJustifyH("LEFT")
-    lg.rows = {}
-    G.toolLegend = lg
-  end
-  local header, rows, state = G.ToolLegendRows()
-  lg.shownHeader, lg.shownRows, lg.shownState = header, rows, state
-  local eff = lg.GetEffectiveScale and lg:GetEffectiveScale() or 1
-  for i, r in ipairs(rows) do
-    local fr = lg.rows[i]
-    if not fr then
-      fr = { icons = {} }
-      fr.text = lg:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-      fr.text:SetJustifyH("LEFT")
-      fr.text:SetWordWrap(true)
-      lg.rows[i] = fr
-    end
-    fr.iconW = 0
-    local missing = {}
-    for k = 1, math.max(#r.icons, #fr.icons) do
-      local name = r.icons[k]
-      local t = fr.icons[k]
-      if name and not t then
-        t = lg:CreateTexture(nil, "ARTWORK")
-        fr.icons[k] = t
-      end
-      if t then
-        local w = name and G.FitToolIcon(t, name, eff)
-        t.name = w and name or nil
-        if w then
-          fr.iconW = fr.iconW + (fr.iconW > 0 and 2 or 0) + w
-        else
-          t:Hide()
-          if name then missing[#missing + 1] = G.TOOL_INPUT_NAMES[name] or name end
-        end
-      end
-    end
-    -- (an icon the client doesn't know yet, before a relog: its input as text instead)
-    fr.label = #missing > 0 and (table.concat(missing, " + ") .. ": " .. r.text) or r.text
-    fr.text:SetText(fr.label)
-    fr.text:Show()
-  end
-  for i = #rows + 1, #lg.rows do
-    lg.rows[i].text:Hide()
-    for _, t in ipairs(lg.rows[i].icons) do
-      t:Hide()
-      t.name = nil
-    end
-  end
-  lg.header:SetText(header or "")
-  lg.state:SetText(state or "")
-  lg.state:SetShown(state ~= nil)
-  lg:Show()
-  G.PlaceToolLegend()
-  local P = ns.Pad
-  if P and P.marksOn and P.ShowMarks then P.ShowMarks(true) end -- (the controller's box gives way: its bottom line)
-end
-function G.HideToolLegend()
-  local lg = G.toolLegend
-  if not (lg and lg:IsShown()) then return end
-  lg:Hide()
-  local P = ns.Pad
-  if P and P.marksOn and P.ShowMarks then P.ShowMarks(true) end
-end
-function G.ToolLegendShown()
-  return G.toolLegend and G.toolLegend:IsShown() and true or false
-end
--- The legend laid out in the room on the map's left (under the directions and the corner logo, over the map menu's
--- buttons): its width the icons' and the longest label's (TOOL_LEGEND_MIN_W .. MAX_W), labels wrapped past that; the
--- rows that don't fit left out.
-function G.PlaceToolLegend()
-  local lg = G.toolLegend
-  if not (lg and lg:IsShown() and G.PadBoxRoom) then return end
-  local parent, x, y, _, h = G.PadBoxRoom()
-  if not parent then return end
-  local pad, gap = G.TOOL_LEGEND_PAD, G.TOOL_LEGEND_GAP
-  local rows = lg.shownRows or {}
-  local iconCol, textW = 0, 0
-  for i = 1, #rows do
-    local fr = lg.rows[i]
-    iconCol = math.max(iconCol, fr.iconW or 0)
-    local sw = fr.text.GetUnboundedStringWidth and fr.text:GetUnboundedStringWidth() or fr.text:GetStringWidth()
-    textW = math.max(textW, sw or 0)
-  end
-  local maxW = math.min(G.TOOL_LEGEND_MAX_W, math.max(G.TOOL_LEGEND_MIN_W, (parent:GetWidth() or 400) * 0.4))
-  local w = math.floor(math.max(G.TOOL_LEGEND_MIN_W, math.min(maxW, pad * 2 + iconCol + gap + textW + 2)))
-  local labelW = w - pad * 2 - iconCol - gap
-  local cy = pad
-  lg.header:ClearAllPoints()
-  lg.header:SetPoint("TOPLEFT", lg, "TOPLEFT", pad, -cy)
-  lg.header:SetWidth(w - pad * 2)
-  cy = cy + (lg.header:GetStringHeight() or 12) + G.TOOL_LEGEND_ROW_GAP + 1
-  local room = h and math.max(0, h) or math.huge
-  lg.fit = 0
-  for i = 1, #rows do
-    local fr = lg.rows[i]
-    fr.text:SetWidth(labelW)
-    local th = fr.text:GetStringHeight() or 12
-    local rh = math.max(G.TOOL_ICON_UNITS, th)
-    local fits = cy + rh + pad <= room
-    local ix = pad
-    for _, t in ipairs(fr.icons) do
-      if t.name and fits then
-        t:ClearAllPoints()
-        -- (on whole units from the row's top, at the row's middle)
-        t:SetPoint("TOPLEFT", lg, "TOPLEFT", ix, -math.floor(cy + (rh - t:GetHeight()) / 2 + 0.5))
-        t:Show()
-        ix = ix + t:GetWidth() + 2
-      else
-        t:Hide()
-      end
-    end
-    fr.text:ClearAllPoints()
-    fr.text:SetPoint("TOPLEFT", lg, "TOPLEFT", pad + iconCol + gap, -math.floor(cy + (rh - th) / 2 + 0.5))
-    fr.text:SetShown(fits)
-    if fits then
-      lg.fit = i
-      cy = cy + rh + G.TOOL_LEGEND_ROW_GAP
-    end
-  end
-  if lg.state:IsShown() then
-    lg.state:ClearAllPoints()
-    lg.state:SetPoint("TOPLEFT", lg, "TOPLEFT", pad, -cy)
-    lg.state:SetWidth(w - pad * 2)
-    cy = cy + (lg.state:GetStringHeight() or 12) + G.TOOL_LEGEND_ROW_GAP
-  end
-  if lg:GetParent() ~= parent then lg:SetParent(parent) end
-  lg:SetFrameLevel((parent:GetFrameLevel() or 1) + 20)
-  lg:ClearAllPoints()
-  lg:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
-  lg:SetSize(w, math.floor(cy - G.TOOL_LEGEND_ROW_GAP + pad))
-end
--- The tools' hover tooltip kept off the legend (asked 2026-11-19: it covered the hint): with the legend shown, the
--- tooltip's bottom left where ANCHOR_CURSOR would put it (the cursor at (mx, my), screen pixels, TOOL_TIP_OFF units
--- past it), but never left of the legend's right edge (`lr`, screen pixels) plus TOOL_TIP_GAP: its offsets from the
--- legend's top right (`lt`: its top, screen pixels) in the tooltip's units (`ts`: its effective scale).
-G.TOOL_TIP_GAP, G.TOOL_TIP_OFF = 8, 12
-function G.TipBesideLegend(mx, my, lr, lt, ts)
-  ts = ts or 1
-  local x = math.max(G.TOOL_TIP_GAP, (mx - lr) / ts + G.TOOL_TIP_OFF)
-  local y = (my - lt) / ts + G.TOOL_TIP_OFF
-  return x, y
-end
-function G.KeepTipOffLegend()
-  local lg = G.toolLegend
-  if not (lg and lg:IsShown()) then return false end
-  local lr, lt = lg:GetRight(), lg:GetTop()
-  if type(lr) ~= "number" or type(lt) ~= "number" then return false end
-  local ls = lg:GetEffectiveScale() or 1
-  local ts = GameTooltip.GetEffectiveScale and GameTooltip:GetEffectiveScale() or 1
-  local mx, my = GetCursorPosition()
-  local x, y = G.TipBesideLegend(mx, my, lr * ls, lt * ls, ts)
-  GameTooltip:ClearAllPoints()
-  GameTooltip:SetPoint("BOTTOMLEFT", lg, "TOPRIGHT", x, y)
-  return true
-end
--- The tools' hint: the legend (the line at the map's top is only for drawing an area now, G.drawMode).
-function G.RoadHint()
-  G.floorLine = G.FloorStateText()
-  if G.drawMode then return end
-  drawHint:Hide()
-  G.ShowToolLegend()
-end
--- The hint's floor line kept up to date as the player moves (a redraw, every FLOOR_HINT_SECONDS).
-G.FLOOR_HINT_SECONDS = 0.5
-local floorHintAt = 0
-function G.RefreshFloorHint()
-  if not (drawHint and (G.roadMode or G.wallMode) and not G.drawMode) then return end
-  local now = GetTime and GetTime() or 0
-  if now - floorHintAt < G.FLOOR_HINT_SECONDS then return end
-  floorHintAt = now
-  G.PlaceDrawHint()
-  if G.FloorStateText() ~= G.floorLine then G.RoadHint() else G.PlaceToolLegend() end
-end
--- The hint under the top panel (the directions, a quest area's objectives): at DRAW_HINT_Y, or lower when that panel
--- reaches further down (reported 2026-11-14: a quest's four lines hid the tools' hint).
-G.DRAW_HINT_Y = -46
-G.DRAW_HINT_GAP = 6
-function G.PlaceDrawHint()
-  if not drawHint then return end
-  local top = drawHint:GetParent()
-  local y = G.DRAW_HINT_Y
-  if G.NavOnMap() and top then
-    local tt, nb = top:GetTop(), navPanel:GetBottom()
-    if type(tt) == "number" and type(nb) == "number" then y = math.min(y, math.floor(nb - tt - G.DRAW_HINT_GAP)) end
-  end
-  if y == G.drawHintY then return end
-  G.drawHintY = y
-  drawHint:ClearAllPoints()
-  drawHint:SetPoint("TOPLEFT", top, "TOPLEFT", 14, y)
-  drawHint:SetPoint("TOPRIGHT", top, "TOPRIGHT", -14, y)
-end
 
--- The tools off: the edits made with them into the road network now (Record.Apply), once.
-local function ToolsOff()
-  if not G.roadMode and not G.wallMode and ns.Record and ns.Record.pending then ns.Record.Apply() end
-  if not G.roadMode and not G.wallMode and G.floorBuilding then -- (a building's pick kept for next time, G.floorPicks)
-    G.floorPicks[G.floorBuilding.key] = G.editFloor or false
-    G.floorBuilding = nil
-  end
-  -- (the floor picked: all again next time; not while recording, whose walk carries it: the Record window's Floor line)
-  if not G.roadMode and not G.wallMode then
-    if not (ns.Record and ns.Record.rec) then G.editFloor = nil end
-    G.eraserMode = nil
-  end
-  if not G.roadMode and not G.wallMode and ns.Ground then ns.Ground.Release() end -- (the ground's tiles let go)
-end
-
-function G.SetRoadMode(on)
-  if on and G.ToolsRefused() then return false end
-  if on then G.MapEditAuto(true) end
-  G.roadMode = on and true or false
-  if not G.roadMode then G.stairMode, G.roadEnd = nil, nil end -- (the stairs tool and a road end picked go with them)
-  if not G.roadMode and G.SetEditRoadMode and G.editRoadMode then G.SetEditRoadMode(false) end -- (and Edit Road)
-  ToolsOff()
-  if G.roadMode then G.wallMode = false end -- (one set of tools at a time)
-  G.lasso, drag = nil, nil
-  if G.drawMode then G.drawMode = false end
-  if drawHint then
-    if G.roadMode or G.wallMode then G.RoadHint() else drawHint:Hide() G.HideToolLegend() end
-  end
-  if G.RefreshQuick then G.RefreshQuick() end
-  if not on then G.MapEditAuto(false) end
-  elapsed = 1
-end
-
--- The wall tools: like the road tools, for walls (what routes can't walk through): on the
--- map, left-drag draws one, right-drag erases them, middle-drag pans. On until toggled off.
-function G.SetWallMode(on)
-  if on and G.ToolsRefused() then return false end
-  if on then G.MapEditAuto(true) end
-  G.wallMode = on and true or false
-  ToolsOff()
-  if G.wallMode then G.roadMode, G.stairMode = false, nil end
-  if G.wallMode and G.editRoadMode then G.SetEditRoadMode(false) end
-  if not G.wallMode and G.editWallMode and G.SetEditWallMode then G.SetEditWallMode(false) end -- (and Edit Wall)
-  G.lasso, drag = nil, nil
-  if G.drawMode then G.drawMode = false end
-  if drawHint then
-    if G.roadMode or G.wallMode then G.RoadHint() else drawHint:Hide() G.HideToolLegend() end
-  end
-  if G.RefreshQuick then G.RefreshQuick() end
-  if not on then G.MapEditAuto(false) end
-  elapsed = 1
-end
-
--- A tool turned on another way than from the menu (a slash command, Options, the tutorial) opens Map Editing with it, and
--- closes it again when the tools are all off; a menu the player opened stays open (G.SetMapEditOpen).
-function G.MapEditAuto(on)
-  if not G.SetMapEditOpen then return end
-  if on and not G.mapEditOpen then
-    G.SetMapEditOpen(true)
-    G.mapEditAuto = true
-  elseif not on and G.mapEditAuto and not G.roadMode and not G.wallMode then
-    G.SetMapEditOpen(false)
-  end
-end
--- The road and wall tools, and the roads and walls shown, off by themselves after TOOLS_IDLE seconds with the map on
--- screen and not used (no click, drag, pan, zoom or stroke on it; a Record walk counts as use), said in chat: drawing
--- the road network or the walls costs every redraw (asked 2026-11-13, for performance). Turning one on starts the
--- count over; time with the map hidden doesn't count (nothing's drawn then).
-G.TOOLS_IDLE = 120
-G.toolsIdle = 0
--- (asked 2026-11-14: "This map editing menu will stay open for 2 minutes (adjustable setting) without map activity before
--- it collapses back and turns off show road/walls": `mapEditIdle`, minutes, Options > Tools)
-G.MAP_EDIT_IDLE_MIN, G.MAP_EDIT_IDLE_MAX = 1, 30
-function G.ToolsIdleSeconds()
-  local m = tonumber(S().mapEditIdle)
-  if not m then return G.TOOLS_IDLE end
-  return math.max(G.MAP_EDIT_IDLE_MIN, math.min(G.MAP_EDIT_IDLE_MAX, m)) * 60
-end
-function G.ToolsOn()
-  local st = S()
-  local on = {}
-  if G.roadMode then on[#on + 1] = L["road tools"] end
-  if G.wallMode then on[#on + 1] = L["wall tools"] end
-  if st.showRoads then on[#on + 1] = L["roads shown"] end
-  if st.showWalls then on[#on + 1] = L["walls shown"] end
-  if G.mapEditOpen and #on == 0 then on[1] = L["Map Editing"] end
-  return on
-end
-function G.NoteMapUse() G.toolsIdle = 0 end
--- Each frame the map is up: `busy` a drag or a stroke under way. True when it turned them off.
-function G.ToolsIdleTick(dt, busy)
-  if G.square then return false end
-  local on = G.ToolsOn()
-  local onSig = table.concat(on, ",")
-  if #on == 0 or busy or onSig ~= G.toolsSig or (ns.Record and ns.Record.rec) then
-    G.toolsSig, G.toolsIdle = onSig, 0
-    return false
-  end
-  G.toolsIdle = G.toolsIdle + (dt or 0)
-  local limit = G.ToolsIdleSeconds()
-  if G.toolsIdle < limit then return false end
-  G.toolsIdle, G.toolsSig = 0, nil
-  local st = S()
-  if G.mapEditOpen and G.SetMapEditOpen then G.SetMapEditOpen(false) end -- (Map Editing closed: all of it below too)
-  st.showRoads, st.showWalls = false, false
-  if G.roadMode then G.SetRoadMode(false) end
-  if G.wallMode then G.SetWallMode(false) end
-  if G.RefreshQuick then G.RefreshQuick() end
-  if ns.Options and ns.Options.Refresh then pcall(ns.Options.Refresh) end
-  G.Redraw()
-  ns.Print(Format(L["Turned off after %d min without use, to save performance: %s."], math.floor(limit / 60 + 0.5),
-    table.concat(on, ", ")))
-  return true
-end
-
-function G.ToggleWallMode()
-  if G.SetWallMode(not G.wallMode) == false then return end
-  ns.Print(G.wallMode and L["wall tools on: Shift + left-drag draws a wall, Shift + right-drag erases walls, a plain drag pans, a click on a wall edits it (toggle off when done)"]
-    or L["wall tools off"])
-end
-
-function G.ToggleRoadMode()
-  if G.SetRoadMode(not G.roadMode) == false then return end
-  ns.Print(G.roadMode and L["road tools on: Shift + left-drag draws a road, Shift + right-drag erases one, a plain drag pans, a click on a road edits it (toggle off when done)"]
-    or L["road tools off"])
-end
-
--- The magic eraser (asked 2026-11-14: "a 'magic eraser' that has a resizable circle area ... that can be used to
--- restore original road and wall data"): with the road or wall tools on, a circle at the pointer; dragged over the map,
--- the player's own changes of the tools on (roads or walls) under it are taken out (Record.Restore: a stroke running on
--- past it is cut at its edge), so the map's own data is back there. Ctrl + wheel sizes it, ERASER_MIN_YD to
--- ERASER_MAX_YD: large enough to sweep away a stroke drawn across zones by mistake. Undo puts back what it took.
-G.ERASER_MIN_YD, G.ERASER_MAX_YD, G.ERASER_YD = 5, 4000, 40
-G.ERASER_STEP = 1.25 -- (a wheel notch: this much larger or smaller)
-G.ERASER_COLOR = { 0.88, 0.5, 1 }
-function G.EraserYd()
-  local r = tonumber(S().eraserYd) or G.ERASER_YD
-  return math.max(G.ERASER_MIN_YD, math.min(G.ERASER_MAX_YD, r))
-end
-function G.SizeEraser(delta)
-  local r = G.EraserYd() * (delta > 0 and G.ERASER_STEP or 1 / G.ERASER_STEP)
-  S().eraserYd = math.floor(math.max(G.ERASER_MIN_YD, math.min(G.ERASER_MAX_YD, r)) + 0.5)
-  if drawHint and (G.roadMode or G.wallMode) then G.RoadHint() end
-  elapsed = 1
-  return S().eraserYd
-end
--- The tools on: "road", "wall", or nil (neither: said in chat unless `quiet`).
-function G.ToolKind(quiet)
-  if G.wallMode then return "wall" end
-  if G.roadMode then return "road" end
-  if not quiet then ns.Print(L["turn on the road tools or the wall tools first"]) end
-  return nil
-end
-function G.SetEraserMode(on)
-  if on and not G.ToolKind() then return false end
-  G.eraserMode = on and true or nil
-  if on then G.stairMode = nil end
-  G.lasso = nil
-  if drawHint and (G.roadMode or G.wallMode) then G.RoadHint() end
-  if G.RefreshQuick then G.RefreshQuick() end
-  elapsed = 1
-end
-function G.ToggleEraser()
-  if G.SetEraserMode(not G.eraserMode) == false then return end
-  ns.Print(G.eraserMode and Format(L["magic eraser on: drag over your changes to put the map's own roads or walls back there. Ctrl + wheel sizes it (%d yd)."], G.EraserYd())
-    or L["magic eraser off"])
-end
--- Whether (x, y) is within `r` yards of the stroke `pts` ({ x, y, ... }): a function of (x, y).
-function G.NearStroke(pts, r)
-  local r2, n = r * r, #pts / 2
-  return function(x, y)
-    for i = 1, n do
-      local ax, ay = pts[2 * i - 1], pts[2 * i]
-      local vx, vy = 0, 0
-      if i < n then vx, vy = pts[2 * i + 1] - ax, pts[2 * i + 2] - ay end
-      local l2 = vx * vx + vy * vy
-      local t = l2 > 0 and math.max(0, math.min(1, ((x - ax) * vx + (y - ay) * vy) / l2)) or 0
-      if (x - ax - vx * t) ^ 2 + (y - ay - vy * t) ^ 2 <= r2 then return true end
-    end
-    return false
-  end
-end
--- What a restore did, in chat.
-function G.SayRestored(whole, cut)
-  if ns.Record.practice then return end
-  if whole + cut == 0 then
-    ns.Print(L["nothing of yours to restore there"])
-  else
-    ns.Print(Format(L["restored the map's own data there: %d of your changes taken out, %d cut short. Undo puts them back."], whole, cut))
-  end
-end
--- An eraser stroke done (`l`: its lasso, the points the pointer went over).
-function G.FinishEraser(l)
-  local kind = G.ToolKind(true)
-  if not (l and kind and #l.pts >= 2) then return end
-  local r = l.r or G.EraserYd()
-  local x1, y1, x2, y2 = math.huge, math.huge, -math.huge, -math.huge
-  for i = 1, #l.pts - 1, 2 do
-    x1, x2 = math.min(x1, l.pts[i]), math.max(x2, l.pts[i])
-    y1, y2 = math.min(y1, l.pts[i + 1]), math.max(y2, l.pts[i + 1])
-  end
-  local whole, cut = ns.Record.Restore(kind, l.cont, G.NearStroke(l.pts, r), { x1 - r, y1 - r, x2 + r, y2 + r },
-    math.max(1, r / 2))
-  G.SayRestored(whole, cut)
-  elapsed = 1
-end
--- The eraser's circle at the pointer (the map's scale `s`: pixels a yard), while it's over the map.
-G.ERASER_SIDES = 48
 -- Filled (asked 2026-11-14: "magic eraser circle should cover the entirety of the circle not just drawing a line with
 -- a circle cursor"): a round see-through disc under its ring, and its stroke as wide as it.
 G.ERASER_FILL_ALPHA = 0.3
 G.ERASER_BAND_MAX_PX = 4000
-G.ERASER_DISC_TEX = G.ROUND_MASK -- (a white disc, see-through round it)
-function G.DrawEraser(s)
-  local disc = G.eraserDisc
-  if not (G.eraserMode and (G.roadMode or G.wallMode) and canvas and canvas:IsMouseOver()) then
-    if disc then disc:Hide() end
-    return
-  end
-  local mx, my = GetCursorPosition()
-  local sc = canvas:GetEffectiveScale()
-  local ccx, ccy = canvas:GetCenter()
-  local dx, dy = mx / sc - ccx, my / sc - ccy
-  local rp = G.EraserYd() * s
-  if not disc and lineLayer then
-    disc = lineLayer:CreateTexture(nil, "ARTWORK")
-    disc:SetTexture(G.ERASER_DISC_TEX)
-    G.eraserDisc = disc
-  end
-  if disc then
-    local c = G.ERASER_COLOR
-    disc:SetVertexColor(c[1], c[2], c[3], G.ERASER_FILL_ALPHA)
-    disc:ClearAllPoints()
-    disc:SetPoint("CENTER", canvas, "CENTER", dx, dy)
-    disc:SetSize(math.max(1, 2 * rp), math.max(1, 2 * rp))
-    disc:Show()
-  end
-  local lx, ly
-  for k = 0, G.ERASER_SIDES do
-    local a = k / G.ERASER_SIDES * 2 * math.pi
-    local px, py = dx + rp * math.cos(a), dy + rp * math.sin(a)
-    if lx then AddSeg(lx, ly, px, py, G.ERASER_COLOR, 2, 0.9, true) end
-    lx, ly = px, py
-  end
-end
--- Each frame with the eraser on: the map drawn again when the pointer moved over it (the circle follows it).
-function G.EraserTick()
-  if not (G.eraserMode and (G.roadMode or G.wallMode) and canvas) then return end
-  local over = canvas:IsMouseOver()
-  local mx, my = GetCursorPosition()
-  local e = G.eraserAt
-  if over ~= (e and e.over) or (over and e and (mx - e.x) ^ 2 + (my - e.y) ^ 2 >= 4) then
-    G.eraserAt = { over = over, x = mx, y = my }
-    elapsed = 1
-  end
-end
-
--- The name of continent `cont` (its own map's), for the questions below.
-function G.ContinentName(cont)
-  local base = Geo.Base(cont)
-  for _, m in pairs(ns.Maps or {}) do
-    if m.type == 2 and m.continent == base and m.name then return m.name end
-  end
-  return tostring(base)
-end
--- Restore Zone (asked 2026-11-14: "restore a zone the crosshair is currently in based on the tool being used"): the
--- zone at the map's middle (the crosshair, or the player when following), asked first.
-function G.RestoreZone()
-  local kind = G.ToolKind()
-  if not kind then return end
-  local cont, x, y = view.cont, view.x, view.y
-  local base = Geo.Base(cont)
-  local zone = ns.Router.ZoneAt(base, x, y)
-  local m = zone and zone ~= 0 and ns.Maps and ns.Maps[zone]
-  if not m then
-    ns.Print(L["no zone under the crosshair"])
-    return
-  end
-  local n = ns.Record.CountEdits(kind, cont, zone)
-  if n == 0 then
-    ns.Print(L["nothing of yours to restore there"])
-    return
-  end
-  local name = m.name or "?"
-  G.Ask("AzerothGPSRestoreZone", Format(kind == "wall"
-      and L["Put %s's walls back as the map has them? Your %d wall changes there are taken out (one running on past it is cut at its edge). Undo puts them back."]
-      or L["Put %s's roads back as the map has them? Your %d road changes there are taken out (one running on past it is cut at its edge). Undo puts them back."], name, n),
-    L["Restore"], L["Cancel"], function()
-      local whole, cut = ns.Record.Restore(kind, cont, function(px, py) return ns.Router.ZoneAt(base, px, py) == zone end,
-        nil, 8)
-      G.SayRestored(whole, cut)
-    end)
-end
--- Restore Continent: all of the tools' changes on the continent in view, asked twice.
-function G.RestoreContinent()
-  local kind = G.ToolKind()
-  if not kind then return end
-  local cont = view.cont
-  local n = ns.Record.CountEdits(kind, cont)
-  if n == 0 then
-    ns.Print(L["nothing of yours to restore there"])
-    return
-  end
-  local name = G.ContinentName(cont)
-  G.Ask("AzerothGPSRestoreContinent", Format(kind == "wall"
-      and L["Put all of %s's walls back as the map has them? All %d of your wall changes there are taken out. Undo puts them back."]
-      or L["Put all of %s's roads back as the map has them? All %d of your road changes there are taken out. Undo puts them back."], name, n),
-    L["Restore"], L["Cancel"], function()
-      G.Ask("AzerothGPSRestoreContinent2", Format(L["Are you sure? Every one of your %d changes on %s goes."], n, name),
-        L["Restore All"], L["Cancel"], function()
-          local whole, cut = ns.Record.Restore(kind, cont, function() return true end)
-          G.SayRestored(whole, cut)
-        end)
-    end)
-end
-
--- Shift-click drawing (asked 2026-11-14; always since 2026-11-19, its option gone and a saved one ignored): the tools
--- draw and erase only with Shift held (Shift + left-drag, Shift + right-drag); a plain click or drag is the map's own
--- (left-drag pans, as with the tools off), and a plain click on a road or wall opens its details (G.ToolClick). Whether
--- a click with `button` goes to the map, not the tools.
-function G.ToolsPassClick(button)
-  return button ~= "MiddleButton" and not (IsShiftKeyDown and IsShiftKeyDown()) or false
-end
 
 -- The area is drawn: a loop through the known nodes inside it (of this character's
 -- gathering professions; all kinds if it has none).
@@ -14768,7 +14077,7 @@ function G.FinishDrawing()
   local lasso = G.lasso
   local kind = G.drawKind
   G.StopDrawing()
-  if kind == "road" or kind == "erase" then return G.FinishRoad(lasso, kind == "erase") end
+  if kind == "road" or kind == "erase" then return G.FinishRoad and G.FinishRoad(lasso, kind == "erase") end
   if not lasso or #lasso.pts < 6 then return end
   -- the kinds shown on the map (map menu: Herbs, Ore): one, the other, or both
   local kinds = ns.Layers.VisibleKinds()
@@ -14805,927 +14114,10 @@ function G.FinishDrawing()
   end
 end
 
--- A road drawn on the map: saved with the player's road fixes (Record.lua), so routes use
--- it at once (the stretches along an existing road are that road: Router.WithTracks); on
--- the city's own level when that's where the player is. `agps roads` takes it into the
--- road data. `erase`: a road that shouldn't be there, drawn over (a "remove" track).
--- Whether a stroke (flat points, `len` yards long) is a loop: long enough, and ending back
--- near where it started.
-G.LOOP_CLOSE = 0.25 -- its ends at most this share of its length apart
-function G.IsLoop(pts, len)
-  local n = #pts
-  if n < 8 or len < 30 then return false end
-  local gap = math.sqrt((pts[n - 1] - pts[1]) ^ 2 + (pts[n] - pts[2]) ^ 2)
-  return gap <= math.max(15, len * G.LOOP_CLOSE) and gap < len * 0.5
-end
-
--- `wall`: a wall (what can't be walked through), not a road; with `erase`, walls taken out.
--- A stroke's heights, a point each (`raw`: the floor picked at each, false where none was), for `n` points: the gaps
--- filled from the nearest point before, else after; nil when no point had one.
-function G.StrokeHeights(raw, n)
-  if type(raw) ~= "table" then return nil end
-  local out, last, any = {}, nil, false
-  for i = 1, n do
-    if raw[i] then last, any = raw[i], true end
-    out[i] = last or false
-  end
-  if not any then return nil end
-  for i = n, 1, -1 do
-    if out[i] then last = out[i] else out[i] = last end
-  end
-  return out
-end
--- Drawing a road by hand: Record suggested instead (asked 2026-10-09: "prompt user that wants to draw a road to
--- potentially use record instead"; the game gives no height, z is always 0: a walk recorded keeps the way walked,
--- indoors or not, the rooms' names and the stairs marked, from which the import tells each point's floor; a drawn road
--- is a line). Asked at a road stroke's start until answered: Record Instead opens Record's window; Draw Anyway, not again
--- until a real login (ns.db.recordHintSnoozed); "Don't ask again", never (the `recordHint` option, Options > Tools).
-G.RECORD_HINT_TEXT = L["Record this road instead? Walk it with Record and AzerothGPS saves the exact way you went, when you're indoors, the rooms you pass and your stairs, so it lands on the right floors when it's imported. A drawn road is only a line."]
-function G.RecordHintDue()
-  if S().recordHint == false or (ns.db and ns.db.recordHintSnoozed) then return false end
-  if not (ns.Record and ns.Record.ShowWindow) then return false end
-  if ns.Record.practice then return false end -- (the tutorial's practice strokes)
-  return not ns.Record.rec -- (recording already: no)
-end
-function G.AskRecordHint()
-  return G.Ask("AzerothGPSRecordHint", G.RECORD_HINT_TEXT, L["Record Instead"], L["Draw Anyway"], function(checked)
-    if checked then S().recordHint = false end
-    if ns.Record and ns.Record.ShowWindow then ns.Record.ShowWindow() end
-  end, function(clicked, checked)
-    if checked then S().recordHint = false end
-    if clicked and ns.db then ns.db.recordHintSnoozed = true end
-  end, { check = L["Don't ask again"] })
-end
-
-function G.FinishRoad(line, erase, wall)
-  if not line or #line.pts < 4 then return end
-  local pts, len = {}, 0
-  for i = 1, #line.pts - 1, 2 do
-    local x, y = line.pts[i], line.pts[i + 1]
-    local n = #pts
-    if n >= 2 then len = len + math.sqrt((x - pts[n - 1]) ^ 2 + (y - pts[n]) ^ 2) end
-    pts[n + 1], pts[n + 2] = math.floor(x * 10 + 0.5) / 10, math.floor(y * 10 + 0.5) / 10
-  end
-  if len < 8 then
-    ns.Print(wall and L["that wall is too short (drag along it)"] or L["that road is too short (drag along it)"])
-    return
-  end
-  -- (down in a city: on its level only when drawn over the city, not somewhere else looked at)
-  -- (the level the map shows: an underground city's over its own map, only over the city)
-  local level, shown = line.cont, G.shownLevel
-  if shown and shown ~= line.cont and G.shownCont == line.cont and Geo.Base(shown) == line.cont
-      and not (ns.Passability and ns.Passability.InGrid and not ns.Passability.InGrid(shown, pts[1], pts[2])) then
-    level = shown
-  end
-  -- (from the road end picked, or to it: snapped onto it, going on as that road is at its height; G.RoadEndClick)
-  local en = G.roadEnd
-  local goOn, goKind, goZ
-  if en and not erase and not wall and en.level == level then
-    local snap = G.ROAD_END_SNAP_PX / (view.s or 1)
-    local n = #pts
-    local d1 = math.sqrt((pts[1] - en.x) ^ 2 + (pts[2] - en.y) ^ 2)
-    local dn = math.sqrt((pts[n - 1] - en.x) ^ 2 + (pts[n] - en.y) ^ 2)
-    if math.min(d1, dn) <= snap then
-      local function r1(v) return math.floor(v * 10 + 0.5) / 10 end
-      if d1 <= dn then pts[1], pts[2] = r1(en.x), r1(en.y) else pts[n - 1], pts[n] = r1(en.x), r1(en.y) end
-      goOn = d1 <= dn and "start" or "finish"
-      goKind, goZ = G.RoadEndGoesOn(en)
-    end
-  end
-  local mapID = C_Map.GetBestMapForUnit("player")
-  local info = mapID and C_Map.GetMapInfo(mapID)
-  -- an erase drawn as a loop (ending back near its start): the roads inside it go
-  local area = erase and G.IsLoop(pts, len) or nil
-  local op = wall and (erase and "unwall" or "wall") or (erase and "remove" or "add")
-  -- (the floor it's on, where floors lie over each other: the player's height and indoors or not,
-  -- when they're on that level; Router.WithTracks changes only that floor's roads)
-  local z, indoors, down = G.EditFloor(level, pts)
-  -- (a height per point where a floor was picked while drawing: G.StrokeHeights)
-  local zs = not wall and G.StrokeHeights(line.zs, #pts / 2) or nil
-  if goOn and goZ then -- (going on from a road end: its height all along)
-    zs = {}
-    for k = 1, #pts / 2 do zs[k] = math.floor(goZ * 10 + 0.5) / 10 end
-  end
-  if zs then z = zs[1] end
-  -- (a new road with no floor picked: the ground's height at each point from the map's data, Ground.lua (1.3.10,
-  -- issue #685), false in a building or a cave; kept as `gz`, the import's start, not a floor the routes follow)
-  local gz = op == "add" and not zs and ns.Ground and ns.Ground.RoadHeights(level, pts) or nil
-  local i = ns.Record.Save({ op = op, drawn = true, continent = level,
-    zone = info and info.name or "?", time = time(), pts = pts, area = area, z = z, indoors = indoors, down = down,
-    zs = zs, gz = gz, kind = goOn and goKind or nil })
-  if goOn and i and not ns.Record.practice then
-    -- (its other end picked next: the road goes on from there again)
-    local n = #pts
-    local fx, fy = goOn == "start" and pts[n - 1] or pts[1], goOn == "start" and pts[n] or pts[2]
-    G.roadEnd = { level = level, x = fx, y = fy, z = en.z, kind = goKind or en.kind }
-    ns.Print(Format(L["went on with that %s (#%d, %s): its other end is picked, Shift + drag from it to go on."],
-      G.EDIT_KIND_NAMES[goKind or "ground"] or L["Road"], i, ns.Nav.FormatDistance(len)))
-    elapsed = 1
-    return
-  end
-  if ns.Record.practice then -- (the tutorial's practice: Record.Save kept it in memory only)
-    ns.Print(L["Practice: nothing was saved."])
-    elapsed = 1
-    return
-  end
-  if wall then
-    if erase then
-      ns.Print(Format(area and L["erased the walls inside that circle (#%d). /agps draw undo puts them back."]
-        or L["erased the walls along that stroke (#%d). /agps draw undo puts them back."], i))
-    else
-      ns.Print(Format(L["saved your wall (#%d, %s): routes won't cross it now, roads included (leave a gap for a gate). /agps draw undo takes it back."],
-        i, ns.Nav.FormatDistance(len)))
-    end
-    elapsed = 1
-    return
-  end
-  if area then
-    ns.Print(Format(L["erased the roads inside that circle (#%d): routes leave them out now. /agps draw undo puts them back."], i))
-    elapsed = 1
-    return
-  end
-  ns.Print(Format(erase and L["erased that road (#%d, %s): routes leave it out now. /agps draw undo puts it back."]
-    or L["saved your road (#%d, %s): routes use it now (joined to the roads it meets). /agps draw undo takes it back."],
-    i, ns.Nav.FormatDistance(len)))
-  elapsed = 1
-end
-
--- The stairs tool (asked 2026-10-06: "the ability to set stair locations and their start and end height"): with the
--- road tools on, a click on the map for the stairs' foot, another for their top, then their heights, picked from the
--- floors near each end (G.StairHeights) or typed (G.AskStairHeights). Saved as a drawn road that's stairs (`stair`,
--- a height each end, `zs`): Router.WithTracks makes it a stairs road (source 6) on those floors, as the data's own.
--- The button again, or the road tools off, ends it.
-function G.SetStairMode(on)
-  if on and not G.roadMode then G.SetRoadMode(true) end
-  G.stairMode = (on and G.roadMode) and {} or nil -- ({ level, x, y }: the foot, once clicked)
-  if G.stairMode then G.eraserMode = nil end
-  if G.roadMode and G.RoadHint then G.RoadHint() end
-  if G.RefreshQuick then G.RefreshQuick() end
-end
--- A click on the map with the stairs tool, at (x, y) of `level`: the foot, then the top (and their heights asked).
--- Whether it was taken.
-function G.StairClick(level, x, y)
-  local sm = G.stairMode
-  if not (sm and level and x) then return false end
-  if not sm.x or sm.level ~= level then
-    sm.level, sm.x, sm.y = level, x, y
-    if G.RoadHint then G.RoadHint() end
-    return true
-  end
-  G.stairMode = {} -- (ready for the next stairs)
-  if G.RoadHint then G.RoadHint() end
-  G.AskStairHeights(level, sm.x, sm.y, x, y)
-  return true
-end
--- The heights to pick from at (x, y) of `level`: the floors there the tools pick from (G.EditFloors), bottom up, or
--- the one road's height near when there's only one floor (none: nothing to offer, a height is typed).
-function G.StairHeights(level, x, y)
-  local hs = {}
-  for _, f in ipairs(G.EditFloors(level, x, y)) do
-    if f.z then hs[#hs + 1] = f.z end
-  end
-  -- (in a building being edited: its floors' heights there too, 1.3.10, Data/InteriorFloors.lua)
-  for _, h in ipairs(G.EditInteriorFloorsAt(x, y)) do
-    local have = false
-    for _, o in ipairs(hs) do have = have or math.abs(o - h) < 0.5 end
-    if not have then hs[#hs + 1] = h end
-  end
-  table.sort(hs)
-  if #hs == 0 then
-    local R = ns.Router
-    local near = R and R.HeightsNear and R.HeightsNear(level, x, y, G.FLOOR_PICK_YD)
-    if near and near[1] then hs[1] = math.floor(near[1].z * 10 + 0.5) / 10 end
-  end
-  return hs
-end
--- The stairs from (x1, y1) at height z1 to (x2, y2) at z2 on `level`, saved with the drawn roads: their number, or nil.
-function G.SaveStairs(level, x1, y1, z1, x2, y2, z2)
-  if not (level and x1 and y1 and x2 and y2 and tonumber(z1) and tonumber(z2)) then return nil end
-  if (x2 - x1) ^ 2 + (y2 - y1) ^ 2 < 1 then
-    ns.Print(L["those stairs are too short: click their foot, then their top"])
-    return nil
-  end
-  local function r(v) return math.floor(tonumber(v) * 10 + 0.5) / 10 end
-  local mapID = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
-  local info = mapID and C_Map.GetMapInfo(mapID)
-  local i = ns.Record.Save({ op = "add", stair = true, drawn = true, continent = level, zone = info and info.name or "?",
-    time = time(), pts = { r(x1), r(y1), r(x2), r(y2) }, zs = { r(z1), r(z2) }, z = r(z1) })
-  ns.Print(Format(L["saved your stairs (#%d, %.1f to %.1f): routes take them now. /agps draw undo takes them back."],
-    i, r(z1), r(z2)))
-  elapsed = 1
-  return i
-end
--- The heights asked: a row for the foot and one for the top, each the heights near that end as buttons and a box to
--- type one; Save Stairs saves them (G.SaveStairs).
-function G.AskStairHeights(level, x1, y1, x2, y2)
-  local f = G.stairWindow
-  if not f then
-    f = ns.Window("AzerothGPSStairs", 360, 190, L["Stairs"])
-    local function Row(label, y)
-      local t = f:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-      t:SetPoint("TOPLEFT", 14, f.top - y)
-      t:SetText(label)
-      local box = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
-      box:SetSize(60, 20)
-      box:SetPoint("TOPLEFT", 60, f.top - y + 3)
-      box:SetAutoFocus(false)
-      box:SetMaxLetters(8)
-      box:SetScript("OnEscapePressed", function() f:Hide() end)
-      local row = { box = box, buttons = {} }
-      for k = 1, 5 do
-        local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-        b:SetSize(50, 20)
-        b:SetPoint("TOPLEFT", 130 + (k - 1) * 44, f.top - y + 3)
-        b:SetScript("OnClick", function(self) box:SetText(string.format("%.1f", self.height)) end)
-        row.buttons[k] = b
-      end
-      return row
-    end
-    f.foot, f.topRow = Row(L["Foot"], 10), Row(L["Top"], 44)
-    local note = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    note:SetPoint("TOPLEFT", 14, f.top - 78)
-    note:SetPoint("RIGHT", -14, 0)
-    note:SetJustifyH("LEFT")
-    note:SetText(L["Pick each end's height (the floors near it), or type one."])
-    f.note = note
-    local save = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    save:SetSize(110, 22)
-    save:SetPoint("BOTTOMRIGHT", -12, 10)
-    save:SetText(L["Save Stairs"])
-    save:SetWidth(math.max(110, (save:GetTextWidth() or 0) + 24)) -- (a longer text in another language)
-    save:SetScript("OnClick", function()
-      local a, b = tonumber(f.foot.box:GetText()), tonumber(f.topRow.box:GetText())
-      local s = f.stairs
-      if not (a and b and s) then
-        f.note:SetText(L["|cffff6060Give both ends a height.|r"])
-        return
-      end
-      if G.SaveStairs(s.level, s.x1, s.y1, a, s.x2, s.y2, b) then f:Hide() end
-    end)
-    f.save = save
-    local cancel = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    cancel:SetSize(90, 22)
-    cancel:SetPoint("RIGHT", save, "LEFT", -6, 0)
-    cancel:SetText(L["Cancel"])
-    cancel:SetScript("OnClick", function() f:Hide() end)
-    G.stairWindow = f
-  end
-  f.stairs = { level = level, x1 = x1, y1 = y1, x2 = x2, y2 = y2 }
-  local function fill(row, hs, pick)
-    for k, b in ipairs(row.buttons) do
-      local h = hs[k]
-      b.height = h
-      b:SetText(h and string.format("%.1f", h) or "")
-      b:SetShown(h ~= nil)
-    end
-    row.box:SetText(pick and string.format("%.1f", pick) or "")
-  end
-  -- (picked first: the foot on the lowest floor near it, the top on the highest near it)
-  local hf, ht = G.StairHeights(level, x1, y1), G.StairHeights(level, x2, y2)
-  fill(f.foot, hf, hf[1])
-  fill(f.topRow, ht, ht[#ht])
-  f.note:SetText(L["Pick each end's height (the floors near it), or type one."])
-  f:Show()
-  return f
-end
-
--- Edit Road (asked 2026-11-18 for 1.3.10, issue #640): with the road tools on, a click picks a drawn or recorded road
--- (Record.TrackAt), and its window sets what it is (G.AskRoadEdit): its kind, its height (the floors near it, or typed)
--- and a stairs stretch on part of it (Pick Foot, Pick Top: a click on the road each). Save Road saves it
--- (Record.EditTrack: a new track that replaces the old one). The button again, or the road tools off, ends it.
-G.EDIT_KINDS = { "ground", "floor", "bridge", "stairs", "lift" } -- (Router.TRACK_KINDS)
-G.EDIT_KIND_NAMES = { ground = L["Ground"], floor = L["Floor"], bridge = L["Bridge"], stairs = L["Stairs"],
-  lift = L["Lift"], ramp = L["Ramp"] }
-function G.SetEditRoadMode(on)
-  if on and not G.roadMode then G.SetRoadMode(true) end
-  G.editRoadMode = (on and G.roadMode) and true or nil
-  if G.editRoadMode then G.stairMode, G.eraserMode = nil, nil end
-  if not G.editRoadMode then
-    G.roadEdit = nil
-    if G.roadEditWindow then G.roadEditWindow:Hide() end
-  end
-  if G.roadMode and G.RoadHint then G.RoadHint() end
-  if G.RefreshQuick then G.RefreshQuick() end
-  elapsed = 1
-end
--- A plain left click on a road or wall with the tools on (asked 2026-11-19 for 1.3.10: "Left-click a road or wall to
--- edit its details"): the line under the pointer (within LINE_CLICK_PX on the screen) opened in Edit Road or Edit Wall,
--- the windows those buttons open: its kind and heights, saved as an edit the same way (Record.EditTrack,
--- Record.EditWall). A drag still pans (Shift + drag draws), and a click on no line is the map's own click as before.
--- With Edit Road or Edit Wall on, or a foot, top or section's end being picked, the click is theirs; with Stairs, the
--- stairs'. A line that can't be edited (the map's own roads with no heights of their own, the map's own walls: no
--- track to replace) opens its window read-only, its details and why.
-G.LINE_CLICK_PX = 8
--- The world spot under the pointer on the map's canvas: x, y (nil off it).
-function G.ToolCursor()
-  if not (canvas and view.x and view.s) then return nil end
-  local ccx, ccy = canvas:GetCenter()
-  if not ccx then return nil end
-  local mx, my = GetCursorPosition()
-  local sc = canvas:GetEffectiveScale()
-  return G.ScreenToWorld(view.x, view.y, mx / sc - ccx, my / sc - ccy, view.rot, view.s)
-end
-function G.ToolClickAtCursor()
-  local x, y = G.ToolCursor()
-  if not x then return false end
-  return G.ToolClick(G.PinLevel(x, y), x, y, G.LINE_CLICK_PX / (view.s or 1))
-end
--- The click at (x, y) of `level`, `reach` yards round it: true when it was a line's (or a pick's).
--- Road ends (Kooki3z 2026-11-20: "click on the end of a road/bridge/lift/etc, this draws a glowing circle around it like
--- what we use for flight path indicators, when shift + left click is used on it, extend whatever that is at its
--- defined height for another section of that road"). With the road tools on, a click on the end of a road (a node only
--- one road reaches) picks it (G.roadEnd), drawn with the flight masters' glowing circle, pulsing; a click on it again
--- or anywhere else lets it go. A road then drawn (Shift + drag) starting or ending at it is snapped onto it and goes on
--- as that road is, at its height there: a bridge a bridge, a floor a floor, stairs, a lift or a ramp a floor at the
--- height they end at; a land road a land road. The far end of the new road is picked next, so it goes on again.
-G.ROAD_END_PICK_PX = 10 -- (pixels from an end that a click picks it)
-G.ROAD_END_SNAP_PX = 14 -- (pixels from the end picked that a drawn road's start or end is snapped onto it)
 G.ROAD_END_GLOW = "Interface\\TaxiFrame\\UI-Taxi-Icon-Yellow" -- (the flight masters' glowing circle)
 G.ROAD_END_GLOW_UNITS = 26
-G.ROAD_END_GO_ON = { bridge = "bridge", floor = "floor", ramp = "floor", stairs = "floor", lift = "floor" }
-G.roadEnds = setmetatable({}, { __mode = "k" })
--- The ends of graph `g`'s roads: { x, y, node, edge } each (drops and gap links not counted), worked out once per graph.
-function G.RoadEnds(g)
-  local ends = G.roadEnds[g]
-  if ends then return ends end
-  local deg, at = {}, {}
-  for ei, e in ipairs(g.e) do
-    if not (g.drops and g.drops[ei]) and #e >= 6 then
-      deg[e[1]] = (deg[e[1]] or 0) + 1
-      deg[e[2]] = (deg[e[2]] or 0) + 1
-      at[e[1]] = at[e[1]] or { e[5], e[6], ei }
-      at[e[2]] = at[e[2]] or { e[#e - 1], e[#e], ei }
-    end
-  end
-  ends = {}
-  for nd, c in pairs(deg) do
-    if c == 1 then ends[#ends + 1] = { x = at[nd][1], y = at[nd][2], node = nd, edge = at[nd][3] } end
-  end
-  G.roadEnds[g] = ends
-  return ends
-end
--- The road end nearest (x, y) on `level` within `reach` yards: { level, x, y, z (its height, or nil), kind }, or nil.
-function G.RoadEndAt(level, x, y, reach)
-  local R = ns.Router
-  if not (R and R.GraphReady and R.GraphReady(level)) then return nil end
-  local g = R.DebugGraph(level)
-  if not g then return nil end
-  local best, bd
-  for _, en in ipairs(G.RoadEnds(g)) do
-    local d = (en.x - x) ^ 2 + (en.y - y) ^ 2
-    if d <= reach * reach and (not bd or d < bd) then best, bd = en, d end
-  end
-  if not best then return nil end
-  local heights = g.z or g.nz
-  local src = g.e[best.edge][4]
-  local kind = g.kind and g.kind[best.edge]
-    or (src == R.SOURCE_STAIR and "stairs") or (src == R.SOURCE_LIFT and "lift") or "ground"
-  return { level = level, x = best.x, y = best.y, z = heights and heights[best.node] or nil, kind = kind }
-end
--- What a road drawn on from end `en` is: its kind (nil: a land road) and its height (nil: none known).
-function G.RoadEndGoesOn(en)
-  local kind = G.ROAD_END_GO_ON[en.kind or ""]
-  if kind == "floor" and not en.z then kind = nil end -- (a floor needs its height)
-  return kind, en.z
-end
--- A click with the road tools at (x, y): an end there picked (or let go when it's the one picked). True when taken.
-function G.RoadEndClick(level, x, y, reach)
-  local en = G.RoadEndAt(level, x, y, math.max(reach or 0, G.ROAD_END_PICK_PX / (view.s or 1)))
-  local was = G.roadEnd
-  if not en then
-    if was then
-      G.roadEnd = nil
-      elapsed = 1
-    end
-    return false
-  end
-  if was and was.level == en.level and math.abs(was.x - en.x) < 0.5 and math.abs(was.y - en.y) < 0.5 then
-    G.roadEnd = nil
-  else
-    G.roadEnd = en
-    local kind, z = G.RoadEndGoesOn(en)
-    ns.Print(Format(L["road end picked (%s%s): Shift + drag from it to go on with it. Click it again to let it go."],
-      G.EDIT_KIND_NAMES[kind or "ground"] or L["Road"], z and string.format(", %.1f", z) or ""))
-  end
-  elapsed = 1
-  return true
-end
-function G.ToolClick(level, x, y, reach)
-  if not (level and x) then return false end
-  local Rec = ns.Record
-  if G.wallMode then
-    local we = G.wallEdit
-    if G.editWallMode or (we and we.pick and we.sel) then return G.EditWallClick(level, x, y) end
-    local sel = Rec.WallAt(level, x, y, math.max(reach or 0, 1))
-    if sel then
-      G.AskWallEdit(level, sel)
-      return true
-    end
-    return G.ShowWallDetails(level, x, y, reach)
-  end
-  if not G.roadMode then return false end
-  local re = G.roadEdit
-  if G.editRoadMode or (re and re.pick and re.sel) then return G.EditRoadClick(level, x, y) end
-  if G.stairMode then return G.StairClick(level, x, y) end
-  if G.RoadEndClick(level, x, y, reach) then return true end -- (a road's end: picked to go on with it)
-  local sel = Rec.TrackAt(level, x, y, math.max(reach or 0, 1))
-  if sel then
-    G.AskRoadEdit(level, sel)
-    return true
-  end
-  return G.ShowRoadDetails(level, x, y, reach)
-end
--- A window read-only (`why`: the reason, shown with the details) or editable again: its kind buttons, height boxes,
--- picks and Save.
-function G.EditWindowReadOnly(f, readOnly)
-  f.readOnly = readOnly and true or nil
-  local function set(b, on)
-    if b and b.SetEnabled then b:SetEnabled(on) end
-  end
-  for _, b in ipairs(f.kinds or {}) do
-    if readOnly then set(b, false) end
-  end
-  for _, row in ipairs({ f.height, f.topRow }) do
-    set(row.box, not readOnly)
-    for _, b in ipairs(row.buttons) do set(b, not readOnly) end
-  end
-  set(f.left, not readOnly)
-  set(f.right, not readOnly)
-  for _, k in ipairs({ "pickFoot", "pickTop", "setHeights", "pickA", "pickB", "flip" }) do
-    if f[k] then f[k]:SetShown(not readOnly) end
-  end
-  set(f.save, not readOnly)
-end
--- The map's own road under the pointer (no heights of its own to edit: Record.TrackAt has none there): Edit Road
--- read-only, its kind and height and why. True when there was one.
-function G.ShowRoadDetails(level, x, y, reach)
-  local R = ns.Router
-  local info = G.RoadHoverInfo(level, x, y, reach or G.LINE_CLICK_PX / (view.s or 1), G.editFloor and G.editFloor.z)
-  if not info then return false end
-  local c = R.NearestEdges(level, x, y, G.editFloor and G.editFloor.z)[1]
-  local g = R.DebugGraph(level)
-  local e = c and g and g.e[c.edge]
-  local pts = {}
-  for k = 5, e and #e or 0 do pts[#pts + 1] = e[k] end
-  if #pts < 4 then pts = { x, y, x, y } end
-  local kind = info.title == L["Lift"] and "lift" or info.title == L["Stairs"] and "stairs"
-    or (g and g.kind and c and g.kind[c.edge]) or "ground"
-  -- (on a level with heights, the road's own from its ends: Delete's erase takes out that floor's only)
-  local za, zb = e and g.z and g.z[e[1]], e and g.z and g.z[e[2]]
-  local zs = za and zb and R.RampHeights and R.RampHeights(pts, za, zb) or nil
-  local f = G.AskRoadEdit(level, { t = { pts = pts, kind = kind, zs = zs }, readOnly = true })
-  G.EditWindowReadOnly(f, true)
-  f.note:SetText(info.title .. ": " .. table.concat(info.lines, "  ") .. "\n" .. L["The map's own road: it can't be changed here. To change it, erase it with Delete, then draw your own."])
-  return true
-end
--- The map's own wall under the pointer (the player's own are Record.WallAt's): Edit Wall read-only, plain or a cliff
--- with its sides, and why. True when there was one.
-function G.ShowWallDetails(level, x, y, reach)
-  local P = ns.Passability
-  if not (P and P.WallLines) then return false end
-  reach = reach or G.LINE_CLICK_PX / (view.s or 1)
-  local best, bw, bp
-  for _, w in ipairs(P.WallLines(level)) do
-    for k = 1, #w - 3, 2 do
-      local ax, ay, bx, by = w[k], w[k + 1], w[k + 2], w[k + 3]
-      local vx, vy = bx - ax, by - ay
-      local L2 = vx * vx + vy * vy
-      local fr = L2 > 0 and math.max(0, math.min(1, ((x - ax) * vx + (y - ay) * vy) / L2)) or 0
-      local d = math.sqrt((ax + vx * fr - x) ^ 2 + (ay + vy * fr - y) ^ 2)
-      if d <= reach and (not best or d < best) then best, bw, bp = d, w, (k + 1) / 2 end
-    end
-  end
-  if not bw then return false end
-  local pts = {}
-  for k = 1, #bw do pts[k] = bw[k] end
-  local f = G.AskWallEdit(level, { t = { pts = pts }, i = bp, readOnly = true, fl = bw.fl })
-  local zl, zr
-  if bw.kind == "cliff" and P.CliffSides then zl, zr = P.CliffSides(bw, bp) end
-  G.wallEdit.kind = zl and "cliff" or "wall"
-  G.FillWallEdit()
-  f.left:SetText(zl and string.format("%.1f", zl) or "")
-  f.right:SetText(zr and string.format("%.1f", zr) or "")
-  G.EditWindowReadOnly(f, true)
-  f.note:SetText((zl and Format(L["Cliff: left %d yd, right %d yd (%s)"], math.floor(zl + 0.5), math.floor(zr + 0.5),
-    P.CliffSection(bw, bp) == "open" and L["level: open"] or P.CliffSection(bw, bp) == "down" and L["a safe jump down"]
-    or L["too high: blocked"]) or L["Wall"]) .. "\n" .. L["The map's own wall: it can't be changed here. To change it, erase it with Delete, then draw your own."])
-  return true
-end
--- A click on the map with Edit Road at (x, y) of `level`: the stairs' foot or top when picking one, else the road there
--- picked and its window opened. Whether it was taken.
-function G.EditRoadClick(level, x, y)
-  local re = G.roadEdit
-  if not ((G.editRoadMode or (re and re.pick and re.sel)) and level and x) then return false end
-  local Rec = ns.Record
-  if re and re.pick and re.sel and re.level == level then
-    re[re.pick] = Rec.NearestPoint(re.sel.t, x, y)
-    re.pick = nil
-    if G.RoadHint then G.RoadHint() end
-    if G.roadEditWindow and G.roadEditWindow:IsShown() then G.FillRoadEdit() end
-    elapsed = 1
-    return true
-  end
-  local sel = Rec.TrackAt(level, x, y)
-  if not sel then
-    ns.Print(L["no drawn or recorded road there to edit (click on one)"])
-    return true
-  end
-  G.AskRoadEdit(level, sel)
-  return true
-end
--- The heights offered near point `i` of the road picked (G.StairHeights there), with its own there first when it has one.
-function G.EditHeightsAt(re, i)
-  local t = re.sel.t
-  local x, y = t.pts[2 * i - 1], t.pts[2 * i]
-  local hs = G.StairHeights(re.level, x, y)
-  local own = type(t.zs) == "table" and t.zs[i]
-  if own then
-    local have = false
-    for _, h in ipairs(hs) do have = have or math.abs(h - own) < 0.5 end
-    if not have then table.insert(hs, 1, math.floor(own * 10 + 0.5) / 10) end
-  end
-  return hs
-end
--- The kind buttons with `kind` the one picked: lit (its highlight held), the rest plain; all clickable. (Kooki3z
--- 2026-11-20: the picked one grayed out read as "can't be picked": "can't seem to make the bottom bridge a bridge".)
-function G.ShowKindPicked(buttons, kind)
-  for _, b in ipairs(buttons) do
-    b:SetEnabled(true)
-    local on = b.kind == kind
-    b.picked = on
-    if on then
-      if b.LockHighlight then b:LockHighlight() end
-    elseif b.UnlockHighlight then
-      b:UnlockHighlight()
-    end
-  end
-end
--- The window filled for the road picked (G.roadEdit): the kind buttons lit, the heights near it.
-function G.FillRoadEdit()
-  local f, re = G.roadEditWindow, G.roadEdit
-  if not (f and re and re.sel) then return end
-  G.ShowKindPicked(f.kinds, re.kind)
-  local function fill(row, hs, pick)
-    for k, b in ipairs(row.buttons) do
-      local h = hs[k]
-      b.height = h
-      b:SetText(h and string.format("%.1f", h) or "")
-      b:SetShown(h ~= nil)
-    end
-    if pick and row.box:GetText() == "" then row.box:SetText(string.format("%.1f", pick)) end
-  end
-  local n = #re.sel.t.pts / 2
-  local fi = re.foot or (re.kind == "stairs" or re.kind == "lift") and 1 or re.sel.i or 1
-  local ti = re.top or n
-  local hf, ht = G.EditHeightsAt(re, math.min(fi, n)), G.EditHeightsAt(re, math.min(ti, n))
-  fill(f.height, hf, hf[1])
-  fill(f.topRow, ht, ht[#ht])
-  local two = re.kind == "stairs" or re.kind == "lift" or (re.foot and re.top) and true or false
-  f.topRow.label:SetShown(two)
-  f.topRow.box:SetShown(two)
-  for _, b in ipairs(f.topRow.buttons) do b:SetShown(two and b.height ~= nil) end
-  f.height.label:SetText(two and L["Foot"] or L["Height"])
-  local lift = re.kind == "lift" and not f.readOnly
-  f.flip:SetShown(lift)
-  f.pickFoot:SetShown(not lift and not f.readOnly)
-  f.pickTop:SetShown(not lift and not f.readOnly)
-end
--- Flip Lift: the Foot and Top typed swapped (Save Road keeps it): the other end is the top.
-function G.FlipLiftEdit()
-  local f = G.roadEditWindow
-  if not (f and G.roadEdit and G.roadEdit.kind == "lift") then return end
-  local a, b = f.height.box:GetText(), f.topRow.box:GetText()
-  f.height.box:SetText(b or "")
-  f.topRow.box:SetText(a or "")
-  -- (no heights: its way round is its points', so it's saved turned round)
-  if (a or "") == "" and (b or "") == "" then G.roadEdit.reverse = not G.roadEdit.reverse end
-  f.note:SetText(L["Foot and top swapped: the lift's other end is its top now. Save Road to keep it."])
-end
--- A kind button's color (G.KIND_COLORS; ground and "heights only" have none): a strip along its bottom, the color the
--- map draws that kind in with the road tools on.
-function G.KindSwatch(b, kind)
-  local c = G.KIND_COLORS[kind]
-  if not (c and b.CreateTexture) then return nil end
-  local t = b:CreateTexture(nil, "OVERLAY")
-  t:SetColorTexture(c[1], c[2], c[3], 1)
-  t:SetHeight(2)
-  t:SetPoint("BOTTOMLEFT", b, "BOTTOMLEFT", 7, 4)
-  t:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", -7, 4)
-  b.swatch, b.swatchColor = t, c
-  return t
-end
-function G.AskRoadEdit(level, sel)
-  local f = G.roadEditWindow
-  if not f then
-    f = ns.Window("AzerothGPSRoadEdit", 400, 250, L["Edit Road"])
-    f.kinds = {}
-    for k, kind in ipairs(G.EDIT_KINDS) do
-      local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-      b:SetSize(72, 22)
-      b:SetPoint("TOPLEFT", 14 + (k - 1) * 74, f.top - 8)
-      b:SetText(G.EDIT_KIND_NAMES[kind])
-      b.kind = kind
-      G.KindSwatch(b, kind)
-      b:SetScript("OnClick", function()
-        if G.roadEdit then G.roadEdit.kind = kind end
-        G.FillRoadEdit()
-        elapsed = 1
-      end)
-      f.kinds[k] = b
-    end
-    local function Row(label, y)
-      local t = f:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-      t:SetPoint("TOPLEFT", 14, f.top - y)
-      t:SetText(label)
-      local box = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
-      box:SetSize(60, 20)
-      box:SetPoint("TOPLEFT", 80, f.top - y + 3)
-      box:SetAutoFocus(false)
-      box:SetMaxLetters(8)
-      box:SetScript("OnEscapePressed", function() f:Hide() end)
-      local row = { box = box, buttons = {}, label = t }
-      for k = 1, 5 do
-        local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-        b:SetSize(50, 20)
-        b:SetPoint("TOPLEFT", 150 + (k - 1) * 46, f.top - y + 3)
-        b:SetScript("OnClick", function(self) box:SetText(string.format("%.1f", self.height)) end)
-        row.buttons[k] = b
-      end
-      return row
-    end
-    f.height, f.topRow = Row(L["Height"], 44), Row(L["Top"], 76)
-    local function Pick(label, which, x)
-      local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-      b:SetSize(110, 22)
-      b:SetPoint("TOPLEFT", x, f.top - 106)
-      b:SetText(label)
-      b:SetWidth(math.max(110, (b:GetTextWidth() or 0) + 24))
-      b:SetScript("OnClick", function()
-        if G.roadEdit then G.roadEdit.pick = which end
-        if G.RoadHint then G.RoadHint() end
-      end)
-      return b
-    end
-    f.pickFoot, f.pickTop = Pick(L["Pick Foot"], "foot", 14), Pick(L["Pick Top"], "top", 130)
-    -- (a lift: Flip Lift swaps its Foot and Top, so "Take the lift up" and "down" swap sides; in Pick Foot's and Pick
-    -- Top's place, which a lift has no use for. Kooki3z 2026-11-20: "flip which side of the lift says take lift up or
-    -- down")
-    local flip = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    flip:SetSize(110, 22)
-    flip:SetPoint("TOPLEFT", 14, f.top - 106)
-    flip:SetText(L["Flip Lift"])
-    flip:SetWidth(math.max(110, (flip:GetTextWidth() or 0) + 24))
-    flip:SetScript("OnClick", function() G.FlipLiftEdit() end)
-    flip:Hide()
-    f.flip = flip
-    -- (Set Heights: the stretch from the foot to the top picked, or the whole road; 1.3.10, issue #685)
-    local sh = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    sh:SetSize(110, 22)
-    sh:SetPoint("TOPLEFT", 246, f.top - 106)
-    sh:SetText(L["Set Heights..."])
-    sh:SetWidth(math.max(110, (sh:GetTextWidth() or 0) + 24))
-    sh:SetScript("OnClick", function() G.AskSetHeights() end)
-    f.setHeights = sh
-    local note = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    note:SetPoint("TOPLEFT", 14, f.top - 136)
-    note:SetPoint("RIGHT", -14, 0)
-    note:SetJustifyH("LEFT")
-    f.note = note
-    local save = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    save:SetSize(110, 22)
-    save:SetPoint("BOTTOMRIGHT", -12, 10)
-    save:SetText(L["Save Road"])
-    save:SetWidth(math.max(110, (save:GetTextWidth() or 0) + 24))
-    save:SetScript("OnClick", function()
-      if G.SaveRoadEdit() then f:Hide() end
-    end)
-    f.save = save
-    local cancel = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    cancel:SetSize(90, 22)
-    cancel:SetPoint("RIGHT", save, "LEFT", -6, 0)
-    cancel:SetText(L["Cancel"])
-    cancel:SetScript("OnClick", function() f:Hide() end)
-    f.delete = G.DeleteButton(f, L["Delete Road"], function() G.AskDeleteRoad() end)
-    f:HookScript("OnHide", function()
-      if G.roadEdit then G.roadEdit.sel = nil end
-      if G.setHeightsWindow then G.setHeightsWindow:Hide() end -- (Set Heights goes with it)
-      elapsed = 1
-    end)
-    G.roadEditWindow = f
-  end
-  local t = sel.t
-  G.roadEdit = { level = level, sel = sel, kind = t.kind or (t.stair and "stairs") or (type(t.zs) == "table" and "floor")
-    or "ground" }
-  f.height.box:SetText("")
-  f.topRow.box:SetText("")
-  f.note:SetText(L["Pick what it is and its height (the floors near it), or type one. Stairs on part of it: Pick Foot and Pick Top, then click each on the road."])
-  G.EditWindowReadOnly(f, false) -- (a map's own road shown before: G.ShowRoadDetails)
-  G.FillRoadEdit()
-  f:Show()
-  elapsed = 1
-  return f
-end
--- Edit Wall (asked 2026-11-19 for 1.3.10, issue #685: "cliff walls"): with the wall tools on, a click picks a wall the
--- player drew (Record.WallAt), and its window (G.AskWallEdit) makes it a Cliff, with the ground's height on its left and
--- its right (filled in from the map's ground, Record.WallSides), or a plain Wall again; Pick Start and Pick End: only
--- that section. Save Wall saves it (Record.EditWall: a new wall that replaces the old one). The picked wall is drawn
--- with its left side in CLIFF_LEFT_COLOR and its right in CLIFF_RIGHT_COLOR, as the window's rows.
-G.CLIFF_LEFT_COLOR, G.CLIFF_RIGHT_COLOR = { 0.35, 0.65, 1 }, { 1, 0.6, 0.15 }
 G.CLIFF_SHADE_COLOR = { 0.85, 0.75, 0.55 } -- (a cliff's high side, drawn along it with the tools on)
 G.CLIFF_SHADE_PX = 4
-G.WALL_EDIT_DIM = { 0.6, 0.6, 0.6 }
-function G.SetEditWallMode(on)
-  if on and not G.wallMode then G.SetWallMode(true) end
-  G.editWallMode = (on and G.wallMode) and true or nil
-  if G.editWallMode then G.eraserMode = nil end
-  if not G.editWallMode then
-    G.wallEdit = nil
-    if G.wallEditWindow then G.wallEditWindow:Hide() end
-  end
-  if G.wallMode and G.RoadHint then G.RoadHint() end
-  if G.RefreshQuick then G.RefreshQuick() end
-  elapsed = 1
-end
--- A click with Edit Wall at (x, y) of `level`: a section's end when picking one, else the wall there picked. Taken or
--- not.
-function G.EditWallClick(level, x, y)
-  local we = G.wallEdit
-  if not ((G.editWallMode or (we and we.pick and we.sel)) and level and x) then return false end
-  local Rec = ns.Record
-  if we and we.pick and we.sel and we.level == level then
-    we[we.pick] = Rec.NearestPoint(we.sel.t, x, y)
-    we.pick = nil
-    if G.RoadHint then G.RoadHint() end
-    if G.wallEditWindow and G.wallEditWindow:IsShown() then G.FillWallEdit(true) end
-    elapsed = 1
-    return true
-  end
-  local sel = Rec.WallAt(level, x, y)
-  if not sel then
-    ns.Print(L["no wall of yours there to edit (click on one you drew)"])
-    return true
-  end
-  G.AskWallEdit(level, sel)
-  return true
-end
--- The section picked: first, last point (the whole wall with none picked).
-function G.WallSection(we)
-  local n = #we.sel.t.pts / 2
-  local i, j = we.a or 1, we.b or n
-  if j < i then i, j = j, i end
-  if i == j then i, j = math.max(1, i - 1), math.min(n, j + 1) end
-  return i, j
-end
--- The window filled for the wall picked: its kind lit, its sides (its own, else the map's ground there). `ground`: the
--- ground's again (a new section picked).
-function G.FillWallEdit(ground)
-  local f, we = G.wallEditWindow, G.wallEdit
-  if not (f and we and we.sel) then return end
-  G.ShowKindPicked(f.kinds, we.kind)
-  local t = we.sel.t
-  local i, j = G.WallSection(we)
-  local zl, zr
-  if not ground and t.kind == "cliff" and type(t.cl) == "table" and type(t.cr) == "table" then
-    zl, zr = tonumber(t.cl[i]), tonumber(t.cr[i])
-  end
-  if not (zl and zr) then zl, zr = ns.Record.WallSides(we.level, t, i, j) end
-  f.left:SetText(zl and string.format("%.1f", zl) or "")
-  f.right:SetText(zr and string.format("%.1f", zr) or "")
-  local cliff = we.kind == "cliff"
-  f.left:SetShown(cliff)
-  f.right:SetShown(cliff)
-  f.leftLabel:SetShown(cliff)
-  f.rightLabel:SetShown(cliff)
-end
-function G.AskWallEdit(level, sel)
-  local f = G.wallEditWindow
-  if not f then
-    f = ns.Window("AzerothGPSWallEdit", 400, 230, L["Edit Wall"])
-    f.kinds = {}
-    for k, kind in ipairs({ "wall", "cliff" }) do
-      local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-      b:SetSize(90, 22)
-      b:SetPoint("TOPLEFT", 14 + (k - 1) * 94, f.top - 8)
-      b:SetText(kind == "cliff" and L["Cliff"] or L["Wall"])
-      b.kind = kind
-      b:SetScript("OnClick", function()
-        if G.wallEdit then G.wallEdit.kind = kind end
-        G.FillWallEdit()
-        elapsed = 1
-      end)
-      f.kinds[k] = b
-    end
-    local function Row(label, color, y)
-      local t = f:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-      t:SetPoint("TOPLEFT", 14, f.top - y)
-      t:SetText(label)
-      t:SetTextColor(color[1], color[2], color[3])
-      local box = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
-      box:SetSize(70, 20)
-      box:SetPoint("TOPLEFT", 160, f.top - y + 3)
-      box:SetAutoFocus(false)
-      box:SetMaxLetters(8)
-      box:SetScript("OnEscapePressed", function() f:Hide() end)
-      return box, t
-    end
-    f.left, f.leftLabel = Row(L["Left side (blue)"], G.CLIFF_LEFT_COLOR, 44)
-    f.right, f.rightLabel = Row(L["Right side (orange)"], G.CLIFF_RIGHT_COLOR, 72)
-    local function Pick(label, which, x)
-      local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-      b:SetSize(110, 22)
-      b:SetPoint("TOPLEFT", x, f.top - 102)
-      b:SetText(label)
-      b:SetWidth(math.max(110, (b:GetTextWidth() or 0) + 24))
-      b:SetScript("OnClick", function()
-        if G.wallEdit then G.wallEdit.pick = which end
-        if G.RoadHint then G.RoadHint() end
-      end)
-      return b
-    end
-    f.pickA, f.pickB = Pick(L["Pick Start"], "a", 14), Pick(L["Pick End"], "b", 130)
-    local note = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    note:SetPoint("TOPLEFT", 14, f.top - 132)
-    note:SetPoint("RIGHT", -14, 0)
-    note:SetJustifyH("LEFT")
-    f.note = note
-    local save = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    save:SetSize(110, 22)
-    save:SetPoint("BOTTOMRIGHT", -12, 10)
-    save:SetText(L["Save Wall"])
-    save:SetWidth(math.max(110, (save:GetTextWidth() or 0) + 24))
-    save:SetScript("OnClick", function()
-      if G.SaveWallEdit() then f:Hide() end
-    end)
-    f.save = save
-    local cancel = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    cancel:SetSize(90, 22)
-    cancel:SetPoint("RIGHT", save, "LEFT", -6, 0)
-    cancel:SetText(L["Cancel"])
-    cancel:SetScript("OnClick", function() f:Hide() end)
-    f.delete = G.DeleteButton(f, L["Delete Wall"], function() G.AskDeleteWall() end)
-    f:HookScript("OnHide", function()
-      if G.wallEdit then G.wallEdit.sel = nil end
-      elapsed = 1
-    end)
-    G.wallEditWindow = f
-  end
-  G.wallEdit = { level = level, sel = sel, kind = "cliff" }
-  f.note:SetText(L["The ground's height on each side, filled in from the map: type over them. Level sides: open. Low to high: blocked. High to low: a jump down when it's safe, else blocked both ways."])
-  G.EditWindowReadOnly(f, false) -- (a map's own wall shown before: G.ShowWallDetails)
-  G.FillWallEdit()
-  f:Show()
-  elapsed = 1
-  return f
-end
--- Save Wall: the wall picked saved as edited (Record.EditWall). Its number, or nil (and the window says why).
-function G.SaveWallEdit()
-  local f, we = G.wallEditWindow, G.wallEdit
-  if not (f and we and we.sel) or we.sel.readOnly then return nil end
-  local i, j = G.WallSection(we)
-  local idx, why = ns.Record.EditWall(we.sel, { kind = we.kind, i = i, j = j, zl = tonumber(f.left:GetText()),
-    zr = tonumber(f.right:GetText()) })
-  if not idx then
-    f.note:SetText(L["|cffff6060Give both sides a height.|r"])
-    return nil, why
-  end
-  ns.Print(Format(we.kind == "cliff" and L["saved your cliff (#%d): routes use it now. /agps draw undo takes it back."]
-    or L["saved your wall (#%d): routes use it now. /agps draw undo takes it back."], idx))
-  G.wallEdit = nil
-  elapsed = 1
-  return idx
-end
--- The wall picked with Edit Wall, drawn over the map: its section bright, its left and right sides in their colors.
-function G.DrawWallEdit(cx, cy, rot, s, viewCont, half)
-  local we = G.wallEdit
-  local t = we and we.sel and we.sel.t
-  if not (t and t.pts and we.level == viewCont) then return 0 end
-  local p, n = t.pts, 0
-  local i, j = G.WallSection(we)
-  local off = G.CLIFF_SHADE_PX / s -- (yards: the side lines this far off it on the screen)
-  local function seg(x1, y1, x2, y2, c, w)
-    local dx1, dy1 = Geo.ScreenOffset(cx, cy, x1, y1)
-    dx1, dy1 = Geo.Rotate(dx1 * s, dy1 * s, rot)
-    local dx2, dy2 = Geo.ScreenOffset(cx, cy, x2, y2)
-    dx2, dy2 = Geo.Rotate(dx2 * s, dy2 * s, rot)
-    AddSeg(dx1, dy1, dx2, dy2, c, w, 0.9, true)
-    n = n + 1
-  end
-  for k = 1, #p / 2 - 1 do
-    local ax, ay, bx, by = p[2 * k - 1], p[2 * k], p[2 * k + 1], p[2 * k + 2]
-    local ex, ey = bx - ax, by - ay
-    local L = math.sqrt(ex * ex + ey * ey)
-    if L > 0 then
-      local lx, ly = -ey / L * off, ex / L * off
-      local on = k >= i and k < j
-      seg(ax, ay, bx, by, on and G.EDIT_ROAD_COLOR or G.WALL_EDIT_DIM, on and 4 or 2)
-      if on then
-        seg(ax + lx, ay + ly, bx + lx, by + ly, G.CLIFF_LEFT_COLOR, 2)
-        seg(ax - lx, ay - ly, bx - lx, by - ly, G.CLIFF_RIGHT_COLOR, 2)
-      end
-    end
-  end
-  return n
-end
 -- With the tools on, a cliff's high side shaded along it (G.LayoutWalls' `shade` lines): for wall `w`'s section from
 -- point p, the line CLIFF_SHADE_PX off it on its high side, in world yards at scale `s`; nil for none.
 function G.CliffShade(w, p, s)
@@ -15741,231 +14133,6 @@ function G.CliffShade(w, p, s)
   local lx, ly = -ey / L * off, ex / L * off
   if zr > zl then lx, ly = -lx, -ly end
   return ax + lx, ay + ly, bx + lx, by + ly
-end
--- The cliff under the pointer (within `reach` yards) as the tools' hover says it: "Cliff: left 30 yd, right 18 yd" and
--- what it does, or nil.
-function G.CliffText(level, x, y, reach)
-  local P = ns.Passability
-  if not (P and P.WallLines and level) then return nil end
-  local best, bw, bp
-  for _, w in ipairs(P.WallLines(level)) do
-    if w.kind == "cliff" then
-      for k = 1, #w - 3, 2 do
-        local ax, ay, bx, by = w[k], w[k + 1], w[k + 2], w[k + 3]
-        local vx, vy = bx - ax, by - ay
-        local L2 = vx * vx + vy * vy
-        local f = L2 > 0 and math.max(0, math.min(1, ((x - ax) * vx + (y - ay) * vy) / L2)) or 0
-        local d = math.sqrt((ax + vx * f - x) ^ 2 + (ay + vy * f - y) ^ 2)
-        if d <= reach and (not best or d < best) then best, bw, bp = d, w, (k + 1) / 2 end
-      end
-    end
-  end
-  if not bw then return nil end
-  local zl, zr = P.CliffSides(bw, bp)
-  if not zl then return nil end
-  local how = P.CliffSection(bw, bp)
-  local what = how == "open" and L["level: open"] or how == "down" and L["a safe jump down"] or L["too high: blocked"]
-  return Format(L["Cliff: left %d yd, right %d yd (%s)"], math.floor(zl + 0.5), math.floor(zr + 0.5), what)
-end
-
--- Set Heights (asked 2026-11-19 for 1.3.10, issue #685: "players can shape stairs and cliffs themselves"): the stretch
--- of the road picked in Edit Road from its foot to its top (Pick Foot, Pick Top; neither: the whole road) gets a start
--- and an end height, filled in from the road's own heights or the map's ground (Record.StretchBase) and typed over, the
--- points between spread evenly by the yards along; it can be made Stairs or a Ramp at once (Heights Only: neither).
--- Saved as Edit Road saves (Record.EditTrack): the rest of the road keeps its heights.
-G.STRETCH_KINDS = { "stairs", "ramp", "none" }
-G.STRETCH_KIND_NAMES = { stairs = L["Stairs"], ramp = L["Ramp"], none = L["Heights Only"] }
--- The stretch picked: first, last point (the whole road with none picked).
-function G.HeightsStretch(re)
-  local n = #re.sel.t.pts / 2
-  local i, j = re.foot or 1, re.top or n
-  if re.foot and not re.top then i, j = re.foot, n end
-  if re.top and not re.foot then i, j = 1, re.top end
-  if j < i then i, j = j, i end
-  if i == j then i, j = math.max(1, i - 1), math.min(n, j + 1) end
-  return i, j
-end
-function G.AskSetHeights()
-  local re = G.roadEdit
-  if not (re and re.sel) then return nil end
-  local f = G.setHeightsWindow
-  if not f then
-    f = ns.Window("AzerothGPSSetHeights", 360, 200, L["Set Heights"])
-    local function Row(label, y)
-      local t = f:CreateFontString(nil, "ARTWORK", "GameFontNormal")
-      t:SetPoint("TOPLEFT", 14, f.top - y)
-      t:SetText(label)
-      local box = CreateFrame("EditBox", nil, f, "InputBoxTemplate")
-      box:SetSize(70, 20)
-      box:SetPoint("TOPLEFT", 90, f.top - y + 3)
-      box:SetAutoFocus(false)
-      box:SetMaxLetters(8)
-      box:SetScript("OnEscapePressed", function() f:Hide() end)
-      return box
-    end
-    f.startBox, f.endBox = Row(L["Start"], 12), Row(L["End"], 40)
-    f.kinds = {}
-    for k, kind in ipairs(G.STRETCH_KINDS) do
-      local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-      b:SetSize(104, 22)
-      b:SetPoint("TOPLEFT", 14 + (k - 1) * 108, f.top - 70)
-      b:SetText(G.STRETCH_KIND_NAMES[kind])
-      b.kind = kind
-      G.KindSwatch(b, kind)
-      b:SetScript("OnClick", function()
-        f.kind = kind
-        G.ShowKindPicked(f.kinds, kind)
-      end)
-      f.kinds[k] = b
-    end
-    local note = f:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-    note:SetPoint("TOPLEFT", 14, f.top - 100)
-    note:SetPoint("RIGHT", -14, 0)
-    note:SetJustifyH("LEFT")
-    f.note = note
-    local save = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    save:SetSize(110, 22)
-    save:SetPoint("BOTTOMRIGHT", -12, 10)
-    save:SetText(L["Set Heights"])
-    save:SetWidth(math.max(110, (save:GetTextWidth() or 0) + 24))
-    save:SetScript("OnClick", function()
-      if G.SaveSetHeights() then f:Hide() end
-    end)
-    f.save = save
-    local cancel = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-    cancel:SetSize(90, 22)
-    cancel:SetPoint("RIGHT", save, "LEFT", -6, 0)
-    cancel:SetText(L["Cancel"])
-    cancel:SetScript("OnClick", function() f:Hide() end)
-    G.setHeightsWindow = f
-  end
-  local i, j = G.HeightsStretch(re)
-  local base = ns.Record.StretchBase(re.sel.t, re.level)
-  local function fmt(h) return h and string.format("%.1f", h) or "" end
-  f.startBox:SetText(fmt(base[i]))
-  f.endBox:SetText(fmt(base[j]))
-  f.kind = re.kind == "stairs" and "stairs" or re.kind == "ramp" and "ramp" or "stairs"
-  G.ShowKindPicked(f.kinds, f.kind)
-  f.note:SetText(L["The stretch from the foot to the top picked (none picked: the whole road). Start and end come from the road or the map's ground; type over them. The points between are spread evenly."])
-  f:Show()
-  return f
-end
--- Set Heights' save: the stretch's heights on the road picked (Record.EditTrack with `stairs`, `base`, `skind`, `split`).
--- Its number, or nil (and the window says why).
-function G.SaveSetHeights()
-  local f, re = G.setHeightsWindow, G.roadEdit
-  if not (f and re and re.sel) then return nil end
-  local z1, z2 = tonumber(f.startBox:GetText()), tonumber(f.endBox:GetText())
-  if not (z1 and z2) then
-    f.note:SetText(L["|cffff6060Give it a start and an end height.|r"])
-    return nil
-  end
-  local i, j = G.HeightsStretch(re)
-  local kind = re.kind
-  if kind == "stairs" or kind == "lift" then kind = "floor" end -- (the rest of it: a floor with its heights)
-  local base = ns.Record.StretchBase(re.sel.t, re.level)
-  local idx, why = ns.Record.EditTrack(re.sel, { kind = kind, stairs = { i, j, z1, z2 }, base = base,
-    skind = f.kind, split = f.kind ~= "none" })
-  if not idx then
-    f.note:SetText(L["|cffff6060Give it a start and an end height.|r"])
-    return nil, why
-  end
-  local dz = z2 - z1
-  ns.Print(Format(L["set the heights of that stretch (#%d): %s"], idx, dz >= 0
-    and Format(L["%s up"], ns.Nav.FormatDistance(math.abs(dz), true))
-    or Format(L["%s down"], ns.Nav.FormatDistance(math.abs(dz), true))))
-  G.roadEdit = nil
-  if G.roadEditWindow then G.roadEditWindow:Hide() end
-  elapsed = 1
-  return idx
-end
-
--- Delete (asked 2026-11-19 for 1.3.10: "a Delete button that deletes exactly the highlighted section of road"): Edit
--- Road's and Edit Wall's, the map's own lines (read-only) too, at the window's bottom left in red. Asked first (ns.Ask
--- over the window's middle, over it as the options' questions are: "Delete this road section?" Delete / Cancel); then the stretch highlighted goes (Record.DeleteRoad,
--- Record.DeleteWall: the player's own off the list, the map's own erased as Shift + right-drag erases), the window
--- closes and routes and the map take it at once (Record.Changed).
-G.DELETE_COLOR = "|cffff6060"
-function G.DeleteButton(f, label, onClick)
-  local b = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
-  b:SetSize(110, 22)
-  b:SetPoint("BOTTOMLEFT", 12, 10)
-  b:SetText(G.DELETE_COLOR .. label .. "|r")
-  b:SetWidth(math.max(110, (b:GetTextWidth() or 0) + 24))
-  b:SetScript("OnClick", onClick)
-  return b
-end
--- The zone's name for an erase (the player's map's, as a stroke's: G.FinishRoad).
-function G.EraseZone()
-  local mapID = C_Map.GetBestMapForUnit("player")
-  local info = mapID and C_Map.GetMapInfo(mapID)
-  return info and info.name or "?"
-end
--- The question over window `win` (unanswered, Escape: Cancel).
-function G.AskDelete(win, text, onYes)
-  if not ns.Ask then return nil end
-  G.askBox = ns.Ask("AzerothGPSDeleteAsk", text, L["Delete"], L["Cancel"], onYes, nil, { strata = ns.POPUP_OVER_STRATA,
-    place = function(f) f:SetPoint("CENTER", win, "CENTER", 0, 0) end })
-  return G.askBox
-end
-function G.AskDeleteRoad()
-  local re = G.roadEdit
-  local level, sel = re and re.level, re and re.sel
-  if not (sel and G.roadEditWindow) then return nil end
-  return G.AskDelete(G.roadEditWindow, L["Delete this road section?"], function() G.DeleteRoadEdit(level, sel) end)
-end
-function G.AskDeleteWall()
-  local we = G.wallEdit
-  local level, sel = we and we.level, we and we.sel
-  if not (sel and G.wallEditWindow) then return nil end
-  local i, j = G.WallSection(we)
-  return G.AskDelete(G.wallEditWindow, L["Delete this wall section?"], function() G.DeleteWallEdit(level, sel, i, j) end)
-end
--- The road `sel` on `level` deleted (Record.DeleteRoad) and its window closed. What Record.DeleteRoad gave.
-function G.DeleteRoadEdit(level, sel)
-  local z, indoors, down = G.EditFloor(level, sel.t.pts)
-  local r = ns.Record.DeleteRoad(level, sel, { z = z, indoors = indoors, down = down, zone = G.EraseZone() })
-  if not r then return nil end
-  ns.Print(L["deleted that road section: routes leave it out now."])
-  G.roadEdit = nil
-  if G.roadEditWindow then G.roadEditWindow:Hide() end
-  G.Redraw()
-  return r
-end
--- Section `i` .. `j` of the wall `sel` on `level` deleted (Record.DeleteWall) and its window closed.
-function G.DeleteWallEdit(level, sel, i, j)
-  local r = ns.Record.DeleteWall(level, sel, i, j, G.EraseZone())
-  if not r then return nil end
-  ns.Print(L["deleted that wall section: routes go through there now."])
-  G.wallEdit = nil
-  if G.wallEditWindow then G.wallEditWindow:Hide() end
-  G.Redraw()
-  return r
-end
-
--- Save Road: the road picked saved as edited (Record.EditTrack). Its number, or nil (and the window says why).
-function G.SaveRoadEdit()
-  local f, re = G.roadEditWindow, G.roadEdit
-  if not (re and re.sel) or re.sel.readOnly then return nil end
-  local z = f and tonumber(f.height.box:GetText())
-  local z2 = f and tonumber(f.topRow.box:GetText())
-  local edit = { kind = re.kind, z = z, z1 = z, z2 = z2, reverse = re.reverse }
-  if re.foot and re.top and re.kind ~= "stairs" and re.kind ~= "lift" then
-    local i, j = re.foot, re.top
-    local a, b = z, z2
-    if j < i then i, j, a, b = j, i, b, a end
-    edit.stairs = { i, j, a, b }
-  end
-  local i, why = ns.Record.EditTrack(re.sel, edit)
-  if not i then
-    if f and f.note then f.note:SetText(L["|cffff6060Give it a height.|r"]) end
-    return nil, why
-  end
-  ns.Print(Format(L["saved your edit of that road (#%d, %s): routes use it now. /agps draw undo takes it back."], i,
-    G.EDIT_KIND_NAMES[re.kind] or re.kind))
-  G.roadEdit = nil
-  elapsed = 1
-  return i
 end
 
 function G.AddStopAt(x, y, name, stopCont, tex, z, exact, questID)
@@ -16224,129 +14391,6 @@ function G.AreaTooltip(dt)
     if i > 1 then GameTooltip:AddLine(" ") end
     ns.Layers.AddQuestToTooltip(GameTooltip, q)
   end
-  GameTooltip:Show()
-end
-
--- The road tools' hover (asked 2026-10-06: "mouse over on existing road to show current Z height"): with the road or
--- wall tools on, the road under the pointer (within ROAD_HOVER_PX on the screen) and its height there, in a tooltip:
--- a level's with heights (Undercity's, a dungeon's roads: their own), a building's or a capital's floor (their roads'
--- `nz`), a stairs road's height there with its foot and top. The land's roads have none in the game's data: "on the
--- ground"; a drawn road not in the data yet (SOURCE_RECORDED) none yet. Heights are the game's (world z).
-G.ROAD_HOVER_PX = 8
--- What the road nearest (x, y) on `level` within `reach` yards is (on the floor near `z` where the level has heights):
--- { title, lines }, or nil (none near, or the roads not built yet: never built in a frame for this).
-function G.RoadHoverInfo(level, x, y, reach, z)
-  local R = ns.Router
-  if not (R and R.GraphReady and R.GraphReady(level)) then return nil end
-  local near = R.NearestEdges(level, x, y, z)
-  local c = near[1]
-  if not c or c.dist > reach then return nil end
-  local g = R.DebugGraph(level)
-  -- (roads on one line, the stairs over a drawn road's piece: the stairs or the lift named, not the first of them by
-  -- edge; Brill inn's stairs, issue #842)
-  local function special(o)
-    local s = g and g.e[o.edge] and g.e[o.edge][4]
-    return s == R.SOURCE_STAIR or s == R.SOURCE_LIFT or (g and g.kind and g.kind[o.edge] == "stairs")
-  end
-  if g and not special(c) then
-    for i = 2, #near do
-      if near[i].dist > c.dist then break end
-      if special(near[i]) then
-        c = near[i]
-        break
-      end
-    end
-  end
-  local e = g and g.e[c.edge]
-  if not e then return nil end
-  local heights = g.z or g.nz
-  local za, zb = heights and heights[e[1]], heights and heights[e[2]]
-  local here
-  if g.z then here = R.EdgeZ(g, c.edge, c.along) else here = R.RoadFloor(g, c) end
-  local src = e[4]
-  -- (its kind names it: a stairs road "Stairs" even with no heights to tell, a bridge "Bridge"; Kooki3z 2026-11-20,
-  -- "stairs should say thats what it is not just Road")
-  local kind = g.kind and g.kind[c.edge]
-  local title = src == R.SOURCE_LIFT and L["Lift"] or (src == R.SOURCE_STAIR or kind == "stairs") and L["Stairs"]
-    or (kind and kind ~= "ground" and G.EDIT_KIND_NAMES and G.EDIT_KIND_NAMES[kind])
-    or src == R.SOURCE_RECORDED and L["Drawn road"] or L["Road"]
-  local lines = {}
-  if not here and src == R.SOURCE_RECORDED then -- (drawn or recorded, not in the data yet: the game gives no height;
-    -- the import works out a recorded walk's floors and stairs, 2026-11-18: a walk up Grom'gol's tower looked flat)
-    lines[1] = L["No height yet: its floors and stairs are worked out when it's added to the road data"]
-  elseif not here then
-    -- (the map's ground there, Ground.lua: a land road's height is the ground's; Kooki3z 2026-11-20, "Seems like all of
-    -- orgrimmar has none")
-    local GD = ns.Ground
-    local gz = GD and GD.PointHeight and GD.PointHeight(level, x, y)
-    lines[1] = gz and Format(L["On the ground: %d yd"], math.floor(gz + 0.5))
-      or L["On the ground (the game's data has no height for it)"]
-  elseif za and zb and math.abs(za - zb) >= R.STAIR_MIN_Z then
-    -- (rising along it: stairs, unless its kind says what it is: a recorded bridge rising between its ends' ground is a
-    -- bridge, Kooki3z 2026-11-20 "recorded bridge, mouse over says stairs")
-    if src ~= R.SOURCE_LIFT and not (kind and kind ~= "ground" and kind ~= "stairs") then title = L["Stairs"] end
-    lines[1] = Format(L["Height here: %.1f"], here)
-    lines[2] = Format(L["Foot %.1f, top %.1f"], math.min(za, zb), math.max(za, zb))
-  else
-    lines[1] = Format(L["Height: %.1f"], here)
-  end
-  return { title = title, lines = lines }
-end
--- The ground's height at (x, y) of `level` as the tools' hover says it (Ground.lua, the map's terrain data: issue #685):
--- "Ground: 123 yd" (and the water's surface over it), or "No ground data" over a hole, off the map or with none.
-function G.GroundText(level, x, y)
-  local GD = ns.Ground
-  local h = GD and level and GD.At(level, x, y)
-  if not h then return L["No ground data"] end
-  local w = GD.At(level, x, y, true)
-  if w and w > h + 0.5 then return Format(L["Ground: %d yd (water %d yd)"], math.floor(h + 0.5), math.floor(w + 0.5)) end
-  return Format(L["Ground: %d yd"], math.floor(h + 0.5))
-end
-function G.RoadHover(dt)
-  G.roadHoverWait = (G.roadHoverWait or 0) - dt
-  if G.roadHoverWait > 0 then return end
-  G.roadHoverWait = 0.1
-  local on = (G.roadMode or G.wallMode) and canvas and canvas:IsMouseOver() and not drag and not G.lasso
-  local owned = GameTooltip:IsShown() and GameTooltip:GetOwner() == frame
-  if on and GameTooltip:IsShown() and not owned then return end -- (another tooltip, an icon's, has it)
-  local info
-  if on then
-    local mx, my = GetCursorPosition()
-    local sc = canvas:GetEffectiveScale()
-    local ccx, ccy = canvas:GetCenter()
-    local x, y = G.ScreenToWorld(view.x, view.y, mx / sc - ccx, my / sc - ccy, view.rot, view.s)
-    local level = G.PinLevel(x, y)
-    info = level and G.RoadHoverInfo(level, x, y, G.ROAD_HOVER_PX / view.s, G.editFloor and G.editFloor.z)
-    -- (and the ground's height there from the map's data, 1.3.10: "Ground: 123 yd", or "No ground data"; a cliff's
-    -- two sides)
-    local ground = G.GroundText(level, x, y)
-    -- (over a building's inside map: its floors' heights there, 1.3.10)
-    local floors = G.FloorHeightText(x, y)
-    if floors then ground = floors .. "\n" .. ground end
-    local cliff = G.wallMode and G.CliffText(level, x, y, G.ROAD_HOVER_PX / view.s)
-    if cliff then ground = cliff .. "\n" .. ground end
-    if info then
-      info.lines[#info.lines + 1] = ground
-    else
-      info = { title = ground, lines = {} }
-    end
-  end
-  if not info then
-    if owned and G.roadTip then GameTooltip:Hide() end
-    G.roadTip = nil
-    return
-  end
-  local key = info.title .. "\n" .. table.concat(info.lines, "\n")
-  if owned and G.roadTip == key then
-    G.KeepTipOffLegend() -- (following the pointer, beside the legend)
-    return
-  end
-  G.roadTip = key
-  GameTooltip:SetOwner(frame, G.ToolLegendShown() and "ANCHOR_NONE" or "ANCHOR_CURSOR")
-  -- (wrapped, never wider than the map: a long floors' line, asked 2026-11-19)
-  GameTooltip:SetText(info.title, 1, 1, 1, 1, true)
-  for _, l in ipairs(info.lines) do GameTooltip:AddLine(l, nil, nil, nil, true) end
-  G.KeepTipOffLegend()
   GameTooltip:Show()
 end
 
@@ -17647,63 +15691,22 @@ function G.Init()
   frame:EnableMouse(true)
   -- Left-drag pans the map (free view); Shift+left-drag moves the frame.
   frame:SetScript("OnMouseDown", function(f, button)
-    G.NoteMapUse() -- (the tools and roads shown: in use, G.ToolsIdleTick)
+    if G.NoteMapUse then G.NoteMapUse() end -- (the map editor's: in use, its tools' idle close)
     if removeAsk then removeAsk:Hide() end
     -- a click on the map closes the map menu and the search panel
     if G.mapMenu then G.mapMenu:Hide() end
     if G.searchPanel then G.searchPanel:Hide() end
-    -- (Shift-click drawing: a click or drag without Shift goes on to the map's own, below; a click on a road or wall
-    -- there opens it, G.ToolClick)
-    if (G.roadMode or G.wallMode) and not G.drawMode and not G.Held() and not G.ToolsPassClick(button) then
-      if G.eraserMode and (button == "LeftButton" or button == "RightButton") then -- (the magic eraser)
-        local mx, my = GetCursorPosition()
-        local sc = canvas:GetEffectiveScale()
-        local ccx, ccy = canvas:GetCenter()
-        local x, y = G.ScreenToWorld(view.x, view.y, mx / sc - ccx, my / sc - ccy, view.rot, view.s)
-        G.lasso = { pts = { x, y }, cont = view.cont, eraser = true, r = G.EraserYd(), button = button, color = G.ERASER_COLOR }
-        return
-      end
-      if button == "LeftButton" and G.editWallMode and G.wallMode then -- (Edit Wall: a wall picked, or its section's ends)
-        local mx, my = GetCursorPosition()
-        local sc = canvas:GetEffectiveScale()
-        local ccx, ccy = canvas:GetCenter()
-        local x, y = G.ScreenToWorld(view.x, view.y, mx / sc - ccx, my / sc - ccy, view.rot, view.s)
-        G.EditWallClick(G.PinLevel(x, y), x, y)
-        return
-      end
-      if button == "LeftButton" and G.editRoadMode then -- (Edit Road: a road picked, or its stairs' foot or top)
-        local mx, my = GetCursorPosition()
-        local sc = canvas:GetEffectiveScale()
-        local ccx, ccy = canvas:GetCenter()
-        local x, y = G.ScreenToWorld(view.x, view.y, mx / sc - ccx, my / sc - ccy, view.rot, view.s)
-        G.EditRoadClick(G.PinLevel(x, y), x, y)
-        return
-      end
-      if button == "LeftButton" and G.stairMode then -- (the stairs tool: their foot, then their top)
-        local mx, my = GetCursorPosition()
-        local sc = canvas:GetEffectiveScale()
-        local ccx, ccy = canvas:GetCenter()
-        local x, y = G.ScreenToWorld(view.x, view.y, mx / sc - ccx, my / sc - ccy, view.rot, view.s)
-        G.StairClick(G.PinLevel(x, y), x, y)
-        return
-      end
-      -- (a road drawn by hand: Record suggested first, G.AskRecordHint; the stroke isn't started)
-      if button == "LeftButton" and not G.wallMode and G.RecordHintDue() then
-        G.AskRecordHint()
-        return
-      end
-      if button == "LeftButton" or button == "RightButton" then
-        local erase = button == "RightButton"
-        local wall = G.wallMode
-        G.lasso = { pts = {}, cont = view.cont, road = true, erase = erase, wall = wall, button = button,
-          color = wall and (erase and UNWALL_COLOR or WALL_COLOR) or (erase and ERASE_COLOR or DRAW_COLOR) }
-      elseif button == "MiddleButton" then
-        local mx, my = GetCursorPosition()
-        tour = nil
-        lastActivity = GetTime()
-        drag = { cx = mx, cy = my, x = view.x, y = view.y, rot = view.rot, s = view.s, moved = false, pan = true,
-          land = (free ~= nil and not free.city and not free.instance and not free.cave and not G.cityMap) or nil }
-      end
+    -- (the map editor's tools, when the dev addon has put them on the map: true, the press is theirs; "pan", a
+    -- middle-drag that pans the map)
+    local tool = G.MapToolDown and G.MapToolDown(button)
+    if tool == "pan" then
+      local mx, my = GetCursorPosition()
+      tour = nil
+      lastActivity = GetTime()
+      drag = { cx = mx, cy = my, x = view.x, y = view.y, rot = view.rot, s = view.s, moved = false, pan = true,
+        land = (free ~= nil and not free.city and not free.instance and not free.cave and not G.cityMap) or nil }
+      return
+    elseif tool then
       return
     end
     if G.drawMode then
@@ -17751,19 +15754,12 @@ function G.Init()
       G.PinClickUp()
       return
     end
-    if (G.roadMode or G.wallMode) and not G.drawMode then
-      local l = G.lasso
-      if l and button == l.button then
-        G.lasso = nil
-        local okF, errF
-        if l.eraser then okF, errF = pcall(G.FinishEraser, l) else okF, errF = pcall(G.FinishRoad, l, l.erase, l.wall) end
-        if not okF then G.LogError(l.eraser and "restoring under the eraser" or "saving a drawn road or wall", errF) end
-        return
-      elseif button == "MiddleButton" then
-        drag = nil
-        return
-      end
-      -- (Shift-click drawing: a plain click or drag is the map's own, below)
+    local tool = G.MapToolUp and G.MapToolUp(button) -- (the map editor's: a stroke finished, or a pan's end)
+    if tool == "pan" then
+      drag = nil
+      return
+    elseif tool then
+      return
     end
     if G.drawMode then
       if button == "LeftButton" and G.lasso then G.FinishDrawing() end
@@ -17774,9 +15770,8 @@ function G.Init()
       f.moving = false
       SavePosition()
     end
-    if button == "LeftButton" and drag and not drag.moved and (G.roadMode or G.wallMode) and not G.drawMode
-        and not G.Held() and G.ToolClickAtCursor() then
-      drag = nil -- (a click on a road or wall with the tools on: its details, not the map's click)
+    if button == "LeftButton" and drag and not drag.moved and G.MapToolClick and G.MapToolClick() then
+      drag = nil -- (a click on a road or wall with the map editor's tools on: its details, not the map's click)
       return
     end
     if button == "LeftButton" and drag and not drag.moved then
@@ -17814,14 +15809,8 @@ function G.Init()
   end)
   frame:EnableMouseWheel(true)
   frame:SetScript("OnMouseWheel", function(_, delta)
-    G.NoteMapUse()
-    -- (the road or wall tools on, Shift held: the floor edited, where floors lie over each other)
-    if (G.roadMode or G.wallMode) and IsShiftKeyDown and IsShiftKeyDown() and G.StepEditFloor(delta) then return end
-    -- (the magic eraser on, Ctrl held: its size)
-    if G.eraserMode and (G.roadMode or G.wallMode) and IsControlKeyDown and IsControlKeyDown() then
-      G.SizeEraser(delta)
-      return
-    end
+    if G.NoteMapUse then G.NoteMapUse() end
+    if G.MapToolWheel and G.MapToolWheel(delta) then return end -- (the map editor's: the floor edited, the eraser's size)
     tour = nil
     lastActivity = GetTime()
     -- (at the cursor: the spot under it stays put, G.WheelAt)
@@ -18546,74 +16535,6 @@ function G.Init()
       tip = L["Cave and mine entrances on the map (not on a continent's map). Double-click one for a stop there."] },
     { id = "instances", key = "layerInstances", icon = INSTANCE_ICON, label = L["Dungeons and Raids"], defaultOn = true,
       tip = L["Their entrances on the map (every map style). Click one for its map, with its bosses in the usual order; right-click goes back out."] },
-    { id = "roadTools", icon = "Interface\\Icons\\INV_Misc_Note_02", label = L["Road Tools"], dev = true,
-      tip = L["Click to turn on, click again when done. On the map: left-drag along a road the routes miss to add it (joined to the roads it meets; where it runs along one, that road stays), right-drag over a road that isn't there to erase it (red), middle-drag to pan. Routes use your changes at once. (Shown with the road tools option, or /agps dev)"] .. " " .. L["Hold Shift to draw or erase; a plain drag pans the map and a click on a line opens its details."],
-      isOn = function() return G.roadMode end,
-      action = function()
-        if G.mapMenu then G.mapMenu:Hide() end
-        G.ToggleRoadMode()
-      end },
-    { id = "wallTools", icon = "Interface\\Icons\\Ability_Warrior_ShieldWall", label = L["Wall Tools"], wallDev = true,
-      tip = L["Click to turn on, click again when done. On the map: left-drag along a wall, fence or cliff edge the routes try to walk through (blood red): routes go around it like a mountain, and roads it crosses are cut there (leave a gap for a gate; flight paths still cross it). Right-drag over walls to erase them (circle an area for all in it), middle-drag to pan. (Shown with the wall tools option)"] .. " " .. L["Hold Shift to draw or erase; a plain drag pans the map and a click on a line opens its details."],
-      isOn = function() return G.wallMode end,
-      action = function()
-        if G.mapMenu then G.mapMenu:Hide() end
-        G.ToggleWallMode()
-      end },
-    { id = "roadUndo", icon = "Interface\\Icons\\INV_Misc_PocketWatch_01", label = L["Undo"], dev = true, wallDev = true,
-      tip = L["Takes back your last drawn or erased road or wall (until it's in the data). (Shown with the road or wall tools)"],
-      action = function()
-        if G.mapMenu then G.mapMenu:Hide() end
-        ns.Record.Undo()
-      end },
-    -- (asked 2026-11-14: the magic eraser, Restore Zone and Restore Continent, for either tools)
-    { id = "magicEraser", icon = "Interface\\Icons\\Spell_Holy_DispelMagic", label = L["Magic Eraser"], dev = true, wallDev = true,
-      tip = L["Drag a circle over your own roads or walls (the tools on) to put the map's own back there: a stroke running on past it is cut at its edge. Ctrl + mouse wheel sizes the circle, up to a few zones across. Undo puts back what it took. Click again when done. (Shown with the road or wall tools)"],
-      isOn = function() return G.eraserMode and true or false end,
-      action = function()
-        if G.mapMenu then G.mapMenu:Hide() end
-        G.ToggleEraser()
-      end },
-    { id = "restoreZone", icon = "Interface\\Icons\\INV_Misc_Map_01", label = L["Restore Zone"], dev = true, wallDev = true,
-      tip = L["Puts the zone under the crosshair (or where you are) back as the map has it: all your changes there of the tools on, roads or walls, taken out, after asking. Undo puts them back. (Shown with the road or wall tools)"],
-      action = function()
-        if G.mapMenu then G.mapMenu:Hide() end
-        G.RestoreZone()
-      end },
-    { id = "restoreContinent", icon = "Interface\\Icons\\INV_Misc_Map02", label = L["Restore Continent"], dev = true, wallDev = true,
-      tip = L["Puts the whole continent in view back as the map has it: all your changes on it of the tools on, roads or walls, taken out, after asking twice. Undo puts them back. (Shown with the road or wall tools)"],
-      action = function()
-        if G.mapMenu then G.mapMenu:Hide() end
-        G.RestoreContinent()
-      end },
-    { id = "roadStairs", icon = "Interface\\Icons\\Ability_Hunter_Pathfinding", label = L["Stairs"], dev = true,
-      tip = L["Draw stairs between two floors: click this, then click the stairs' foot on the map, then their top, and pick each end's height (the floors near it, or type one). Routes take them as stairs at once, and Undo takes them back. Click it again when done. (Shown with the road tools)"],
-      isOn = function() return G.stairMode ~= nil end,
-      action = function()
-        if G.mapMenu then G.mapMenu:Hide() end
-        G.SetStairMode(not G.stairMode)
-      end },
-    { id = "wallEdit", icon = "Interface\\Icons\\INV_Misc_Rune_01", label = L["Edit Wall"], wallDev = true,
-      tip = L["Make a wall you drew a cliff: click this, then the wall on the map, and give the ground's height on each side (filled in from the map). Routes go round it from the low side and jump down from the high side when the drop is safe; level sides are open. Pick Start and Pick End: only that section. Undo takes it back. Click it again when done. (Shown with the wall tools)"],
-      isOn = function() return G.editWallMode ~= nil end,
-      action = function()
-        if G.mapMenu then G.mapMenu:Hide() end
-        G.SetEditWallMode(not G.editWallMode)
-      end },
-    { id = "roadEdit", icon = "Interface\\Icons\\Trade_Engineering", label = L["Edit Road"], dev = true,
-      tip = L["Change a road you drew or recorded: click this, then the road on the map, and set what it is: ground, a floor, a bridge, stairs or a lift, and its height (the floors near it, or type one). Stairs on part of it: Pick Foot and Pick Top on the road. Routes use it at once, and Undo takes it back. Click it again when done. (Shown with the road tools)"],
-      isOn = function() return G.editRoadMode ~= nil end,
-      action = function()
-        if G.mapMenu then G.mapMenu:Hide() end
-        G.SetEditRoadMode(not G.editRoadMode)
-      end },
-    { id = "roadRecord", icon = "Interface\\Icons\\Ability_Rogue_Sprint", label = L["Record"], dev = true,
-      tip = L["Record a road by walking it: opens the Record window (Record, Pause, Stop & Save, and the road type, Stairs too, or its key). Each walk is saved as a drawn road with where you were indoors and the rooms' names, so its floors can be worked out. Undo takes the last walk back. (Shown with the road tools)"],
-      isOn = function() return ns.Record and ns.Record.rec ~= nil end,
-      action = function()
-        if G.mapMenu then G.mapMenu:Hide() end
-        if ns.Record and ns.Record.ToggleWindow then ns.Record.ToggleWindow() end
-      end },
     -- (asked 2026-11-16: routing paused, by hand: Nav.SetPaused. Shown with a route; in the menu's row going right,
     -- last, by default; while paused also on the bar at the map's bottom, without opening the menu)
     { id = "pauseRoute", icon = "Interface\\Icons\\Spell_Nature_TimeStop", label = L["Pause Routing"],
@@ -18652,7 +16573,7 @@ function G.Init()
   -- 2026-11-16 for 1.3.5, "if using RestedXP or any of the supported questing addons, these buttons are always shown by
   -- default to the right")
   G.QUICK_DEFAULT = { search = "menuUp", quickFind = "menuUp", questRoute = "menuRight", rxpRoute = "barRight", zygorRoute = "barRight", polestarRoute = "barRight", questifyRoute = "barRight", aprRoute = "barRight", hearth = "menuRight", pauseRoute = "menuRight",
-    city = "hidden", dungeonsG = "menuUp", styles = "hidden", gather = "menuUp", questsG = "menuUp", mapEdit = "barUp" }
+    city = "hidden", dungeonsG = "menuUp", styles = "hidden", gather = "menuUp", questsG = "menuUp" }
   -- Groups: one button in the bar or menu; clicked, its buttons slide out beside it (to the
   -- right from a column going up, upward from a row going right).
   G.QUICK_GROUPS = {
@@ -18663,12 +16584,6 @@ function G.Init()
       tip = L["Cave, dungeon and raid entrances on the map, and a route through a dungeon's bosses."] },
     { id = "gather", label = L["Herbs, Ore and Farming"], members = { "herbs", "ore", "nodeFind", "gm2Import", "farm" },
       tip = L["Herb and ore nodes on the map, finding particular ones, and drawing a farming area."] },
-    -- (asked 2026-11-14: the road and wall tools as one button, "map editing tools"; opened, the roads and walls show,
-    -- closed, they're hidden; it stays open until the map goes unused for the time set: G.SetMapEditOpen)
-    { id = "mapEdit", label = L["Map Editing"], icon = "Interface\\Icons\\INV_Misc_Note_02", edit = true, keep = true,
-      members = { "roadTools", "wallTools", "roadUndo", "magicEraser", "restoreZone", "restoreContinent",
-        "roadStairs", "roadRecord", "roadEdit", "wallEdit" },
-      tip = L["The map editing tools: roads, walls, the magic eraser and restoring, Undo, Stairs and Record. While it's open the roads and walls show on the map; it closes by itself after the map goes unused a while (Options > Tools), hiding them and turning the tools off."] },
   }
   G.GROUP_IDLE = 8 -- seconds an opened group stays open with the mouse away
   G.DRAWER_SECONDS = 0.22 -- the menu column slides open and shut like a drawer
@@ -18876,7 +16791,7 @@ function G.Init()
   end
   G.groupOf = {}
   local memberOf = {}
-  for _, grp in ipairs(G.QUICK_GROUPS) do
+  local function MakeGroup(grp)
     local slot = { id = grp.id, label = grp.label, tip = grp.tip, members = {}, group = true, icon = grp.icon,
       edit = grp.edit, keep = grp.keep }
     for _, mid in ipairs(grp.members) do
@@ -18906,7 +16821,9 @@ function G.Init()
       GameTooltip:Show()
     end)
     G.groupOf[grp.id] = slot
+    return slot
   end
+  for _, grp in ipairs(G.QUICK_GROUPS) do MakeGroup(grp) end
   for _, t in ipairs(QUICK) do
     local grp = memberOf[t.id]
     if not grp then
@@ -18915,6 +16832,25 @@ function G.Init()
       grp.added = true
       SLOTS[#SLOTS + 1] = grp
     end
+  end
+  -- Buttons another addon puts in after the map is built (the dev addon's map editor: its buttons and their group,
+  -- `grp` as G.QUICK_GROUPS' entries, `default` where the group goes as G.QUICK_DEFAULT's). Each id once.
+  function G.AddQuick(buttons, grp, default)
+    for _, t in ipairs(buttons or {}) do
+      if not byId[t.id] then
+        G.MakeQuickButton(t)
+        QUICK[#QUICK + 1], byId[t.id] = t, t
+        if not grp then SLOTS[#SLOTS + 1] = t end
+      end
+    end
+    if grp and not G.groupOf[grp.id] then
+      G.QUICK_GROUPS[#G.QUICK_GROUPS + 1] = grp
+      if default then G.QUICK_DEFAULT[grp.id] = default end
+      local slot = MakeGroup(grp)
+      slot.added = true
+      SLOTS[#SLOTS + 1] = slot
+    end
+    if G.LayoutQuick then G.LayoutQuick() end
   end
   function G.QuickSlots()
     local rank, base = {}, {}
@@ -19045,7 +16981,7 @@ function G.Init()
     G.mapEditAuto = nil -- (opened or shut by the player, or after use: theirs from now)
     local was = G.mapEditOpen and true or false
     G.mapEditOpen = on
-    G.NoteMapUse()
+    if G.NoteMapUse then G.NoteMapUse() end
     if on ~= was then
       local st = S()
       st.showRoads, st.showWalls = on, on
@@ -19869,7 +17805,7 @@ function G.Init()
       G.settleDt = 0
       local ft = ns.PerfStart()
       G.AreaTooltip(fdt)
-      G.RoadHover(fdt)
+      if G.RoadHover then G.RoadHover(fdt) end -- (the map editor's)
       G.SwimHover(fdt)
       G.BuildingHover()
       G.UpdateFade(fdt)
@@ -19899,7 +17835,7 @@ function G.Init()
         end
       end
     end
-    G.EraserTick()
+    if G.EraserTick then G.EraserTick() end -- (the map editor's)
     if G.lasso and not G.lasso.pad then -- drawing a farming area: add the cursor's spot as it moves (not the pad's)
       local mx, my = GetCursorPosition()
       local sc = canvas:GetEffectiveScale()
@@ -19941,8 +17877,10 @@ function G.Init()
       local okA, errA = pcall(G.MinimapAwayCheck, dt)
       if not okA then G.LogError("minimap in an instance", errA) end
     end
-    local okT, errT = pcall(G.ToolsIdleTick, dt, drag ~= nil or G.lasso ~= nil)
-    if not okT then G.LogError("tools idle", errT) end
+    if G.ToolsIdleTick then -- (the map editor's)
+      local okT, errT = pcall(G.ToolsIdleTick, dt, drag ~= nil or G.lasso ~= nil)
+      if not okT then G.LogError("tools idle", errT) end
+    end
     local forced = elapsed >= 1 -- G.Redraw / settings / dragging / tour set elapsed = 1
     elapsed = elapsed + dt
     if elapsed < 1 / G.RedrawHz() then return end

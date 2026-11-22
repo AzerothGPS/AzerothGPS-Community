@@ -1111,15 +1111,18 @@ def test_a_slider_steps_and_a_dropdown_opens_picks_and_closes(pad):
     lua, ns = pad
     O, P, PO = _opts(lua, ns)
     st = ns.settings.gps
-    O.ShowPage("Tools")  # (map redraws a second, the slider here before, is radio buttons since 2026-11-19)
-    hz = _control(ns, "mapEditIdle")
+    # (map redraws a second, the slider here before, is radio buttons since 2026-11-19; Tools' Map Editing slider went
+    # with the map editor in 1.3.14: Routing's road tolerance)
+    O.ShowPage("Routing")
+    hz = _control(ns, "roadTolerance")
     assert PO.FocusOn(hz.slider)
-    v = st.mapEditIdle or 2
+    v = st.roadTolerance or 0
     _press(lua, "PADDRIGHT")
-    assert st.mapEditIdle == v + 1
+    assert st.roadTolerance == v + 1
     _press(lua, "PADDLEFT")
     _press(lua, "PADDLEFT")
-    assert st.mapEditIdle == v - 1 and PO.side == "page"  # (a slider's left: a step, never the list)
+    assert st.roadTolerance == v - 1 and PO.side == "page"  # (a slider's left: a step, never the list)
+    st.roadTolerance = v
     O.ShowPage("General")
     dd = _control(ns, "distanceUnits")
     assert PO.FocusOn(dd)

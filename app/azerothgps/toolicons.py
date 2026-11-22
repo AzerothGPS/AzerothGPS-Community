@@ -270,7 +270,23 @@ def on_canvas(name: str, n: int) -> np.ndarray:
     return out
 
 
+# The map editor's legend icons: the developer addon's own (its Media/Tools, private_paths.DEV_ADDON; the editor left
+# AzerothGPS in 1.3.14), written there when that checkout is next to this one.
+EDITOR_ICONS = ("MouseLeft", "MouseRight", "MouseWheel", "Shift", "Ctrl")
+
+
+def editor_tools_dir() -> Path | None:
+    """The dev addon's Media/Tools (private_paths.DEV_ADDON next to this repo), or None."""
+    try:
+        from .private_paths import DEV_ADDON
+    except ImportError:
+        return None
+    return Path(__file__).resolve().parents[3].joinpath(*DEV_ADDON) / "Media" / "Tools"
+
+
 def icon_file(name: str, n: int, tools_dir: Path | None = None) -> Path:
+    if tools_dir is None and name in EDITOR_ICONS:
+        tools_dir = editor_tools_dir()
     return (tools_dir or TOOLS_DIR) / f"{name}_{n}.tga"
 
 
@@ -279,7 +295,17 @@ def write(tools_dir: Path | None = None) -> list[Path]:
     tools_dir = tools_dir or TOOLS_DIR
     tools_dir.mkdir(parents=True, exist_ok=True)
     keep = []
+    editor = editor_tools_dir()
     for name in ICONS:
+        if name in EDITOR_ICONS and tools_dir == TOOLS_DIR:  # (the dev addon's, when it's checked out)
+            if editor and editor.parent.is_dir():
+                editor.mkdir(exist_ok=True)
+                for n in ICON_PX:
+                    f = icon_file(name, n, editor)
+                    data = tga_rgba(on_canvas(name, n))
+                    if not f.exists() or f.read_bytes() != data:
+                        f.write_bytes(data)
+            continue
         for n in ICON_PX:
             f = icon_file(name, n, tools_dir)
             data = tga_rgba(on_canvas(name, n))

@@ -28,10 +28,7 @@ local HELP = {
   L["/agps lock | unlock [map|arrow|directions]  (all, or just one; unlocked they can be moved)"],
   L["/agps reset              (restore default position and settings)"],
   L["/agps roads on|off       (show the extracted road network)"],
-  L["/agps dev                 (the Map Editing button on the map)"],
   L["/agps walls on|off        (show the walls routes go around)"],
-  L["/agps draw [undo|list|delete <n>]  (road tools on/off: Shift + left-drag draws, Shift + right-drag erases, a plain drag pans)"],
-  L["/agps draw eraser|zone|continent  (magic eraser, restore the zone or continent)"],
   L["/agps minimap on|off     (minimap button)"],
   L["/agps replace on|off|small|medium|large|ground|mask|status  (the GPS map as the minimap)"],
   L["/agps tutorial [section|exit]  (the tutorial, or one of its sections: Options > Help lists them)"],
@@ -42,6 +39,10 @@ local HELP = {
   "/agps debug route        (save your position and the route for a bug report; then /reload)",
   "/agps debug combat [on|off]  (an API probe a second into each fight)",
 }
+
+-- Words other addons add to /agps (the dev addon's map editor: `dev`, `draw`): ns.COMMANDS[word] = fn(b, msg), its
+-- help lines in ns.COMMAND_HELP.
+ns.COMMANDS, ns.COMMAND_HELP = {}, {}
 
 local function OnOff(v, cur)
   if v == "on" then return true elseif v == "off" then return false end
@@ -67,6 +68,7 @@ Command = function(msg)
   local gps = ns.settings.gps
   local a, b = strsplit(" ", strtrim((msg or ""):lower()))
   local n = tonumber(b)
+  if a ~= "" and ns.COMMANDS[a] then return ns.COMMANDS[a](b, msg) end
   if a == "" or a == "options" or a == "config" then
     ns.Options.Toggle()
     return
@@ -229,29 +231,6 @@ Command = function(msg)
     gps.showRoads = OnOff(b, gps.showRoads)
   elseif a == "walls" then
     gps.showWalls = OnOff(b, gps.showWalls)
-  elseif a == "dev" or a == "walltools" then -- (the Map Editing button: the road and wall tools, one option since 1.3.0)
-    gps.devTools = not gps.devTools
-    ns.Print(gps.devTools and L["the Map Editing button on the map: shown"] or L["the Map Editing button on the map: hidden"])
-    if not gps.devTools and ns.GPS.SetMapEditOpen then ns.GPS.SetMapEditOpen(false) end
-    if ns.GPS.LayoutQuick then ns.GPS.LayoutQuick() end
-    return
-  elseif a == "draw" then
-    if b == "undo" then
-      ns.Record.Undo()
-    elseif b == "list" then
-      ns.Record.List()
-    elseif b == "delete" then
-      ns.Record.Delete(tonumber(select(3, strsplit(" ", msg))))
-    elseif b == "eraser" then
-      ns.GPS.ToggleEraser()
-    elseif b == "zone" then
-      ns.GPS.RestoreZone()
-    elseif b == "continent" then
-      ns.GPS.RestoreContinent()
-    else
-      ns.GPS.ToggleRoadMode()
-    end
-    return
   elseif a == "pad" then
     -- (a controller: "Show/Hide AzerothGPS" on its Back button, asked; Pad.lua, offered once by itself. With a control's
     -- name: that control, once, as its button: the controller's controls as macros, Pad.MACROS)
@@ -341,6 +320,7 @@ Command = function(msg)
     return
   else
     for _, l in ipairs(HELP) do ns.Print(l) end
+    for _, l in ipairs(ns.COMMAND_HELP) do ns.Print(l) end
     return
   end
   ns.Options.Apply()

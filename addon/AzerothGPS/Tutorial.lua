@@ -23,7 +23,7 @@
 -- end of every section and at the end or exit of the tutorial; it's saved (db.tutorial.run) while a tutorial runs, so
 -- a /reload or a crash restores it at the next login (T.RestoreSaved, before anything reads the settings). Anything a
 -- new step changes must be in the snapshot. The player's data is never written: example herbs and ore are
--- Layers.demoNodes, practice roads, walls and recorded walks go to Record.practice (both in memory only). The one
+-- Layers.demoNodes (in memory only). The one
 -- thing kept: "Keep the GPS map as your minimap?" answered Yes (the option on, at the size picked).
 -- Display only: the tutorial drives AzerothGPS's own windows and settings, never the character or the game's own UI.
 local _, ns = ...
@@ -38,10 +38,8 @@ T.PROMPT_DELAY = 8 -- seconds after the world is entered before the offer
 T.POLL = 0.1 -- seconds between looks at whether the player did the step
 T.DONE_PAUSE = 0.8 -- seconds "Done!" shows before the next step
 T.HOLD = "tutorial" -- G.mmHold's value: the map as the minimap held opened out
-T.ORDER = { "minimap", "route", "quests", "arrow", "gather", "pins", "search", "dungeon", "window", "roads" }
-T.OVERLAY = "AzerothGPS tutorial" -- its drawing on the map (the practice roads and walls)
+T.ORDER = { "minimap", "route", "quests", "arrow", "gather", "pins", "search", "dungeon", "window" }
 T.RAGEFIRE = 389 -- Ragefire Chasm's map id (the dungeon map shown)
-T.WALK_YD = 3 -- a practice walk recorded this far counts
 T.FILL_MAX = 160 -- the glow fills what it points at up to this wide (UI units); wider, the outline alone
 -- the example across the sea, from each continent (world x, y, continent, the game's own name for the place's map)
 T.FAR = {
@@ -112,7 +110,6 @@ end
 -- What the answer to "Keep the GPS map as your minimap?" keeps, over the settings just put back; and the two
 -- "back to the minimap" options ticked in the tutorial itself (asked 2026-11-10: offered there, so kept).
 T.BACK_KEYS = { "replaceMinimapCollapseOnMove", "replaceMinimapCollapseOnCombat" }
-T.TOOL_KEYS = { "devTools" } -- (the Map Editing button, ticked in the roads section)
 -- The world map option shown on its own step: on (the step entered), the game's map opened with the GPS map in it;
 -- off (the step left), the game's map closed and the map in its own window again for the steps after.
 function T.WorldMapPreview(on)
@@ -133,7 +130,7 @@ function T.ApplyKeep(run, final)
   -- (the world map option, ticked in the map window's section: only as the tutorial ends, since it runs on the map's
   -- own window)
   if final and run.keepOpts and run.keepOpts.useWorldMap ~= nil then st.useWorldMap = run.keepOpts.useWorldMap end
-  for _, keys in ipairs({ T.BACK_KEYS, T.TOOL_KEYS }) do
+  for _, keys in ipairs({ T.BACK_KEYS }) do
     for _, k in ipairs(keys) do
       if run.keepOpts and run.keepOpts[k] ~= nil then st[k] = run.keepOpts[k] end
     end
@@ -159,23 +156,9 @@ function T.Try(what, fn, ...)
   return ok
 end
 
--- A practice walk being recorded let go (never saved).
-function T.DropRecording()
-  local R = ns.Record
-  if not (R and R.practice and R.rec) then return end
-  R.rec = nil
-  if R.recFrame then R.recFrame:Hide() end
-  if R.RefreshWindow then R.RefreshWindow() end
-  if GPS().RefreshQuick then GPS().RefreshQuick() end
-end
-
 -- The tutorial's own things off the map: the practice, the examples, the tools, the search and the hold.
 function T.ClearDemo()
   local g, R, Lay = GPS(), ns.Record, ns.Layers
-  if R and R.practice then
-    R.practice.list = {}
-    T.DropRecording()
-  end
   -- (the Record window, unless the player had it open before)
   if R and R.window and R.window:IsShown() and not (T.run and T.run.snapshot.recWindow) then R.window:Hide() end
   if Lay and Lay.demoNodes then
@@ -558,49 +541,6 @@ end
 function T.Sizing()
   local grip = GPS().sizeGrip
   return grip and grip.sizing and true or false
-end
-
--- The road tools' buttons on the map (the practice itself is on for the whole tutorial: T.Start).
-function T.ToolsShown(open)
-  local g, st = GPS(), S()
-  st.devTools = true
-  if open and not g.mapEditOpen and g.SetMapEditOpen then g.SetMapEditOpen(true) end
-  if g.RefreshQuick then g.RefreshQuick() end
-  if g.LayoutQuick then pcall(g.LayoutQuick) end
-end
--- A practice road across the player's spot (the magic eraser's step with none drawn): in the practice list only.
-function T.PracticeRoad()
-  local x, y, level = T.Here()
-  ns.Record.Save({ op = "add", drawn = true, continent = level, zone = "?", time = time(),
-    pts = { x - 25, y, x + 25, y } })
-end
--- How many practice strokes there are; `wall`: walls only.
-function T.PracticeCount(wall)
-  local R = ns.Record
-  local n = 0
-  for _, t in ipairs(R and R.practice and R.practice.list or {}) do
-    local isWall = t.op == "wall" or t.op == "unwall"
-    if not t.recorded and (wall == nil or wall == isWall) then n = n + 1 end
-  end
-  return n
-end
-function T.RecordWindow()
-  local R = ns.Record
-  if not (R.window and R.window:IsShown()) then R.ShowWindow() end
-  return R.window
-end
--- The practice strokes on the map (an overlay, as another addon's drawing: lines in the view's continent).
-T.PRACTICE_COLORS = { add = { 0.3, 0.9, 0.4 }, remove = { 1, 0.25, 0.2 }, wall = { 0.75, 0.1, 0.1 }, unwall = { 1, 0.6, 0.2 } }
-function T.DrawPractice(ctx)
-  local R = ns.Record
-  for _, t in ipairs(R and R.practice and R.practice.list or {}) do
-    if t.continent == ctx.cont and type(t.pts) == "table" then
-      local color = T.PRACTICE_COLORS[t.op] or T.PRACTICE_COLORS.add
-      for i = 1, #t.pts - 3, 2 do
-        ctx.Line(t.pts[i], t.pts[i + 1], t.pts[i + 2], t.pts[i + 3], color, 3, 0.95, t.op == "remove" or t.op == "unwall")
-      end
-    end
-  end
 end
 
 ---------------------------------------------------------------------------
@@ -1001,103 +941,6 @@ function T.BuildSections()
         end },
       { title = L["Returning to original"],
         text = L["Size, shape and lock are in Options > Map window. Your own settings come back when the tutorial ends."] },
-    } },
-    { id = "roads", version = "1.2.0", updated = "1.3.0", title = L["Fix roads and record"], full = true, steps = {
-      { title = L["Practice only"],
-        -- (how the tools are turned on, and the two options offered there: asked 2026-11-10)
-        text = function() return L["Routes follow roads. Where one is missing or wrong, you can fix it. This is practice: nothing here is saved."] .. " " .. L["The Map Editing button is on the map for this tutorial. Tick it here to keep it, or later in Options > Tools."] end,
-        enter = function(run)
-          local keep = run.keepOpts or {}
-          for _, k in ipairs(T.TOOL_KEYS) do
-            if keep[k] == nil then keep[k] = run.snapshot.gps[k] and true or false end
-          end
-          run.keepOpts = keep
-          T.ToolsShown()
-        end,
-        target = T.Quick("roadTools"),
-        checks = function(run)
-          local function Row(label, k) -- (kept for after: the buttons stay on the map while the section runs)
-            return { label, function() return run.keepOpts and run.keepOpts[k] end, function(v)
-              run.keepOpts = run.keepOpts or {}
-              run.keepOpts[k] = v and true or false
-              T.Persist()
-            end }
-          end
-          return { Row(L["Map editing tools"], "devTools") }
-        end },
-      -- (1.3.0: the road and wall tools in one Map Editing button, asked 2026-11-14: opened first, then Road Tools; the
-      -- glow on Map Editing while it's shut)
-      { title = L["Road Tools"], text = L["Click Map Editing on the map, then Road Tools. Open, Map Editing shows the roads and walls."],
-        enter = function()
-          T.ToolsShown()
-          if GPS().roadMode then GPS().SetRoadMode(false) end
-          if GPS().mapEditOpen and GPS().SetMapEditOpen then GPS().SetMapEditOpen(false) end
-        end,
-        target = T.Quick("roadTools"), done = function() return GPS().roadMode and true or false end },
-      { title = L["Draw a road"],
-        text = L["Hold Shift and left-drag along where a road should be. Shift + right-drag over a road erases it. A plain drag pans the map."],
-        enter = function(run)
-          T.ToolsShown(true)
-          if GPS().eraserMode then GPS().SetEraserMode(false) end
-          if not GPS().roadMode then GPS().SetRoadMode(true) end
-          run.mark.n = T.PracticeCount(false)
-        end,
-        target = T.MapFrame, done = function(run) return T.PracticeCount(false) > run.mark.n end },
-      -- (1.3.0: the magic eraser, asked 2026-11-14; a practice road put down by the player if the last step was skipped)
-      { title = L["Magic Eraser"],
-        text = L["Click Magic Eraser, then Shift + drag its circle over the road you drew: the map's own roads are back there. Ctrl + mouse wheel sizes it."],
-        enter = function(run)
-          T.ToolsShown(true)
-          if not GPS().roadMode then GPS().SetRoadMode(true) end
-          if T.PracticeCount(false) == 0 then T.PracticeRoad() end
-          run.mark.n = T.PracticeCount(false)
-        end,
-        target = function() return GPS().eraserMode and T.MapFrame() or T.QuickButton("magicEraser") end,
-        done = function(run) return T.PracticeCount(false) < run.mark.n end },
-      { title = L["Draw a wall"],
-        text = L["Wall Tools do the same for walls and cliffs that routes should go around. Click Wall Tools, then Shift + left-drag one."],
-        enter = function(run)
-          T.ToolsShown(true)
-          if GPS().eraserMode then GPS().SetEraserMode(false) end
-          run.mark.n = T.PracticeCount(true)
-        end,
-        target = function() return GPS().wallMode and T.MapFrame() or T.QuickButton("wallTools") end,
-        done = function(run) return T.PracticeCount(true) > run.mark.n end },
-      { title = L["Record a walk"],
-        text = L["Click Record on the map, then Record in its window, and walk a few steps."],
-        enter = function()
-          T.ToolsShown()
-          if GPS().roadMode then GPS().SetRoadMode(false) end
-          if GPS().wallMode then GPS().SetWallMode(false) end
-          T.DropRecording() -- (one going already, come back to: from the start)
-        end,
-        target = function()
-          local w = ns.Record.window
-          return w and w:IsShown() and w.rec or T.QuickButton("roadRecord")
-        end,
-        done = function()
-          local rec = ns.Record.rec
-          return rec ~= nil and (rec.yd or 0) >= T.WALK_YD
-        end },
-      { title = L["Stop recording"],
-        text = L["Click Stop. A real walk is saved as a road, with its floors and rooms."],
-        enter = function()
-          T.ToolsShown()
-          local w = T.RecordWindow()
-          if not ns.Record.rec then ns.Record.StartRecording(true) end
-          if w and ns.Record.RefreshWindow then ns.Record.RefreshWindow() end
-        end,
-        target = function() return ns.Record.window and ns.Record.window.stop end,
-        done = function() return ns.Record.rec == nil end },
-      { title = L["Share your fixes"],
-        text = L["Real fixes work for you at once. Share them and they are added for everyone: Options > Help shows how. Your practice road, wall and walk are gone."],
-        enter = function()
-          local R = ns.Record
-          if R.practice then R.practice.list = {} end
-          T.DropRecording()
-          if R.window then R.window:Hide() end
-          GPS().Redraw()
-        end },
     } },
   }
   T.byId = {}
@@ -1507,7 +1350,7 @@ function T.Start(ids, from)
   if _G.AzerothGPSOptions and _G.AzerothGPSOptions:IsShown() then _G.AzerothGPSOptions:Hide() end
   if T.prompt then T.answered = true T.prompt:Hide() end
   local snap = T.Snapshot()
-  -- (the tools on: off before the practice starts, so the player's own edits so far go into the roads as always)
+  -- (the dev addon's map editor's tools on: off for the tutorial, back on at its end)
   if g.roadMode then g.SetRoadMode(false) end
   if g.wallMode then g.SetWallMode(false) end
   T.run = { queue = queue, qi = math.max(1, math.min(from or 1, #queue)), si = 1, snapshot = snap, mark = {},
@@ -1515,8 +1358,6 @@ function T.Start(ids, from)
   -- (the guide routes put their own stops back in: off while it runs, back on from the snapshot)
   local cdb = ns.CharDB()
   cdb.rxpFollow, cdb.zygorFollow = nil, nil
-  R.practice = { list = {} } -- (anything drawn or recorded from here: in memory only, Record.Save)
-  g.overlays[T.OVERLAY] = T.DrawPractice
   T.Ticker():Show()
   T.Persist()
   ns.Print(L["Tutorial started. Everything goes back to how you had it when it ends."])
@@ -1713,8 +1554,6 @@ function T.End(completed)
   T.LeaveStep()
   local g, R = GPS(), ns.Record
   T.RestoreLive(run.snapshot, function() T.ApplyKeep(run, true) end)
-  R.practice = nil
-  g.overlays[T.OVERLAY] = nil
   T.Try("the tools", function()
     if run.snapshot.mapEditOpen and g.SetMapEditOpen then g.SetMapEditOpen(true) end
     if run.snapshot.roadMode then g.SetRoadMode(true) elseif run.snapshot.wallMode then g.SetWallMode(true) end

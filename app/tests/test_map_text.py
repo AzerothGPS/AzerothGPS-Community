@@ -161,16 +161,12 @@ def test_importing_every_kind_into_the_players_own_data(mine):
     before = ns.unsavedOwn or 0
     res = I.ImportText(EVERY_KIND, "stops", False)
     A = res.added
-    assert (A.roads, A.walls, A.pins, A.herbs, A.ore, A.npcs) == (1, 1, 2, 1, 1, 1)
-    assert res.had == 0 and len(res.rejected) == 0 and res.skipped == 3 and res.stops is None
-    assert str(I.ImportSummary(res)) == ("Added 1 road, 1 wall, 2 pins, 1 herb, 1 ore, 1 NPC. "
-                                         "3 lines not imported here (faster trips, dungeons' ways in).")
-    # roads and walls: with the drawn ones (routes use them, Undo takes them back), marked imported, not shared
-    tracks = {int(t.time): t for t in ns.db.tracks.values()}
-    assert set(tracks) == {1790000001, 1790000002}
-    for t in tracks.values():
-        assert t.imported and not t.shared and t.drawn and t.zone == "imported"
-    assert tracks[1790000002].op == "wall" and tracks[1790000002].z == 41.5
+    # (roads and walls: not imported here since 1.3.14, with the map editor gone; the dev addon takes them in)
+    assert (A.roads, A.walls, A.pins, A.herbs, A.ore, A.npcs) == (0, 0, 2, 1, 1, 1)
+    assert res.had == 0 and len(res.rejected) == 0 and res.skipped == 5 and res.stops is None
+    assert str(I.ImportSummary(res)) == ("Added 2 pins, 1 herb, 1 ore, 1 NPC. "
+                                         "5 lines not imported here (faster trips, dungeons' ways in, roads, walls).")
+    assert len(list(ns.db.tracks.values())) == 0
     # pins: the player's own, marked imported, never shared
     pins = {str(p.name): p for p in ns.Pins.Own().values()}
     assert set(pins) == {"Trainer up here", "Old Tree"}
@@ -185,8 +181,8 @@ def test_importing_every_kind_into_the_players_own_data(mine):
     assert (ns.unsavedOwn or 0) == before + 1
     # again: all of it known
     again = I.ImportText(EVERY_KIND, "stops", False)
-    assert sum(again.added[k] for k in ("roads", "walls", "pins", "herbs", "ore", "npcs")) == 0 and again.had == 7
-    assert str(I.ImportSummary(again)).startswith("Nothing new added. 7 you had already.")
+    assert sum(again.added[k] for k in ("roads", "walls", "pins", "herbs", "ore", "npcs")) == 0 and again.had == 5
+    assert str(I.ImportSummary(again)).startswith("Nothing new added. 5 you had already.")
 
 
 def test_my_map_data_copies_and_imports_back(mine):
@@ -218,7 +214,8 @@ def test_my_map_data_copies_and_imports_back(mine):
         ns.db[k] = lua.table()
     res = I.ImportText(text, "stops", False)
     A = res.added
-    assert (A.roads, A.walls, A.pins, A.herbs, A.ore, A.npcs) == (1, 0, 1, 1, 1, 1) and len(res.rejected) == 0
+    assert (A.roads, A.walls, A.pins, A.herbs, A.ore, A.npcs) == (0, 0, 1, 1, 1, 1) and len(res.rejected) == 0
+    assert res.skipped == 1 and len(list(ns.db.tracks.values())) == 0  # (the road: not imported here since 1.3.14)
     (pin,) = ns.Pins.Own().values()
     assert (pin.name, pin.z, pin.icon, pin.time) == ("Up here", 41.2, 134400, 1790000003)
     assert ns.db.npcs["imp:innkeeper renee"].title == "Innkeeper"

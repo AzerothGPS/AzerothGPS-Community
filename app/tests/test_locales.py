@@ -268,7 +268,7 @@ def test_the_import_window_fits_a_long_language():
     f = lua.globals().AzerothGPSImport
     mine = f.mine
     assert mine.GetWidth(mine) >= len(ns.L["Copy My Map Data"]) * 6 + 24
-    assert f.GetWidth(f) >= f.needWidth > 520
+    assert f.GetWidth(f) >= max(520, f.needWidth) and f.needWidth > 480
 
 
 def test_the_options_search_filters_the_settings_as_typed():
