@@ -180,10 +180,7 @@ ns.DEFAULTS = {
     combatAlpha = 1, -- map opacity in combat (unset: the map's usual opacity)
     arrowCombatAlpha = 1, -- arrow opacity in combat
     -- help improve AzerothGPS (opt-in: off unless the player turns them on)
-    devTools = false, -- the Map Editing button on the map (the road and wall tools; one option since 2026-11-14)
-    mapEditIdle = 2, -- minutes the opened Map Editing menu stays open with the map unused (GPS.ToolsIdleSeconds)
     pinning = true, -- Shift + left-click on the map: "Create Pin" (Pins.lua)
-    recordHint = true, -- drawing a road by hand: suggest Record instead (GPS.AskRecordHint; asked 2026-10-09)
     showCustomPins = true, -- the pins on the map (the player's and the shared ones)
     otherAddonPins = true, -- other addons' world map icons on the map too (OtherPins.lua; asked 2026-11-09)
     showWalls = false, -- draw the walls routes don't walk through (blood red)
@@ -327,11 +324,6 @@ BINDING_NAME_AZEROTHGPS_SEARCH = L["Quick Search"]
 function AzerothGPS_QuickSearch()
   if not ns.settings then return end
   if ns.GPS and ns.GPS.QuickSearch then return ns.GPS.QuickSearch() end
-end
--- (the road tools' Record: Stairs Start, then Stairs End, without reaching for the window)
-BINDING_NAME_AZEROTHGPS_RECORD_STAIRS = L["Record: Stairs on/off"]
-function AzerothGPS_RecordStairs()
-  if ns.Record and ns.Record.MarkStairs then ns.Record.MarkStairs() end
 end
 
 -- Timing of the addon's work (redraw and its parts, routing, layers), for /agps debug perf:
@@ -1242,9 +1234,15 @@ end
 -- Developer hook: `AzerothGPS_Extend(fn)` runs fn(ns), the addon's own tables, for a private dev
 -- addon (never shipped). It plugs in at
 -- PLAYER_LOGIN, after every part has started. Nothing in AzerothGPS calls it.
+-- `AzerothGPS_Extend(fn, "load")` runs fn(ns) at once, while the addons load (no saved data yet): for a file that
+-- puts its functions on the addon's tables as it loads.
 local extenders = {}
-function AzerothGPS_Extend(fn)
+function AzerothGPS_Extend(fn, when)
   if type(fn) ~= "function" then return end
+  if when == "load" then
+    fn(ns)
+    return
+  end
   if ns.started then
     local ok, err = pcall(fn, ns)
     if not ok and ns.Print then ns.Print(string.format(L["an extension failed: %s"], tostring(err))) end
@@ -1724,7 +1722,6 @@ function ns.OnEnteringWorld(isInitialLogin, isReloadingUi)
   if not ns.db then return end
   if isInitialLogin or (isInitialLogin == nil and isReloadingUi == nil) then
     ns.db.unsavedSnoozedLogin = nil -- (left by the old Dismiss button, removed 2026-11-17)
-    ns.db.recordHintSnoozed = nil -- (Draw Anyway: until a real login, GPS.AskRecordHint)
   end
 end
 function ns.ResetUnsaved() -- (as just saved: the tests)

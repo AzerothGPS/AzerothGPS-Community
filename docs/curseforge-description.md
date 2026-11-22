@@ -85,12 +85,6 @@ Quest areas show up on the map just like on your minimap. A stop in a quest area
 
 Every herb and ore node you gather, hover over on the minimap, or right-click without the profession ("Requires Herbalism") gets remembered across all your characters.
 
-## Spot a mistake? Fix it
-
-If a route misses a trail or walks you into a wall, draw the fix right on the map and routes use it straight away. Send it by following directions in "Help improve" menu (`/reload`, then **Copy Map Data…**) and if it checks out, it ships in the next version for everybody.
-
-![Road tools in Silverpine: circling a road to erase it, drawing the real one, the route taking it](https://azerothgps.com/press/fixing-road-tools.gif)
-
 ## Also in there
 
 *   **Every way to get around:** flight paths (plus a detour to pick up ones you pass but haven't learned), boats and zeppelins with countdowns to their next arrival (on board, an "arrives in" countdown just like a flight's; Shift-click a dock to paste its times in chat), the Deeprun Tram, your hearthstone, class teleports and engineer teleporters. You can hearth or teleport with one click right from the directions. Don't fancy a certain flight or boat? Right-click it and the route skips it. If that leaves no way there, it tells you and offers to put it back.
@@ -115,6 +109,5 @@ If a route misses a trail or walks you into a wall, draw the fix right on the ma
 
 *   **Discord:** questions, ideas and news on the **[AzerothGPS Discord](https://discord.gg/hHEguxVQFb)**. Come hang out.
 *   **Bugs and bad routes:** send them in with the [report form](https://azerothgps.com/feedback/) or post in the Discord. Include the zone and your start and destination coordinates (they're at the bottom of the map).
-*   **Map fixes:** draw them with the road or wall tools, type `/reload` (that saves every edit), then **Copy Map Data…** (Options → Help) and paste it into the [report form](https://azerothgps.com/feedback/#road-fixes) or the Discord.
 
 _AzerothGPS is a fan-made addon and is not affiliated with or endorsed by Blizzard Entertainment. World of Warcraft and Azeroth are trademarks of Blizzard Entertainment, Inc._

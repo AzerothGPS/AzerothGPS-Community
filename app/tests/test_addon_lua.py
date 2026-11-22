@@ -2408,28 +2408,6 @@ def test_out_of_the_ruins_through_the_north_gate(nav_env):
                     assert run < 5, (offroad, stop, x1, y1, x2, y2)  # (a corner, not through a wall)
 
 
-def test_the_map_shows_undercitys_roads_on_its_map(nav_env):
-    # (reported) Undercity's map (its model's inside map, or its zone map) showed no roads, and
-    # zoomed out the city's roads lay over the Ruins on Tirisfal's map: the art shown decides
-    lua, ns, UC = undercity_env(nav_env)
-    G = ns.GPS
-    wmo = ns.CityLevels[UC].wmo
-    assert G.CityArtLevel(wmo) == UC and G.CityArtLevel(None, 1458) == UC
-    assert G.CityArtLevel(None, 1420) is None and G.CityArtLevel(12345) is None  # Tirisfal, a building
-    # the road tools draw on the level shown there: the city's over its map, over the city only
-    saved = []
-    ns.Print = lambda *a: None
-    ns.Record = lua.table(Save=lambda t: saved.append(t) or len(saved))
-    lua.execute("C_Map.GetMapInfo = function() return { name = 'Undercity' } end time = os.time")
-    line = lambda x, y: lua.table(cont=0, pts=lua.table(x, y, x + 10, y, x + 20, y))
-    G.shownLevel, G.shownCont = UC, 0
-    G.FinishRoad(line(1560.0, 228.0))
-    G.FinishRoad(line(-9000.0, 400.0))
-    G.shownLevel = 0  # Tirisfal's map
-    G.FinishRoad(line(1560.0, 228.0))
-    assert [t.continent for t in saved] == [UC, 0, 0]
-
-
 def test_undercitys_map_stays_up_anywhere_over_the_city_while_down_in_it(nav_env):
     # (reported, a recording) zooming in on the city's map moved the view off the player, and the
     # outside map (the Ruins' ground) flipped in and out: down there, the city's map anywhere over it
@@ -5826,18 +5804,6 @@ def test_panned_view_comes_back_after_a_reload(router):
     assert G.SaveView() is None
 
 
-def test_road_tools_stay_on_until_toggled_off(router):
-    lua, ns = router
-    ns.Print = lua.eval("function() end")
-    G = ns.GPS
-    G.ToggleRoadMode()
-    assert G.roadMode
-    G.FinishRoad(lua.eval("{ pts = { 1, 1 }, cont = 1 }"))  # (a stroke too short: nothing saved, still on)
-    assert G.roadMode
-    G.ToggleRoadMode()
-    assert not G.roadMode
-
-
 def test_right_click_from_terrain_opens_the_continent_map_with_its_zones(nav_env):
     lua, ns = nav_env
     # (not the small overview maps 1463 / 1464 some continents also have)
@@ -5921,22 +5887,6 @@ def test_ironforge_icon_opens_its_interior_map(env):
     got = G.CityInterior(ids["Ironforge"])
     assert got is not None
     assert G.CityInterior(ids["Orgrimmar"]) is None and G.CityInterior(ids["Stormwind City"]) is None
-
-
-def test_erasing_with_a_circle_takes_out_the_roads_inside_it(router):
-    lua, ns = router
-    import math as m
-    loop = [v for k in range(13) for v in (500 + 40 * m.cos(k * m.pi / 6), -1000 + 40 * m.sin(k * m.pi / 6))]
-    assert ns.GPS.IsLoop(lua.table(*loop), 250.0)
-    assert not ns.GPS.IsLoop(lua.table(0, 0, 50, 0, 100, 0, 150, 0), 150.0)  # a line isn't
-    ns.db = lua.eval("{ tracks = { { op = 'remove', drawn = true, area = true, continent = 1, time = 1, pts = { %s } } } }"
-                     % ",".join(f"{v:.1f}" for v in loop))
-    ns.Router.Reset()
-    edges = ns.Router.Edges(1)[0]
-    for e in edges.values():
-        for i in range(5, len(e), 2):
-            assert m.hypot(e[i] - 500, e[i + 1] + 1000) >= 38  # nothing left inside
-    assert len(edges) == 3  # the leg cut in two, the other leg as it was
 
 
 def test_road_data_text_to_copy_and_read_back(nav_env, tmp_path):
@@ -6439,22 +6389,6 @@ def test_nothing_to_share_once_the_data_has_it(nav_env):
     assert len(ns.db.tracksShipped) == 1  # (archived once: the old second copy of road 5 isn't another)
 
 
-def test_a_stroke_drawn_elsewhere_from_down_in_a_city_is_on_the_continent(nav_env):
-    lua, ns = nav_env
-    load(lua, ns, "Data/Terrain.lua", "Passability.lua", "Data/Cities.lua", "Record.lua")
-    ns.Print = lua.eval("function() end")
-    lua.execute("C_Map = C_Map or {} C_Map.GetBestMapForUnit = function() return 1458 end C_Map.GetMapInfo = function() return { name = 'Undercity' } end time = function() return 1 end")
-    ns.Nav.PlayerLevel = lua.eval("function(c) return 10001 end")  # (the player is down in Undercity)
-    ns.GPS.shownLevel, ns.GPS.shownCont = 10001, 0  # (its map shown)
-    ns.db = lua.eval("{ tracks = {} }")
-    # looking at Duskwood from there, a road drawn
-    ns.GPS.FinishRoad(lua.eval("{ cont = 0, pts = { -10900,400, -10880,450, -10860,500 } }"))
-    assert ns.db.tracks[1].continent == 0
-    # drawn over the city itself: on its level
-    ns.GPS.FinishRoad(lua.eval("{ cont = 0, pts = { 1560,250, 1570,270, 1590,280 } }"))
-    assert ns.db.tracks[2].continent == 10001
-
-
 @pytest.fixture
 def api(env):
     lua, ns = env
@@ -6496,40 +6430,13 @@ def test_public_api_exposes_documented_functions(api):
                  "PlayerLevel", "ShownLevel",
                  "SetPlayerArrow", "SetRouteLook", "SetFrameLook", "OnArrive", "TitleBarSlot",
                  "RegisterLookFrame", "FrameLook", "SeamKnobs", "AddCharm", "RegisterPopup",
-                 "ShowRecorder", "Recording", "RecordedWalks", "RouteTo", "PreviewWalk", "Previewing"):
+                 "RouteTo", "PreviewWalk", "Previewing"):
         assert A[name] is not None, name
+    for name in ("ShowRecorder", "Recording", "RecordedWalks"):  # (API 22's: gone with the map editor in 1.3.14)
+        assert A[name] is None, name
     assert A.version == 23
     assert A.TopPanelInset() == 4  # (no window frame in the tests)
     assert A.MapButton("recenter") is None  # (no map built in the tests)
-
-
-def test_public_api_reads_recorded_walks_since_a_time(api):
-    # (API 22: a companion asks the player to walk a way with Record, then reads that walk back) only recorded walks,
-    # from `since` on, oldest first, as copies with their length; nothing in the saved tracks changes
-    lua, ns, A = api
-    if ns.db is None:
-        ns.db = lua.eval("{}")
-    db = ns.db
-    saved = db.tracks
-    try:
-        db.tracks = lua.eval("""{
-          { op = "add", drawn = true, recorded = true, continent = 1, zone = "Orgrimmar", time = 2000,
-            pts = { 0, 0, 3, 4, 3, 10 }, zs = { 5, 5, 6 } },
-          { op = "add", drawn = true, continent = 1, time = 2001, pts = { 0, 0, 1, 1 } },
-          { op = "remove", continent = 1, time = 2002, pts = { 0, 0, 1, 1 } },
-          { op = "add", drawn = true, recorded = true, continent = 10001, time = 1500, pts = { 0, 0, 1, 0 } },
-          { op = "add", drawn = true, recorded = true, continent = 0, time = 1999, kind = "stairs", pts = { 0, 0, 0, 2 } },
-        }""")
-        walks = A.RecordedWalks(1999)
-        got = [(walks[i].time, walks[i].level, round(walks[i].yd, 3)) for i in range(1, len(walks) + 1)]
-        assert got == [(1999, 0, 2.0), (2000, 1, 11.0)]
-        walks[2].pts[1] = 99
-        assert db.tracks[1].pts[1] == 0  # (a copy)
-        assert walks[2].zs[3] == 6 and walks[1].kind == "stairs"
-        assert len(A.RecordedWalks(None)) == 3
-    finally:
-        db.tracks = saved
-    assert A.Recording() is False
 
 
 def test_public_api_shift_click_on_a_boss_goes_to_another_addon(api):
@@ -6651,29 +6558,6 @@ def test_no_docks_or_dungeon_entrances_while_the_map_is_held(api):
     assert not G.ShowsTravelMarkers()
     A.HoldMap("StreetGuess", False)
     assert G.ShowsTravelMarkers()
-
-
-def test_no_road_or_wall_tools_while_the_map_is_held(api):
-    lua, ns, A = api
-    G = ns.GPS
-    said = lua.eval("{}")
-    ns.Print = lua.eval("function(t) return function(msg) t[#t + 1] = msg end end")(said)
-    G.SetRoadMode(True)
-    assert G.roadMode
-    A.HoldMap("game", True, None)  # (a game on the map starts)
-    assert not G.roadMode and not G.wallMode  # (turned off)
-    assert G.SetRoadMode(True) is False and not G.roadMode  # (refused while held, and said why)
-    assert G.SetWallMode(True) is False and not G.wallMode
-    assert G.StartDrawing("farm") is False and not G.drawMode
-    assert said[len(said)] == "not during a game on the map"
-    ns.settings = lua.eval("{ gps = { showWalls = true } }")
-    assert G.ShowsWalls() is False  # (no wall outlines over the game's map)
-    A.HoldMap("game", False)
-    assert G.ShowsWalls() is True and ns.settings.gps.showWalls  # (the option untouched)
-    assert not G.roadMode  # (not back by itself)
-    G.SetRoadMode(True)  # (turned on again after the game: fine)
-    assert G.roadMode
-    G.SetRoadMode(False)
 
 
 def test_nearest_road_waits_for_the_background_build(nav_env):
@@ -7614,51 +7498,6 @@ def test_copy_map_data_includes_only_the_kinds_picked(env):
     trips = parse_shared_trips("T 1 13 300 200 1 to=50.0,60.0,1 0,0 30,0 40,25\nT 1 nope\nR add 0 11 1,2 3,4")
     assert trips == [{"continent": 1, "time": 13, "estimate": 300, "actual": 200, "mounted": True, "from": [0.0, 0.0],
                       "to": [50.0, 60.0, 1], "pts": [0.0, 0.0, 30.0, 0.0, 40.0, 25.0], "source": "shared"}]
-
-
-def test_shared_map_data_is_taken_into_the_players_own(env):
-    # (asked: the dev tools' "Import into My Data") roads, walls, pins, faster trips and dungeons' ways in
-    # someone shared, taken in with their times (each once; not what the data has); pins marked shared so
-    # the road watcher takes them, never the player's own
-    from azerothgps.pins import saved_pins
-
-    lua, ns = env
-    ns.db = lua.eval("{ tracks = { { op = 'add', continent = 0, time = 5, pts = { 1, 2, 3, 4 } } } }")
-    ns.RoadTracksIn = lua.eval("{ [7] = true }")
-    ns.PinsIn = lua.eval("{ [30] = true }")
-    ns.settings = lua.eval("{ gps = {} }")
-    load(lua, ns, "Record.lua", "Pins.lua", "Feedback.lua")
-    tracks = lua.eval("""{ { op = "add", continent = 0, time = 5, pts = { 1, 2, 3, 4 } },
-      { op = "wall", continent = 0, time = 6, pts = { 5, 6, 7, 8 }, z = 55 },
-      { op = "remove", continent = 0, time = 7, pts = { 9, 9, 10, 10 } },
-      { op = "remove", continent = 1, time = 8, pts = { 1, 1, 2, 2, 3, 3 }, area = true } }""")
-    assert tuple(ns.Record.AddShared(tracks)) == (2, 2)  # (5: here already; 7: in the data)
-    assert tuple(ns.Record.AddShared(tracks)) == (0, 4)
-    got = {int(t.time): (t.op, bool(t.shared), bool(t.drawn), t.z) for t in ns.db.tracks.values()}
-    assert got[6] == ("wall", True, True, 55) and got[8][0] == "remove" and len(got) == 3
-    pins = lua.eval("""{ { add = true, level = 0, x = 1, y = 2, time = 20, name = "Shared spot", icon = 136001 },
-      { add = true, level = 0, x = 1, y = 2, time = 30, name = "In the data" }, { remove = true, time = 30 },
-      { remove = true, time = 99 } }""")
-    assert tuple(ns.Pins.AddShared(pins)) == (1, 1)
-    assert tuple(ns.Pins.AddShared(pins)) == (0, 0)
-    ns.Pins.Add(lua.eval('{ level = 0, x = 5, y = 5, name = "Mine" }'))
-    own = list(ns.Pins.Own().values())
-    assert [(p.name, bool(p.shared)) for p in own] == [("Shared spot", True), ("Mine", False)]
-    assert ns.db.pinsRemoved[30] == "shared"
-    # (the road watcher: the shared ones only)
-    sv = {"AzerothGPSDB": {"pins": [dict(level=0, x=1, y=2, time=20, name="Shared spot", shared=True),
-                                    dict(level=0, x=5, y=5, time=21, name="Mine")],
-                           "pinsRemoved": {30: "shared", 31: True}}}
-    added, removed = saved_pins(sv, shared_only=True)
-    assert [p["name"] for p in added] == ["Shared spot"] and removed == {30}
-    added, removed = saved_pins(sv)
-    assert len(added) == 2 and removed == {30, 31}
-    trips = lua.eval("""{ { continent = 1, time = 13, estimate = 300, actual = 200, mounted = true, to = { 9, 9, 1 },
-      pts = { 0, 0, 30, 0 } } }""")
-    ways = lua.eval("{ { map = 36, level = 0, x = -11208, y = 1672 } }")
-    assert tuple(ns.Feedback.AddShared(trips, ways)) == (1, 1)
-    assert tuple(ns.Feedback.AddShared(trips, ways)) == (0, 0)
-    assert ns.db.feedback.trips[1].shared and ns.db.entrances[36][1][2] == -11208
 
 
 def test_working_out_the_route_now_and_then_in_murloc(nav_env):

@@ -16,29 +16,6 @@ def vals(t):
     return [t[k] for k in range(1, len(t) + 1)]
 
 
-def test_a_stretchs_heights_are_spread_evenly_by_the_yards_along_and_the_rest_keeps_its_own(nav_env):
-    lua, ns = nav_env
-    from test_addon_lua import load
-    load(lua, ns, "Record.lua")
-    Rec = ns.Record
-    # points 0, 10, 20, 50, 60 yd along; the stretch from point 2 to 4 (10 to 50 yd: 40 yd) from 5 up to 25
-    pts = lua.table(0, 0, 10, 0, 20, 0, 50, 0, 60, 0)
-    base = lua.table(1, 2, False, False, 9)
-    hs = vals(Rec.EditHeights(pts, "ground", None, None, lua.table(2, 4, 5, 25), None, None, base))
-    assert hs == pytest.approx([1, 5, 10, 25, 9])
-    # with no heights of its own around it: the stretch's ends carried on
-    hs = vals(Rec.EditHeights(pts, "ground", None, None, lua.table(2, 4, 5, 25), None, None))
-    assert hs == pytest.approx([5, 5, 10, 25, 25])
-    # down as well as up
-    hs = vals(Rec.EditHeights(pts, "ground", None, None, lua.table(1, 5, 30, 0), None, None))
-    assert hs == pytest.approx([30, 25, 20, 5, 0])
-    # the base: the road's own heights, else the ground's it was drawn on
-    t = lua.table(pts=pts, zs=lua.table(3, 3, 3, 3, 3))
-    assert vals(Rec.StretchBase(t, 999)) == [3, 3, 3, 3, 3]
-    t = lua.table(pts=pts, gz=lua.table(4, False, 6, 7, 8))
-    assert vals(Rec.StretchBase(t, 999)) == [4, False, 6, 7, 8]
-
-
 def test_a_ramp_stretch_goes_on_as_a_ramp_piece_walked_as_a_road(nav_env):
     lua, ns = nav_env
     R = ns.Router
@@ -81,78 +58,6 @@ def game():
 
 def click(b):
     b.GetScript(b, "OnClick")(b)
-
-
-def test_set_heights_in_edit_road_makes_a_stretch_stairs_or_a_ramp_filled_from_the_ground(game):
-    lua, ns = game
-    G, R, Rec = ns.GPS, ns.Router, ns.Record
-    saved = ns.db.tracks
-    try:
-        ns.db.tracks = lua.table()
-        R.Reset()
-        G.SetRoadMode(True)
-        # Durotar, south of Orgrimmar: a road drawn there takes the ground's heights
-        G.FinishRoad(lua.table(pts=lua.table(1300.0, -4450.0, 1280.0, -4450.0, 1260.0, -4450.0, 1240.0, -4450.0), cont=1),
-                     False, False)
-        first = ns.db.tracks[1]
-        gz = vals(first.gz)
-        assert all(isinstance(h, (int, float)) for h in gz)
-        G.SetEditRoadMode(True)
-        assert G.EditRoadClick(1, 1280.0, -4451.0)
-        win = lua.globals().AzerothGPSRoadEdit
-        click(win.pickFoot)
-        assert G.EditRoadClick(1, 1281.0, -4450.0) and G.roadEdit.foot == 2
-        click(win.pickTop)
-        assert G.EditRoadClick(1, 1261.0, -4450.0) and G.roadEdit.top == 3
-        click(win.setHeights)
-        sh = lua.globals().AzerothGPSSetHeights
-        assert sh._shown
-        # filled in from the ground the road was drawn on
-        assert float(sh.startBox.GetText(sh.startBox)) == pytest.approx(gz[1], abs=0.06)
-        assert float(sh.endBox.GetText(sh.endBox)) == pytest.approx(gz[2], abs=0.06)
-        # no height: not saved
-        sh.endBox.SetText(sh.endBox, "")
-        click(sh.save)
-        assert len(ns.db.tracks) == 1 and sh._shown
-        # typed over: a ramp from 20 to 32
-        sh.startBox.SetText(sh.startBox, "20")
-        sh.endBox.SetText(sh.endBox, "32")
-        click([b for b in vals(sh.kinds) if b.kind == "ramp"][0])
-        click(sh.save)
-        assert not sh._shown and len(ns.db.tracks) == 2
-        ed = ns.db.tracks[2]
-        assert ed.replaces == first.time and vals(ed.stairs) == [2, 3] and ed.skind == "ramp"
-        zs = vals(ed.zs)
-        assert zs[1:3] == [20, 32] and zs[0] == pytest.approx(gz[0], abs=0.06) and zs[3] == pytest.approx(gz[3], abs=0.06)
-        # its share line carries the heights
-        assert " zs=" in ns.MapText.RoadLine(ed)
-        # routes: the ramp a road of its own kind, with its heights
-        Rec.Apply()
-        R.NearestEdges(1, 1270.0, -4450.0)
-        g = R.DebugGraph(1)
-        ramp = [ei for ei in range(1, len(g.e) + 1) if g.kind and g.kind[ei] == "ramp"]
-        assert ramp and all(g.e[ei][4] != R.SOURCE_STAIR for ei in ramp)
-        assert {round(g.nz[g.e[ramp[0]][1]]), round(g.nz[g.e[ramp[0]][2]])} == {20, 32}
-        # again, as stairs over the whole road (none picked), down
-        Rec.Undo()
-        assert G.EditRoadClick(1, 1280.0, -4451.0)
-        click(win.setHeights)
-        sh.startBox.SetText(sh.startBox, "30")
-        sh.endBox.SetText(sh.endBox, "18")
-        click([b for b in vals(sh.kinds) if b.kind == "stairs"][0])
-        click(sh.save)
-        st = ns.db.tracks[2]
-        assert st.skind is None and vals(st.stairs) == [1, 4]
-        assert vals(st.zs) == pytest.approx([30, 26, 22, 18])
-        Rec.Apply()
-        R.NearestEdges(1, 1270.0, -4450.0)
-        g = R.DebugGraph(1)
-        assert [ei for ei in range(1, len(g.e) + 1) if g.e[ei][4] == R.SOURCE_STAIR and abs(g.e[ei][6] + 4450) < 1]
-    finally:
-        ns.db.tracks = saved
-        G.SetEditRoadMode(False)
-        G.SetRoadMode(False)
-        R.Reset()
 
 
 def test_the_import_ships_a_ramp_stretch_as_its_own_piece(tmp_path):

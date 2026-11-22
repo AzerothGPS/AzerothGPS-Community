@@ -2586,15 +2586,6 @@ def test_the_roads_and_walls_shown_stay_on_the_art_a_little_past_the_tiles():
     assert drawn(G.SEAM_DATA_YD * 1.5) == (True, False, False)  # (further out: gone)
     st.showRoads, st.showWalls = False, False
     assert drawn(G.SEAM_DATA_YD * 0.9) == (True, False, False)  # (not shown: none)
-    # the road and wall tools on: past it none either (for performance)
-    try:
-        G.SetRoadMode(True)
-        assert drawn(G.SEAM_DATA_YD * 0.9)[1] and not drawn(G.SEAM_DATA_YD * 1.5)[1]
-        G.SetWallMode(True)
-        assert drawn(G.SEAM_DATA_YD * 0.9)[2] and not drawn(G.SEAM_DATA_YD * 1.5)[2]
-    finally:
-        G.SetRoadMode(False)
-        G.SetWallMode(False)
 
 
 def test_hovering_a_building_shows_its_inside_map_a_click_holds_it_and_right_click_lets_it_go():

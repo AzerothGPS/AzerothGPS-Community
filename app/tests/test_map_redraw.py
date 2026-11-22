@@ -765,6 +765,36 @@ def test_no_dev_tool_ships_with_the_addon():
     assert not re.search(r"mapClickHook\s*=[^=]", src) and not re.search(r"override\s*=\s*\{", src)
 
 
+def test_no_map_editor_ships_with_the_addon(game):
+    # (Kooki3z, 2026-11-22, for 1.3.14: the map editor is the dev addon's only) no road or wall tools, magic eraser,
+    # stairs tool, Edit Road / Edit Wall, Record or its window, their buttons, key or slash commands in the shipped addon;
+    # what's left is the player's own roads and walls as routes use them (Record.Tracks, Archive, Prune) and the hooks
+    lua, ns = game
+    G, R = ns.GPS, ns.Record
+    for name in ("SetRoadMode", "SetWallMode", "ToggleRoadMode", "ToggleWallMode", "SetEraserMode", "RestoreZone",
+                 "RestoreContinent", "FinishRoad", "SetStairMode", "SetEditRoadMode", "SetEditWallMode", "AskRoadEdit",
+                 "AskWallEdit", "AskSetHeights", "ToolClick", "ShowToolLegend", "RoadHover", "StepEditFloor",
+                 "MapToolDown", "EditorDraw"):
+        assert G[name] is None, name
+    for name in ("Save", "Undo", "List", "Delete", "AddShared", "EditTrack", "EditWall", "Restore", "StartRecording",
+                 "ShowWindow", "ToggleWindow", "MarkStairs", "OnEnteringWorld", "OnLogout"):
+        assert R[name] is None, name
+    assert R.Tracks is not None and R.Prune is not None and R.Archive is not None
+    for gone in ("roadTools", "wallTools", "roadUndo", "magicEraser", "restoreZone", "restoreContinent", "roadStairs",
+                 "roadRecord", "roadEdit", "wallEdit"):
+        assert not any(t.id == gone for t in G.QUICK.values()), gone
+    assert G.groupOf["mapEdit"] is None and ns.Import.TakeTracks is None
+    assert [k[1] for k in ns.Import.EXPORT_KINDS.values()] == ["herbs", "ore", "npcs", "pins"]
+    for api in ("ShowRecorder", "Recording", "RecordedWalks"):
+        assert lua.globals().AzerothGPS[api] is None, api
+    assert ns.COMMANDS.dev is None and ns.COMMANDS.draw is None
+    src = "\n".join(p.read_text(encoding="utf-8") for p in ADDON.glob("*.lua"))
+    assert "AZEROTHGPS_RECORD_STAIRS" not in src
+    assert "AZEROTHGPS_RECORD_STAIRS" not in (ADDON / "Bindings.xml").read_text(encoding="utf-8")
+    assert not (ADDON / "Media" / "Tools" / "MouseLeft_14.tga").exists()  # (the tools' legend's own icons)
+    assert "roads" not in [str(s.id) for s in ns.Tutorial.SECTIONS.values()]
+
+
 def test_a_simulated_player_is_the_dev_tools_only_and_nothing_is_learned_from_it(game):
     # (asked 2026-10-06 for route testing: put the player anywhere on the map, or drive them) unset by
     # default: the game's position, as before. Set (Geo.SetOverride), the map, routing and the arrow go by it (where,
@@ -1378,67 +1408,6 @@ def test_the_performance_page_tells_the_addons_share_of_the_time(game):
         lua.execute("AGPS_NS.perf = AGPS_SAVED")
 
 
-def test_the_map_editing_button_opens_the_tools_and_shows_the_roads_and_walls(game):
-    # (asked 2026-11-14: "collapse the road and wall tools into a single menu item ... the setting 'map editing tools'
-    # ... when clicked this expands the menu icons ... automatically enabling the show roads/walls feature, when the menu
-    # is collapsed this automatically turn this off") one option, one button; open: the tools beside it and the roads
-    # and walls shown; shut: hidden and the tools off
-    lua, ns = game
-    G, st = ns.GPS, ns.settings.gps
-    try:
-        st.showRoads, st.showWalls, st.devTools = False, False, False
-        G.LayoutQuick()
-        ids = [str(t.id) for t in G.QuickSlots().values()]
-        assert "mapEdit" not in ids and "roadTools" not in ids and "wallTools" not in ids
-        st.devTools = True
-        G.LayoutQuick()
-        ids = [str(t.id) for t in G.QuickSlots().values()]
-        assert "mapEdit" in ids and "roadTools" not in ids and "showMapData" not in ids  # (the tools: in its menu)
-        grp = G.groupOf["mapEdit"]
-        members = [str(m.id) for m in grp.members.values()]
-        assert members[:2] == ["roadTools", "wallTools"] and "magicEraser" in members and "roadRecord" in members
-        assert grp.button._shown and not grp.members[1].button._shown
-        G.ToggleGroup(grp)
-        assert G.mapEditOpen and st.showRoads and st.showWalls and grp.members[1].button._shown
-        G.ToggleGroup(G.groupOf["styles"])  # (another group opened: Map Editing stays open)
-        assert G.mapEditOpen and grp.members[1].button._shown
-        G.ToggleGroup(G.groupOf["styles"])  # (and shut again)
-        G.SetRoadMode(True)
-        G.ToggleGroup(grp)  # (shut: hidden, the tools off)
-        assert not G.mapEditOpen and not st.showRoads and not st.showWalls and not G.roadMode
-        assert not grp.members[1].button._shown
-        G.SetWallMode(True)  # (a tool turned on another way, /agps draw: the menu opens with it)
-        assert G.mapEditOpen and st.showWalls
-        G.SetMapEditOpen(False)
-        st.devTools = False
-        G.LayoutQuick()
-        assert not grp.button._shown  # (the option off: the button goes)
-    finally:
-        G.SetMapEditOpen(False)
-        G.SetRoadMode(False)
-        G.SetWallMode(False)
-        st.showRoads, st.showWalls, st.devTools = False, False, False
-        G.LayoutQuick()
-
-
-def test_undo_takes_back_roads_and_walls_in_the_order_drawn(game):
-    # (asked) one Undo for both: the last change, road or wall, first
-    lua, ns = game
-    Rec = ns.Record
-    ns.db.tracks = lua.eval("{}")
-    road = lua.eval("{ op = 'add', drawn = true, continent = 0, time = 1000, pts = { 2200, 300, 2210, 300, 2220, 305 } }")
-    wall = lua.eval("{ op = 'wall', drawn = true, continent = 0, time = 1001, pts = { 2230, 320, 2240, 330 } }")
-    try:
-        Rec.Save(road)
-        Rec.Save(wall)
-        Rec.Undo()
-        assert [str(t.op) for t in ns.db.tracks.values()] == ["add"]  # (the wall, drawn last, first)
-        Rec.Undo()
-        assert len(ns.db.tracks) == 0
-    finally:
-        ns.db.tracks = lua.eval("{}")
-
-
 def test_ironforge_s_roads_show_on_its_inside_map(game):
     # (reported: drawn roads over Ironforge showed on the mountain in the outside view, and went once
     # the map showed the city's inside) a capital's inside map is its streets: its roads show there
@@ -1482,44 +1451,6 @@ def test_capitals_show_their_districts_names(game):
     G.CityLabelPois(pois, 0, -8832.0, 625.0, 0, 0.1, 200.0, 2000.0)
     assert len(pois) == 0  # (zoomed far out: none)
 
-
-def test_the_road_tools_pick_the_floor_and_draw_the_others_faint(game):
-    # (asked: "any place editing roads/walls that have floors like undercity need a current floor
-    # indicator"; the game gives no player height, so the floor is picked) in Undercity at a walkway over a
-    # road, Shift + mouse wheel steps the floor edited; the hint says it, the other floors' roads draw faint,
-    # strokes record it; the tools off, all floors again
-    lua, ns = game
-    G, R = ns.GPS, ns.Router
-    lua.execute("""
-      AGPS_MAP_REAL = AGPS_MAP
-      AGPS_MAP = 1458
-      AGPS_SHIFT_REAL = IsShiftKeyDown
-    """)
-    x, y = 1593.5, 157.3  # (a walkway at -43.5 over a road at -62)
-    try:
-        R.Edges(10001)
-        lua.execute(f"AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = {x}, {y}, 0 AGPS_T = AGPS_T + 1")
-        G.SetRoadMode(True)
-        G.Update()
-        assert "all floors" in str(G.FloorText())
-        faint = {}
-        for step in range(2):
-            assert G.StepEditFloor(-1)  # (down a floor: from all floors, the top one)
-            G.Update()
-            assert "Editing: floor" in str(G.floorLine)
-            segs = G.LayoutRoads(x, y, 10001, 0, 60.0, 200.0)
-            alphas = [segs[i][6] for i in range(1, len(segs) + 1)]
-            assert any(a is None for a in alphas) and any(a == G.OTHER_FLOOR_ALPHA for a in alphas)
-            faint[step] = {i for i, a in enumerate(alphas) if a is not None}
-            z = G.EditFloor(10001, lua.table(x, y, x + 10, y))[0]
-            assert z == G.editFloor.z  # (a stroke's floor: the one picked)
-        assert faint[0] != faint[1]
-        G.SetRoadMode(False)
-        assert G.editFloor is None  # (the tools off: all floors next time)
-    finally:
-        G.SetRoadMode(False)
-        lua.execute("AGPS_MAP = AGPS_MAP_REAL IsShiftKeyDown = AGPS_SHIFT_REAL "
-                    "AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = 2254.0, 293.0, 0 AGPS_T = AGPS_T + 1")
 
 def test_a_zeppelin_dock_that_is_a_stop_still_shows_its_timer(game):
     # (asked) a stop on a dock hid the dock with its icon, and its countdown went with it: the countdown
@@ -4116,7 +4047,7 @@ def test_unsaved_changes_are_counted_but_no_save_or_dismiss_shows(game):
     # says when a pin is saved. (asked 2026-11-17: "Don't show save/dismiss anymore and remove that setting") no Save or
     # Dismiss button over Clear Route with something unsaved, in or out of combat, and no "Remind me to save" setting
     lua, ns = game
-    G, P, R, T = ns.GPS, ns.Pins, ns.Record, ns.Taxi
+    G, P, T = ns.GPS, ns.Pins, ns.Taxi
     lua.execute("AGPS_RELOADED = 0 ReloadUI = function() AGPS_RELOADED = AGPS_RELOADED + 1 end")
 
     def shown_save_dismiss():
@@ -4141,10 +4072,6 @@ def test_unsaved_changes_are_counted_but_no_save_or_dismiss_shows(game):
         own = P.Own()
         own[len(own) + 1] = old
         P.Remove(old)
-        assert ns.unsaved == 1
-        R.Save(lua.eval("{ op = 'add', continent = 0, time = 1790000000, pts = { 2250, 250, 2260, 260 } }"))
-        assert ns.unsaved == 2
-        R.Undo()  # (drawn and taken back: as saved)
         assert ns.unsaved == 1
         # (a way into a dungeon learned: where the player stood outside just before)
         ns.db.entrances = None
@@ -4986,64 +4913,6 @@ def test_the_route_knows_when_the_player_is_swimming(game):
         assert N.Swimming() is True
     finally:
         Geo.override = old
-
-
-def test_drawing_a_road_suggests_record_first(game):
-    # (asked 2026-10-09: "prompt user that wants to draw a road to potentially use record instead") a road's stroke
-    # started by hand asks first (G.AskRecordHint), the stroke not started; Record Instead opens Record's window; Draw
-    # Anyway: not again until a real login; "Don't ask again": never (the recordHint option); never while recording,
-    # nor for walls or an erase
-    lua, ns = game
-    G, R = ns.GPS, ns.Record
-    st = ns.settings.gps
-    frame = lua.globals().AzerothGPSFrame
-    keep = st.recordHint
-    lua.execute("AGPS_SHIFT_KEEP = IsShiftKeyDown IsShiftKeyDown = function() return true end")  # (Shift draws)
-    shown = []
-    real_show = R.ShowWindow
-    R.ShowWindow = lambda *a: shown.append(True)
-
-    def press(button="LeftButton"):
-        G.lasso = None
-        frame._scripts.OnMouseDown(frame, button)
-
-    try:
-        st.recordHint = True
-        ns.db.recordHintSnoozed = None
-        G.SetRoadMode(True)
-        press()
-        box = G.askBox
-        assert box and box._shown and box.text._text == G.RECORD_HINT_TEXT and G.lasso is None
-        assert box.check and box.check._shown and box.check.label._text == "Don't ask again"
-        # Draw Anyway: the stroke goes ahead from then on, until a real login
-        box.no._scripts.OnClick(box.no)
-        assert ns.db.recordHintSnoozed and not shown
-        press()
-        assert G.lasso is not None and not box._shown
-        ns.OnEnteringWorld(False, True)  # (a /reload: still snoozed)
-        assert ns.db.recordHintSnoozed
-        ns.OnEnteringWorld(True, False)  # (a login: asked again)
-        assert not ns.db.recordHintSnoozed
-        # Record Instead, "Don't ask again" ticked: Record's window; never asked again
-        press()
-        box = G.askBox
-        box.check.SetChecked(box.check, True)
-        box.check._checked = True
-        box.yes._scripts.OnClick(box.yes)
-        assert shown and st.recordHint is False
-        press()
-        assert G.lasso is not None
-        # an erase or the wall tools: never asked
-        st.recordHint = True
-        press("RightButton")
-        assert G.lasso is not None and G.lasso.erase
-    finally:
-        R.ShowWindow = real_show
-        lua.execute("IsShiftKeyDown = AGPS_SHIFT_KEEP")
-        st.recordHint = keep
-        ns.db.recordHintSnoozed = None
-        G.SetRoadMode(False)
-        G.lasso = None
 
 
 def test_a_group_quest_left_out_shows_in_the_directions_with_a_button_to_put_it_back(game):
@@ -6282,154 +6151,6 @@ def test_brill_inns_route_upstairs_climbs_the_stairs_not_the_landings_side(game)
         N.Clear()
         N.ResetCityTrack()
         G.Update()
-
-
-def test_the_road_tools_hover_shows_a_roads_height(game):
-    # (asked 2026-10-06: "mouse over on existing road to show current Z height") with the road tools on, the road under
-    # the pointer and its height there: a level with heights (Undercity) its own, a building's stairs their height
-    # there with foot and top, the land's roads "on the ground"; nothing away from roads or before the roads are built
-    lua, ns = game
-    G, R = ns.GPS, ns.Router
-    R.NearestEdges(10001, 1595.3, 224.7)  # (Undercity's roads built)
-    g = R.DebugGraph(10001)
-    ei = next(i for i, s in g.e.items() if abs(g.z[s[1]] - g.z[s[2]]) < 1 and s[4] != 5)  # (a flat road)
-    e = g.e[ei]
-    info = G.RoadHoverInfo(10001, e[5], e[6], 3, g.z[e[1]])
-    assert str(info.title) == "Road" and str(info.lines[1]) == "Height: %.1f" % g.z[e[1]]
-    # Brill's inn: a stairs road (source 6), at its middle
-    R.NearestEdges(0, 2259.0, 235.9)
-    g0 = R.DebugGraph(0)
-    ei, st = next((i, s) for i, s in g0.e.items() if s[4] == 6 and abs(s[5] - 2265) < 40 and abs(s[6] - 245) < 40)
-    za, zb = g0.nz[st[1]], g0.nz[st[2]]
-    pts = [(st[k], st[k + 1]) for k in range(5, len(st), 2)]
-    mx, my = (pts[0][0] + pts[-1][0]) / 2, (pts[0][1] + pts[-1][1]) / 2
-    info = G.RoadHoverInfo(0, mx, my, 3, None)
-    assert str(info.title) == "Stairs" and str(info.lines[2]) == "Foot %.1f, top %.1f" % (min(za, zb), max(za, zb))
-    here = float(str(info.lines[1]).split(":")[1])
-    assert min(za, zb) - 0.05 <= here <= max(za, zb) + 0.05
-    # the land's road by Brill: no height in the data
-    land = next(c for c in R.NearestEdges(0, 2330.0, 380.0).values()
-                if g0.nz[g0.e[c.edge][1]] is None and g0.nz[g0.e[c.edge][2]] is None)
-    info = G.RoadHoverInfo(0, land.px, land.py, land.dist + 1)
-    assert str(info.title) == "Road" and str(info.lines[1]).startswith("On the ground")
-    # (Kooki3z 2026-11-20: the map's ground height said for a land road, not "no height")
-    lua.execute("AGPS_PH = AGPS_NS.Ground.PointHeight AGPS_NS.Ground.PointHeight = function() return 31.4 end")
-    try:
-        info = G.RoadHoverInfo(0, land.px, land.py, land.dist + 1)
-        assert str(info.lines[1]) == "On the ground: 31 yd"
-    finally:
-        lua.execute("AGPS_NS.Ground.PointHeight = AGPS_PH")
-    assert G.RoadHoverInfo(0, 2300.0 + 3000, 330.0, 3) is None  # (no road near)
-    if not R.GraphReady(1):
-        assert G.RoadHoverInfo(1, 0.0, 0.0, 3) is None and not R.GraphReady(1)  # (never builds the roads for it)
-    # the tooltip itself, with the tools on: runs, and gives the tooltip back with them off
-    G.roadMode = True
-    try:
-        G.RoadHover(1)
-    finally:
-        G.roadMode = None
-        G.RoadHover(1)
-
-
-def test_drawn_roads_carry_heights_and_the_stairs_tool_makes_stairs(game):
-    # (asked 2026-10-06: "the ability to set stair locations and their start and end height in addition to Z height for
-    # road drawn") in Brill's inn the tools offer its floors; a road drawn upstairs (a height per point) joins the
-    # upstairs roads only, its new nodes at that height; the stairs tool (foot, top, heights picked) makes a stairs
-    # road between the floors, as the data's (source 6: StairAt, the hover)
-    lua, ns = game
-    G, R, M = ns.GPS, ns.Router, ns.MapText
-    saved = ns.db.tracks
-    try:
-        ns.db.tracks = lua.table()
-        R.Reset()
-        R.NearestEdges(0, 2259.0, 235.9)
-        floors = [f.z for f in G.EditFloors(0, 2252.0, 245.0).values()]
-        assert any(abs(z - 34.5) < 1 for z in floors) and any(abs(z - 41.5) < 1 for z in floors)
-        # a road upstairs, drawn on the floor picked (41.5) from end to end
-        assert list(G.StrokeHeights(lua.table(False, 41.5, False), 3).values()) == [41.5, 41.5, 41.5]
-        assert G.StrokeHeights(lua.table(False, False), 2) is None
-        G.roadMode = True
-        G.editFloor = lua.table(z=41.5)
-        line = lua.table(pts=lua.table(2250.4, 237.3, 2250.4, 246.3, 2250.4, 255.3), zs=lua.table(41.5, 41.5, 41.5), cont=0)
-        G.FinishRoad(line, False, False)
-        t = ns.db.tracks[1]
-        assert list(t.zs.values()) == [41.5, 41.5, 41.5] and t.z == 41.5
-        # the stairs: foot on the ground floor, top upstairs
-        G.SetStairMode(True)
-        assert G.StairClick(0, 2248.4, 247.3) and G.StairClick(0, 2256.4, 247.3)
-        win = lua.globals().AzerothGPSStairs
-        assert win._shown
-        win.foot.box.SetText(win.foot.box, "34.5")
-        win.topRow.box.SetText(win.topRow.box, "41.5")
-        win.save.GetScript(win.save, "OnClick")(win.save)
-        st = ns.db.tracks[2]
-        assert st.stair and list(st.zs.values()) == [34.5, 41.5] and not win._shown
-        line_text = str(M.RoadLine(st))
-        assert line_text.startswith("R stair 0 ") and "zs=34.5,41.5" in line_text
-        (back,) = list(M.Parse(line_text).roads.values())
-        assert back.stair and list(back.zs.values()) == [34.5, 41.5]
-        G.SetStairMode(False)
-        G.roadMode, G.editFloor = None, None
-        ns.Record.Apply()
-        R.NearestEdges(0, 2259.0, 235.9)
-        g = R.DebugGraph(0)
-        drawn = [e for e in g.e.values() if e[4] == 9 and abs(e[5] - 2250.4) < 1]
-        assert drawn and all(abs(g.nz[e[1]] - 41.5) < 3 and abs(g.nz[e[2]] - 41.5) < 3 for e in drawn)  # (upstairs only)
-        # (its foot on the ground floor's road nearest the click: 2250.4, 245.3 since issue #842's inn roads)
-        stairs = [e for e in g.e.values() if e[4] == 6 and math.dist((e[5], e[6]), (2248.4, 247.3)) <= 3]
-        assert stairs
-        e = stairs[0]
-        assert sorted([g.nz[e[1]], g.nz[e[2]]]) == [34.5, 41.5]  # (its foot and top on those floors)
-        assert R.StairAt(0, 2248.4, 247.3, 2256.4, 247.3) is not None
-        info = G.RoadHoverInfo(0, 2254.4, 246.6, 2)  # (on the stairs, off the road drawn upstairs)
-        assert str(info.title) == "Stairs"
-        # a drawn road with no heights, not in the data yet: none yet, not "on the ground" (a walk recorded up
-        # Grom'gol's tower looked flat, 2026-11-18: its floors and stairs come with the import)
-        G.roadMode = True
-        G.FinishRoad(lua.table(pts=lua.table(2600.0, 700.0, 2615.0, 700.0, 2630.0, 700.0), cont=0), False, False)
-        G.roadMode = None
-        ns.Record.Apply()
-        c = R.NearestEdges(0, 2615.0, 700.0)[1]
-        assert R.DebugGraph(0).e[c.edge][4] == R.SOURCE_RECORDED
-        info = G.RoadHoverInfo(0, 2615.0, 700.0, 3)
-        assert str(info.title) == "Drawn road" and str(info.lines[1]).startswith("No height yet")
-        # bad lines: heights not matching the points, stairs with none
-        bad = M.Parse("R add 0 1790000001 zs=1.0 1.0,1.0 2.0,2.0\nR stair 0 1790000002 1.0,1.0 2.0,2.0")
-        assert [str(r.why) for r in bad.rejected.values()] == ["its heights don't match its points", "stairs need their heights"]
-    finally:
-        ns.db.tracks = saved
-        G.roadMode, G.editFloor, G.stairMode = None, None, None
-        R.Reset()
-
-
-def test_a_shipped_stair_goes_on_as_it_was_drawn(game):
-    # (1.1.6: roads drawn with their heights ship as Data/Roads.lua's ns.FloorTracks) put on in game by Router.WithTracks
-    # as the player's own was: a stairs road on its floors; the player's copy, whose time the data has, not twice
-    lua, ns = game
-    R, G = ns.Router, ns.GPS
-    saved = (ns.FloorTracks, ns.db.tracks, ns.RoadTracksIn)
-    try:
-        lua.execute("""
-          AGPS_NS.FloorTracks = { [0] = { { op = "add", time = 1790000099, pts = { 2248.4, 247.3, 2256.4, 247.3 },
-            zs = { 34.5, 41.5 }, stair = true } } }
-          AGPS_NS.db.tracks = { { op = "add", stair = true, drawn = true, continent = 0, time = 1790000099,
-            pts = { 2248.4, 247.3, 2256.4, 247.3 }, zs = { 34.5, 41.5 } } }
-          local shipped = {}
-          for k, v in pairs(AGPS_NS.RoadTracksIn or {}) do shipped[k] = v end
-          shipped[1790000099] = true
-          AGPS_NS.RoadTracksIn = shipped
-        """)
-        R.Reset()
-        R.NearestEdges(0, 2252.4, 247.3)
-        g = R.DebugGraph(0)
-        stairs = [e for e in g.e.values() if e[4] == 6 and math.dist((e[5], e[6]), (2248.4, 247.3)) <= 3]
-        assert len(stairs) == 1  # (the data's, not the player's copy too)
-        e = stairs[0]
-        assert sorted([g.nz[e[1]], g.nz[e[2]]]) == [34.5, 41.5]
-        assert str(G.RoadHoverInfo(0, 2252.4, 247.3, 2).title) == "Stairs"
-    finally:
-        ns.FloorTracks, ns.db.tracks, ns.RoadTracksIn = saved
-        R.Reset()
 
 
 @pytest.mark.parametrize("cont,start,place", [
@@ -8794,40 +8515,6 @@ def test_the_show_hide_key_can_be_kept_from_showing_the_map_in_combat(game):
         ns.Options.Apply()
 
 
-def test_a_wall_drawn_with_the_wall_tools_on_changes_the_route_at_once(game):
-    # (asked 2026-11-07 in Auberdine, a screenshot of a dotted line up the hill: "why doesn't the wall tool fix this? need
-    # to update this to work instantly") a wall drawn across the route's walk off the roads changed nothing until the
-    # tools were turned off (the network rebuilt once then, Record.Apply): the walk now goes round it at once
-    lua, ns = game
-    G, N, P, Rec = ns.GPS, ns.Nav, ns.Passability, ns.Record
-    tracks = ns.db.tracks
-    ns.db.tracks = lua.eval("{}")
-    lua.execute("AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = -950.0, -4050.0, 1 AGPS_T = AGPS_T + 1")
-
-    def crosses():
-        pts = []
-        for part in N.route.parts.values():
-            pts += [(part.pts[i], part.pts[i + 1]) for i in range(1, len(part.pts), 2)]
-        return any(P.CrossesWall(1, *a, *b) for a, b in zip(pts, pts[1:]))
-    try:
-        N.SetStops(lua.eval("{ { x = -950, y = -3900, cont = 1, name = 'Over the wall' } }"), False, "red")
-        assert N.Route(-950.0, -4050.0, 1) and not N.route.noWay
-        G.wallMode = True
-        Rec.Save(lua.eval("{ op = 'wall', drawn = true, continent = 1, time = 1, pts = { -1030,-3975, -870,-3975 } }"))
-        assert not Rec.pending  # (the road network too, since 2026-11-11: nothing waits for the tools to be turned off)
-        # (the player's own wall: yellow on the map)
-        own = [w for w in P.WallLines(1).values() if w.own]
-        assert len(own) == 1 and G.OWN_WALL_COLOR == 9
-        assert P.CrossesWall(1, -950, -4050, -950, -3900)
-        assert N.Route(-950.0, -4050.0, 1) and not crosses()
-    finally:
-        G.wallMode = None
-        ns.db.tracks = tracks
-        Rec.Apply()
-        N.Clear()
-        lua.execute("AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = 2254.0, 293.0, 0")
-
-
 def test_a_quest_areas_parts_from_its_fill(game):
     """Layers.AreaParts: rectangles touching (or within AREA_PART_GAP) are one part; a spot inside each part's largest
     rectangle, the biggest part first; one part: nil."""
@@ -10931,53 +10618,6 @@ def test_in_a_fight_the_squares_logo_grows_the_map_with_the_world_map_option(min
 
 
 
-def test_the_map_editing_menu_closes_after_the_time_set_unused(game):
-    # (asked 2026-11-13: the tools and the roads and walls shown cost every redraw, off by themselves with the map unused;
-    # 2026-11-14: the Map Editing menu "will stay open for 2 minutes (adjustable setting) without map activity before it
-    # collapses back and turns off show road/walls". A click, a drag or the wheel on the map is use; time with the map
-    # hidden doesn't count, a Record walk keeps it open)
-    lua, ns = game
-    G, st = ns.GPS, ns.settings.gps
-    printed = []
-    lua.globals().AGPS_SAID = lambda m: printed.append(m) if str(m).startswith("Turned off") else None
-    lua.execute("AGPS_OLD_PRINT2 = AGPS_NS.Print AGPS_NS.Print = function(t) AGPS_SAID(t) end")
-    f = lua.eval("AzerothGPSFrame")
-    try:
-        G.SetMapEditOpen(False)
-        st.showRoads, st.showWalls = False, False
-        assert st.mapEditIdle == 2 and G.ToolsIdleSeconds() == 120
-        G.SetRoadMode(True)
-        assert G.roadMode and G.mapEditOpen
-        _frames(lua, 1, fps=10)  # (the map's OnUpdate counts it)
-        assert 0 < G.toolsIdle <= 1.01
-        G.ToolsIdleTick(118, False)
-        assert G.roadMode and st.showRoads and printed == []
-        f._scripts.OnMouseWheel(f, 1)  # (used: the count starts over)
-        assert G.toolsIdle == 0
-        G.ToolsIdleTick(119, False)
-        assert G.ToolsIdleTick(5, True) is False and G.toolsIdle == 0  # (a drag or stroke under way: in use)
-        G.ToolsIdleTick(119, False)
-        assert G.roadMode and printed == []
-        assert G.ToolsIdleTick(2, False) is True
-        assert not G.roadMode and not G.mapEditOpen and not st.showRoads and not st.showWalls
-        assert printed == ["Turned off after 2 min without use, to save performance: road tools, roads shown, walls shown."]
-        assert G.ToolsIdleTick(500, False) is False and len(printed) == 1  # (all off: nothing to count)
-        # the time set: 5 minutes
-        st.mapEditIdle = 5
-        G.SetMapEditOpen(True)
-        G.ToolsIdleTick(1, False)
-        G.ToolsIdleTick(250, False)
-        assert G.mapEditOpen
-        assert G.ToolsIdleTick(60, False) is True and not G.mapEditOpen
-        assert printed[-1] == "Turned off after 5 min without use, to save performance: roads shown, walls shown."
-    finally:
-        lua.execute("AGPS_NS.Print = AGPS_OLD_PRINT2")
-        st.mapEditIdle = 2
-        G.SetMapEditOpen(False)
-        G.SetRoadMode(False)
-        st.showRoads, st.showWalls = False, False
-
-
 def test_a_rides_dotted_line_keeps_its_light_blue_with_several_stops(game):
     # (asked 2026-11-14, screenshot: a route with a flight showed the flight's dotted line light blue, and once another
     # stop was added the flight's line took the darker shade of its stop's color) a ride (flight, zeppelin, boat, lift)
@@ -11377,26 +11017,6 @@ def test_ramp_heights_rise_evenly_between_the_ends_floors(game):
     one = R.RampHeights(pts, None, 104)
     assert [one[i] for i in (1, 2, 3)] == [104, 104, 104]  # (one end's floor alone: flat at it)
     assert R.RampHeights(pts, None, None) is None  # (none: as before, the land's)
-
-
-def test_undo_takes_back_only_this_sessions_changes(game):
-    # (asked 2026-11-17: "I accidently hit undo too many times and erased the path fix to stormwind bank, Undo on
-    # recorder should only be for the current session reloaded")
-    lua, ns = game
-    Rec = ns.Record
-    old = lua.eval("{ op = 'add', drawn = true, recorded = true, continent = 0, time = 900, pts = { 2200, 300, 2210, 300 } }")
-    ns.db.tracks = lua.eval("{}")
-    ns.db.tracks[1] = old  # (saved before this session: in the file at login)
-    new = lua.eval("{ op = 'add', drawn = true, continent = 0, time = 1000, pts = { 2230, 320, 2240, 330 } }")
-    try:
-        Rec.Save(new)
-        Rec.Undo()
-        assert len(ns.db.tracks) == 1 and ns.db.tracks[1].time == 900  # (this session's taken back)
-        Rec.Undo()
-        Rec.Undo()
-        assert len(ns.db.tracks) == 1 and ns.db.tracks[1].time == 900  # (the older one kept, however many times)
-    finally:
-        ns.db.tracks = lua.eval("{}")
 
 
 def test_the_mage_trainer_route_goes_up_the_wizards_sanctum_and_through_its_portal(game):

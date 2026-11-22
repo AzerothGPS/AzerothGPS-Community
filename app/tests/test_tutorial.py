@@ -12,7 +12,7 @@ import pytest
 from test_map_redraw import MM_SETUP
 
 ROOT = Path(__file__).resolve().parents[2]
-SECTIONS = ["minimap", "route", "quests", "arrow", "gather", "pins", "search", "dungeon", "window", "roads"]
+SECTIONS = ["minimap", "route", "quests", "arrow", "gather", "pins", "search", "dungeon", "window"]  # (roads: gone, 1.3.14)
 
 # The player's side of the test, in Lua: a canonical text of any table (to compare before and after), the saved
 # variables as the game would write them, and what the player does at each step that waits for them.
@@ -533,7 +533,7 @@ def test_every_section_runs_start_to_finish_with_the_players_actions(tut):
     taken = _run_all(lua, ns, True)
     waits = [(s, i) for s, i, w in taken if w]
     assert len(waits) >= 20  # (the player does most of it)
-    assert ("minimap", 2) in waits and ("route", 1) in waits and ("roads", 3) in waits
+    assert ("minimap", 2) in waits and ("route", 1) in waits
 
 
 def test_every_section_runs_start_to_finish_with_every_step_skipped(tut):
@@ -701,19 +701,15 @@ def test_the_sections_are_jumped_between_and_each_starts_from_the_players_own_st
     T.Back()
     assert _where(ns) == ("gather", 1)
     assert T.panel.back._enabled is False  # (nothing before a section's first step)
-    T.Jump("roads")
-    assert _where(ns) == ("roads", 1) and ns.Layers.demoNodes is None  # (the examples gone with their section)
-    assert ns.settings.gps.devTools is True
-    tools = G.groupOf["mapEdit"].button  # (the road and wall tools: the Map Editing button, 1.3.0)
-    assert tools._shown is True and lua.eval("AGPS_NS.Tutorial.target == AGPS_NS.GPS.QUICK[1].button") is False
+    T.Jump("window")
+    assert _where(ns) == ("window", 1) and ns.Layers.demoNodes is None  # (the examples gone with their section)
     # the list of sections, from the panel: a click jumps, the done ones marked
     ns.db.tutorial.seen.route = "1.2.0"
     lua.globals().AGPS_CLICK(T.panel.list)
     rows = [str(b._text) for b in T.list.rows.values()]
-    assert T.list._shown and rows[1] == "Set a route (done)" and rows[2] == "Quest Route" and len(rows) == 10
+    assert T.list._shown and rows[1] == "Set a route (done)" and rows[2] == "Quest Route" and len(rows) == 9
     lua.globals().AGPS_CLICK(T.list.rows[4])
-    assert _where(ns) == ("arrow", 1) and T.list._shown is False and ns.settings.gps.devTools is False
-    assert tools._shown is False  # (the road tools' button off the map again)
+    assert _where(ns) == ("arrow", 1) and T.list._shown is False
     # played on from there to the end: the sections after it, in order
     taken = _play(lua, ns, False)
     assert [s for s, i, w in taken if i == 1] == SECTIONS[SECTIONS.index("arrow"):]
@@ -768,7 +764,12 @@ def test_keep_the_gps_map_as_your_minimap_yes_keeps_only_that(tut):
     T.NextClicked()
     after = _state(lua)
     assert st.replaceMinimap is True and st.replaceMinimapSize == "large" and G.MinimapMode() and G.mmHold is None
+    zoom = st.zoom
     lua.execute("AGPS_NS.settings.gps.replaceMinimap, AGPS_NS.settings.gps.replaceMinimapSize = false, 'small'")
+    G.ApplySettings()
+    # (this test's own going back to the small map rescales the zoom, as any resize does: put back as it was. With the
+    # window section last, since 1.3.14's roads section went, the tutorial ends on the bigger window)
+    st.zoom = zoom
     G.ApplySettings()
     back = _state(lua)
     assert _diff(before[0], back[0]) is None and _diff(before[1], back[1]) is None  # (nothing else was kept)
@@ -858,14 +859,14 @@ def test_a_tutorial_left_saved_by_a_crash_restores_whoever_logs_in(tut):
     lua.execute("AGPS_NS.db.tutorial.run = { snapshot = 5, queue = 'x' }")
     T.RestoreSaved()
     assert ns.db.tutorial.run is None
-    lua.execute("AGPS_NS.Tutorial.Ticker():Hide() AGPS_NS.Record.practice = nil AGPS_NS.GPS.overlays[AGPS_NS.Tutorial.OVERLAY] = nil")
+    lua.execute("AGPS_NS.Tutorial.Ticker():Hide()")
     ns.GPS.ApplySettings()
     assert run is not None
 
 
 # ---------------------------------------------------------------- the player's data is never written
 
-def test_the_example_nodes_practice_roads_and_recorded_walks_never_reach_the_saved_variables(tut):
+def test_the_example_nodes_never_reach_the_saved_variables(tut):
     lua, ns = tut
     T, G, R, Lay = ns.Tutorial, ns.GPS, ns.Record, ns.Layers
     before = lua.eval("AGPS_DB()")
@@ -895,68 +896,11 @@ def test_the_example_nodes_practice_roads_and_recorded_walks_never_reach_the_sav
     assert len([m for m in Lay.Marks(0, 2254, 293, 300, lua.eval("{}"), 0).values()
                 if str(m[5]) == "Example for the tutorial"]) == 0
 
-    # roads, walls and a recorded walk: practice, drawn from memory, gone at the end
-    assert _ok(T.Start(lua.eval("{ 'roads' }"))) is True
-    assert "nothing here is saved" in str(T.panel.body._text) and R.practice is not None
-    for _ in range(3):
-        _step(lua, ns, True)
-    assert T.PracticeCount(False) == 1 and str(lua.eval("AGPS_PRINTS[#AGPS_PRINTS]")) == "Practice: nothing was saved."
-    lua.execute("AGPS_T = AGPS_T + 2")
-    G.Update()  # (the practice road drawn on the map, its overlay)
-    untouched()
-    _step(lua, ns, True)  # (the magic eraser over the practice road: gone, never a saved one)
-    assert T.PracticeCount(False) == 0
-    untouched()
-    _step(lua, ns, True)
-    assert T.PracticeCount(True) == 1 and T.PracticeCount() == 1
-    R.Undo()  # (Undo takes the practice wall back, never a saved road)
-    assert T.PracticeCount() == 0
-    lua.execute("local x, y, level = AGPS_NS.Tutorial.Here() AGPS_NS.GPS.FinishRoad({ cont = level, pts = { x + 10, y, x + 40, y + 5 } }, false, true)")
-    untouched()
-    _step(lua, ns, True)  # (Record, and a few steps walked)
-    assert _where(ns) == ("roads", 7) and R.rec is not None and R.rec.yd >= T.WALK_YD
-    lua.eval("AGPS_FIRE")("PLAYER_LOGOUT")  # (a /reload while it records: no walk saved, not gone on with after)
-    assert R.rec is None
-    untouched()
-    lua.execute("AGPS_NS.UnpackSaved(AGPS_NS.db) AGPS_NS.CharDB().floorTrack = nil")  # (the logout's own, not kept here)
-    T.EnterStep()  # (the step again: recording for the player to stop)
-    assert R.rec is not None
-    lua.execute("AGPS_POS[1] = AGPS_POS[1] + 12 AGPS_T = AGPS_T + 3 AGPS_NS.Record.RecordTick(AGPS_T)")
-    lua.globals().AGPS_CLICK(R.window.stop)
-    assert R.rec is None and str(lua.eval("AGPS_PRINTS[#AGPS_PRINTS]")) == "Practice: nothing was saved."
-    walks = [t for t in R.practice.list.values() if t.recorded]
-    assert len(walks) == 1  # (the walk went to the practice list)
-    untouched()
-    T.Tick()
-    assert _where(ns) == ("roads", 8) and len(list(R.practice.list.values())) == 0
-    T.NextClicked()
-    T.NextClicked()
-    assert R.practice is None and G.overlays[T.OVERLAY] is None and R.window._shown is False
-    assert G.RecordHintDue() in (True, False)
     untouched()
     assert _diff(before, lua.eval("AGPS_DB()")) is None
-    # with the tutorial over, the road tools save as always
-    n = R.Save(lua.eval("{ op = 'add', drawn = true, continent = 0, time = 5, pts = { 2254, 293, 2300, 300 } }"))
-    assert n == tracks + 1 and ns.unsaved == 1
-    R.Undo()
-    ns.ResetUnsaved()
-    assert lua.eval("#(AGPS_NS.db.tracks or {})") == tracks
+    # (the roads section, its practice roads, walls and walks, went with the map editor in 1.3.14)
+    assert "roads" not in [str(s.id) for s in T.SECTIONS.values()] and T.PracticeCount is None
 
-
-def test_the_road_tools_on_before_the_tutorial_come_back_after(tut):
-    lua, ns = tut
-    T, G = ns.Tutorial, ns.GPS
-    G.SetRoadMode(True)
-    try:
-        assert _ok(T.Start(lua.eval("{ 'route' }"))) is True
-        assert not G.roadMode and ns.Record.practice is not None
-        T.Exit()
-        assert G.roadMode is True and ns.Record.practice is None
-    finally:
-        G.SetRoadMode(False)
-
-
-# ---------------------------------------------------------------- combat, the panel and the glow
 
 def test_combat_hides_the_tutorial_and_it_goes_on_after(tut):
     lua, ns = tut
@@ -1262,24 +1206,6 @@ def test_the_arrow_section_leaves_the_map_as_the_minimap_in_its_corner(tut):
         G.ApplySettings()
 
 
-def test_the_roads_section_says_how_the_tools_are_turned_on_and_offers_them(tut):
-    # (asked 2026-11-10: "need to explain how the road tools are enabled for this part")
-    lua, ns = tut
-    T, st = ns.Tutorial, ns.settings.gps
-    assert not st.devTools
-    assert _ok(T.Start(lua.eval("{ 'roads' }"))) is True
-    assert _where(ns) == ("roads", 1) and "Options > Tools" in str(T.panel.body._text)
-    boxes = [T.panel.checks[1]]
-    assert [str(b.label._text) for b in boxes] == ["Map editing tools"]  # (1.3.0: one button for both)
-    assert st.devTools  # (on the map while the section runs, ticked or not)
-    boxes[0].GetChecked = lua.eval("function() return true end")
-    boxes[0]._scripts.OnClick(boxes[0])
-    T.Exit()
-    assert st.devTools is True  # (ticked: kept)
-    st.devTools = False
-    ns.GPS.LayoutQuick()
-
-
 def test_the_any_shape_step_really_turns_any_shape_on_and_offers_it(tut):
     # (seen in game 2026-11-10: "this step didn't actually enable the any size option to test it")
     lua, ns = tut
@@ -1389,5 +1315,3 @@ def test_the_section_list_marks_done_updated_and_new(tut):
     assert T.SectionLabel(sec("1.3.0"), lua.eval("{ route = '1.2.0' }")) == "X (new)"  # (added after the newest played)
     assert T.SectionLabel(sec("1.2.0"), lua.eval("{ route = '1.2.0' }")) == "X"  # (as old, not played: no mark)
     assert T.SectionLabel(sec("1.3.0"), lua.eval("{}")) == "X"  # (none played: nothing is new to them)
-    roads = next(s for s in T.SECTIONS.values() if s.id == "roads")
-    assert roads.updated == "1.3.0"

@@ -860,9 +860,11 @@ function I.ImportText(text, ways, addToRoute)
       tracks[#tracks + 1] = { op = e.op, continent = e.level, time = e.time, pts = e.pts, area = e.area, z = e.z,
         indoors = e.indoors, down = e.down }
     end
-    if #tracks > 0 and ns.Record then
-      local n, had = ns.Record.AddShared(tracks, true)
+    if #tracks > 0 and I.TakeTracks then -- (the dev addon's map editor takes them in: Record.AddShared)
+      local n, had = I.TakeTracks(tracks)
       A[kind], res.had = n, res.had + had
+    elseif #tracks > 0 then -- (else not imported here: making roads and walls isn't part of AzerothGPS since 1.3.14)
+      res.skipped = res.skipped + #tracks
     end
   end
   -- herbs, ore and NPCs, with /way lines taken as them
@@ -950,8 +952,8 @@ function I.ImportSummary(res)
   end
   if res.had > 0 then out[#out + 1] = string.format(L["%d you had already."], res.had) end
   if res.skipped > 0 then
-    out[#out + 1] = res.skipped == 1 and L["1 line not imported here (faster trips, dungeons' ways in)."]
-      or string.format(L["%d lines not imported here (faster trips, dungeons' ways in)."], res.skipped)
+    out[#out + 1] = res.skipped == 1 and L["1 line not imported here (faster trips, dungeons' ways in, roads, walls)."]
+      or string.format(L["%d lines not imported here (faster trips, dungeons' ways in, roads, walls)."], res.skipped)
   end
   local n = #res.rejected
   if n > 0 then
@@ -1155,8 +1157,8 @@ end
 I.FitButton = FitButton
 
 -- The kinds Copy My Map Data writes (the window's checkboxes): { key, label }.
-I.EXPORT_KINDS = { { "herbs", L["Herbs"] }, { "ore", L["Ore"] }, { "npcs", L["NPCs"] }, { "pins", L["Pins"] },
-  { "roads", L["Roads"] }, { "walls", L["Walls"] } }
+-- (roads and walls only with the dev addon's map editor, which adds them here)
+I.EXPORT_KINDS = { { "herbs", L["Herbs"] }, { "ore", L["Ore"] }, { "npcs", L["NPCs"] }, { "pins", L["Pins"] } }
 
 local function Build()
   -- the map window's frame without the logo, as every popup (ns.Window)
@@ -1288,7 +1290,7 @@ local function Build()
     for key, c in pairs(f.kinds) do want[key] = c:GetChecked() and true or nil end
     local text, n = I.MapDataText(want)
     if n == 0 then
-      status:SetText(L["|cffff6060Nothing of yours to copy|r for what's ticked: the herbs and ore you gathered, the NPCs you talked to, your pins, and the roads and walls you drew go here."])
+      status:SetText(L["|cffff6060Nothing of yours to copy|r for what's ticked: the herbs and ore you gathered, the NPCs you talked to and your pins go here."])
       return
     end
     edit:SetText(text)
@@ -1297,7 +1299,7 @@ local function Build()
     status:SetText(n == 1 and L["1 line selected above: press Ctrl+C, then paste it anywhere. Players with AzerothGPS paste it here and press Import to add it to their map."]
       or string.format(L["%d lines selected above: press Ctrl+C, then paste it anywhere. Players with AzerothGPS paste it here and press Import to add it to their map."], n))
   end)
-  Tip(mine, L["Copy My Map Data"], L["Writes your own map data in the box, selected for copying: the herbs and ore you gathered, the NPCs you talked to, your pins, and the roads and walls you drew. Tick what to include. Players with AzerothGPS paste it here and press Import to add it to their own map."])
+  Tip(mine, L["Copy My Map Data"], L["Writes your own map data in the box, selected for copying: the herbs and ore you gathered, the NPCs you talked to and your pins. Tick what to include. Players with AzerothGPS paste it here and press Import to add it to their own map."])
 
   local add = Check(f, L["Add to the current route"])
   add:SetPoint("BOTTOMLEFT", 10, 38)
@@ -1348,7 +1350,7 @@ local function Build()
       ns.GPS.Redraw()
     end
   end)
-  Tip(go, L["Import"], L["Takes in what's pasted above: /way lines as your route's stops (or, with the boxes beside, as herb and ore nodes or NPCs), and AzerothGPS map data (pins, roads, walls, herbs, ore and NPCs other players copied) into your own map. Here it says what was added, what you had already, and which lines couldn't be read."])
+  Tip(go, L["Import"], L["Takes in what's pasted above: /way lines as your route's stops (or, with the boxes beside, as herb and ore nodes or NPCs), and AzerothGPS map data (pins, herbs, ore and NPCs other players copied) into your own map. Here it says what was added, what you had already, and which lines couldn't be read."])
   f.go = go
   local cancel = CreateFrame("Button", nil, f, "UIPanelButtonTemplate")
   cancel:SetSize(90, 22)

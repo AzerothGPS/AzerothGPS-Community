@@ -221,6 +221,8 @@ map as your minimap, a double-click on the logo sends the map back to its corner
 
 ### 10. Fix roads and record (`roads`, added in 1.2.0, updated in 1.3.0)
 
+Removed in 1.3.14: road and wall drawing and Record are no longer part of AzerothGPS. Kept here as it was.
+
 The Map Editing button (the road and wall tools, one button since 1.3.0) is put on the map for the section. Everything
 drawn, erased or recorded is practice.
 

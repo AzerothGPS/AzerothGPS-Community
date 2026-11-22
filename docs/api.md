@@ -100,15 +100,10 @@ center, +x right and +y up.
 - `Redraw()`: the map redraws on its next frame. The map skips redraws when nothing it knows
   about changed, so call this after changing what your overlay draws.
 
-## The road recorder (version 22)
+## The road recorder (version 22, gone in 1.3.14)
 
-- `ShowRecorder()`: opens AzerothGPS's Record window, where the player records a road by walking it (Record, Pause,
-  Stop & Save). False when there's none.
-- `Recording()`: whether Record is recording now.
-- `RecordedWalks(since)`: the player's recorded walks saved at `since` (a `time()`) or after, oldest first, as copies:
-  `{ time, level, zone, kind, pts = { x1, y1, x2, y2, ... }, zs, stairs, yd }`. `time` is the walk's key, `level` its
-  continent (Undercity's 10001 down there), `kind` nil for ground, `zs` a height per point or nil, `yd` its length. A
-  walk's time is when it began, so read with the time the player was asked to start. Read only: nothing changes.
+`ShowRecorder()`, `Recording()` and `RecordedWalks(since)` went with Record in 1.3.14: AzerothGPS no longer records or
+draws roads. The table no longer has them; check with `AzerothGPS.ShowRecorder ~= nil` before calling.
 
 ## Setting the route, and previewing a recorded walk (version 23)
 
@@ -119,7 +114,7 @@ recorded, so the directions panel and the arrow show what AzerothGPS does there.
   Undercity's 10001 down there), `z` its height (picks its floor; nil when unknown), `name` its label, as a stop the
   player made on the map. The route is worked out from wherever the player is. True when set; false when not (with a
   second value true while AzerothGPS first asks about a zone too high for the player).
-- `PreviewWalk(times, done)`: routes take the player's recorded walks with those times (`RecordedWalks`' `time`s: a
+- `PreviewWalk(times, done)`: routes take the player's recorded walks with those times (their `time`s, the keys of the saved roads: a
   list, or one) as the way, far ahead of any other road, as they will once the walk replaces the route there in the
   road data. The roads are built again and the route worked out again at once. Only the walks on the oldest one's
   level count. True and how many walks are previewed; false, `"none"` when none of those times is a recorded walk.

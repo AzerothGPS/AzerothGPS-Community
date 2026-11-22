@@ -160,7 +160,7 @@ def test_each_round_button_uses_art_drawn_at_its_exact_size(game):  # noqa: F811
     end""")()
     names = [str(ids[b] or "") for b in buttons]
     same = lua.eval("rawequal")
-    assert len(buttons) > 40 and "pauseRoute" in names and "questRoute" in names
+    assert len(buttons) > 30 and "pauseRoute" in names and "questRoute" in names
     assert any(same(b, G.mapButton) for b in buttons) and any(same(b, G.searchButton) for b in buttons)
     try:
         seen = set()
