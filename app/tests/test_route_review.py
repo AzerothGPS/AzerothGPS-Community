@@ -85,7 +85,7 @@ def test_the_decisions_come_back_from_the_saved_variables(tmp_path):
     (sv / "Review.lua").write_text(before, encoding="utf-8")
     got, stale = RR.read_decisions([addons], rows)
     assert got == {"orgrimmar-1": {"decision": "correct", "tracks": [1700000001, 1700000002], "yd": 172, "level": 1},
-                   "undercity-1": "approve"}
+                   "undercity-1": "spf"}  # (the first review's Approve: the other walk's line)
     assert stale == 1  # (made on a candidate not in this list)
     assert (sv / "Review.lua").read_text(encoding="utf-8") == before  # (read only)
     # a second account's newer decision on the same candidate wins
@@ -95,7 +95,13 @@ def test_the_decisions_come_back_from_the_saved_variables(tmp_path):
         f'ReviewDB = {{ ["routeReview"] = {{ ["decisions"] = {{ ["undercity-1"] = {{ ["decision"] = "reject", '
         f'["sig"] = "{s1}", ["at"] = 45 }} }} }} }}\n', encoding="utf-8")
     got, _ = RR.read_decisions([addons], rows)
-    assert got["undercity-1"] == "reject"
+    assert got["undercity-1"] == "ours"  # (the first review's Reject: keep ours)
+    # the buttons' own names now: Keep Ours, Use SPF Path
+    for name in ("ours", "spf"):
+        (sv2 / "Review.lua").write_text(
+            f'ReviewDB = {{ ["routeReview"] = {{ ["decisions"] = {{ ["undercity-1"] = {{ ["decision"] = "{name}", '
+            f'["sig"] = "{s1}", ["at"] = 46 }} }} }} }}\n', encoding="utf-8")
+        assert RR.read_decisions([addons], rows)[0]["undercity-1"] == name
     out = tmp_path / "decisions.json"
     RR.write_decisions(got, out)
     assert json.loads(out.read_text(encoding="utf-8"))["orgrimmar-1"]["tracks"] == [1700000001, 1700000002]
