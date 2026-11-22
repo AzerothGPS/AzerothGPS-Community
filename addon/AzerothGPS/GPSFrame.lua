@@ -2991,7 +2991,12 @@ end
 -- Shift + mouse wheel with the tools on: the next floor up (delta > 0) or down, "all floors" past the
 -- ends, from the floors where the map is centered. Returns whether there were floors to pick from.
 function G.StepEditFloor(delta)
-  local floors = G.EditFloors(G.shownLevel, view.x, view.y)
+  return G.StepFloorAt(G.shownLevel, view.x, view.y, delta)
+end
+-- The same from the floors at (x, y) of `level`: the Record window's Up / Down step them at the player's own spot
+-- (Kooki3z 2026-11-21: Record never said which floor it took you to be on), the road tools on or not.
+function G.StepFloorAt(level, x, y, delta)
+  local floors = G.EditFloors(level, x, y)
   if #floors == 0 then return false end
   local i = G.FloorIndex(floors, G.editFloor) -- (0: all floors)
   -- (over a cave's floor: up = up top, the second; a level's floors are bottom up)
@@ -14440,7 +14445,11 @@ local function ToolsOff()
     G.floorPicks[G.floorBuilding.key] = G.editFloor or false
     G.floorBuilding = nil
   end
-  if not G.roadMode and not G.wallMode then G.editFloor, G.eraserMode = nil, nil end -- (the floor picked: all again next time)
+  -- (the floor picked: all again next time; not while recording, whose walk carries it: the Record window's Floor line)
+  if not G.roadMode and not G.wallMode then
+    if not (ns.Record and ns.Record.rec) then G.editFloor = nil end
+    G.eraserMode = nil
+  end
   if not G.roadMode and not G.wallMode and ns.Ground then ns.Ground.Release() end -- (the ground's tiles let go)
 end
 

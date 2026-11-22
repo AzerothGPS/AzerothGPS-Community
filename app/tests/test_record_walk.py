@@ -35,6 +35,7 @@ def rec(game):
     if R.rec is not None:
         R.rec = None
     R.REC_MAX_POINTS = 1000
+    R.lastSummary, R.floorState, ns.GPS.editFloor = None, None, None
     ns.inCombat = False
     ns.Geo.SetOverride(None)
     ns.db.tracks = lua.eval("{}")
@@ -448,3 +449,96 @@ def test_a_walk_saved_after_an_erase_made_during_it_is_newer_than_the_erase(rec)
     R.StopRecording()
     walks = [t for t in tracks(lua, ns) if t.op == "add"]
     assert walks and all(t.time > t0 + 5 for t in walks)
+
+
+# Brill's inn: two floors over each other (its ground floor about 34.5, upstairs about 41.5; test_map_redraw's stairs)
+INN_X, INN_Y = 2252.0, 245.0
+
+
+def _inn_floors(ns):
+    ns.Router.NearestEdges(0, INN_X, INN_Y)  # (Brill's roads built: the floors come from their heights)
+    return [f.z for f in ns.GPS.EditFloors(0, INN_X, INN_Y).values() if f.z is not None]
+
+
+def test_the_record_window_picks_the_floor_at_the_players_spot_without_the_road_tools(rec):
+    # (Kooki3z 2026-11-21: Shift + wheel with the road tools on was the only way to pick a floor, and Record never said
+    # which floor it took you to be on)
+    lua, ns = rec
+    R, G, w = ns.Record, ns.GPS, Walker(*rec)
+    txt = lambda fs: str(fs.GetText(fs))
+    floors = _inn_floors(ns)
+    n = len(floors)
+    assert n >= 2
+    assert not G.roadMode and not G.wallMode
+    w.put(INN_X, INN_Y)
+    f = R.ShowWindow()
+    try:
+        assert txt(f.floor) == "Floor: Auto" and txt(f.up) == "Up" and txt(f.down) == "Down" and txt(f.auto) == "Auto"
+        assert f.up.IsEnabled(f.up) and not f.auto.IsEnabled(f.auto)
+        assert "import works your floor out" in txt(f.floorNote)
+        # Up: the bottom floor at the player's spot, then the next, and Auto past the top (as Shift + wheel)
+        f.up._scripts.OnClick(f.up)
+        assert G.editFloor.z == pytest.approx(floors[0], abs=1)
+        assert txt(f.floor) == f"Floor 1 of {n} (counting up)" and f.auto.IsEnabled(f.auto)
+        f.up._scripts.OnClick(f.up)
+        assert txt(f.floor) == f"Floor 2 of {n} (counting up)"
+        for _ in range(n - 1):
+            f.up._scripts.OnClick(f.up)
+        assert G.editFloor is None and txt(f.floor) == "Floor: Auto"
+        # Down from Auto: the top floor
+        f.down._scripts.OnClick(f.down)
+        assert txt(f.floor) == f"Floor {n} of {n} (counting up)"
+        # walked out of the inn (the window's own refresh): the pick isn't among the floors there, one floor there
+        w.put(X0, Y0)
+        lua.execute("AGPS_T = AGPS_T + 1")
+        f._scripts.OnUpdate(f, 1.0)
+        assert txt(f.floor) == "Floor: the one picked (none here)" and txt(f.floorNote) == "One floor here."
+        assert not f.up.IsEnabled(f.up) and not f.down.IsEnabled(f.down)
+        assert not R.StepFloor(1)  # (nothing to step there)
+        f.auto._scripts.OnClick(f.auto)
+        assert G.editFloor is None and txt(f.floor) == "Floor: Auto" and not f.auto.IsEnabled(f.auto)
+    finally:
+        G.editFloor = None
+        f.Hide(f)
+
+
+def test_the_floor_picked_in_the_window_goes_with_the_walk_and_the_summary_says_so(rec):
+    lua, ns = rec
+    R, G, w = ns.Record, ns.GPS, Walker(*rec)
+    txt = lambda fs: str(fs.GetText(fs))
+    n = len(_inn_floors(ns))
+    w.put(INN_X, INN_Y)
+    f = R.ShowWindow()
+    try:
+        f.up._scripts.OnClick(f.up)  # (the ground floor, picked before Record)
+        R.StartRecording(True)
+        z = G.editFloor.z
+        w.walk(0, 4)
+        # the road tools on and off meanwhile keep the pick: the walk carries it
+        G.SetRoadMode(True)
+        G.SetRoadMode(False)
+        assert G.editFloor is not None and G.editFloor.z == z
+        w.walk(0, 4)
+        f.auto._scripts.OnClick(f.auto)
+        w.walk(0, 6)
+        R.SetRecordKind("stairs")
+        w.walk(0, 3)
+        f.stop._scripts.OnClick(f.stop)
+        walks = tracks(lua, ns)
+        pk = list(walks[0].rec.pk.values())
+        assert pk[0] == 1 and pk[1] == pytest.approx(z) and pk[3] is False, pk
+        assert txt(f.summary) == R.lastSummary
+        s = str(R.lastSummary)
+        assert s.startswith(f"Floors picked: 1 of {n} at the start, Auto from ") and " yd. Stairs roads: 1." in s, s
+        assert s.endswith("The import works out the floors from these.")
+        # a walk with no pick
+        R.SetRecordKind("ground")
+        f.rec._scripts.OnClick(f.rec)
+        assert txt(f.summary) == ""  # (recording: the summary is for after Stop & Save)
+        w.walk(0, 10)
+        f.stop._scripts.OnClick(f.stop)
+        assert txt(f.summary) == "No floor picked: worked out when imported. Stairs roads: 0."
+    finally:
+        G.editFloor = None
+        R.SetRecordKind("ground")
+        f.Hide(f)
