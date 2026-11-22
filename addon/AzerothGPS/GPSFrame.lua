@@ -11038,6 +11038,21 @@ function G.SetMinimized(on)
   G.ApplySettings()
 end
 
+-- Whether the map's window goes over the game's own windows (MINIMAP_EXPANDED_STRATA): grown out of the minimap
+-- square, or (1.3.14) the map in its own window; never the square itself, nor a second map (G.clone).
+function G.OverUI(mmOn, expanded, mmSide)
+  if mmOn and expanded then return true end
+  return not mmSide and not G.clone
+end
+-- Our popups (ns.Window, API.Window's, the options) lifted over the map while it shows over the game's windows (or in
+-- the world map, over that), back to their own strata when it's under them or closed (Core's ns.SetPopupsOver). The
+-- first map's alone: a second map never changes them.
+function G.SyncPopupsOver()
+  if G.clone or not ns.SetPopupsOver then return end
+  local shown = frame and frame:IsShown()
+  ns.SetPopupsOver(shown and (G.frameStrata or "BACKGROUND") ~= "BACKGROUND" or false)
+end
+
 function G.ApplySettings()
   G.ApplySeamPlayer() -- (the OpenMap stages the player set, Options > Map)
   pcall(G.UpdateEscCatcher) -- (Escape closes the map, Options > Map)
@@ -11119,8 +11134,11 @@ function G.ApplySettings()
   -- the map's opacity again: asked 2026-11-14, "map opacity setting doesn't work when gps minimap is on for the pop out")
   frame:SetAlpha((mmSide or host) and 1 or (ns.inCombat and (st.combatAlpha or st.alpha) or st.alpha))
   if G.RefreshHearthButton then G.RefreshHearthButton() end -- the option may have changed
-  -- (grown out of the square: over every other window, the quest log, the world map, bags; else under them all)
-  local strata = (mmOn and m.expanded) and G.MINIMAP_EXPANDED_STRATA or "BACKGROUND"
+  -- (grown out of the square: over every other window, the quest log, the world map, bags; and the map in its own
+  -- window the same since 1.3.14, Kooki3z: "make the GPS map outside of minimap pop out also go over UI elements like
+  -- the pop out one does, options still go on top of it", G.OverUI. The square itself stays under them all, and the
+  -- second maps (the square's copy, the extra window) as they were)
+  local strata = G.OverUI(mmOn, m.expanded, mmSide) and G.MINIMAP_EXPANDED_STRATA or "BACKGROUND"
   if host then strata = G.WorldMapStrata() end
   if host then
     G.frameLevelOwn = G.frameLevelOwn or frame:GetFrameLevel() or 0
@@ -11142,7 +11160,7 @@ function G.ApplySettings()
     if ns.ApplyLogoLook then pcall(ns.ApplyLogoLook) end -- (the logo's plate keeps its own strata: set again)
     -- (the search's panel has a strata of its own: over the map out too)
     if G.searchPanel then G.searchPanel:SetFrameStrata(strata == "BACKGROUND" and "DIALOG" or ns.POPUP_OVER_STRATA) end
-    if ns.SetPopupsOver then ns.SetPopupsOver(strata ~= "BACKGROUND") end -- (our popups over the map out)
+    G.SyncPopupsOver() -- (our popups over the map out)
   end
   G.ApplyMinimapChrome(mmSide ~= nil)
   if host then
@@ -17737,7 +17755,11 @@ function G.Init()
     if had or G.appended or tour or reopenFollow then G.Follow() end
     return had
   end
-  frame:HookScript("OnHide", function() G.ConfirmPendingOnClose() end)
+  frame:HookScript("OnHide", function()
+    G.ConfirmPendingOnClose()
+    G.SyncPopupsOver() -- (closed: our popups back to their own strata)
+  end)
+  frame:HookScript("OnShow", function() G.SyncPopupsOver() end) -- (shown again over the game's windows: over it)
 
   -- (the map's OnUpdate pumps the searches while the map shows, and the arrow's used to while it was hidden:
   -- with the arrow off too, nothing pumped — the first route never finished and the minimap's route froze
@@ -17782,6 +17804,8 @@ function G.Init()
   G.pumpFrame = pump
 
   frame:SetScript("OnUpdate", G.Timed("map frame, other work", function(_, dt)
+    -- (a popup opened over the map in its own window: lifted over it, as G.MinimapTick does over the map grown out)
+    if ns.popupsOver and not G.clone and ns.LiftShownPopups then ns.LiftShownPopups() end
     if tour then
       -- (an error in the tour ends it, rather than failing every frame)
       local ok, err = pcall(TourStep, GetTime())

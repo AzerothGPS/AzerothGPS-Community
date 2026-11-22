@@ -11390,3 +11390,48 @@ def test_the_leg_to_the_next_stop_is_drawn_over_the_later_legs(game):
                           and w._kind == "Line")
     finally:
         N.Clear()
+
+
+def test_the_map_window_goes_over_the_games_windows_with_our_popups_over_it(minimap):
+    # (Kooki3z, for 1.3.14: "make the GPS map outside of minimap pop out also go over UI elements like the pop out one
+    # does, options still go on top of it just like the pop out one") the map in its own window at the grown-out
+    # map's strata, over the game's windows; our popups (ns.Window, the options) lifted over it while it shows, back to
+    # their own when it closes or is the minimap square again; the square under them all as before
+    lua, ns = minimap
+    G, st = ns.GPS, ns.settings.gps
+    _expand_setup(lua)
+    frame = lua.eval("AzerothGPSFrame")
+    st.replaceMinimap, st.useWorldMap, st.shown = False, False, True
+    frame._shown = True
+    G.ApplySettings()
+    assert frame._strata == G.MINIMAP_EXPANDED_STRATA and ns.popupsOver
+    f = ns.Window("AzerothGPSTestPopup", 200, 100, "Test")
+    own = str(f.GetFrameStrata(f))
+    f._shown = True
+    f._scripts.OnShow(f)
+    assert f._strata == ns.POPUP_OVER_STRATA  # (over the map)
+    ns.Options.Toggle()
+    opts = lua.eval("AzerothGPSOptions")
+    frame._scripts.OnUpdate(frame, 0.01)  # (the map's next frame: a popup whose own OnShow went past the hook, lifted)
+    assert opts._shown and opts._strata == ns.POPUP_OVER_STRATA
+    ns.Options.Toggle()
+    # the map closed: back to their own strata
+    frame._shown = False
+    frame._scripts.OnHide(frame)
+    assert not ns.popupsOver and f._strata == own
+    # shown again: over it again (and one shown since, lifted on the map's next frame)
+    frame._shown = True
+    frame._scripts.OnShow(frame)
+    assert ns.popupsOver and f._strata == ns.POPUP_OVER_STRATA
+    # the map as the minimap square: under the game's windows, our popups back
+    st.replaceMinimap = True
+    G.ApplySettings()
+    assert G.MinimapMode() and frame._strata == "BACKGROUND" and not ns.popupsOver and f._strata == own
+    G.SetMinimapExpanded(True)  # (grown out of it: over them again, as before)
+    _tick(lua, ns)
+    assert frame._strata == G.MINIMAP_EXPANDED_STRATA and f._strata == ns.POPUP_OVER_STRATA
+    G.SetMinimapExpanded(False)
+    _tick(lua, ns)
+    st.replaceMinimap = False
+    G.ApplySettings()
+    f._shown = False
