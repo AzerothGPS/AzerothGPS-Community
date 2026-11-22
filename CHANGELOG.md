@@ -2,7 +2,14 @@
 
 Each version's section is its release notes (GitHub and CurseForge).
 
-## 1.3.13 (in progress)
+## 1.3.14 (in progress)
+
+### New
+
+- Record: pick the floor you are on with Up, Down and Auto; after Stop & Save it says the floors picked.
+- For plugin addons (API 23): set the route to a place, and preview a recorded walk as the route. See docs/api.md.
+
+## 1.3.13
 
 ### New
 
@@ -10,10 +17,9 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Quest Route: ordered by level, it sorts itself again when you level up.
 - Quest Route: Options lists the quests you left out, with Put Back All.
 - Roads: new roads and walls in Stonetalon Mountains.
-- Roads: new roads and a wall in Stonetalon Mountains.
-- Record: pick the floor you are on with Up, Down and Auto; after Stop & Save it says the floors picked.
+- Orgrimmar: straighter routes through the city's streets, with fewer turns.
+- Brill: the inn's stairs are routed up the stairs, not over the landing's side.
 - For plugin addons (API 22): open Record and read back the walks recorded. See docs/api.md.
-- For plugin addons (API 23): set the route to a place, and preview a recorded walk as the route. See docs/api.md.
 
 ### Fixed
 
@@ -23,6 +29,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Quest Route: with only tracked quests on, finishing an untracked quest no longer asks for a reroute.
 - Alliance routes no longer take the Zephras Isle zeppelin to Camp Gev'rek in Mulgore.
 - Routes to an NPC inside a building go round to its door and in, not through its walls.
+- Less stutter while a route is worked out on slower PCs.
 
 ## 1.3.12.1
 
