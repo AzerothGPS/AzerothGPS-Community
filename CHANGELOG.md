@@ -11,6 +11,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Quest Route: Options lists the quests you left out, with Put Back All.
 - Roads: new roads and walls in Stonetalon Mountains.
 - Roads: new roads and a wall in Stonetalon Mountains.
+- For plugin addons (API 22): open Record and read back the walks recorded. See docs/api.md.
 
 ### Fixed
 

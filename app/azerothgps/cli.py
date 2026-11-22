@@ -842,6 +842,37 @@ def cmd_floor_survey(args) -> int:
     return 0
 
 
+def cmd_route_review(args) -> int:
+    """The city route review (routereview.py): `export` writes the candidate routes (--review, a JSON list) into the
+    review addon's folder (any addon whose .toc lists RouteReview.lua; every `agps install-addon` refreshes it too);
+    `import` reads the decisions made in game from that addon's SavedVariables (read only) into --out."""
+    from . import routereview as RR
+
+    dirs = _survey_dirs(args)
+    review = Path(args.review) if args.review else RR.REVIEW
+    rows = RR.load_review(review)
+    if args.action == "export":
+        if not rows:
+            print(f"no routes to check in {review}")
+        n = RR.export_review(dirs, rows)
+        print(f"{len(rows)} routes to check; {n} review addon(s) found")
+        return 0 if n else 1
+    decisions, stale = RR.read_decisions(dirs, rows or None)
+    out = Path(args.out) if args.out else RR.DECISIONS
+    RR.write_decisions(decisions, out)
+    counts = {}
+    for v in decisions.values():
+        d = v if isinstance(v, str) else v["decision"]
+        counts[d] = counts.get(d, 0) + 1
+    print(f"{len(decisions)} of {len(rows)} decided ({', '.join(f'{n} {d}' for d, n in sorted(counts.items())) or 'none'})"
+          f" -> {out}" + (f"; {stale} made on an older list left out" if stale else ""))
+    for key, v in sorted(decisions.items()):
+        if isinstance(v, dict) and v["decision"] == "correct":
+            print(f"  {key}: replaced by recorded walk(s) {', '.join(str(t) for t in v['tracks']) or '(none)'}"
+                  f" ({v['yd']} yd)")
+    return 0
+
+
 def cmd_npc_spots(args) -> int:
     """NPC spots marked in game (a JSON list of marks: npcspots.py) into overrides/npc_spots.json, and the overrides
     into Data/Npcs.lua (only the spawns marked change; the dump isn't needed)."""
@@ -1049,6 +1080,11 @@ def _install_into(addons: Path, dev: bool) -> int:
         export_survey([addons])
     except Exception as e:  # (never fails an install)
         print(f"floor survey list not written: {e}")
+    try:  # (the city route review's candidates, where an addon there takes them: as the survey's list)
+        from .routereview import export_review
+        export_review([addons])
+    except Exception as e:  # (never fails an install)
+        print(f"route review list not written: {e}")
     if dev:
         # the developer tools (a checkout next to this repo, _dev_addon()): never shipped
         src = _dev_addon()
@@ -1453,6 +1489,14 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--wow-path", default=str(DEFAULT_WOW))
     sp.add_argument("--flavor", default=DEFAULT_FLAVOR)
     sp.set_defaults(fn=cmd_floor_survey)
+
+    sp = sub.add_parser("route-review", help="the city route review's candidates out, the decisions made in game in")
+    sp.add_argument("action", choices=("export", "import"))
+    sp.add_argument("--review", help="the candidates (JSON list; default data/debug/city-spf/review.json)")
+    sp.add_argument("--out", help="import: where the decisions go (default data/debug/city-spf/decisions.json)")
+    sp.add_argument("--wow-path", default=str(DEFAULT_WOW))
+    sp.add_argument("--flavor", default=DEFAULT_FLAVOR)
+    sp.set_defaults(fn=cmd_route_review)
 
     sp = sub.add_parser("npcs", help="every friendly NPC, for the search (Data/Npcs.lua)")
     sp.add_argument("--write", action="store_true")

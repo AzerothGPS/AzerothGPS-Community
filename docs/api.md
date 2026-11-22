@@ -1,6 +1,6 @@
 # Public API for plugin addons
 
-`Api.lua` publishes a global table `AzerothGPS` (version 21) so other addons, such as
+`Api.lua` publishes a global table `AzerothGPS` (version 22) so other addons, such as
 AzerothGPS-StreetView, can read the map's geometry and draw on the map. It stays display
 only, like the rest of AzerothGPS. Declare `## Dependencies: AzerothGPS` in your toc.
 
@@ -99,6 +99,16 @@ center, +x right and +y up.
   on or off); `fn = nil` stops.
 - `Redraw()`: the map redraws on its next frame. The map skips redraws when nothing it knows
   about changed, so call this after changing what your overlay draws.
+
+## The road recorder (version 22)
+
+- `ShowRecorder()`: opens AzerothGPS's Record window, where the player records a road by walking it (Record, Pause,
+  Stop & Save). False when there's none.
+- `Recording()`: whether Record is recording now.
+- `RecordedWalks(since)`: the player's recorded walks saved at `since` (a `time()`) or after, oldest first, as copies:
+  `{ time, level, zone, kind, pts = { x1, y1, x2, y2, ... }, zs, stairs, yd }`. `time` is the walk's key, `level` its
+  continent (Undercity's 10001 down there), `kind` nil for ground, `zs` a height per point or nil, `yd` its length. A
+  walk's time is when it began, so read with the time the player was asked to start. Read only: nothing changes.
 
 ## Your options page and Save Now (version 13)
 
