@@ -10,6 +10,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Quest Route: ordered by level, it sorts itself again when you level up.
 - Quest Route: Options lists the quests you left out, with Put Back All.
 - Roads: new roads and walls in Stonetalon Mountains.
+- Roads: new roads and a wall in Stonetalon Mountains.
 
 ### Fixed
 
