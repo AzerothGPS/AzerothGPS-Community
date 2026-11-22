@@ -125,6 +125,9 @@ local function Save()
   cdb.loop = (N.loop and #list > 1) or nil
   cdb.keepOrder = (N.keepOrder and #list > 0) or nil
   cdb.paused = (#list > 0 and N.paused) or nil -- (routing paused: kept over a /reload, N.SetPaused)
+  -- (the quest route's other way, from the Quest Route button's menu: kept over a /reload with its route)
+  local w = #list > 0 and N.OnQuestRoute() and N.questWay
+  cdb.questWay = w and { id = w.id, level = w.level, zone = w.zone, tracked = w.tracked, only = w.only } or nil
   cdb.dest = nil -- older single-destination save
   -- (the zones too high the player said yes to for this route: not asked again after a /reload)
   local ok = {}
@@ -1314,6 +1317,7 @@ function N.Version() return version end
 
 function N.Clear()
   N.stops, N.loop, N.keepOrder = {}, false, false
+  N.questWay = nil -- (the quest route's other way, GPS.QuestWayOf: gone with it)
   N.paused, N.pauseWatch = nil, nil
   N.redOk, N.skipLearn, N.noWalk, N.walkKept, N.riskOk, N.riskQuestion, N.riskAsking = {}, {}, {}, {}, {}, nil, nil
   N.hostileSaid, N.noSwim, N.swimBans = {}, nil, {}
@@ -1333,6 +1337,14 @@ function N.PauseShown()
   if G.RefreshMinimapResume then G.RefreshMinimapResume() end
 end
 
+-- A saved quest route's other way (N.questWay), checked field by field; nil when it isn't one.
+function N.ReadQuestWay(w)
+  if type(w) ~= "table" or type(w.id) ~= "string" then return nil end
+  local function bool(v) if type(v) == "boolean" then return v end end
+  local level = (w.level == "off" or w.level == "low" or w.level == "gray") and w.level or nil
+  local only = (w.only == "turnin" or w.only == "objectives") and w.only or nil
+  return { id = w.id, level = level, zone = bool(w.zone), tracked = bool(w.tracked), only = only }
+end
 -- Called at login: bring back the saved stops.
 function N.Restore()
   local cdb = ns.CharDB()
@@ -1346,6 +1358,7 @@ function N.Restore()
   N.keepOrder = N.ListedOrder() -- (or its stops say so)
   N.paused = (#N.stops > 0 and (cdb.paused == "auto" or cdb.paused == "manual" or cdb.paused == "perf")) and cdb.paused or nil
   N.pauseWatch = nil
+  N.questWay = N.ReadQuestWay(#N.stops > 0 and cdb.questWay)
   N.redOk = {}
   for _, z in ipairs(#N.stops > 0 and cdb.redOk or {}) do N.redOk[z] = true end
   N.riskOk = {}
@@ -4349,9 +4362,12 @@ N.PART_GAIN_SECONDS = 5 -- ... another part only when it saves at least this muc
 -- or the log doesn't say) have no band and go wherever is fastest. Nil when the option is off or no stop has a band.
 N.LEVEL_BAND = 3
 N.GRAY_SOON_LEVELS = 2
+-- (a quest route made by one of the Quest Route button's other ways with a level order of its own, N.questWay's
+-- `level`: that one, for this route only; GPS.QuestWayOf)
 function N.QuestLevelOrder()
   local st = ns.settings and ns.settings.gps
-  local v = st and st.questLevelOrder
+  local w = N.questWay
+  local v = (w and w.level) or (st and st.questLevelOrder)
   return (v == "low" or v == "gray") and v or nil
 end
 function N.QuestBands(stops)
@@ -5408,12 +5424,23 @@ end
 -- Whether the quest route would take finished quest `id`'s turn-in: not one the player left out, and with "only tracked
 -- quests" on (`questTrackedOnly`) one tracked. (Else the Sprint icon pulsed, and the route was made again, for a turn-in
 -- it never takes.)
+-- (made by one of the button's other ways, N.questWay: "Objectives only" takes no turn-in; its tracked quests or all in
+-- place of the option)
 function N.QuestRouteTakes(id)
   if N.QuestDropped({ quest = id, turnin = true }) then return false end
   local st = ns.settings and ns.settings.gps
+  local w = N.questWay
+  if w and w.only == "objectives" then return false end
+  local tracked = st and st.questTrackedOnly
+  if w and w.tracked ~= nil then tracked = w.tracked end
   local Lay = ns.Layers
-  if st and st.questTrackedOnly and Lay and Lay.QuestTracked and not Lay.QuestTracked(id) then return false end
+  if tracked and Lay and Lay.QuestTracked and not Lay.QuestTracked(id) then return false end
   return true
+end
+-- Whether the quest route would take a quest just picked up (its objectives): not on one made "Turn-ins only".
+function N.QuestRouteTakesNew()
+  local w = N.questWay
+  return not (w and w.only == "turnin")
 end
 -- The quest route lacks a quest picked up or finished: the Sprint icon pulses in the directions, or with the option on
 -- (asked 2026-11-12, `questAutoReroute`, Options > Routing; offered once at the icon's first click,

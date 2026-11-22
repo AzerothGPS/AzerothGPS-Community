@@ -15,6 +15,7 @@ local HELP = {
   L["/agps clear              (cancel the route)"],
   L["/agps pause              (pause or resume routing, the stops kept)"],
   L["/agps questroute         (the quest route: your quest log's objectives and turn-ins)"],
+  L["/agps questroute <way>   (another way: fastest, low, gray, turnins, objectives, tracked, zone)"],
   L["/agps arrow on|off       (turn-by-turn direction arrow window)"],
   L["/agps import             (paste TomTom /way lines as stops; copy or send your route)"],
   L["/way [zone] x y [text]   (add a stop; several pasted lines = several stops; with TomTom too)"],
@@ -200,7 +201,13 @@ Command = function(msg)
   elseif a == "clear" then
     if not (ns.GPS.ClearRoute and ns.GPS.ClearRoute()) then ns.Nav.Clear() end -- (as the map's Clear Route)
   elseif a == "questroute" then -- (the map menu's Quest Route: a controller's macro, asked 2026-11-16)
-    if ns.GPS.QuestRoute then ns.GPS.QuestRoute() end
+    -- (/agps questroute <way>: one of its right-click menu's ways, GPS.QUEST_WAYS)
+    local way = b and b ~= "" and ns.GPS.QuestWayByWord and ns.GPS.QuestWayByWord(b)
+    if b and b ~= "" and not way then
+      ns.Print(L["Quest Route ways: fastest, low, gray, turnins, objectives, tracked, zone."])
+    elseif ns.GPS.QuestRoute then
+      ns.GPS.QuestRoute(way or nil)
+    end
   elseif a == "pause" then -- (routing paused or resumed, the stops kept: Nav.SetPaused)
     if not ns.Nav.dest then
       ns.Print(L["No route to pause."])

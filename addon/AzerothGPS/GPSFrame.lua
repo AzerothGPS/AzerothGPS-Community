@@ -14822,16 +14822,27 @@ function G.RouteChanged()
 end
 
 -- The quest route button: stops for the quest log's objectives and turn-ins, in the
--- fastest order, as the route.
-function G.QuestRoute()
+-- fastest order, as the route. `wayId` (optional): one of the button's other ways (its right-click menu,
+-- QuestWays.lua's G.QUEST_WAYS), for this route only; nil: the player's saved Quest Route options.
+function G.QuestRoute(wayId)
   if ns.Nav.DungeonLocked() then ns.Nav.SayLocked() return end
   if InCombatLockdown and InCombatLockdown() then
     ns.Print(L["Quest Route: not in combat (the game hides quest locations then)."])
     return
   end
   if not (ns.Layers and ns.Layers.QuestStops) then return end
+  local way = wayId and G.QuestWayOf and G.QuestWayOf(wayId) or nil
   local onlyZone, onlyTracked = S().questZoneOnly, S().questTrackedOnly
+  if way and way.zone ~= nil then onlyZone = way.zone end
+  if way and way.tracked ~= nil then onlyTracked = way.tracked end
   local stops, c = ns.Layers.QuestStops(onlyZone, onlyTracked)
+  local found = #stops
+  if way and way.only then stops = G.QuestWayStops(stops, way.only) end
+  if #stops == 0 and found > 0 then
+    ns.Print(way.only == "turnin" and L["Quest Route: none of your quests are finished yet (nothing to turn in)."]
+      or L["Quest Route: only turn-ins are left (no objectives to do)."])
+    return
+  end
   if #stops == 0 then
     ns.Print(onlyZone and c.elsewhere > 0
       and Format(L["Quest Route: none of your quests are in this zone (%d elsewhere; Options > Routing: only this zone)."], c.elsewhere)
@@ -14849,10 +14860,11 @@ function G.QuestRoute()
   -- Route). Every quest found left out isn't asked again any more: said, with where to put them back.
   if ns.Nav.ForgetGoneQuests and ns.Layers.LogQuests then ns.Nav.ForgetGoneQuests(ns.Layers.LogQuests()) end
   G.groupQuests = G.GroupQuestsOf(stops)
-  local ask = G.GroupQuestsToAsk(stops)
+  -- (turn-ins only: no question, a group quest's turn-in is never left out)
+  local ask = (way and way.only == "turnin") and {} or G.GroupQuestsToAsk(stops)
   local function Next(i)
     local q = ask[i]
-    if not q then return G.SetQuestRoute(stops, c) end
+    if not q then return G.SetQuestRoute(stops, c, way) end
     G.Ask("AzerothGPSGroupQuest", G.GroupQuestText(q), L["Keep"], L["Leave Out"],
       function() G.groupChoice[q.id] = "keep" Next(i + 1) end,
       function() G.groupChoice[q.id] = "leave" Next(i + 1) end)
@@ -14878,13 +14890,13 @@ function G.QuestRerouteClick()
       ns.Print(on and L["Quest Route: it's made again by itself now when you pick up or finish a quest. To turn this off: Options > Routing > \"Quest route: reroute by itself\"."]
         or L["Quest Route: click the pulsing Sprint icon to make it again. To have it done by itself: Options > Routing > \"Quest route: reroute by itself\"."])
       if ns.Options and ns.Options.Refresh then ns.Options.Refresh() end
-      G.QuestRoute()
+      G.QuestRoute(G.QuestWayNow())
     end
     G.Ask("AzerothGPSQuestAuto", L["Make your quest route again automatically by itself whenever you pick up or finish a quest?\n(Asked once; you can change it in Options > Routing.)"],
       L["Yes"], L["No"], function() Answer(true) end, function() Answer(false) end)
     return
   end
-  G.QuestRoute()
+  G.QuestRoute(G.QuestWayNow())
 end
 -- The quest route made again by itself (the option on): a moment after the quest change (the quest log's areas
 -- come in after QUEST_ACCEPTED), and not in combat or while a question is up (tried again until then).
@@ -14901,7 +14913,7 @@ function G.AutoQuestTick()
   if not (N.questRouteStale and N.QuestAutoReroute() and N.OnQuestRoute()) then return end
   local asking = G.askBox and G.askBox.IsShown and G.askBox:IsShown()
   if (InCombatLockdown and InCombatLockdown()) or asking then return G.AutoQuestRoute() end
-  G.QuestRoute()
+  G.QuestRoute(G.QuestWayNow())
 end
 
 -- The route to the quest picked (asked 2026-11-13, a player: "when I select a quest and activate it, I'd like the
@@ -15193,7 +15205,7 @@ function G.ToggleGroupQuest(id)
     G.groupChoice[id] = "leave"
     ns.Nav.SaveQuestChoices()
   end
-  G.QuestRoute()
+  G.QuestRoute(G.QuestWayNow())
 end
 -- The directions' rows for the quest route's group quests, under `below` in `panel`: each one kept or left out, with
 -- Leave Out or Put Back (the route's only quest isn't offered to leave out: nothing would be left). Their height.
@@ -15277,8 +15289,8 @@ function G.GroupQuestText(q)
     table.concat(why, L[", "]))
 end
 -- The quest route set: `stops` less the group quests left out and the stops the player removed (Nav.QuestDropped);
--- `c` the counts from Layers.QuestStops.
-function G.SetQuestRoute(stops, c)
+-- `c` the counts from Layers.QuestStops; `way` the button's other way it was made by (G.QuestWayOf), or nil.
+function G.SetQuestRoute(stops, c, way)
   ns.Nav.SaveQuestChoices() -- (the answers just given kept, a route set or not)
   local kept, left = {}, {}
   for _, d in ipairs(stops) do
@@ -15292,6 +15304,7 @@ function G.SetQuestRoute(stops, c)
     ns.Print(L["Quest Route: every quest found is one you left out."] .. " " .. L["To put quests back: Options > Routing > Quest Route."])
     return
   end
+  ns.Nav.questWay = way -- (before the stops: their order is by its level order, Nav.QuestLevelOrder)
   if ns.Nav.SetStops(kept, true) == false then return end -- (asked first: a zone too high)
   ns.Nav.questRouteStale = nil
   -- (the quests finished now are in it, or have no turn-in to show: only those finished from here on pulse the icon)
@@ -16607,13 +16620,22 @@ function G.Init()
 
   -- Quest route: stops for the quest log, fastest order.
   local qr = RoundButton(26, "Interface\\Icons\\Ability_Rogue_Sprint")
-  qr:SetScript("OnClick", function() G.QuestRoute() end)
+  -- (right-click: its menu of other ways, QuestWays.lua; asked 2026-11-22, "extend the quest route button with a sub
+  -- menu to route in different ways like by level, turn ins only, tracked quest only")
+  qr:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+  qr:SetScript("OnClick", function(self, button)
+    if button == "RightButton" and G.ToggleQuestWays then G.ToggleQuestWays(self) return end
+    if G.CloseQuestWays then G.CloseQuestWays() end
+    G.QuestRoute()
+  end)
+  G.questRouteButton = qr
   qr:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     GameTooltip:SetText(L["Quest Route"], 1, 1, 1)
     GameTooltip:AddLine(L["A route through your quest log: where each quest's objectives are, and where finished quests are turned in, in the fastest order. Replaces the current route."], nil, nil, nil, true)
     -- (players' request relayed by Kooki3z 2026-11-21, "Quest route to be able to go through tracked quests only": it
     -- was there already, unfound; said where)
+    GameTooltip:AddLine(L["Right-click for other ways."], nil, nil, nil, true)
     GameTooltip:AddLine(L["Only tracked quests, lowest level first, quests left out: Options > Routing > Quest Route."], 0.6, 0.6, 0.6, true)
     GameTooltip:Show()
   end)

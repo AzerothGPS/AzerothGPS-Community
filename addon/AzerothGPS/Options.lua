@@ -3570,6 +3570,29 @@ local function BuildWindow()
     O.ApplyFolds(p)
     ShowPage(currentPage)
   end
+  -- The built-in page `id` shown at its section titled `title` (opened if collapsed, scrolled to its title): the
+  -- Quest Route button's "Quest Route options...". The page alone when there's no such section; false with no page.
+  function O.ShowSection(id, title)
+    local pg = O.pages[id]
+    local p = pg and search.pages[pg.index]
+    if not p then return false end
+    local at
+    for _, row in ipairs(p.rows) do
+      if not at and row.header and row.w.GetText and row.w:GetText() == title then at = row end
+    end
+    if at and at.foldKey and O.Folded(at) and ns.db and not search.on then
+      ns.db.optFold = ns.db.optFold or {}
+      ns.db.optFold[at.foldKey] = false
+      O.ApplyFolds(p)
+    end
+    ShowPage(pg.index)
+    if at and pg.scroll.SetVerticalScroll then
+      local y = -(at.w.padY or at.y) - 8
+      local range = math.max(0, (p.child:GetHeight() or 0) - (pg.scroll:GetHeight() or 0))
+      pg.scroll:SetVerticalScroll(math.max(0, math.min(range, y)))
+    end
+    return true
+  end
   function O.Search(text)
     local words = {}
     for w in tostring(text or ""):lower():gmatch("%S+") do
@@ -3770,6 +3793,12 @@ function O.ShowPage(title, owner)
   window = window or BuildWindow()
   window:Show()
   return title == nil or O.ShowPageNamed(title, owner)
+end
+-- Open the options at built-in page `id`'s section titled `title` (O.ShowSection).
+function O.ShowSettingsAt(id, title)
+  window = window or BuildWindow()
+  window:Show()
+  return O.ShowSection(id, title)
 end
 
 -- Every option back to its default (the window's Reset to defaults, once its question is answered Yes).
