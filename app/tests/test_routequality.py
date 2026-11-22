@@ -235,6 +235,70 @@ def test_a_trip_onto_the_roads_at_a_new_roads_end_is_redrawn_not_worse():
         assert [r["trip"] for r in res["worse"]] == ["trip 1"] and not res["redrawn"]
 
 
+FLOOR_TRACKS = """ns.FloorTracks = {
+  [0] = {
+  },
+  [1] = {
+    { op = "add", time = 5, pts = {1,2,3,4,5,6}, zs = {10,11,12} },
+    { op = "remove", time = 6, pts = {7,8,9,10}, zs = {10,11} },
+    { op = "add", time = 7, pts = {-1.5,2,3,-4.5}, zs = {10,11}, part = 1 },
+  },
+}
+"""
+
+
+def test_floor_track_lines_are_ns_floor_tracks_added_roads_per_continent():
+    # #875: a trip onto a newly shipped floor track is on a changed road (the erasures aren't roads)
+    assert rq.floor_track_lines(ROADS + FLOOR_TRACKS) == {1: {(1, 2, 3, 4, 5, 6), (-1.5, 2, 3, -4.5)}}
+    assert rq.road_lines(ROADS + FLOOR_TRACKS) == rq.road_lines(ROADS)  # (and they're not ns.Roads')
+
+
+def test_changed_roads_counts_the_floor_tracks_too(monkeypatch):
+    # #875: the road import's conflict merge lost the four Stonetalon walks' FloorTracks lines; put back, route-quality
+    # saw no road changed, so a trip onto the trail could never count as on changed roads
+    texts = {(rq.ROADS_FILE, "ref"): ROADS + FLOOR_TRACKS.replace("    { op = \"add\", time = 7, pts = {-1.5,2,3,-4.5}, "
+                                                                 "zs = {10,11}, part = 1 },\n", ""),
+             (rq.ROADS_FILE, None): ROADS + FLOOR_TRACKS, (rq.CAVES_FILE, "ref"): CAVES, (rq.CAVES_FILE, None): CAVES}
+    monkeypatch.setattr(rq, "_lines_at", lambda ref, path, read: read(texts[(path, ref)]))
+    assert rq.changed_roads("ref") == {1: {(-1.5, 2, 3, -4.5)}}
+    assert (-1.5, 2, 3, -4.5) not in rq.old_roads("ref")[1] and (1, 2, 3, 4, 5, 6) in rq.old_roads("ref")[1]
+    assert (0, 100, 0, 200) in rq.old_roads("ref")[1] and (0, 0, 0, 5) in rq.old_roads("ref")[1]  # (ns.Roads', caves')
+
+
+def test_a_trip_onto_the_roads_up_a_new_trail_is_onto_roads_not_worse():
+    # #875, Cragpool Lake: the older route walked 1,785 yd west over the land to Sun Rock Retreat (the road above, 135 yd
+    # off, up a cliff); Kooki3z's recorded trail up the cliff made that road reachable, and the router took the roads,
+    # 2,595 yd (1.45 times: under Router.ROAD_DIRECT_PENALTY's 2), the trip 700 s to 811 s. A stretch more than twice
+    # as long, a trip slower by a greater share than its stretch grew, an older stretch along the roads (not a walk over
+    # the land), a new one never on a changed road, or other rides: still worse.
+    trail = (0.0, 100.0, 50.0, 150.0)
+    changed = {1: {trail}}
+    roads = {1: {(50.0, 150.0, 400.0, 400.0, 1000.0, 400.0), (1000.0, 0.0, 1000.0, 400.0)}}
+    walk = _pts((0, 0), (500, 0), (1000, 0))  # (1,000 yd over the land)
+    up = _pts((0, 0), (0, 100), (50, 150), (400, 400), (1000, 400), (1000, 0))  # (1,601 yd: the trail, the roads)
+    beside = [[c, x + 5, y] for c, x, y in up]  # (5 yd off the trail and its ends)
+    old_yd, new_yd = rq.stretch_yards(walk, up)
+    assert round(old_yd) == 1000 and 1.35 * old_yd < new_yd <= old_yd * rq.ROAD_DIRECT_PENALTY
+    assert rq.share_along(walk, roads) == 0 and rq.share_along(up, roads) > 0.5
+
+    def compare(before_pts, after_pts, after_secs, rides=(), ch=changed, rd=roads):
+        return rq.compare([{**_row(1, 700), "pts": before_pts}],
+                          [{**_row(1, after_secs, rides), "pts": after_pts}], ch, None, None, rd)
+
+    res = compare(walk, up, 811)
+    assert [r["trip"] for r in res["onto_roads"]] == ["trip 1"] and not res["worse"] and not res["redrawn"]
+    assert (res["onto_roads"][0]["stretch_before"], res["onto_roads"][0]["stretch_after"]) == (1000, 1601)
+    far = up[:-1] + _pts((1000, -700), (1000, 0))  # (3,001 yd: past twice the walk)
+    on_roads = _pts((0, 0), (1000, 0)), _pts((0, 0), (0, 100), (50, 150), (400, 400), (1000, 400), (1000, 0))
+    for before, after, secs, rides, ch, rd in ((walk, up, 1150, (), changed, roads), (walk, far, 811, (), changed, roads),
+                                               (walk, beside, 811, (), changed, roads),
+                                               (walk, up, 811, ("flight",), changed, roads),
+                                               (on_roads[0], on_roads[1], 811, (), changed, {1: {(0.0, 0.0, 1000.0, 0.0)}}),
+                                               (walk, up, 811, (), changed, None)):
+        res = compare(before, after, secs, rides, ch, rd)
+        assert [r["trip"] for r in res["worse"]] == ["trip 1"] and not res["onto_roads"]
+
+
 def test_wall_lines_are_ns_walls_per_continent_and_new_walls_cross_routes():
     text = ROADS.replace("    {1,2,3,4},\n", "    {1,2,3,4},\n    {0,-5,0,5, z = 12.5},\n")
     assert rq.wall_lines(text) == {1: {(1, 2, 3, 4), (0, -5, 0, 5)}}  # (no road, no height)
