@@ -136,7 +136,7 @@ def test_x_pops_out_the_icons_and_the_d_pad_moves_over_them_from_the_first(padme
     assert G.QuestWaysOpen() and len(ns.Nav.stops) == 0
     same = lua.eval("rawequal")
     icons = _icons(ns)
-    assert len(icons) == 8 and same(P.focus, icons[0]) and _sel(ns) == "fastest"
+    assert len(icons) == 7 and same(P.focus, icons[0]) and _sel(ns) == "fastest"
     assert P.ring._shown and same(P.ring.GetParent(P.ring), icons[0])  # (the map menu's gold ring round it)
     # the map menu's own list is the icons now, as with Quick Find out (Pad.Move(0) comes back to the first)
     mb = P.MenuButtons()
@@ -145,11 +145,11 @@ def test_x_pops_out_the_icons_and_the_d_pad_moves_over_them_from_the_first(padme
     # the hints now: A's over the icon in focus, B's over the button it goes back to
     _tick_hints(lua, P, 0.1)
     assert set(_hints_on(lua, ns, icons[0])) == {"select"} and set(_hints_on(lua, ns, qr)) == {"back"}
-    # up and right the next, down and left the one before, round at the ends (8: the seven toggles and the options)
+    # up and right the next, down and left the one before, round at the ends (7: six toggles and the options)
     _press(lua, "PADDUP")
     _press(lua, "PADDRIGHT")
     _press(lua, "PADDUP")
-    assert _sel(ns) == "turnins" and same(P.focus, icons[3])
+    assert _sel(ns) == "objectives" and same(P.focus, icons[3])
     _press(lua, "PADDDOWN")
     _press(lua, "PADDLEFT")
     _press(lua, "PADDDOWN")
@@ -168,7 +168,7 @@ def test_a_toggles_the_icon_in_focus_and_they_stay_out(padmenu):
     same = lua.eval("rawequal")
     qr = _focus_qr(lua, ns)
     _press(lua, "PAD3")
-    for _ in range(5):
+    for _ in range(4):
         _press(lua, "PADDUP")
     assert _sel(ns) == "tracked"
     tracked = P.focus
@@ -190,7 +190,7 @@ def test_a_toggles_the_icon_in_focus_and_they_stay_out(padmenu):
     assert _names(ns) == ["Turn in: Letter"]
     _focus_qr(lua, ns)
     _press(lua, "PAD3")
-    for _ in range(3):
+    for _ in range(2):
         _press(lua, "PADDUP")
     _press(lua, "PAD1")  # (Turn-ins only off: every quest again)
     assert G.QuestWaysOpen() and st.questTurninsOnly is False and len(_names(ns)) == 4

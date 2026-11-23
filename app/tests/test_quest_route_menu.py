@@ -9,8 +9,9 @@ button, expand into more icons with on/off toggles".
 
 - Left-click: the quest route by the saved Quest Route options. Right-click: round icon buttons (Quick Find's,
   G.NewRoundButton; never the game's menus: issue #887) out from the button the way Quick Find's go, one each for
-  Fastest order, Lowest level first, About to turn gray first, Turn-ins only, Objectives only, Tracked quests only,
-  This zone only, and Quest Route options. On: full color in a lit gold ring; off: gray and dimmed. A tooltip each: its
+  Fastest order, Lowest level first, Turn-ins only, Objectives only, Tracked quests only, This zone only, and Quest
+  Route options (About to turn gray first: Options and /agps questroute gray only, Kooki3z 2026-11-22; set, Fastest
+  order and Lowest level first both show off). On: full color in a lit gold ring; off: gray and dimmed. A tooltip each: its
   name, what it does, On or Off.
 - Each toggle is a saved setting (QuestWays.lua): Options > Routing > Quest Route is its home, the icons a second
   control; one changes the other. Groups: the level order (Fastest order = neither), and turn-ins only / objectives
@@ -30,16 +31,25 @@ from test_map_redraw import MM_SETUP, MM_TEARDOWN, _expand_setup, _tick
 from test_quest_route_choices import BRILL, _names, _order, game, quests  # noqa: F401
 
 WAYS = ["fastest", "low", "gray", "turnins", "objectives", "tracked", "zone"]
+ICON_WAYS = [w for w in WAYS if w != "gray"]  # (the flyout's toggles)
 ALL4 = ["Boars", "Spiders", "Turn in: Letter", "Wolves"]
 ICONS = {
     "fastest": "Interface\\Icons\\INV_Boots_02",
     "low": "Interface\\Icons\\Spell_ChargePositive",
-    "gray": "Interface\\Icons\\INV_Misc_Bone_HumanSkull_01",
     "turnins": "Interface\\GossipFrame\\ActiveQuestIcon",
     "objectives": "Interface\\GossipFrame\\AvailableQuestIcon",
     "tracked": "Interface\\Icons\\INV_Misc_Eye_01",
     "zone": "Interface\\Icons\\INV_Misc_Map_01",
     "options": "Interface\\Icons\\INV_Misc_Gear_01",
+}
+TIPS = {
+    "fastest": "Visits your quests in the quickest order.",
+    "low": "Visits your lowest-level quests first.",
+    "turnins": "Only goes to quests that are ready to turn in.",
+    "objectives": "Only goes to quest objectives, not turn-ins.",
+    "tracked": "Only goes to the quests you're tracking.",
+    "zone": "Only goes to quests in the zone you're in.",
+    "options": "Opens the Quest Route settings.",
 }
 
 
@@ -134,7 +144,7 @@ def test_right_click_pops_out_the_toggle_icons_and_left_click_is_the_route_by_th
     _right_click(ns)
     assert G.QuestWaysOpen() and len(N.stops) == 0  # (the icons only: no route yet)
     icons = _icons(ns)
-    assert [str(i.id) for i in icons] == WAYS + ["options"]
+    assert [str(i.id) for i in icons] == ICON_WAYS + ["options"]
     for i in icons:
         # Quick Find's round buttons: the round frame and a round icon, on the button's own parent, its picture each
         assert i.agpsArt is not None and i.agpsArt.units == 26 and i.agpsArt.mask is not None
@@ -213,7 +223,13 @@ def test_the_tooltips_name_say_what_and_on_or_off(menu):
         lines.clear()
         i = _icon(ns, "fastest")
         i._scripts.OnEnter(i)
-        assert lines[1] == ("line", "Your quests in the fastest order, whatever their level. Turns off the level orders.")
+        assert lines[1] == ("line", TIPS["fastest"])
+        # each icon its own short line (Kooki3z: the Options page's longer text "made no sense" here)
+        for way, tip in TIPS.items():
+            lines.clear()
+            i = _icon(ns, way)
+            i._scripts.OnEnter(i)
+            assert lines[1] == ("line", tip), way
         # clicked: its tooltip says so at once
         lines.clear()
         t = _icon(ns, "turnins")
@@ -226,7 +242,7 @@ def test_the_tooltips_name_say_what_and_on_or_off(menu):
         o = _icon(ns, "options")
         o._scripts.OnEnter(o)
         assert lines[0] == ("title", "Quest Route options...") and ("line", "On") not in lines
-        assert ("line", "Off") not in lines and "Options > Routing > Quest Route" in lines[1][1]
+        assert ("line", "Off") not in lines and lines[1] == ("line", "Opens the Quest Route settings.")
     finally:
         lua.execute("GameTooltip.SetText, GameTooltip.AddLine = AGPS_OLD_TIP.S, AGPS_OLD_TIP.A")
 
@@ -275,30 +291,48 @@ def test_the_level_order_and_fastest(menu):
     lua, ns = menu
     st = ns.settings.gps
     _right_click(ns)
-    order = ["fastest", "low", "gray"]
+    order = ["fastest", "low"]
     assert [w for w in order if w in _checked(ns)] == ["fastest"]
     # Fastest order clicked while on: stays on, nothing changes
     _pick(ns, "fastest")
     assert st.questLevelOrder == "off" and [w for w in order if w in _checked(ns)] == ["fastest"]
-    # a level order on: Fastest off; the other level order turns it off
+    # Lowest level first on: Fastest off
     _pick(ns, "low")
     assert st.questLevelOrder == "low" and [w for w in order if w in _checked(ns)] == ["low"]
-    _pick(ns, "gray")
-    assert st.questLevelOrder == "gray" and [w for w in order if w in _checked(ns)] == ["gray"]
-    # Fastest order on: both level orders off
+    # Fastest order on: the level order off
     _pick(ns, "fastest")
     assert st.questLevelOrder == "off" and [w for w in order if w in _checked(ns)] == ["fastest"]
-    # a level order turned off by itself: Fastest again
-    _pick(ns, "gray")
-    _pick(ns, "gray")
+    # turned off by itself: Fastest again
+    _pick(ns, "low")
+    _pick(ns, "low")
     assert st.questLevelOrder == "off" and [w for w in order if w in _checked(ns)] == ["fastest"]
+
+
+def test_about_to_turn_gray_is_options_only(menu):
+    # (Kooki3z 2026-11-22: off the flyout; Options and /agps questroute gray keep it)
+    lua, ns = menu
+    G, st = ns.GPS, ns.settings.gps
+    _right_click(ns)
+    assert "gray" not in [str(i.id) for i in _icons(ns)] and len(_icons(ns)) == 7
+    # set in Options (or by the slash command): Fastest order and Lowest level first both off, it's neither
+    lua.eval("function(m) SlashCmdList.AZEROTHGPS(m) end")("questroute gray")
+    assert st.questLevelOrder == "gray" and G.QuestWaysOpen()
+    assert [w for w in ("fastest", "low") if w in _checked(ns)] == []
+    # Lowest level first from there: "low"; Fastest order: "off"
+    _pick(ns, "low")
+    assert st.questLevelOrder == "low" and [w for w in ("fastest", "low") if w in _checked(ns)] == ["low"]
+    st.questLevelOrder = "gray"
+    G.RefreshQuestWays()
+    assert [w for w in ("fastest", "low") if w in _checked(ns)] == []
+    _pick(ns, "fastest")
+    assert st.questLevelOrder == "off" and [w for w in ("fastest", "low") if w in _checked(ns)] == ["fastest"]
 
 
 def test_this_zone_only_combines_with_anything(menu):
     lua, ns = menu
     _right_click(ns)
     _pick(ns, "zone")
-    for w in ("low", "turnins", "gray", "objectives", "tracked", "fastest"):
+    for w in ("low", "turnins", "objectives", "tracked", "fastest"):
         _pick(ns, w)
         assert "zone" in _on(ns) and w in _on(ns), w
     assert _on(ns) == ["fastest", "tracked", "zone"] and _checked(ns) == ["fastest", "tracked", "zone"]
@@ -399,12 +433,15 @@ def test_the_options_page_and_the_icons_stay_in_sync(menu):
         click("questZoneOnly", False)
         assert "zone" not in _checked(ns)
         # the level order's choice, both ways
-        _pick(ns, "gray")
         radios = ctl["questLevelOrder"]
-        assert [bool(radios[i].GetChecked(radios[i])) for i in range(1, len(radios) + 1)] == [False, False, True]
+        r = radios[3]  # (About to turn gray first: Options only; both flyout orders off)
+        r._scripts.OnClick(r)
+        assert st.questLevelOrder == "gray" and [w for w in ("fastest", "low") if w in _checked(ns)] == []
         r = radios[2]  # (Lowest level first)
         r._scripts.OnClick(r)
         assert st.questLevelOrder == "low" and [w for w in ("fastest", "low", "gray") if w in _checked(ns)] == ["low"]
+        _pick(ns, "fastest")
+        assert [bool(radios[i].GetChecked(radios[i])) for i in range(1, len(radios) + 1)] == [True, False, False]
     finally:
         lua.execute("if AzerothGPSOptions then AzerothGPSOptions:Hide() end")
 
@@ -512,7 +549,7 @@ def test_with_the_controller_ui_the_icons_are_our_own(menu):
         G.questWays = None  # (made afresh under the controller UI)
         _left_click(ns)
         _right_click(ns)
-        assert G.QuestWaysOpen() and lua.eval("AGPS_GAME_MENUS") == 0 and len(_icons(ns)) == 8
+        assert G.QuestWaysOpen() and lua.eval("AGPS_GAME_MENUS") == 0 and len(_icons(ns)) == 7
         _pick(ns, "tracked")
         assert _names(ns) == ["Spiders", "Wolves"] and lua.eval("AGPS_GAME_MENUS") == 0
         assert "tracked" in _checked(ns)
@@ -606,7 +643,7 @@ def test_it_works_in_world_map_mode(menu):
         assert G.WorldMapHosted()
         _left_click(ns)
         _right_click(ns)
-        assert G.QuestWaysOpen() and len(_icons(ns)) == 8
+        assert G.QuestWaysOpen() and len(_icons(ns)) == 7
         assert all(same(i.GetParent(i), _qr(ns).GetParent(_qr(ns))) for i in _icons(ns))
         _pick(ns, "tracked")
         assert _names(ns) == ["Spiders", "Wolves"] and "tracked" in _checked(ns)
@@ -631,7 +668,7 @@ def test_it_works_on_the_map_grown_out_of_the_minimap_square(menu):
         assert G.mmState.expanded
         _left_click(ns)
         _right_click(ns)
-        assert G.QuestWaysOpen() and len(_icons(ns)) == 8
+        assert G.QuestWaysOpen() and len(_icons(ns)) == 7
         _pick(ns, "turnins")
         assert _names(ns) == ["Turn in: Letter"] and "turnins" in _checked(ns)
     finally:
@@ -678,7 +715,7 @@ def test_the_toggles_survive_a_reload(game):
             st[k] = v
         _right_click(ns)
         _pick(ns, "objectives")
-        _pick(ns, "gray")
+        _pick(ns, "low")
         _pick(ns, "zone")
         G.CloseQuestWays()
         # (the saved variable's settings, written out as plain values)
@@ -690,10 +727,10 @@ def test_the_toggles_survive_a_reload(game):
           end
           return "AzerothGPSDB = { settings = { gps = { " .. table.concat(out, ", ") .. " } } }"
         end""")()
-        assert "questObjectivesOnly = true" in saved and 'questLevelOrder = "gray"' in saved
+        assert "questObjectivesOnly = true" in saved and 'questLevelOrder = "low"' in saved
         lua2, ns2 = start(saved=saved)
-        assert [w for w in WAYS if ns2.GPS.QuestToggleOn(w)] == ["gray", "objectives", "zone"]
+        assert [w for w in WAYS if ns2.GPS.QuestToggleOn(w)] == ["low", "objectives", "zone"]
         _right_click(ns2)
-        assert _checked(ns2) == ["gray", "objectives", "zone"]
+        assert _checked(ns2) == ["low", "objectives", "zone"]
     finally:
         (st.questLevelOrder, st.questZoneOnly, st.questTrackedOnly, st.questTurninsOnly, st.questObjectivesOnly) = was

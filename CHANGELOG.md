@@ -12,7 +12,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Roads: new roads and stairs in Ironforge.
 - For plugin addons (API 23): set the route to a place, and preview a recorded walk as the route. See docs/api.md.
 - Roads: the trail up from Cragpool Lake in Stonetalon Mountains.
-- Quest Route: right-click the button and toggle icons pop out, like Quick Find's: fastest order, lowest level first, about to turn gray first, turn-ins only, objectives only, tracked quests only, this zone only. Lit means on. A quest route remakes itself as you change them.
+- Quest Route: right-click the button and toggle icons pop out, like Quick Find's: fastest order, lowest level first, turn-ins only, objectives only, tracked quests only, this zone only. Lit means on. A quest route remakes itself as you change them.
 - Quest Route: with a controller, the button's hint switches between the buttons that route and that open the toggles; move through them with the D-pad, A turns one on or off.
 - Near an NPC you picked in the search as your next stop, a pulsing Target button (Hunter's Mark's icon) in the directions targets it with your click and marks it with the stop's route marker (also a key; Options > Directions).
 - Zephras Isle: its vendors, trainers, innkeepers and other NPCs are in the search and Quick Find before you've talked to them.
