@@ -24,6 +24,8 @@ Each version's section is its release notes (GitHub and CurseForge).
 - The Target button now marks the NPC with the stop's route marker too; it only targeted it.
 - A new stop's marker no longer shows as a gray cog for a moment.
 - Setting a route, the map zooms out to show it only once the route is drawn, not while it's still being worked out.
+- A stop inside a dungeon or raid routes to its entrance: the distance and time are to the portal, not the walk inside.
+- Clicking a dungeon or raid with no map yet (Nightmare Grove) does nothing; its tooltip says the map is coming soon.
 
 ## 1.3.14
 

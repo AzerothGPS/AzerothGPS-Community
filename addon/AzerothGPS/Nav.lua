@@ -3306,6 +3306,40 @@ function N.WithoutBlockedWalks(cont, sx, sy, d, walk, tps, opts, sz, legs, route
   return bestLegs, bestRoutes
 end
 
+-- Whether level `lvl` is a dungeon's or a raid's (Data/Instances.lua), not a map between places (the Deeprun Tram's).
+function N.IsInstanceLevel(lvl)
+  local l = lvl and ns.CityLevels and ns.CityLevels[lvl]
+  return (l and l.instance and not l.transit) and true or false
+end
+
+-- A stretch's legs without what's inside a dungeon or raid the player isn't in (`here`: the instance level they're in,
+-- or nil): its walks and the portal in, the stretch ending at the portal (asked 2026-11-23, Kooki3z 11 yd from the
+-- Deadmines' portal with a stop inside: "853 yd, 2m 17s" counted the walk inside; "routing to a spot in the dungeon
+-- should only ever lead to the dungeon entrance". The position is hidden in there, so the walk inside is the dungeon's
+-- map's, once in). The portal out of one stays: the way on from it. Returns legs, routes and, for a stop inside one,
+-- { level, ride, from } (the portal in, when it's this stretch's): Steps' "Then inside", the panel's "Board the portal".
+function N.OutsideInstances(legs, routes, d, here)
+  local function Away(c) return c ~= here and N.IsInstanceLevel(c) end
+  local keep, keepRoutes, ride, from = {}, {}, nil, nil
+  for li, leg in ipairs(legs) do
+    local drop
+    if leg.ride then
+      drop = Away(leg.from == 2 and leg.ride[1] or leg.ride[4])
+      if drop and not ride then ride, from = leg.ride, leg.from end
+    else
+      drop = Away(leg.cont)
+    end
+    if not drop then
+      keep[#keep + 1] = leg
+      keepRoutes[#keep] = routes and routes[li]
+      ride, from = nil, nil -- (only the portal after the last leg kept: the one into the stop's)
+    end
+  end
+  local inside = Away(d.cont) and { level = d.cont, ride = ride, from = from } or nil
+  if #keep == #legs then return legs, routes, inside end
+  return keep, keepRoutes, inside
+end
+
 N.INTERIM_WALK_SHARE = 2
 local function Stretch(cont, sx, sy, d, walk, opts, sz)
   -- from the player's position: the teleports ready now may start the trip
@@ -3352,6 +3386,8 @@ local function Stretch(cont, sx, sy, d, walk, opts, sz)
   local memo = {}
   routes = routes or WalkRoutes(legs, sx, sy, d, opts, sz, memo)
   legs, routes = N.WithoutBlockedWalks(cont, sx, sy, d, walk, tps, opts, sz, legs, routes, memo)
+  local inside
+  legs, routes, inside = N.OutsideInstances(legs, routes, d, opts.here)
   -- (a walk with no way there, the Router's `noWay`: a line through a wall or over blocked ground with
   -- no roads or walk round: none, "No way there found", rather than that line drawn; a broken road
   -- network drew one over the mountains from Ironforge, 2026-10-01)
@@ -3372,7 +3408,7 @@ local function Stretch(cont, sx, sy, d, walk, opts, sz)
       return nil
     end
   end
-  local st = { parts = {}, legs = legs, first = 0, walk = 0, ride = 0, road = 0 }
+  local st = { parts = {}, legs = legs, first = 0, walk = 0, ride = 0, road = 0, inside = inside }
   local rode = false
   for li, leg in ipairs(legs) do
     if leg.ride then
@@ -3583,7 +3619,8 @@ local function RideOn(px, py, cont, walk, offroad, L, key, path, secs, row, info
   end
   local legs = { { ride = row, from = 1 } }
   for _, leg in ipairs(rest.legs) do legs[#legs + 1] = leg end
-  local first = { parts = parts, legs = legs, first = 0, walk = rest.walk, ride = secs + rest.ride, road = rest.road }
+  local first = { parts = parts, legs = legs, first = 0, walk = rest.walk, ride = secs + rest.ride, road = rest.road,
+    inside = rest.inside }
   local stretches = { first }
   local yards, ride = rest.walk, secs + rest.ride
   for i = 2, N.PlannedStops() do
@@ -3796,7 +3833,7 @@ local function FillLater(walk, offroad, budget)
     if budget <= 0 then break end
     if not later.done[i] then
       local a = N.stops[i - 1]
-      local opts = { offroad = offroad }
+      local opts = { offroad = offroad, here = later.here } -- (the instance the player's in: N.OutsideInstances)
       opts.fixed = { offroad = offroad }
       if later.tp and later.tp[i] then opts.teleports = TeleportsFrom(a.cont, a.x, a.y, { [later.tp[i]] = true }) end
       later[i] = Stretch(a.cont, a.x, a.y, N.stops[i], walk, opts, N.StopZ(a)) or false
@@ -4021,14 +4058,16 @@ end
 -- each call), assembled; nil when there's no way.
 local function Compute(px, py, cont, d, offroad)
   local _, walk = N.Speeds()
-  local key = version .. ":" .. tostring(offroad)
-  if later.key ~= key then later = { key = key, done = {} } end
+  -- (the dungeon or raid the player's in: its insides routed, the others' left out, N.OutsideInstances)
+  local here = N.IsInstanceLevel(cont) and cont or nil
+  local key = version .. ":" .. tostring(offroad) .. ":" .. tostring(here)
+  if later.key ~= key then later = { key = key, done = {}, here = here } end
   local tps = AssignTeleports(cont, px, py, d, walk)
   if ns.Router.Breathe then ns.Router.Breathe(1, 1) end -- (in a background job: a pause between the parts)
   local t1 = ns.PerfStart and ns.PerfStart()
   N.noWayCliff = nil -- (set again by the stretches: no way but a cliff)
   local first = Stretch(cont, px, py, d, walk, { offroad = offroad, transient = true, fixed = { offroad = offroad },
-    teleports = tps, indoors = N.Indoors(), swimming = N.Swimming(),
+    teleports = tps, indoors = N.Indoors(), swimming = N.Swimming(), here = here,
     z = N.PlayerZ() or N.TrackCityZ(cont, px, py) or N.TrackRaisedZ(cont, px, py) })
   if t1 then ns.PerfEnd("route calculation: next stop", t1) end
   if not first then return nil end
@@ -4114,7 +4153,7 @@ function Rejoin(old, px, py, cont, offroad)
   local parts = { part }
   for k = 2, #f0.parts do parts[k] = f0.parts[k] end
   local first = { parts = parts, legs = legs, first = f0.first - total + newLen, walk = f0.walk - total + newLen,
-    ride = f0.ride, road = f0.road, pending = lr.pending or f0.pending }
+    ride = f0.ride, road = f0.road, pending = lr.pending or f0.pending, inside = f0.inside }
   local _, walk = N.Speeds()
   return Assemble(first, px, py, cont, walk, offroad)
 end
@@ -4223,7 +4262,7 @@ function N.Route(px, py, cont)
   -- background (they don't depend on the player; a far pair of stops was 40 to 85 ms in the frame, the
   -- overnight sweeps' replay); in the tests, in the frame as before.
   if r and not r.flying and r.firstStretch and r.version == version and r.offroad == offroad and not N.degraded
-      and later.key == version .. ":" .. tostring(offroad) and LaterMissing() then
+      and later.key == version .. ":" .. tostring(offroad) .. ":" .. tostring(later.here) and LaterMissing() then
     if ns.Router.WARM and not ns.Router.SYNC_WALKS then
       ns.Router.Background("later:" .. version .. ":" .. tostring(offroad), function()
         local _, walk = N.Speeds()
@@ -4875,6 +4914,13 @@ local function NextRide(route, px, py)
       return t, from, atDock
     end
   end
+  -- (a stop in a dungeon the player isn't in: the route ends at its portal, N.OutsideInstances)
+  local inside = route.firstStretch and route.firstStretch.inside
+  local t = inside and inside.ride
+  if t then
+    local bx, by = inside.from == 1 and t[2] or t[5], inside.from == 1 and t[3] or t[6]
+    return t, inside.from, #route.legs <= 1 and math.sqrt((px - bx) ^ 2 + (py - by) ^ 2) <= N.DOCK_YD
+  end
 end
 
 -- The teleport to use now: the route's first step (the hearthstone, a teleport, an engineer's
@@ -5316,10 +5362,16 @@ function N.Steps()
           if last then left = last.yd end
           local dist = N.FormatDistance(left)
           local time = last and SwimTime(last) or (count > 1 and took or "")
+          -- (a stop in a dungeon the player isn't in: the walk to its portal, N.OutsideInstances)
+          -- (named by the dungeon: "to the portal (Deadmines)")
+          local into = not nxt and st.inside and st.inside.ride
+          if into then nxt = { ride = into, from = st.inside.from } end
           if nxt and nxt.ride then
             local t = nxt.ride
             local at = N.WALK_TO[t[11] or t[8]]
-            local here = ns.RideEndName(t, nxt.from == 1 and 1 or 2)
+            local e = nxt.from == 1 and 1 or 2
+            if into then e = 3 - e end -- (its far end, the dungeon)
+            local here = ns.RideEndName(t, e)
             steps[#steps + 1] = last and last.swim and Format(L["Swim %s to %s"], dist, here) .. time
               or (at and Format(at, dist, here) or Format(L["Walk %s to the %s (%s)"], dist, t[11] or t[8], here))
                 .. (last and time or "")
@@ -5331,6 +5383,8 @@ function N.Steps()
           for _, h in ipairs(after) do Detour(h) end
         end
       end
+      -- (the way on inside a dungeon or raid: the dungeon's map's, once in; just what's next)
+      if st.inside then steps[#steps + 1] = Format(L["Then inside: %s"], StopLabel(i, d, count)) end
     end
   end
   -- the stops after those routed (the option: stops routed and drawn ahead): listed too, not worked
