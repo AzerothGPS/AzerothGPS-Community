@@ -2559,3 +2559,61 @@ def test_the_pause_hint_shows_over_the_glowing_button_only_while_paused_with_a_c
         N.dest = None
         _defaults_off(lua)
         P.ResetBinds()
+
+
+def test_the_show_hide_keys_set_key_takes_a_controller_button_too(pad):
+    # (a player's report for 1.3.14: "no way to bind opening the map to a controller button through the menus"; Options >
+    # Keys and buttons' Set Key took keyboard keys only. Now it waits for a controller button as well, Pad's capture: the
+    # button pressed is the game's Show/Hide key, saved; Escape or B held cancels as the keyboard's Escape does)
+    lua, ns = pad
+    O, P = ns.Options, ns.Pad
+    _game_keys(lua, game={"PADBACK": "TOGGLEGAMEMENU"})
+    lua.execute("AGPS_SAVED = 0 SaveBindings = function() AGPS_SAVED = AGPS_SAVED + 1 end "
+                "GetCurrentBindingSet = function() return 1 end")
+    O.Show()
+    holder = O.keyBinds[O.BINDING]
+    b = holder.button
+    try:
+        b._scripts.OnClick(b, "LeftButton")
+        assert P.Capturing() == "toggle" and "button" in str(b._text)
+        _tap(lua, P, "PADFORWARD")  # (Start: nothing of the game's on it)
+        assert lua.eval("AGPS_SETBIND.PADFORWARD") == "AZEROTHGPS_TOGGLE" and lua.eval("AGPS_SAVED") > 0
+        assert P.Capturing() is None and str(b._text) == "Start"
+        assert "Start opens and closes the map" in str(holder.msg._text)
+        # a keyboard key as well: the button kept, both show it
+        b._scripts.OnClick(b, "LeftButton")
+        b._scripts.OnKeyDown(b, "M")
+        assert P.Capturing() is None  # (the key taken: the controller's wait over too)
+        assert lua.eval("AGPS_SETBIND.M") == "AZEROTHGPS_TOGGLE"
+        assert lua.eval("AGPS_SETBIND.PADFORWARD") == "AZEROTHGPS_TOGGLE"
+        # Escape cancels both waits; B held cancels the controller's (and the keyboard's) wait
+        b._scripts.OnClick(b, "LeftButton")
+        b._scripts.OnKeyDown(b, "ESCAPE")
+        assert P.Capturing() is None and "button" not in str(b._text)
+        b._scripts.OnClick(b, "LeftButton")
+        _hold(lua, "PAD2")
+        P.CaptureTick()
+        lua.execute("AGPS_T = AGPS_T + %s" % (P.CANCEL_HOLD + 0.1))
+        P.CaptureTick()
+        _hold(lua, "PAD2", False)
+        assert P.Capturing() is None and "button" not in str(b._text)
+        assert lua.eval("AGPS_SETBIND.PAD2") is None and P.Key("toggle") == "PADFORWARD"
+        # with the game's controller UI on a button press can't open it (Pad.ToggleBlocked): a keyboard key only, said so
+        lua.execute("AGPS_CUI = AGPS_NS.GPS.ControllerUI AGPS_NS.GPS.ControllerUI = function() return true end")
+        try:
+            b._scripts.OnClick(b, "LeftButton")
+            assert P.Capturing() is None and "keyboard key only" in str(holder.msg._text)
+            b._scripts.OnKeyDown(b, "ESCAPE")
+        finally:
+            lua.execute("AGPS_NS.GPS.ControllerUI = AGPS_CUI")
+        # no controller: the keyboard's alone, as ever
+        lua.execute("AGPS_PAD.id = -1")
+        b._scripts.OnClick(b, "LeftButton")
+        assert P.Capturing() is None and str(b._text) == "Press a key..."
+        b._scripts.OnKeyDown(b, "ESCAPE")
+    finally:
+        lua.execute("AGPS_PAD.id = 1")
+        if P.Capturing():
+            P.CancelCapture()
+        P.ResetBinds()
+        _ungame(lua)

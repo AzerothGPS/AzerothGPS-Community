@@ -15102,7 +15102,10 @@ function G.HookQuestMenus()
   local M = rawget(_G, "Menu")
   if not (type(M) == "table" and type(M.ModifyMenu) == "function") then return false end
   G.questMenus = true
+  -- (and looked at again each time a menu opens: the controller UI turned on after login, the menus were hooked with
+  -- it off and kept getting the entry, a player's report for 1.3.14, an error abandoning a quest with the controller)
   local function Add(root, quest)
+    if G.ControllerUI() then return end
     pcall(function()
       root:CreateDivider()
       root:CreateButton(L["Route Here"], function() G.RouteToQuest(quest()) end)
@@ -15130,6 +15133,14 @@ function G.HookQuestMenus()
   return true
 end
 G.QUEST_TRACKERS = { "QuestObjectiveTracker", "CampaignQuestObjectiveTracker" }
+-- The Route Here button made with the controller UI off, then the controller UI turned on: hidden while it's on (our own
+-- button, hidden from our own check, Pad.lua's driver; never from the game panel's showing), shown again once it's off.
+function G.SyncRouteHere()
+  local b = G.routeHereBtn
+  if not b then return end
+  local want = not G.ControllerUI()
+  if b:IsShown() ~= want then b:SetShown(want) end
+end
 function G.InitRouteHere()
   if G.clone then return end -- (the second map, the square beside the world map's: the first one's are the ones)
   local function Try()
@@ -18341,18 +18352,49 @@ function G.QuickFindEntries()
   end
   return out
 end
--- The nearest search entry of generic `kind` (an NPC, or a city place of it): on the player's continent nearest
--- first, else the first found. Nil when there's none.
+-- The nearest search entry of generic `kind` (an NPC, or a city place of it) on the player's continent or island
+-- (its yards known, `yd`). Nil when there's none. None there but some elsewhere (a player's report, 1.3.14: on Zephras
+-- Isle, an island of its own, "nearest" innkeeper, vendor or class trainer was a mainland one and routed off the
+-- isle): nil and the first of those, never the stop; the player is told (G.QuickFindNoneHere). Where the player's
+-- spot isn't known, the first found.
 function G.QuickFindNearest(kind)
   local words = {}
   for w in kind:gmatch("%S+") do words[#words + 1] = w end
-  local best, memo, FAR = nil, {}, math.huge
+  local best, elsewhere, memo = nil, nil, {}
+  local px, _, pc = Geo.PlayerWorld()
   for _, e in ipairs(G.SearchPlacesPlain(kind, G.QUICK_FIND_MAX)) do
-    if e.x and e.cont and G.EntryKindTyped(words, e, memo) and (not best or (e.yd or FAR) < (best.yd or FAR)) then
-      best = e
+    if e.x and e.cont and G.EntryKindTyped(words, e, memo) then
+      if e.yd then
+        if not best or not best.yd or e.yd < best.yd then best = e end
+      elseif not (px and pc) then
+        best = best or e
+      else
+        elsewhere = elsewhere or e
+      end
     end
   end
-  return best
+  if best then return best end
+  return nil, elsewhere
+end
+-- The name of the land level `level` is on: its continent's ("Kalimdor"), else the one zone of an island with no
+-- continent map ("Zephras Isle"), in the game's language; nil when there's no map of it.
+function G.LandName(level)
+  local base = level and Geo.Base(level)
+  local bestId, bestType
+  for id, m in pairs(ns.Maps or {}) do
+    if m.continent == base and (m.type == 2 or m.type == 3) then
+      if not bestId or m.type < bestType or (m.type == bestType and id < bestId) then bestId, bestType = id, m.type end
+    end
+  end
+  return bestId and ns.ZoneName(bestId, ns.Maps[bestId].name) or nil
+end
+-- Said in chat when Quick Find (or a search button) finds none of `label` where the player is, only elsewhere: no
+-- route off the continent or island; the search lists the others.
+function G.QuickFindNoneHere(label)
+  local _, _, pc = Geo.PlayerWorld()
+  local land = G.LandName(pc) or (GetRealZoneText and GetRealZoneText()) or "?"
+  ns.Print(Format(L["Quick Find: no %s known on %s, so no route off it. Search Places lists the ones elsewhere."],
+    label, land))
 end
 function G.ToggleQuickFind() return G.SetQuickFindOpen(not G.quickFindOpen) end
 -- Open or shut; `sub`: the entry whose own flyout is out too (Ammo). Not while another addon holds the map.
@@ -18378,10 +18420,10 @@ function G.QuickFindClick(e)
     G.SetQuickFindOpen(false)
     return ns.Searches.Run(e.row)
   end
-  local found = G.QuickFindNearest(e.kind)
+  local found, elsewhere = G.QuickFindNearest(e.kind)
   G.SetQuickFindOpen(false)
   if not found then
-    ns.Print(Format(L["Quick Find: nothing found for %s."], e.label))
+    if elsewhere then G.QuickFindNoneHere(e.label) else ns.Print(Format(L["Quick Find: nothing found for %s."], e.label)) end
     return nil
   end
   if G.PickSearchEntry then G.PickSearchEntry(found) end

@@ -2101,6 +2101,7 @@ do
       since = 0
       local ok, err = pcall(Pad.Apply)
       if not ok and ns.GPS and ns.GPS.LogError then ns.GPS.LogError("controller", err) end
+      if ns.GPS and ns.GPS.SyncRouteHere then pcall(ns.GPS.SyncRouteHere) end -- (the controller UI on: Route Here hidden)
     end
     if Pad.bound then
       local ok, err = pcall(Pad.Tick, dt)

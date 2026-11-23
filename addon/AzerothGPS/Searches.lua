@@ -221,7 +221,8 @@ function S.RestoreDefaults()
 end
 
 -- The search's top result for `text`, from where the player is: a common kind typed ("repair", "flight master") the
--- nearest of it (Quick Find's own way), else the search box's first. Nil: nothing found.
+-- nearest of it (Quick Find's own way), else the search box's first. Nil: nothing found; nil and true: of that kind
+-- only elsewhere, off the player's continent or island (G.QuickFindNearest; never routed off it, 1.3.14).
 function S.Top(text)
   local G = ns.GPS
   if not (G and G.SearchPlacesPlain) then return nil end
@@ -229,8 +230,9 @@ function S.Top(text)
   for w in G.SearchLower(text):gmatch("%S+") do words[#words + 1] = w end
   for _, k in ipairs(G.GENERIC_KINDS or {}) do
     if G.KindTyped(words, k) then
-      local found = G.QuickFindNearest(text)
+      local found, elsewhere = G.QuickFindNearest(text)
       if found then return found end
+      if elsewhere then return nil, true end
       break
     end
   end
@@ -243,9 +245,13 @@ end
 function S.Run(r)
   local G = ns.GPS
   if not G or G.Held() then return nil end
-  local found = S.Top(S.Text(r))
+  local found, elsewhere = S.Top(S.Text(r))
   if not found then
-    ns.Print(Format(L["Quick Find: nothing found for %s."], S.Name(r)))
+    if elsewhere and G.QuickFindNoneHere then
+      G.QuickFindNoneHere(S.Name(r))
+    else
+      ns.Print(Format(L["Quick Find: nothing found for %s."], S.Name(r)))
+    end
     return nil
   end
   if G.PickSearchEntry then G.PickSearchEntry(found) end

@@ -80,16 +80,18 @@ def test_undercity_a_height_another_level_and_npcs_not_shipped(tmp_path):
         _mark(100, 1510.0, 250.0, 1, level=10001, cont=0, z=-42.25),  # (down in Undercity, its floor followed)
         _mark(100, -900.0, -3000.0, 2, level=1, cont=1),  # (Kalimdor: no spawn there yet, added)
         _mark(999999, 1.0, 1.0, 3),  # (not shipped)
-        _mark(100, 1.0, 1.0, 4, level=2991, cont=2991),  # (Zephras Isle: no shipped NPCs there, never taken in)
+        _mark(100, 1.0, 1.0, 4, level=2991, cont=2991),  # (Zephras Isle: its NPCs shipped since 1.3.14, taken in)
+        _mark(100, 1.0, 1.0, 6, level=5000, cont=5000),  # (a level no NPC is shipped on: never taken in)
         {"id": "x", "x": 1, "y": 1, "time": 5},  # (not a mark)
     ], path)
     doc = npcspots.load(path)
-    assert sorted(s["time"] for v in doc["npcs"].values() for s in v) == [1, 2, 3]
+    assert sorted(s["time"] for v in doc["npcs"].values() for s in v) == [1, 2, 3, 4]
     npcs = _npcs()
     said = []
     applied = npcspots.apply(npcs, doc, log=said.append)
     assert npcs[100]["spawns"][2] == (10001, 1510.0, 250.0, -42.2)
     assert npcs[100]["spawns"][3] == (1, -900.0, -3000.0, 0.0) and (doc["npcs"]["100"][1], None) in applied[100]
+    assert (2991, 1.0, 1.0, 0.0) in npcs[100]["spawns"]
     assert 999999 not in npcs and "999999" in said[0]
 
 

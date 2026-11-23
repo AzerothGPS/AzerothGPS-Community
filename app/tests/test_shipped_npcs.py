@@ -33,7 +33,7 @@ def test_the_data_file_is_one_packed_string_of_friendly_npcs():
         sides[m.group(2)] = m.group(6)
         for spawn in m.group(7).split(";"):
             lv, x, y, z = spawn.split(" ")
-            assert int(lv) in (0, 1, 10001), line
+            assert int(lv) in (0, 1, 2991, 10001), line
             float(x), float(y), float(z)
     assert len(ids) == len(lines)  # (one line an NPC)
     assert sides["Innkeeper Renee"] == "H" and sides["Innkeeper Farley"] == "A" and sides["Thrall"] == "H"

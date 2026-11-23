@@ -16,7 +16,12 @@ both), and its spawns: level (the continent, or Undercity's 10001 down there as 
 Search only: nothing routed or drawn. Packed into one string (`ns.NpcsPacked`) the addon reads at its first search
 (Layers' `L.ShippedNpcs`), so the login costs nothing but the string.
 
-`agps npcs` reports; `--write` writes Data/Npcs.lua. Run it again when the dump changes.
+Zephras Isle (level 2991, WoW Forever's own island in the sky) isn't in the 1.12 dump: its NPCs come from ISLE_FILE,
+a snapshot of a WoW Forever world database's creature spawns there with something to offer (ISLE_SQL; numbers and
+names only), read by the same rules with that database's newer npcflag bits (ISLE_SERVICES). Without them the
+search found nothing of a kind on the isle and "nearest" sent the player off it (a player's report, 1.3.14).
+
+`agps npcs` reports; `--write` writes Data/Npcs.lua. Run it again when the dump or the snapshot changes.
 """
 from __future__ import annotations
 
@@ -50,6 +55,19 @@ PROFESSIONS = (("alchem", "Alchemy"), ("blacksmith", "Blacksmithing"), ("armor c
                ("physician", "First Aid"), ("surgeon", "First Aid"), ("fish", "Fishing"), ("herbal", "Herbalism"),
                ("leather", "Leatherworking"), ("miner", "Mining"), ("mining", "Mining"), ("skinn", "Skinning"),
                ("tailor", "Tailoring"))
+ISLE_FILE = Path(__file__).parent / "data" / "isle_npcs.tsv"
+ISLE = 2991
+# (the query the snapshot was made with, on a TrinityCore-style world database; its columns renamed as ISLE_FILE's)
+ISLE_SQL = ("SELECT c.guid, c.id, c.map, c.position_x, c.position_y, c.position_z, c.MovementType, t.name, t.subname, "
+            "t.faction, IF(c.npcflag <> 0, c.npcflag, t.npcflag), t.type, t.unit_flags, t.flags_extra "
+            "FROM creature c JOIN creature_template t ON t.entry = c.id "
+            "WHERE c.map = 2991 AND (t.npcflag <> 0 OR c.npcflag <> 0)")
+# that database's NPCFlags (newer than 1.12's) -> the services' letters
+ISLE_SERVICES = ((0x1, "g"), (0x2, "q"), (0x80, "v"), (0x2000, "f"), (0x10, "t"), (0x4000, "h"), (0x10000, "i"),
+                 (0x20000, "b"), (0x40000, "p"), (0x80000, "d"), (0x100000, "m"), (0x200000, "a"), (0x400000, "s"),
+                 (0x1000, "r"))
+ISLE_GUARD_FLAG = 0x8000  # (its flags_extra: a guard)
+CLASS_TRAINER = re.compile(r"^(Warrior|Paladin|Hunter|Rogue|Priest|Shaman|Mage|Warlock|Druid) Trainer$", re.I)
 NOISE = re.compile(r"\b(Trigger|DND|UNUSED|PH|Dummy|Visual|Invisible|Placeholder|Test|Bunny|Spawner)\b|Only GM|\[|\]",
                    re.I)
 
@@ -164,7 +182,73 @@ def build(data_dir: Path, ft: dict[int, dict] | None = None, undercity=None):
                 continue
             n["spawns"].append((level, x, y, z))
             report["kept"] += 1
+    _add_isle(npcs, report, ft, alliance, horde)
     return npcs, dict(report)
+
+
+def isle_rows(path: Path = ISLE_FILE) -> list[dict]:
+    """ISLE_FILE's rows (tab-separated, a header line)."""
+    lines = Path(path).read_text(encoding="utf-8").splitlines()
+    keys = lines[0].split("	")
+    return [dict(zip(keys, ln.split("	"))) for ln in lines[1:] if ln.strip()]
+
+
+def isle_services(flags: int) -> str:
+    return "".join(c for bit, c in ISLE_SERVICES if flags & bit)
+
+
+def isle_trainer_kind(flags: int, sub: str) -> str:
+    """A trainer's kind on the isle by its subname (the snapshot's trainer_class is 0 for all): "Mage Trainer" its
+    class's file name, a profession's by its word ("Alchemist", "Miner"), "Riding", "Pet"; "" for the rest."""
+    if not flags & 0x10:
+        return ""
+    m = CLASS_TRAINER.match(sub)
+    if m:
+        return m.group(1).upper()
+    low = sub.lower()
+    if "weapon master" in low:
+        return "Weapon"
+    if "pet trainer" in low:
+        return "Pet"
+    if "riding" in low:
+        return "Riding"
+    for word, prof in PROFESSIONS + (("herbalist", "Herbalism"), ("skinner", "Skinning"), ("medic", "First Aid")):
+        if word in low:
+            return prof
+    return ""
+
+
+def _add_isle(npcs, report, ft, alliance, horde, rows=None):
+    """Zephras Isle's NPCs (isle_rows) into `npcs`, by _left_out's rules: one already shipped (the Spirit Healer)
+    gets the isle's spawns too."""
+    for r in (rows if rows is not None else isle_rows()):
+        if int(r["map"]) != ISLE:
+            continue
+        f = ft.get(int(r["faction"]))
+        flags = int(r["npcflag"])
+        extra = int(r["flags_extra"])
+        t = {"Name": r["name"], "SubName": r["subname"] or "NULL", "NpcFlags": str(flags),
+             "CreatureType": r["type"], "UnitFlags": r["unit_flags"],
+             "ExtraFlags": str((GUARD_FLAG if extra & ISLE_GUARD_FLAG else 0) | (extra & INVISIBLE))}
+        why = _left_out(t, f, {"guid": r["guid"], "MovementType": r["movement"]}, {}, alliance, horde)
+        if why:
+            report[why] += 1
+            continue
+        x, y, z = (round(float(r[k]), 1) for k in ("x", "y", "z"))
+        n = npcs.get(int(r["id"]))
+        if n is None:
+            sub = r["subname"]
+            svc = isle_services(flags)
+            if "innkeeper" not in (r["name"] + " " + sub).lower():
+                svc = svc.replace("i", "")
+            n = npcs[int(r["id"])] = {"name": r["name"], "sub": sub, "svc": svc,
+                                      "trainer": isle_trainer_kind(flags, sub), "side": side(f, alliance, horde),
+                                      "spawns": []}
+        if any(sl == ISLE and math.hypot(sx - x, sy - y) <= SAME_YD for sl, sx, sy, _ in n["spawns"]):
+            report["same spot"] += 1
+            continue
+        n["spawns"].append((ISLE, x, y, z))
+        report["kept"] += 1
 
 
 def _left_out(t, f, s, events, alliance, horde) -> str | None:
@@ -218,7 +302,8 @@ def lua_text(npcs: dict) -> str:
         lines.append("|".join((str(i), n["name"], n["sub"], n["svc"], n["trainer"], n["side"], spawns)))
     body = "\n".join(lines)
     assert "]==]" not in body
-    out = ["-- GENERATED by `agps npcs --write` from the CMaNGOS dump's creatures. Do not edit by hand.",
+    out = ["-- GENERATED by `agps npcs --write` from the CMaNGOS dump's creatures and Zephras Isle's (isle_npcs.tsv).",
+           "-- Do not edit by hand.",
            "-- Every friendly NPC (or neutral one with something to offer), for the search only (asked 2026-11-14,",
            "-- \"Ship all NPCs\"): one line each, id|name|subname|services|trainer|side|spawns, its spawns",
            "-- \"level x y z\" split by \";\". Services: g gossip, q quests, v vendor, f flight master, t trainer, h spirit",

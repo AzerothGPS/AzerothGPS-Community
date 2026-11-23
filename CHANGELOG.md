@@ -15,6 +15,8 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Quest Route: right-click the button for toggles that stay on: lowest level first, about to turn gray first, turn-ins only, objectives only, tracked quests only, this zone only. A quest route remakes itself as you change them.
 - Quest Route: with a controller, the button's hint switches between the buttons that route and that open the toggles; move through them with the D-pad, A turns one on or off.
 - Near an NPC you picked in the search as your next stop, a Target button under the directions targets it with your click and marks it with the stop's route marker (also a key; Options > Directions).
+- Zephras Isle: its vendors, trainers, innkeepers and other NPCs are in the search and Quick Find before you've talked to them.
+- Options > Keys and buttons: Set Key for the show/hide key also takes a controller button (with the game's controller UI off; with it on, use a /agps toggle macro).
 
 ### Changed
 
@@ -24,6 +26,8 @@ Each version's section is its release notes (GitHub and CurseForge).
 ### Fixed
 
 - Controller UI: abandoning quests no longer gets AzerothGPS blocked (Route Here stays out of the quest menus there).
+- Controller UI: Route Here also stays out of the quest menus when you turn the controller UI on after logging in.
+- Quick Find and search buttons no longer route you off Zephras Isle (or any continent) to a vendor, trainer or innkeeper elsewhere; they say none is known there instead.
 
 ## 1.3.13
 
