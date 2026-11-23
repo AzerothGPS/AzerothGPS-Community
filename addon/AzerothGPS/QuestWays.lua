@@ -1,9 +1,13 @@
 -- The Quest Route button's choices (asked 2026-11-22: "lets extend the quest route button with a sub menu to route in
 -- different ways like by level, turn ins only, tracked quest only, etc"; then, for 1.3.14: "make these quick buttons
 -- that can be toggled on/off. If any of them conflict with another auto turn it on/off like picking turn-ins only and
--- tracked quests only for example, only 1 should be on at a time or both off"). Right-click the button: a small menu
--- of ours, each entry a toggle with a check box: the player's saved Quest Route options (Options > Routing > Quest
--- Route is their home; this menu is a second control for them), and a left-click makes the route by them.
+-- tracked quests only for example, only 1 should be on at a time or both off"; then, of the text menu that was: "this
+-- still isn't sub menu buttons, should be like the ammo button, expand into more icons with on/off toggles").
+-- Right-click the button: round icon buttons pop out of it as Quick Find's do (G.QUICK_FIND, the one with Ammo; the
+-- same round buttons, G.NewRoundButton, the same way out and spacing: right of a column going up, up from a row going
+-- right), one per toggle and one for Quest Route options. On: full color in a lit gold ring; off: gray and dimmed.
+-- Each is a saved Quest Route option (Options > Routing > Quest Route is their home; these are a second control for
+-- them), and a left-click of the button makes the route by them.
 --
 -- The toggles and their groups (at most one on in a group, or none):
 --   Order: Lowest level first, About to turn gray first (`questLevelOrder` "low" / "gray"). Fastest order is neither:
@@ -13,34 +17,48 @@
 --     (G.SetQuestToggle).
 --   This zone only (`questZoneOnly`): its own, with anything.
 -- A toggle clicked on a quest route makes it again at once with the new options; on any other route (or none) it's
--- only saved. The menu stays open for more; it shuts on a click anywhere else, the button again, B or Escape (Escape
--- shuts only the menu: not the map, nor the game's menu). Quests left out (Leave Out, a removed stop) stay out.
+-- only saved. The icons stay out for more; they go in on a click anywhere else, the button again, B or Escape (Escape
+-- shuts only them: not the map, nor the game's menu), and as Quick Find's do (GROUP_IDLE untouched, or the button
+-- gone). Quests left out (Leave Out, a removed stop) stay out.
 --
--- The menu is our own frame, never the game's menus (MenuUtil, dropdowns): with the game's controller UI on, the
--- game's menus with an addon's entries got AzerothGPS blocked (issue #887). /agps questroute <way> [off] turns a
--- toggle on (or off) as the menu does, then makes the quest route (a controller's macro).
+-- All our own frames, never the game's menus (MenuUtil, dropdowns): with the game's controller UI on, the game's menus
+-- with an addon's entries got AzerothGPS blocked (issue #887). /agps questroute <way> [off] turns a toggle on (or off)
+-- as the icons do, then makes the quest route (a controller's macro).
 --
 -- With a controller (asked 2026-11-22 for 1.3.14: "add controller support for quest route sub menu, just fade between
 -- the 2 buttons for activating and opening the submenu"): the button in the map menu's focus, its hint fades from the
--- button that presses it (Set Stop's, A) to the one that opens this menu (Remove's, X: its right-click) and back
--- (Pad.lua's HintTargets, SWAP_SECONDS). Open: the D-pad's up and down move a highlight of ours over the entries (round
--- at the ends), starting on the first; A toggles it (the menu stays open), B (or X again) shuts the menu, the focus
--- back on the button.
+-- button that presses it (Set Stop's, A) to the one that opens the icons (Remove's, X: its right-click) and back
+-- (Pad.lua's HintTargets, SWAP_SECONDS). Out: the map menu's focus ring moves over the icons as over Quick Find's
+-- (Pad.MenuButtons: up and right the next, down and left the one before, round at the ends), starting on the first;
+-- A turns the one in focus on or off (they stay out), B (or X again) shuts them, the focus back on the button.
 local _, ns = ...
 local L = ns.L
 local G = ns.GPS
 
 -- Each toggle: `key` the setting it is (with `value`: on when the setting is that), `group` the ones of which at most
--- one is on.
+-- one is on; `icon` its round button's picture, `tip` its tooltip's line.
 G.QUEST_WAYS = {
-  { id = "fastest", word = "fastest", label = L["Fastest order"], group = "order" },
-  { id = "low", word = "low", label = L["Lowest level first"], key = "questLevelOrder", value = "low", group = "order" },
+  { id = "fastest", word = "fastest", label = L["Fastest order"], group = "order",
+    icon = "Interface\\Icons\\INV_Boots_02",
+    tip = L["Your quests in the fastest order, whatever their level. Turns off the level orders."] },
+  { id = "low", word = "low", label = L["Lowest level first"], key = "questLevelOrder", value = "low", group = "order",
+    icon = "Interface\\Icons\\Spell_ChargePositive",
+    tip = L["The lowest level quests first, a few levels at a time, each few in the fastest order."] },
   { id = "gray", word = "gray", label = L["About to turn gray first"], key = "questLevelOrder", value = "gray",
-    group = "order" },
-  { id = "turnins", word = "turnins", label = L["Turn-ins only"], key = "questTurninsOnly", group = "what" },
-  { id = "objectives", word = "objectives", label = L["Objectives only"], key = "questObjectivesOnly", group = "what" },
-  { id = "tracked", word = "tracked", label = L["Tracked quests only"], key = "questTrackedOnly", group = "what" },
-  { id = "zone", word = "zone", label = L["This zone only"], key = "questZoneOnly" },
+    group = "order", icon = "Interface\\Icons\\INV_Misc_Bone_HumanSkull_01",
+    tip = L["The quests that turn gray within two more levels of yours first (their experience drops then), then the rest in the fastest order."] },
+  { id = "turnins", word = "turnins", label = L["Turn-ins only"], key = "questTurninsOnly", group = "what",
+    icon = "Interface\\GossipFrame\\ActiveQuestIcon",
+    tip = L["The Quest Route button takes only the finished quests' turn-ins. Turns off \"only objectives\" and \"only tracked quests\"."] },
+  { id = "objectives", word = "objectives", label = L["Objectives only"], key = "questObjectivesOnly", group = "what",
+    icon = "Interface\\GossipFrame\\AvailableQuestIcon",
+    tip = L["The Quest Route button takes only your quests' objectives, no turn-ins. Turns off \"only turn-ins\" and \"only tracked quests\"."] },
+  { id = "tracked", word = "tracked", label = L["Tracked quests only"], key = "questTrackedOnly", group = "what",
+    icon = "Interface\\Icons\\INV_Misc_Eye_01",
+    tip = L["The Quest Route button takes only the quests you track: the ones Questie's tracker shows when it's on, else the ones ticked to track in the quest log. Off: every quest in your log."] },
+  { id = "zone", word = "zone", label = L["This zone only"], key = "questZoneOnly",
+    icon = "Interface\\Icons\\INV_Misc_Map_01",
+    tip = L["The Quest Route button takes only the quests whose objective or turn-in is in the zone you're in (a city counts as its zone). Off: every quest in your log, anywhere."] },
 }
 
 local function Settings() return ns.settings and ns.settings.gps or {} end
@@ -134,12 +152,15 @@ function G.QuestToggle(id, on, always)
   return changed
 end
 
--- The menu ---------------------------------------------------------------------------------------------------------
+-- The icons --------------------------------------------------------------------------------------------------------
 
-G.QUEST_WAYS_W, G.QUEST_WAYS_ROW, G.QUEST_WAYS_PAD, G.QUEST_WAYS_BOX = 210, 18, 5, 10
+G.QUEST_WAYS_SIZE = 26 -- (Quick Find's round buttons' size)
+G.QUEST_WAYS_OFF_ALPHA = 0.45 -- (an off toggle: gray and dimmed, as the quick buttons' toggles show off, G.RefreshQuick)
+G.QUEST_WAYS_RING_ALPHA = 0.9 -- (an on toggle: full color in a lit gold ring, G.MakeGlow's, steady)
+G.QUEST_WAYS_OPTIONS_ICON = "Interface\\Icons\\INV_Misc_Gear_01"
 
--- An entry clicked: a toggle flipped, the menu kept open; Quest Route options... shuts it and opens Options > Routing
--- at Quest Route.
+-- An icon clicked: a toggle flipped, the icons kept out; Quest Route options shuts them and opens Options > Routing at
+-- Quest Route.
 function G.QuestWayPick(id)
   if id == "options" then
     G.CloseQuestWays()
@@ -151,86 +172,72 @@ function G.QuestWayPick(id)
   return true
 end
 
-local function Row(m, i)
-  local row = CreateFrame("Button", nil, m)
-  row:SetSize(G.QUEST_WAYS_W - 2 * G.QUEST_WAYS_PAD, G.QUEST_WAYS_ROW)
-  row:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-  local hl = row:CreateTexture(nil, "HIGHLIGHT")
-  hl:SetAllPoints()
-  hl:SetColorTexture(1, 0.82, 0, 0.15)
-  -- (the toggle's check box, drawn: an edge, its inside, and a gold fill while on)
-  local B = G.QUEST_WAYS_BOX
-  row.box = row:CreateTexture(nil, "ARTWORK")
-  row.box:SetSize(B, B)
-  row.box:SetPoint("LEFT", 5, 0)
-  row.box:SetColorTexture(0.6, 0.55, 0.4, 1)
-  row.boxIn = row:CreateTexture(nil, "ARTWORK", nil, 1)
-  row.boxIn:SetPoint("TOPLEFT", row.box, "TOPLEFT", 1, -1)
-  row.boxIn:SetPoint("BOTTOMRIGHT", row.box, "BOTTOMRIGHT", -1, 1)
-  row.boxIn:SetColorTexture(0.08, 0.08, 0.08, 1)
-  row.check = row:CreateTexture(nil, "ARTWORK", nil, 2)
-  row.check:SetPoint("TOPLEFT", row.box, "TOPLEFT", 2, -2)
-  row.check:SetPoint("BOTTOMRIGHT", row.box, "BOTTOMRIGHT", -2, 2)
-  row.check:SetColorTexture(1, 0.82, 0, 1)
-  row.check:Hide()
-  row.text = row:CreateFontString(nil, "ARTWORK", "GameFontHighlightSmall")
-  row.text:SetPoint("LEFT", B + 11, 0)
-  row.text:SetPoint("RIGHT", -4, 0)
-  row.text:SetJustifyH("LEFT")
-  row.text:SetWordWrap(false)
-  row:SetScript("OnClick", function(self) if self.id then G.QuestWayPick(self.id) end end)
-  m.rows[i] = row
-  return row
+-- The icons as shown, in their order out from the button: { id, text, tip, icon, on } (`on` nil: no on or off, Quest
+-- Route options), the toggles then Quest Route options.
+function G.QuestWayList()
+  local out = {}
+  for _, e in ipairs(G.QUEST_WAYS) do
+    out[#out + 1] = { id = e.id, text = e.label, tip = e.tip, icon = e.icon, on = G.QuestToggleOn(e.id) }
+  end
+  out[#out + 1] = { id = "options", text = L["Quest Route options..."], icon = G.QUEST_WAYS_OPTIONS_ICON,
+    tip = L["Only tracked quests, lowest level first, quests left out: Options > Routing > Quest Route."] }
+  return out
 end
 
+-- An icon's tooltip: its name, what it does, and On or Off.
+function G.QuestWayTip(b)
+  GameTooltip:SetOwner(b, "ANCHOR_RIGHT")
+  GameTooltip:SetText(b.text or "", 1, 1, 1)
+  if b.tip then GameTooltip:AddLine(b.tip, nil, nil, nil, true) end
+  if b.on == true then
+    GameTooltip:AddLine(L["On"], 0.3, 1, 0.3)
+  elseif b.on == false then
+    GameTooltip:AddLine(L["Off"], 0.6, 0.6, 0.6)
+  end
+  GameTooltip:Show()
+end
+
+local function Combat() return (InCombatLockdown and InCombatLockdown()) and true or false end
+
+-- What's open: a frame of ours with no size (its keys, its clock), the click-catcher under the icons, and the icons
+-- themselves, made on the Quest Route button's own parent (the map's buttons, wherever the map is).
 local function Build()
   local m = CreateFrame("Frame", nil, UIParent)
-  m:SetFrameStrata("FULLSCREEN_DIALOG")
-  m:SetFrameLevel(20)
-  m:SetClampedToScreen(true)
-  m:EnableMouse(true)
-  m:SetWidth(G.QUEST_WAYS_W)
-  local edge = m:CreateTexture(nil, "BACKGROUND", nil, -1)
-  edge:SetPoint("TOPLEFT", -1, 1)
-  edge:SetPoint("BOTTOMRIGHT", 1, -1)
-  edge:SetColorTexture(0.55, 0.45, 0.2, 0.95)
-  local bg = m:CreateTexture(nil, "BACKGROUND")
-  bg:SetAllPoints()
-  bg:SetColorTexture(0.04, 0.04, 0.04, 0.97)
-  m.title = m:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
-  m.title:SetPoint("TOPLEFT", G.QUEST_WAYS_PAD + 6, -G.QUEST_WAYS_PAD - 3)
-  m.title:SetText(L["Quest Route"])
-  m.line = m:CreateTexture(nil, "ARTWORK")
-  m.line:SetHeight(1)
-  m.line:SetColorTexture(1, 0.82, 0, 0.25)
-  m.rows = {}
-  -- (the controller's highlight: the entry A picks)
-  m.sel = m:CreateTexture(nil, "ARTWORK", nil, 1)
-  m.sel:SetColorTexture(1, 0.82, 0, 0.3)
-  m.sel:Hide()
-  -- (a click anywhere else shuts it: under the menu, over everything else)
+  m:SetSize(1, 1)
+  m:SetPoint("BOTTOMLEFT")
+  m.buttons = {}
+  -- (a click anywhere else shuts them: under the icons, over everything else; on the Quest Route button, its
+  -- left-click goes on to it, a route as ever)
   local catch = CreateFrame("Button", nil, m)
   catch:SetFrameStrata("FULLSCREEN_DIALOG")
   catch:SetFrameLevel(1)
   catch:SetAllPoints(UIParent)
   catch:RegisterForClicks("LeftButtonUp", "RightButtonUp")
-  catch:SetScript("OnClick", function() G.CloseQuestWays() end)
+  catch:SetScript("OnClick", function(_, mouse)
+    local owner = m.owner
+    G.CloseQuestWays()
+    if mouse == "LeftButton" and owner and owner:IsMouseOver() then
+      local click = owner:GetScript("OnClick")
+      if click then click(owner, "LeftButton") end
+    end
+  end)
   m.catch = catch
-  -- (shut with its button: the map closed, the map menu shut; open, the map menu stays open)
-  m:SetScript("OnUpdate", function(self)
+  -- (shut with its button: the map closed, the map menu shut; and as Quick Find shuts, GROUP_IDLE untouched)
+  m:SetScript("OnUpdate", function(self, dt)
     local b = self.owner
     if not (b and b:IsVisible()) then G.CloseQuestWays() return end
+    local over = b:IsMouseOver() or G.QuestWaysMouseOver() or G.QuestWaysSel() ~= nil
+    self.idle = over and 0 or (self.idle or 0) + (dt or 0)
+    if self.idle >= (G.GROUP_IDLE or 8) then G.CloseQuestWays() return end
     if G.mapMenu then G.mapMenu.idle = 0 end
-    G.QuestWaysShowSel() -- (the highlight: the controller's only, gone while the mouse is in use)
   end)
   if ns.TimeScript then ns.TimeScript(m, "OnUpdate", "map buttons") end
-  -- (Escape shuts the menu only, taken from the game out of combat: not the map, nor the game's menu. Every other key
-  -- goes on to the game; in combat the keys can't be taken, so Escape shuts it and goes on too: G.QuestWaysKey)
+  -- (Escape shuts the icons only, taken from the game out of combat: not the map, nor the game's menu. Every other key
+  -- goes on to the game; in combat the keys can't be taken, so Escape shuts them and goes on too: G.QuestWaysKey)
   m:SetScript("OnKeyDown", function(self, key) G.QuestWaysKey(self, key) end)
   m:Hide()
   return m
 end
-local function Combat() return (InCombatLockdown and InCombatLockdown()) and true or false end
 function G.QuestWaysKey(m, key)
   local eat = key == "ESCAPE" and not Combat()
   if m.SetPropagateKeyboardInput then pcall(m.SetPropagateKeyboardInput, m, not eat) end
@@ -244,28 +251,47 @@ function G.QuestWaysKeys(m)
   m:EnableKeyboard(on and true or false)
 end
 
--- The entries as shown: { id, text, on } (`on` nil: no check box), the toggles then Quest Route options...
-function G.QuestWayRows()
-  local out = {}
-  for _, e in ipairs(G.QUEST_WAYS) do out[#out + 1] = { id = e.id, text = e.label, on = G.QuestToggleOn(e.id) } end
-  out[#out + 1] = { id = "options", text = L["Quest Route options..."], gap = true }
-  return out
+-- Icon `i` (made the first time), on `parent`: Quick Find's round button.
+local function Icon(m, i, parent)
+  local b = m.buttons[i]
+  if b then
+    if b:GetParent() ~= parent then b:SetParent(parent) end
+    return b
+  end
+  local icon
+  b, icon = G.NewRoundButton(parent, G.QUEST_WAYS_SIZE, "Interface\\Icons\\INV_Misc_QuestionMark")
+  b.iconTex = icon
+  b.ring = G.MakeGlow(b)
+  b.ring:SetAlpha(G.QUEST_WAYS_RING_ALPHA)
+  b.ring:Hide()
+  b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+  b:SetScript("OnClick", function(self) if self.id then G.QuestWayPick(self.id) end end)
+  b:SetScript("OnEnter", function(self)
+    if G.questWays then G.questWays.idle = 0 end
+    G.QuestWayTip(self)
+  end)
+  b:Hide()
+  m.buttons[i] = b
+  return b
 end
--- The rows' texts and check boxes as the saved options are now (a toggle clicked, or one it turned off).
+
+-- The icons' pictures and on or off as the saved options are now (a toggle clicked, or one it turned off).
 function G.RefreshQuestWays()
   local m = G.questWays
   if not m then return end
-  for i, r in ipairs(G.QuestWayRows()) do
-    local row = m.rows[i]
-    if row then
-      row.id = r.id
-      row.on = r.on
-      row.text:SetText(r.text)
-      local box = r.on ~= nil
-      row.box:SetShown(box)
-      row.boxIn:SetShown(box)
-      row.check:SetShown(r.on == true)
-      row.text:SetPoint("LEFT", box and G.QUEST_WAYS_BOX + 11 or 6, 0)
+  for i, r in ipairs(G.QuestWayList()) do
+    local b = m.buttons[i]
+    if b then
+      b.id, b.on, b.text, b.tip = r.id, r.on, r.text, r.tip
+      if b.iconPath ~= r.icon then
+        G.SetButtonIcon(b.iconTex, r.icon)
+        b.iconPath = r.icon
+      end
+      local lit = r.on ~= false
+      b.iconTex:SetDesaturated(not lit)
+      b.iconTex:SetAlpha(lit and 1 or G.QUEST_WAYS_OFF_ALPHA)
+      b.ring:SetShown(r.on == true)
+      if b:IsShown() and GameTooltip:GetOwner() == b then G.QuestWayTip(b) end
     end
   end
 end
@@ -273,51 +299,81 @@ end
 function G.QuestWaysOpen()
   return (G.questWays and G.questWays:IsShown()) and true or false
 end
+-- The icons out, in their order from the button.
+function G.QuestWaysButtons()
+  local m = G.questWays
+  local out = {}
+  if not (m and m:IsShown()) then return out end
+  for i = 1, m.count or 0 do
+    local b = m.buttons[i]
+    if b and b:IsShown() then out[#out + 1] = b end
+  end
+  return out
+end
+function G.QuestWaysMouseOver()
+  for _, b in ipairs(G.QuestWaysButtons()) do
+    if b:IsMouseOver() then return true end
+  end
+  return false
+end
 function G.CloseQuestWays()
   local m = G.questWays
-  if m and m:IsShown() then m:Hide() end
+  if not (m and m:IsShown()) then return end
+  local P = ns.Pad
+  local sel = G.QuestWaysSel()
+  m:Hide()
+  for _, b in pairs(m.buttons) do
+    if GameTooltip:GetOwner() == b then GameTooltip:Hide() end
+    b:Hide()
+  end
+  if sel and P and P.SetFocus then P.SetFocus(nil) end
 end
--- Open beside `owner` (the Quest Route button): right of it in a column going up, above it in a row going right.
+-- Out from `owner` (the Quest Route button) as Quick Find's: from a column going up, a row going right; from a row
+-- going right, a column going up. Quick Find's and a group's flyouts shut meanwhile (they'd lie over each other).
 function G.OpenQuestWays(owner)
   owner = owner or G.questRouteButton
   if not owner then return nil end
   G.questWays = G.questWays or Build()
   local m = G.questWays
   m.owner = owner
-  local P, R = G.QUEST_WAYS_PAD, G.QUEST_WAYS_ROW
-  local y = -P - R
-  for i, r in ipairs(G.QuestWayRows()) do
-    if r.gap then
-      m.line:ClearAllPoints()
-      m.line:SetPoint("TOPLEFT", P + 4, y - 3)
-      m.line:SetPoint("TOPRIGHT", -P - 4, y - 3)
-      y = y - 7
-    end
-    local row = m.rows[i] or Row(m, i)
-    row:ClearAllPoints()
-    row:SetPoint("TOPLEFT", P, y)
-    row:Show()
-    y = y - R
-  end
-  m:SetHeight(-y + P)
-  G.RefreshQuestWays()
+  if G.quickFindOpen and G.SetQuickFindOpen then G.SetQuickFindOpen(false) end
+  if G.CloseOpenGroup then G.CloseOpenGroup() end
   local where
   for _, t in ipairs(G.QUICK or {}) do
     if t.id == "questRoute" then where = t.where end
   end
-  m:ClearAllPoints()
-  if where == "barRight" or where == "menuRight" then
-    m:SetPoint("BOTTOMLEFT", owner, "TOPLEFT", 0, 4)
-  else
-    m:SetPoint("BOTTOMLEFT", owner, "BOTTOMRIGHT", 4, 0)
+  local sideways = where == "barUp" or where == "menuUp"
+  local parent = owner:GetParent() or UIParent
+  local list = G.QuestWayList()
+  for j = 1, #list do
+    local b = Icon(m, j, parent)
+    b:ClearAllPoints()
+    if sideways then
+      b:SetPoint("LEFT", owner, "RIGHT", 4 + (j - 1) * G.QUICK_STEP_BAR, 0)
+    else
+      b:SetPoint("BOTTOM", owner, "TOP", 0, 4 + (j - 1) * G.QUICK_STEP_MENU)
+    end
+    -- (over the click-catcher: its strata, above it)
+    b:SetFrameStrata("FULLSCREEN_DIALOG")
+    b:SetFrameLevel(20)
+    b:SetAlpha(1)
+    b:Show()
   end
+  for j = #list + 1, #m.buttons do m.buttons[j]:Hide() end
+  m.count = #list
+  m.sideways = sideways
+  G.RefreshQuestWays()
   if GameTooltip:GetOwner() == owner then GameTooltip:Hide() end
   if G.mapMenu then G.mapMenu.idle = 0 end
-  m.count = #G.QuestWayRows()
-  m.at = G.QuestWaysStart()
+  m.idle = 0
   m:Show()
   G.QuestWaysKeys(m)
-  G.QuestWaysShowSel()
+  -- (with the controller: its focus on the first icon, the one next to the button)
+  if G.QuestWaysPadOn() then
+    local P = ns.Pad
+    P.SetFocus(nil)
+    P.SetFocus(m.buttons[1])
+  end
   return m
 end
 function G.ToggleQuestWays(owner)
@@ -330,48 +386,34 @@ end
 
 -- The controller ------------------------------------------------------------------------------------------------------
 
--- The entry the highlight starts on: the first.
-function G.QuestWaysStart()
-  return 1
-end
 -- The controller in use on the map (its buttons bound, a pad pressed since the mouse was).
 function G.QuestWaysPadOn()
   local P = ns.Pad
-  return (P and P.bound and P.used) and true or false
+  return (P and P.bound and P.used and P.SetFocus) and true or false
 end
--- The highlighted entry's row (shown), or nil.
-function G.QuestWaysSelRow()
-  local m = G.questWays
-  if not (m and m:IsShown() and m.at) then return nil end
-  local row = m.rows[m.at]
-  return (row and row:IsShown()) and row or nil
-end
-function G.QuestWaysShowSel()
-  local m = G.questWays
-  if not m then return end
-  local row = G.QuestWaysPadOn() and G.QuestWaysSelRow() or nil
-  if row then
-    if m.sel.row ~= row then
-      m.sel:ClearAllPoints()
-      m.sel:SetAllPoints(row)
-      m.sel.row = row
-    end
-    m.sel:Show()
-  else
-    m.sel:Hide()
+-- The icon in the controller's focus (Pad's gold ring round it, its tooltip shown), or nil.
+function G.QuestWaysSel()
+  local P = ns.Pad
+  local f = P and P.focus
+  if not f then return nil end
+  for _, b in ipairs(G.QuestWaysButtons()) do
+    if b == f then return b end
   end
+  return nil
 end
--- the highlight `step` entries on, round at the ends
+-- The focus `step` icons on, round at the ends (none in focus: the first).
 function G.QuestWaysMove(step)
-  local m = G.questWays
-  if not (m and m:IsShown()) then return false end
-  local n = m.count or #G.QuestWayRows()
-  if n == 0 then return false end
-  m.at = (((m.at or G.QuestWaysStart()) - 1 + step) % n) + 1
-  G.QuestWaysShowSel()
+  local list = G.QuestWaysButtons()
+  local P = ns.Pad
+  if #list == 0 or not (P and P.SetFocus) then return false end
+  local at
+  for i, b in ipairs(list) do
+    if b == P.focus then at = i end
+  end
+  P.SetFocus(at and list[((at - 1 + step) % #list) + 1] or list[1])
   return true
 end
--- Shut, the controller's focus back on the button that opened it.
+-- Shut, the controller's focus back on the button that opened them.
 function G.QuestWaysBack()
   local m = G.questWays
   local owner = m and m.owner
@@ -383,23 +425,24 @@ function G.QuestWaysBack()
   end
   return true
 end
--- A pad's controls while the menu is open (`has`: the pressed controls' ids, Pad.Run's): true when taken, nil to leave
--- them to the map menu's (Map menu: the menu shut with it).
+-- A pad's controls while the icons are out (`has`: the pressed controls' ids, Pad.Run's): true when taken, nil to leave
+-- them to the map menu's (Map menu: shut with it). As in Quick Find: up and right the next icon, down and left the one
+-- before; A turns the one in focus on or off (they stay out), B or X shuts them.
 function G.QuestWaysPad(has)
   if not G.QuestWaysOpen() then return nil end
-  if has.panUp then return G.QuestWaysMove(-1) end
-  if has.panDown then return G.QuestWaysMove(1) end
+  if has.panUp or has.panRight then return G.QuestWaysMove(1) end
+  if has.panDown or has.panLeft then return G.QuestWaysMove(-1) end
   if has.select or has.yes or has.click then
-    local row = G.QuestWaysSelRow()
-    if not row then return G.QuestWaysMove(0) end
+    local b = G.QuestWaysSel()
+    if not b then return G.QuestWaysMove(0) end
     local P = ns.Pad
     local owner = G.questWays.owner
-    G.QuestWayPick(row.id)
-    if G.QuestWaysOpen() then return true end -- (a toggle: the menu stays open, the highlight where it was)
-    -- (shut by Quest Route options... or a question: the map menu still open, the focus back on the button; shut, the
+    G.QuestWayPick(b.id)
+    if G.QuestWaysOpen() then return true end -- (a toggle: still out, the focus where it was)
+    -- (shut by Quest Route options or a question: the map menu still open, the focus back on the button; shut, the
     -- map's own marks)
     if P and P.MenuOpen and P.MenuOpen() then
-      if owner and owner:IsShown() and not G.QuestWaysOpen() then P.SetFocus(owner) end
+      if owner and owner:IsShown() then P.SetFocus(owner) end
     elseif P then
       P.SetFocus(nil)
       if P.ShowMarks then P.ShowMarks(P.bound) end
@@ -411,5 +454,5 @@ function G.QuestWaysPad(has)
     G.CloseQuestWays()
     return nil
   end
-  return true -- (the rest: nothing while the menu is open)
+  return true -- (the rest: nothing while they're out)
 end

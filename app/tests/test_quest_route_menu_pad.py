@@ -1,14 +1,13 @@
-"""The Quest Route button's menu of other ways with a controller (1.3.14; QuestWays.lua, Pad.lua; the whole addon,
-gameharness).
+"""The Quest Route button's toggle icons with a controller (1.3.14; QuestWays.lua, Pad.lua; the whole addon, gameharness).
 
 Kooki3z 2026-11-22: "add controller support for quest route sub menu, just fade between the 2 buttons for activating and
 opening the submenu in 1.3.14".
 
 - The Quest Route button in the map menu's focus: its hint goes from Set Stop's button (A, which presses it) to
   Remove's (X, its right-click: the menu) and back, each Pad.SWAP_SECONDS, cross-fading; only while it has the focus.
-- X opens the menu; the D-pad's up and down move a highlight over its entries (round at the ends), starting on the
-  first; A toggles the highlighted one (saved, as a click does) and the menu stays open; B shuts it, the focus back on
-  the button.
+- X pops the icons out (as its right-click); the map menu's focus ring moves over them as over Quick Find's (up and
+  right the next, down and left the one before, round at the ends), starting on the first; A turns the one in focus on
+  or off (saved, as a click does) and they stay out; B (or X again) puts them in, the focus back on the button.
 
 The quest log is test_quest_route_choices.py's stub; the pad test_controller.py's.
 """
@@ -118,85 +117,115 @@ def test_the_swap_follows_the_players_buttons(padmenu):
         P.ResetBinds()
 
 
-def test_x_opens_the_menu_and_the_d_pad_moves_its_highlight_from_the_first(padmenu):
+def _icons(ns):
+    b = ns.GPS.QuestWaysButtons()
+    return [b[i] for i in range(1, len(b) + 1)]
+
+
+def _sel(ns):
+    b = ns.GPS.QuestWaysSel()
+    return str(b.id) if b else None
+
+
+def test_x_pops_out_the_icons_and_the_d_pad_moves_over_them_from_the_first(padmenu):
     lua, ns = padmenu
     G, P, st = ns.GPS, ns.Pad, ns.settings.gps
-    st.questLevelOrder = "gray"  # (whatever is on: the highlight starts on the first)
+    st.questLevelOrder = "gray"  # (whatever is on: the focus starts on the first)
     qr = _focus_qr(lua, ns)
     _press(lua, "PAD3")
     assert G.QuestWaysOpen() and len(ns.Nav.stops) == 0
-    m = G.questWays
     same = lua.eval("rawequal")
-    assert m.at == 1 and str(G.QuestWaysSelRow().id) == "fastest"
-    assert m.sel._shown and same(m.sel.row, m.rows[1])  # (the highlight over it)
-    # the hints now: A's over the highlighted entry, B's over the button it goes back to
+    icons = _icons(ns)
+    assert len(icons) == 8 and same(P.focus, icons[0]) and _sel(ns) == "fastest"
+    assert P.ring._shown and same(P.ring.GetParent(P.ring), icons[0])  # (the map menu's gold ring round it)
+    # the map menu's own list is the icons now, as with Quick Find out (Pad.Move(0) comes back to the first)
+    mb = P.MenuButtons()
+    assert [str(mb[i].id) for i in range(1, len(mb) + 1)] == [str(i.id) for i in icons]
+    assert same(P.MenuParent(), qr)
+    # the hints now: A's over the icon in focus, B's over the button it goes back to
     _tick_hints(lua, P, 0.1)
-    assert set(_hints_on(lua, ns, m.rows[1])) == {"select"} and set(_hints_on(lua, ns, qr)) == {"back"}
-    # down and up, round at the ends (8 entries: the seven toggles and Quest Route options...)
-    _press(lua, "PADDDOWN")
-    _press(lua, "PADDDOWN")
-    _press(lua, "PADDDOWN")
-    assert str(G.QuestWaysSelRow().id) == "turnins" and same(m.sel.row, m.rows[4])
+    assert set(_hints_on(lua, ns, icons[0])) == {"select"} and set(_hints_on(lua, ns, qr)) == {"back"}
+    # up and right the next, down and left the one before, round at the ends (8: the seven toggles and the options)
     _press(lua, "PADDUP")
-    _press(lua, "PADDUP")
-    _press(lua, "PADDUP")
-    assert str(G.QuestWaysSelRow().id) == "fastest"
-    _press(lua, "PADDUP")
-    assert str(G.QuestWaysSelRow().id) == "options"
-    _press(lua, "PADDDOWN")
-    assert str(G.QuestWaysSelRow().id) == "fastest"
-    # left and right: nothing (the map menu's focus stays on the button, the menu open)
     _press(lua, "PADDRIGHT")
-    assert G.QuestWaysOpen() and same(P.focus, qr) and str(G.QuestWaysSelRow().id) == "fastest"
-    # the view never panned meanwhile
-    assert len(ns.Nav.stops) == 0
+    _press(lua, "PADDUP")
+    assert _sel(ns) == "turnins" and same(P.focus, icons[3])
+    _press(lua, "PADDDOWN")
+    _press(lua, "PADDLEFT")
+    _press(lua, "PADDDOWN")
+    assert _sel(ns) == "fastest"
+    _press(lua, "PADDDOWN")
+    assert _sel(ns) == "options"
+    _press(lua, "PADDUP")
+    assert _sel(ns) == "fastest"
+    # the view never panned meanwhile, and nothing routed
+    assert G.QuestWaysOpen() and len(ns.Nav.stops) == 0
 
 
-def test_a_toggles_the_highlighted_entry_and_the_menu_stays_open(padmenu):
+def test_a_toggles_the_icon_in_focus_and_they_stay_out(padmenu):
     lua, ns = padmenu
     G, P, N, st = ns.GPS, ns.Pad, ns.Nav, ns.settings.gps
     same = lua.eval("rawequal")
     qr = _focus_qr(lua, ns)
     _press(lua, "PAD3")
     for _ in range(5):
-        _press(lua, "PADDDOWN")
-    assert str(G.QuestWaysSelRow().id) == "tracked"
+        _press(lua, "PADDUP")
+    assert _sel(ns) == "tracked"
+    tracked = P.focus
     _press(lua, "PAD1")
-    m = G.questWays
-    assert G.QuestWaysOpen() and st.questTrackedOnly is True and m.rows[6].check._shown
-    assert str(G.QuestWaysSelRow().id) == "tracked" and same(P.focus, qr) and P.MenuOpen()
+    assert G.QuestWaysOpen() and st.questTrackedOnly is True and tracked.ring._shown and not tracked.iconTex._desat
+    assert same(P.focus, tracked) and P.MenuOpen()
     # another of its group: the first one off, shown at once
-    _press(lua, "PADDUP")
-    _press(lua, "PADDUP")
-    assert str(G.QuestWaysSelRow().id) == "turnins"
+    _press(lua, "PADDDOWN")
+    _press(lua, "PADDDOWN")
+    assert _sel(ns) == "turnins"
     _press(lua, "PAD1")
-    assert st.questTurninsOnly is True and st.questTrackedOnly is False and not m.rows[6].check._shown
+    assert st.questTurninsOnly is True and st.questTrackedOnly is False
+    assert not tracked.ring._shown and tracked.iconTex._desat
     assert len(N.stops) == 0  # (no quest route: only saved)
-    # on a quest route: A remakes it at once, the menu still open
+    # on a quest route: A remakes it at once, the icons still out
     _press(lua, "PAD2")
+    assert not G.QuestWaysOpen() and same(P.focus, qr)
     G.QuestRoute()
     assert _names(ns) == ["Turn in: Letter"]
     _focus_qr(lua, ns)
     _press(lua, "PAD3")
     for _ in range(3):
-        _press(lua, "PADDDOWN")
+        _press(lua, "PADDUP")
     _press(lua, "PAD1")  # (Turn-ins only off: every quest again)
     assert G.QuestWaysOpen() and st.questTurninsOnly is False and len(_names(ns)) == 4
-    # B: shut, the focus back on the button
+    # B: in, the focus back on the button
     _press(lua, "PAD2")
     assert not G.QuestWaysOpen() and same(P.focus, qr)
 
 
-def test_b_shuts_the_menu_and_the_focus_is_back_on_the_button(padmenu):
+def test_a_on_quest_route_options_opens_options_and_the_focus_goes_back(padmenu):
+    lua, ns = padmenu
+    G, P, O = ns.GPS, ns.Pad, ns.Options
+    same = lua.eval("rawequal")
+    qr = _focus_qr(lua, ns)
+    _press(lua, "PAD3")
+    _press(lua, "PADDDOWN")
+    assert _sel(ns) == "options"
+    try:
+        _press(lua, "PAD1")
+        assert O.IsShown() and not G.QuestWaysOpen()
+        assert not P.MenuOpen() or same(P.focus, qr)
+    finally:
+        lua.execute("if AzerothGPSOptions then AzerothGPSOptions:Hide() end")
+
+
+def test_b_puts_them_in_and_the_focus_is_back_on_the_button(padmenu):
     lua, ns = padmenu
     G, P = ns.GPS, ns.Pad
     same = lua.eval("rawequal")
     qr = _focus_qr(lua, ns)
     _press(lua, "PAD3")
-    _press(lua, "PADDDOWN")
+    _press(lua, "PADDUP")
     _press(lua, "PAD2")
     assert not G.QuestWaysOpen() and P.MenuOpen() and same(P.focus, qr) and len(ns.Nav.stops) == 0
-    # X again shuts it too (as a second right-click)
+    assert not any(i._shown for i in G.questWays.buttons.values())
+    # X again puts them in too (as a second right-click)
     _press(lua, "PAD3")
     assert G.QuestWaysOpen()
     _press(lua, "PAD3")
@@ -218,19 +247,18 @@ def test_x_on_another_button_does_nothing(padmenu):
     assert not G.QuestWaysOpen() and P.MenuOpen() and same(P.focus, other)
 
 
-def test_the_mouse_sees_no_highlight(padmenu):
+def test_the_mouse_sees_no_focus_ring(padmenu):
     lua, ns = padmenu
     G, P = ns.GPS, ns.Pad
+    same = lua.eval("rawequal")
     P.SawInput(False)  # (the mouse used)
     qr = G.questRouteButton
     qr._scripts.OnClick(qr, "RightButton")
-    m = G.questWays
-    assert G.QuestWaysOpen() and not m.sel._shown
-    # the controller picked up again: the highlight shows on the frame's next update
-    _press(lua, "PADDDOWN")
+    assert G.QuestWaysOpen() and P.focus is None and G.QuestWaysSel() is None
+    # the controller picked up again: the focus on the first icon with the pad's next tick
     P.SawInput(True)
-    m._scripts.OnUpdate(m, 0.05)
-    assert m.sel._shown
+    P.Tick(0.05)
+    assert same(P.focus, _icons(ns)[0])
     # left-click: the saved route, as ever
     qr._scripts.OnClick(qr, "LeftButton")
     assert not G.QuestWaysOpen() and len(_names(ns)) == 4
