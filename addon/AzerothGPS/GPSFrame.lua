@@ -13024,6 +13024,12 @@ local function TourStep(now)
   if not tour then return end
   local px, py, cont = Geo.PlayerWorld()
   if not px or not ns.Nav.dest then tour = nil return end
+  -- (no route shown yet, still being worked out: the hold waits for it, no zooming over nothing; Kooki3z 2026-11-23,
+  -- "the zoom in when setting a route shouldn't happen until a route is actually displayed")
+  if tour.phase == "hold" and not ns.Nav.route then
+    tour.t0 = now - (tour.skip and ROUTE_TOUR.hold or 0)
+    return
+  end
   local dt = now - tour.t0
   if tour.phase == "world" then -- (the world map shown: then back to the player, in their view)
     if dt >= ROUTE_TOUR.show then G.Follow() end
@@ -13081,9 +13087,13 @@ local function StartTour(px, py, cont, viewCont, skipHold)
     free = { x = px, y = py, rot = 0 }
     skipHold = true
   end
-  tour = { phase = "hold", t0 = GetTime() - (skipHold and ROUTE_TOUR.hold or 0) }
+  tour = { phase = "hold", t0 = GetTime() - (skipHold and ROUTE_TOUR.hold or 0), skip = skipHold }
   elapsed = 1
 end
+-- The tour's phase (tests): "hold", "out", "show", "back", "world" or nil.
+function G.TourPhase() return tour and tour.phase or nil end
+-- One step of it at `now` (tests).
+function G.TourStep(now) TourStep(now) end
 
 -- Route to the crosshair (single stop).
 function G.RouteHere()
