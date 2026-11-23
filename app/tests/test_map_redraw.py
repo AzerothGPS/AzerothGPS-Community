@@ -11543,3 +11543,32 @@ def test_the_map_window_goes_over_the_games_windows_with_our_popups_over_it(mini
     st.replaceMinimap = False
     G.ApplySettings()
     f._shown = False
+
+
+def test_the_route_tour_waits_for_the_route_before_zooming(game):
+    # (Kooki3z, 2026-11-23: "The zoom in when setting a route shouldn't happen until a route is actually displayed")
+    lua, ns = game
+    G, N = ns.GPS, ns.Nav
+    try:
+        N.Clear()
+        G.Follow()
+        G.AddStopAt(2400.0, 400.0, "Somewhere near Brill")
+        G.ConfirmRoute()  # (skips the hold: zooms out as soon as there's a route)
+        assert G.TourPhase() == "hold"
+        for _ in range(20):  # (the route worked out in the frame's update, not left over from the test before)
+            if N.route:
+                break
+            G.Update()
+        real = N.route
+        assert real and G.TourPhase() == "hold"
+        N.route = None  # (still being worked out)
+        t = lua.eval("GetTime")()
+        for k in range(1, 40):
+            G.TourStep(t + k * 0.5)
+            assert G.TourPhase() == "hold"  # (no zoom over nothing)
+        N.route = real
+        G.TourStep(t + 20.5)
+        assert G.TourPhase() == "out"  # (the route shown: the tour goes on)
+    finally:
+        N.Clear()
+        G.Follow()

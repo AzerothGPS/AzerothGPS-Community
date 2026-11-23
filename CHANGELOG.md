@@ -18,6 +18,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 - The Target button now marks the NPC with the stop's route marker too; it only targeted it.
 - A new stop's marker no longer shows as a gray cog for a moment.
+- Setting a route, the map zooms out to show it only once the route is drawn, not while it's still being worked out.
 
 ## 1.3.14
 
