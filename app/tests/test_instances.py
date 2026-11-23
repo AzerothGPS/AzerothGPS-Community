@@ -171,6 +171,36 @@ def test_wailing_caverns_portal_is_in_its_cave(inst_env):
     assert grid is not None and grid.cave
 
 
+THANES = 23065  # the Hall of Thanes' level
+THANES_DOOR = (-4772.23, -965.07, 399.04)  # where the game takes you in: stood at in game, under Ironforge
+
+
+def test_hall_of_thanes_entrance_is_where_the_game_takes_you_in(inst_env):
+    # (placed from guides 117 yd off, by Ironforge's High Seat and with no height; measured in game 2026-11-22: under
+    # the city, between the Mystic Ward and the Great Forge, 100 yd below its streets)
+    import json
+    from pathlib import Path
+
+    from azerothgps.instances import ENTRANCES, measured_entrance_z
+    lua, ns = inst_env
+    x, y, z = THANES_DOOR
+    e = ns.Instances[THANES].entrances
+    assert len(e) == 1 and e[1][1] == 0 and math.dist((e[1][2], e[1][3]), (x, y)) < 3
+    rows = ns.Transports
+    portal = next(rows[i] for i in range(1, len(rows) + 1) if rows[i][8] == "portal" and rows[i][4] == THANES)
+    assert portal[1] == 0 and math.dist((portal[2], portal[3]), (x, y)) < 3
+    assert portal.z1 == pytest.approx(z, abs=3)  # (the walk there ends on its floor, not the streets at 502)
+    assert portal[9] == "Dun Morogh"
+    known = json.loads(Path(ENTRANCES).read_text(encoding="utf-8"))["3065"]
+    assert len(known) == 1 and math.dist(known[0][1:3], (x, y)) < 3 and known[0][3] == pytest.approx(z, abs=3)
+    assert measured_entrance_z(3065, 0, *known[0][1:3]) == pytest.approx(z, abs=3)
+    assert measured_entrance_z(36, 0, -11208.7, 1675.9) is None  # (the Deadmines': no height measured)
+    # a trip there from Ironforge's gate ends at it (the portal, then where it puts you)
+    legs, _ = ns.Nav.Plan(0, -5020.0, -830.0, 7.0, lua.table(x=-105.5, y=0.8, cont=THANES))
+    assert legs[2].ride and legs[2].ride[8] == "portal"
+    assert math.dist((legs[1].x2, legs[1].y2), (x, y)) < 3
+
+
 def test_instance_map_view_helpers(inst_env):
     lua, ns = inst_env
     load(lua, ns, "GPSFrame.lua")

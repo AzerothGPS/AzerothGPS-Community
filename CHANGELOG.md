@@ -29,6 +29,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - An NPC upstairs or in a cellar is no longer "Arrived" at the door below: the directions say to go in and up or down the stairs, quest turn-ins go to their NPC, and the Target button stays until you target or talk to it.
 - Controller UI: Route Here also stays out of the quest menus when you turn the controller UI on after logging in.
 - Quick Find and search buttons no longer route you off Zephras Isle (or any continent) to a vendor, trainer or innkeeper elsewhere; they say none is known there instead.
+- The Hall of Thanes: its entrance is where it really is, under Ironforge.
 
 ## 1.3.13
 
