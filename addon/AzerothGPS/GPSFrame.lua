@@ -15662,6 +15662,20 @@ function G.MapClickHook(dxUI, dyUI, double)
   return ok and used and not double or false
 end
 
+-- Another addon's modified clicks (never set by AzerothGPS): a left click on the map (not dragged) with Ctrl or Alt held
+-- goes to `G.mapModClickHook(x, y, level, z, ctrl, alt)` first, in world yards through the map's own projection, the
+-- level shown there (a dungeon's map: its level) and its height on a dungeon's floor shown (else nil); true when it took
+-- it (then no map pin). Nothing happens on such a click without one but what always did (Ctrl: the map pin).
+function G.MapModClickHook(dxUI, dyUI, ctrl, alt)
+  local hook = G.mapModClickHook
+  if not hook or not (ctrl or alt) or G.Held() or not view.cont then return false end
+  local x, y = G.ScreenToWorld(view.x, view.y, dxUI, dyUI, view.rot, view.s)
+  local level = view.instance or G.PinLevel(x, y)
+  local z = view.instance and G.ShownInstanceZ(view.instance, x, y) or nil
+  local ok, used = pcall(hook, x, y, level, z, ctrl and true or false, alt and true or false)
+  return ok and used == true
+end
+
 function G.CursorWorld()
   if not canvas or not view.cont or not canvas:IsVisible() or not canvas:IsMouseOver() then return nil end
   local ox, oy = canvas:GetCenter()
@@ -15671,13 +15685,16 @@ function G.CursorWorld()
   local x, y = G.ScreenToWorld(view.x, view.y, mx / sc - ox, my / sc - oy, view.rot, view.s)
   local inst = view.instance
   if not inst then return x, y, view.cont end
-  -- a dungeon's map: its level, and the height there on the floor shown (all of them: the top
-  -- floor's; one: its height there when that's on it, else the floor's bottom)
+  return x, y, inst, G.ShownInstanceZ(inst, x, y)
+end
+-- A dungeon's map: the height at (x, y) on the floor shown (all of them: the top floor's; one: its height there when
+-- that's on it, else the floor's bottom), or nil.
+function G.ShownInstanceZ(inst, x, y)
   local z = ns.Nav.CityHeight and ns.Nav.CityHeight(inst, x, y)
   local floors = view.floor and view.floor > 0 and G.InstanceFloors(inst)
   local band = floors and floors[#floors - view.floor + 1]
   if band and not (z and z >= band[1] - 1 and z <= band[2] + 1) then z = band[1] end
-  return x, y, inst, z
+  return z
 end
 
 -- The dungeon whose map is in view (its level: 20000 + its MapID) and the floor shown (0 all,
@@ -15986,9 +16003,13 @@ function G.Init()
       local worldMap = m and m.type <= 2 -- a click there opens a zone instead
       -- Ctrl + left-click: the map pin there (Import.SetMapPin), as on the game's world map
       local px_, py_, pc_
+      local ctrl_, alt_ = IsControlKeyDown and IsControlKeyDown(), IsAltKeyDown and IsAltKeyDown()
+      local hooked = (ctrl_ or alt_) and G.MapModClickHook(dx, dy, ctrl_, alt_) -- (another addon's: G.MapModClickHook)
       -- (in the game's world map with its own map pin button pressed: a click places it, as on the game's map)
-      if ((IsControlKeyDown and IsControlKeyDown()) or G.WorldMapPinning()) and not G.Held() then px_, py_, pc_ = G.ClickWorld() end
-      if px_ and ns.Import and ns.Import.SetMapPin(pc_, px_, py_) then
+      if not hooked and (ctrl_ or G.WorldMapPinning()) and not G.Held() then px_, py_, pc_ = G.ClickWorld() end
+      if hooked then
+        lastClick = nil
+      elseif px_ and ns.Import and ns.Import.SetMapPin(pc_, px_, py_) then
         lastClick = nil
       elseif not worldMap and lastClick and now - lastClick.t <= DOUBLE_CLICK
           and (dx - lastClick.x) ^ 2 + (dy - lastClick.y) ^ 2 <= 100

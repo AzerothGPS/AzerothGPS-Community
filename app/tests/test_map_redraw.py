@@ -763,6 +763,7 @@ def test_no_dev_tool_ships_with_the_addon():
     src = "\n".join(p.read_text(encoding="utf-8") for p in ADDON.rglob("*.lua"))
     assert len(re.findall(r"SetOverride\(", src)) == 1  # (its definition)
     assert not re.search(r"mapClickHook\s*=[^=]", src) and not re.search(r"override\s*=\s*\{", src)
+    assert not re.search(r"mapModClickHook\s*=[^=]", src)  # (another addon's modified clicks: never set here)
 
 
 def test_no_map_editor_ships_with_the_addon(game):
@@ -850,6 +851,56 @@ def test_a_simulated_player_is_the_dev_tools_only_and_nothing_is_learned_from_it
         N.Clear()
         G.Follow()
     assert tuple(Geo.PlayerWorld()) == real and N.PlayerLevel(0) == 0
+
+
+def test_a_modified_click_goes_to_another_addons_hook_before_the_map_pin(game):
+    # (a map click hook for other addons, 2026-11-22) with no hook, Ctrl + left-click is the map pin as always and Alt +
+    # left-click a plain click; with one, a left click with Ctrl or Alt held goes to it first (world yards through the
+    # map's projection, the level shown, the modifiers): taken, no map pin and no plain click; not taken, as before.
+    # A plain click never reaches it
+    lua, ns = game
+    G, I = ns.GPS, ns.Import
+    frame = lua.globals().AzerothGPSFrame
+    lua.execute("""
+      AGPS_OLD_MOD = { IsControlKeyDown, IsAltKeyDown, GetCursorPosition }
+      AGPS_CTRL, AGPS_ALT = false, false
+      IsControlKeyDown = function() return AGPS_CTRL end
+      IsAltKeyDown = function() return AGPS_ALT end
+      GetCursorPosition = function() return 300, 300 end
+    """)
+    got, plain = [], []
+
+    def click(ctrl=False, alt=False):
+        lua.execute("AGPS_CTRL, AGPS_ALT = %s, %s" % ("true" if ctrl else "false", "true" if alt else "false"))
+        frame._scripts.OnMouseDown(frame, "LeftButton")
+        frame._scripts.OnMouseUp(frame, "LeftButton")
+        lua.execute("AGPS_CTRL, AGPS_ALT = false, false")
+
+    try:
+        ns.CharDB().mapPin = None
+        assert G.mapModClickHook is None
+        click(alt=True)  # (no hook: Alt + click is a plain click, no map pin)
+        assert I.MapPin() is None
+        click(ctrl=True)  # (no hook: the map pin)
+        assert I.MapPin() is not None
+        I.ClearMapPin()
+        x, y, c = G.ClickWorld()
+        G.mapModClickHook = lambda x, y, level, z, ctrl, alt: got.append((x, y, level, z, ctrl, alt)) or (ctrl and alt)
+        G.mapClickHook = lambda x, y, level, double: plain.append((x, y)) or True
+        click(ctrl=True, alt=True)  # (taken: nothing else happens)
+        assert len(got) == 1 and got[0][:2] == pytest.approx((x, y)) and got[0][2:] == (c, None, True, True)
+        assert I.MapPin() is None and not plain
+        click(ctrl=True)  # (not taken: the map pin, as before)
+        assert len(got) == 2 and got[1][4:] == (True, False) and I.MapPin() is not None and not plain
+        I.ClearMapPin()
+        click()  # (a plain click: not to it)
+        assert len(got) == 2 and len(plain) == 1
+    finally:
+        G.mapModClickHook = None
+        G.mapClickHook = None
+        ns.CharDB().mapPin = None
+        lua.execute("IsControlKeyDown, IsAltKeyDown, GetCursorPosition = unpack(AGPS_OLD_MOD, 1, 3)")
+        G.Follow()
 
 
 def test_the_search_offers_only_your_factions_npcs_and_neutral_ones(game):
