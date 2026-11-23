@@ -235,11 +235,12 @@ MEASURED_CYCLES = {  # "dock 1 | dock 2" (the row's names) -> seconds
 # user, 2026-10-08, "Not sure"). Camp Gev'rek's is the Horde's: an Alliance player sent on it to reach Stonetalon Peak
 # "had to death run from the dock" (a player's report, relayed by Kooki3z 2026-11-21: "make sure alliance isn't routed
 # there"); Camp Gev'rek (AreaTable 17223) lies in Mulgore, the Horde's (FactionGroupMask 4), and its guards aren't in
-# the 1.12 NPC dump (hostile.FOREVER_GUARDS). Old Dalaran Ruins' stays open to both: Alterac Mountains is contested
-# (FactionGroupMask 0), the NPC data has only wild creatures by its dock, and Zephras Isle's own NPCs are friendly to
-# both (faction 35).
+# the 1.12 NPC dump (hostile.FOREVER_GUARDS). Old Dalaran's skycutter is the Alliance's (Kooki3z 2026-11-23: "Alliance
+# players can use the airship ... connecting Dalaran and Zephras Isle (Valanaar). Dalaran is friendly to the Alliance,
+# whereas Horde players are not welcome inside Dalaran's city walls and face hostile guards"); the Horde's way to
+# Zephras Isle is Camp Gev'rek's.
 TRANSPORT_FACTIONS = {  # "dock 1 | dock 2" (the row's names) -> "A", "H" or "both"
-    "Old Dalaran Ruins, Alterac Mountains | Valanaar Skydocks, Zephras Isle": "both",
+    "Old Dalaran Ruins, Alterac Mountains | Valanaar Skydocks, Zephras Isle": "A",
     "Camp Gev'rek, Mulgore | Fairweather Stables, Zephras Isle": "H",
 }
 

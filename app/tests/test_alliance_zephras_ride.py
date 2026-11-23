@@ -34,8 +34,8 @@ def test_the_rides_faction_is_the_hordes_in_the_data():
     row = next(line for line in TRANSPORTS.read_text(encoding="utf-8").splitlines()
                if '"Camp Gev\'rek, Mulgore", "Fairweather Stables, Zephras Isle"' in line)
     assert 'faction = "H"' in row, row
-    # (Old Dalaran's stays open to both: Alterac Mountains is contested, no guards by either dock)
-    assert TRANSPORT_FACTIONS["Old Dalaran Ruins, Alterac Mountains | Valanaar Skydocks, Zephras Isle"] == "both"
+    # (Old Dalaran's skycutter is the Alliance's: Dalaran's guards are hostile to the Horde, Kooki3z 2026-11-23)
+    assert TRANSPORT_FACTIONS["Old Dalaran Ruins, Alterac Mountains | Valanaar Skydocks, Zephras Isle"] == "A"
 
 
 def test_camp_gevreks_guards_are_in_the_hostile_data(game):
