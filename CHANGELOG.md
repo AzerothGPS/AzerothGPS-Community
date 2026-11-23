@@ -2,6 +2,12 @@
 
 Each version's section is its release notes (GitHub and CurseForge).
 
+## 1.3.15 (in progress)
+
+### New
+
+- Roads: new roads in Ironforge, down to the Hall of Thanes' way in.
+
 ## 1.3.14
 
 ### New
