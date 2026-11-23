@@ -2,34 +2,29 @@
 
 Each version's section is its release notes (GitHub and CurseForge).
 
-## 1.3.14 (in progress)
+## 1.3.14
 
 ### New
 
-- Roads: new roads on Theramore Isle in Dustwallow Marsh.
-- Roads: new roads at Stormwind City's gate and in Thunder Bluff.
+- Quest Route: right-click the button and toggle icons pop out, like Quick Find's: fastest order, lowest level first, turn-ins only, objectives only, tracked quests only, this zone only. Lit means on. A quest route remakes itself as you change them; /agps questroute <way> sets one from a macro.
+- Quest Route: with a controller, the button's hint switches between A (route) and X (the toggle icons); move along them with the D-pad, A turns one on or off.
+- Near an NPC that's your next stop (picked in the search or on the map, by Quick Find, a city place or a /way), a pulsing Target button (Hunter's Mark's icon) in the directions targets it with your click and marks it with the stop's route marker (also a key; Options > Directions).
 - The GPS map window shows over the game's windows (quest log, bags, world map), as the map opened out of the minimap does; AzerothGPS's own windows stay on top.
-- Roads: new roads and stairs in Ironforge.
-- For plugin addons (API 23): set the route to a place, and preview a recorded walk as the route. See docs/api.md.
-- Roads: the trail up from Cragpool Lake in Stonetalon Mountains.
-- Quest Route: right-click the button and toggle icons pop out, like Quick Find's: fastest order, lowest level first, turn-ins only, objectives only, tracked quests only, this zone only. Lit means on. A quest route remakes itself as you change them.
-- Quest Route: with a controller, the button's hint switches between the buttons that route and that open the toggles; move through them with the D-pad, A turns one on or off.
-- Near an NPC you picked in the search as your next stop, a pulsing Target button (Hunter's Mark's icon) in the directions targets it with your click and marks it with the stop's route marker (also a key; Options > Directions).
-- Zephras Isle: its vendors, trainers, innkeepers and other NPCs are in the search and Quick Find before you've talked to them.
 - Options > Keys and buttons: Set Key for the show/hide key also takes a controller button (with the game's controller UI off; with it on, use a /agps toggle macro).
+- Zephras Isle: its vendors, trainers, innkeepers and other NPCs are in the search and Quick Find before you've talked to them.
+- Roads: new roads on Theramore Isle in Dustwallow Marsh, at Stormwind City's gate, in Thunder Bluff and in Ironforge (with its stairs), and the trail up from Cragpool Lake in Stonetalon Mountains.
+- For plugin addons (API 23): set the route to a place, and preview a recorded walk as the route. See docs/api.md.
 
 ### Changed
 
 - Road and wall drawing and Record are no longer part of AzerothGPS; roads you drew still guide your routes.
+- A city location (First Aid Trainer, Bank, Inn...) routes to its NPC, the nearest one when there are several.
 - Options: the grayed-out "Show the GPS map in the game's world map" now says why when you hover it (the game's controller UI is on).
 
 ### Fixed
 
-- Controller UI: abandoning quests no longer gets AzerothGPS blocked (Route Here stays out of the quest menus there).
-- An NPC upstairs or in a cellar is no longer "Arrived" at the door below: the directions say to go in and up or down the stairs, and quest turn-ins go to their NPC.
-- The Target button and the floor rules now work for NPCs picked on the map (inside buildings too), by Quick Find, by city places and by /way points at an NPC.
-- A city location (First Aid Trainer, Bank, Inn...) routes to its NPC, the nearest one when there are several.
-- Controller UI: Route Here also stays out of the quest menus when you turn the controller UI on after logging in.
+- Controller UI: abandoning quests no longer gets AzerothGPS blocked (Route Here stays out of the quest menus there, also when you turn the controller UI on after logging in).
+- An NPC upstairs or in a cellar is no longer "Arrived" at the door below, wherever the stop came from: the directions say to go in and up or down the stairs, and quest turn-ins go to their NPC.
 - Quick Find and search buttons no longer route you off Zephras Isle (or any continent) to a vendor, trainer or innkeeper elsewhere; they say none is known there instead.
 - The Hall of Thanes: its entrance is where it really is, under Ironforge.
 
