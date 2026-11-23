@@ -345,6 +345,7 @@ def test_the_stretches_past_guards_split_a_piece_in_order(game):
         cdb.faction = fac
 
 
+@pytest.mark.timing
 def test_the_warning_is_worked_out_in_short_slices(game):
     # (a lag spike would come back here) the route's towns past their guards are looked for in a background job
     # (N.CheckHostileRoute: Router.Background) that pauses along the way: a long route, 20 times through Dun Algaz's

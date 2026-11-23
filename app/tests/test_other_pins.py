@@ -251,6 +251,7 @@ def test_the_cap_holds_nearest_first(g):
     assert worst < 400
 
 
+@pytest.mark.timing
 def test_a_big_registry_redraws_within_a_frame_budget(g):
     # Questie can have thousands of icons: indexing them is done only when the registry changed (at most every
     # REINDEX_MIN), a gather looks only at the cells round the view, and a redraw with nothing changed gathers nothing
