@@ -2128,6 +2128,144 @@ function Lay.AtQuestNpc(stop)
   stop.npcId, stop.npcName = s.id, s.name
   return stop
 end
+-- The NPC at a spot with no NPC of its own (Kooki3z, 2026-11-22, "consider /way points too": a /way, a guide's step):
+-- the shipped NPCs' spawns and the ones talked to (ns.db.npcs) within `r` of (x, y) on `level`'s continent. With
+-- `name` (the waypoint's text), only those it names: their name or title, or the text holding their name ("Talk to
+-- Gelman Stonehand"); a text naming none of them: none. Several left: the nearest when it alone is that near, else
+-- none (WAY_NPC_AMBIGUOUS_YD). { id, name, cont (the spawn's level), x, y, z } or nil.
+Lay.WAY_NPC_YD, Lay.WAY_NPC_AMBIGUOUS_YD = 5, 1
+function Lay.NpcNear(level, x, y, r, name)
+  if not (level and x and y and r) then return nil end
+  local base = Geo.Base(level)
+  local key = type(name) == "string" and name ~= "" and name:lower() or nil
+  local function named(nm, title)
+    if not key then return true end
+    nm = type(nm) == "string" and nm:lower() or nil
+    title = type(title) == "string" and title:lower() or nil
+    return (nm and (key == nm or key:find(nm, 1, true) ~= nil)) or (title and key == title) or false
+  end
+  local found, seen = {}, {}
+  local function try(id, nm, title, lv, sx, sy, sz)
+    if not (lv and sx and sy) or Geo.Base(lv) ~= base then return end
+    local d2 = (sx - x) ^ 2 + (sy - y) ^ 2
+    if d2 > r * r or not named(nm, title) then return end
+    local f = seen[id]
+    if f and f.d2 <= d2 then return end
+    if not f then f = {} found[#found + 1] = f seen[id] = f end
+    f.id, f.name, f.cont, f.x, f.y, f.z, f.d2 = id, nm, lv, sx, sy, sz, d2
+  end
+  local _, byId = Lay.ShippedNpcs()
+  for _, n in ipairs((Lay.ShippedNpcs())) do
+    local sp = n.spawns
+    for i = 1, #sp - 3, 4 do
+      if math.abs(sp[i + 1] - x) <= r and math.abs(sp[i + 2] - y) <= r then
+        try(n.id, ns.NpcName and ns.NpcName(n.id, n.name) or n.name, n.title, sp[i], sp[i + 1], sp[i + 2], sp[i + 3])
+      end
+    end
+  end
+  for id, n in pairs(NpcDB() or {}) do
+    if type(id) == "number" and type(n) == "table" and not byId[id] and not n.imported then
+      try(id, n.name, n.title, n.cont, n.x, n.y, n.z)
+      for _, sp in ipairs(n.spots or {}) do try(id, n.name, n.title, sp.cont, sp.x, sp.y, sp.z) end
+    end
+  end
+  if #found == 0 then return nil end
+  table.sort(found, function(a, b) return a.d2 < b.d2 end)
+  if found[2] and math.sqrt(found[2].d2) - math.sqrt(found[1].d2) < Lay.WAY_NPC_AMBIGUOUS_YD then return nil end
+  if found[2] and not key then return nil end -- (no text to tell them apart)
+  local f = found[1]
+  return { id = f.id, name = f.name, cont = f.cont, x = f.x, y = f.y, z = f.z }
+end
+-- Stop `stop` (a /way's, a guide step's) at an NPC (Lay.NpcNear within WAY_NPC_YD, by `name`): that NPC's creature
+-- id and name, and its height when the stop has none (not with `noHeight`: a guide's step, its heights its own,
+-- RestedXP.lua's X.Height), so the Target button and the floor rules apply. Returns it.
+function Lay.AttachNpc(stop, name, noHeight)
+  if not (stop and stop.x and stop.cont) or stop.npcId then return stop end
+  local n = Lay.NpcNear(stop.cont, stop.x, stop.y, Lay.WAY_NPC_YD, name)
+  if not n then return stop end
+  stop.npcId, stop.npcName = n.id, n.name
+  if stop.z == nil and not noHeight then stop.z = n.z end
+  if Geo.Base(n.cont) == Geo.Base(stop.cont) and n.cont ~= stop.cont and stop.cont == Geo.Base(stop.cont) then
+    stop.cont = n.cont -- (down in Undercity: its level)
+  end
+  return stop
+end
+-- A city place's NPC (Kooki3z, 2026-11-22: "Locations that have a single trainer like the first aid trainer in
+-- ironforge, have routing go to the NPC. If it has more than 1 just pick one of them"): the places (Data/CityPlaces.lua,
+-- TownPlaces) are the guards' map spots, near the NPC but not at it, and often on another floor. By the place's kind
+-- (its English name's ending, PLACE_NPC_KINDS: a trainer's `trainer`, else a service letter, Data/Npcs.lua's), the
+-- shipped NPCs of the player's side (or both) offering it within PLACE_NPC_YD of the place's spot. One: it. Several: the
+-- nearest the player while they're within PLACE_NPC_NEAR_YD of the place (in that city), else the nearest the place's
+-- spot. None, or a kind with no NPC (a mailbox, a zeppelin): nil, the place's spot as before.
+-- { id, name, cont (the spawn's level), x, y, z } or nil.
+Lay.PLACE_NPC_YD, Lay.PLACE_NPC_NEAR_YD = 150, 500
+Lay.PLACE_NPC_KINDS = {
+  { "Alchemy Trainer", trainer = "Alchemy" }, { "Blacksmithing Trainer", trainer = "Blacksmithing" },
+  { "Cooking Trainer", trainer = "Cooking" }, { "Enchanting Trainer", trainer = "Enchanting" },
+  { "Engineering Trainer", trainer = "Engineering" }, { "First Aid Trainer", trainer = "First Aid" },
+  { "Fishing Trainer", trainer = "Fishing" }, { "Herbalism Trainer", trainer = "Herbalism" },
+  { "Leatherworking Trainer", trainer = "Leatherworking" }, { "Mining Trainer", trainer = "Mining" },
+  { "Skinning Trainer", trainer = "Skinning" }, { "Tailoring Trainer", trainer = "Tailoring" },
+  { "Druid Trainer", trainer = "DRUID" }, { "Hunter Trainer", trainer = "HUNTER" }, { "Mage Trainer", trainer = "MAGE" },
+  { "Paladin Trainer", trainer = "PALADIN" }, { "Priest Trainer", trainer = "PRIEST" },
+  { "Rogue Trainer", trainer = "ROGUE" }, { "Shaman Trainer", trainer = "SHAMAN" },
+  { "Warlock Trainer", trainer = "WARLOCK" }, { "Warrior Trainer", trainer = "WARRIOR" },
+  { "Weapon Master", trainer = "Weapon" }, { "Bank", svc = "b" }, { "Inn", svc = "i" }, { "Innkeeper", svc = "i" },
+  { "Stable Master", svc = "s" }, { "Guild Master", svc = "p" }, { "Auction House", svc = "a" },
+  { "Auctioneer", svc = "a" }, { "Battlemaster", svc = "m" }, { "Gryphon Master", svc = "f" },
+  { "Wind Rider Master", svc = "f" }, { "Bat Handler", svc = "f" }, { "Hippogryph Master", svc = "f" },
+  { "Flight Master", svc = "f" },
+}
+function Lay.PlaceNpcKind(name)
+  if type(name) ~= "string" then return nil end
+  local low = name:lower()
+  for _, k in ipairs(Lay.PLACE_NPC_KINDS) do
+    local e = k[1]:lower()
+    if low == e or low:sub(-#e - 1) == " " .. e then return k end
+  end
+  return nil
+end
+-- Whether `name` is a shipped city or town place's (English) name.
+function Lay.IsPlaceName(name)
+  if type(name) ~= "string" then return false end
+  if not Lay.placeNames then
+    local t = {}
+    for _, c in pairs(ns.CityPlaces or {}) do
+      for _, p in ipairs(c) do if type(p[3]) == "string" then t[p[3]:lower()] = true end end
+    end
+    for _, c in pairs(ns.TownPlaces or {}) do
+      for _, p in ipairs(c) do if type(p[1]) == "string" then t[p[1]:lower()] = true end end
+    end
+    Lay.placeNames = t
+  end
+  return Lay.placeNames[name:lower()] == true
+end
+function Lay.PlaceNpc(name, level, x, y, px, py, pcont)
+  local k = Lay.IsPlaceName(name) and Lay.PlaceNpcKind(name)
+  if not (k and level and x and y) then return nil end
+  local fac = ns.Nav and ns.Nav.Faction and ns.Nav.Faction() or false
+  local base = Geo.Base(level)
+  local nearPlayer = px and pcont and Geo.Base(pcont) == base
+    and (px - x) ^ 2 + (py - y) ^ 2 <= Lay.PLACE_NPC_NEAR_YD ^ 2
+  local fx, fy = nearPlayer and px or x, nearPlayer and py or y
+  local best, bd
+  for _, n in ipairs((Lay.ShippedNpcs())) do
+    local offers = (k.trainer and n.trainer == k.trainer) or (k.svc and n.svc and n.svc:find(k.svc, 1, true) ~= nil)
+    if offers and (n.side == "B" or not fac or n.side == fac) then
+      local sp = n.spawns
+      for i = 1, #sp - 3, 4 do
+        if Geo.Base(sp[i]) == base and (sp[i + 1] - x) ^ 2 + (sp[i + 2] - y) ^ 2 <= Lay.PLACE_NPC_YD ^ 2 then
+          local d2 = (sp[i + 1] - fx) ^ 2 + (sp[i + 2] - fy) ^ 2
+          if not bd or d2 < bd then
+            best, bd = { id = n.id, name = ns.NpcName and ns.NpcName(n.id, n.name) or n.name, cont = sp[i],
+              x = sp[i + 1], y = sp[i + 2], z = sp[i + 3] }, d2
+          end
+        end
+      end
+    end
+  end
+  return best
+end
 -- The window of an NPC opening (L.NPC_EVENTS): who it is and where the player stands. `options`: the gossip's.
 function Lay.OnNpcWindow(event, options)
   local kind = Lay.NPC_EVENTS[event]

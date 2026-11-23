@@ -41,7 +41,6 @@ def clean(game):
     yield lua, ns
     lua.execute("AGPS_GUIDS = nil AGPS_NEAR = nil CheckInteractDistance = AGPS_OLD_CID")
     ns.Nav.Clear()
-    ns.Nav.arrivedNpc = None
     ns.settings.gps.targetNpcButton = True
     ns.GPS.UpdateTargetButton()
 
@@ -98,7 +97,9 @@ def test_the_door_below_an_npc_upstairs_is_not_arrived(clean):
     assert b._shown and "/targetexact Acolyte Dellis" in b._attr["macrotext"]
 
 
-def test_targeting_the_npc_within_interact_range_arrives(clean):
+def test_targeting_an_npc_a_floor_off_in_range_does_not_arrive_on_its_own_floor_it_does(clean):
+    # (the game's interact range is 3D, about 10 yd, and reaches through a floor: from the door under Acolyte Dellis
+    # she's in range. So a floor off, only her window or her floor followed)
     lua, ns = clean
     N = ns.Nav
     _stop(lua, ns, DELLIS, DELLIS_XYZ, "Acolyte Dellis")
@@ -106,8 +107,15 @@ def test_targeting_the_npc_within_interact_range_arrives(clean):
     lua.execute(f"AGPS_GUIDS = {{ target = '{guid(DELLIS)}' }} AGPS_NEAR = false")
     assert ARRIVED not in _status(lua, ns, x + 7, y - 2)  # (targeted, out of range: not yet)
     lua.execute("AGPS_NEAR = true")
-    assert ARRIVED in _status(lua, ns, x + 2.5, y + 4)  # (upstairs by it: in range)
-    assert N.dest is None
+    assert ARRIVED not in _status(lua, ns, x + 2.5, y + 4)  # (in range, no floor known: not either)
+    N.AnchorFloor(0, x + 2.5, y + 4, 104.8)  # (her floor followed: there)
+    assert ARRIVED in (N.Status(x + 2.5, y + 4, 0) or "") and N.dest is None
+    # (a ground floor NPC targeted in range: there, as before)
+    N.ResetTrack()
+    _stop(lua, ns, GILROY, GILROY_XYZ, "Adair Gilroy")
+    lua.execute(f"AGPS_GUIDS = {{ target = '{guid(GILROY)}' }}")
+    gx, gy, _ = GILROY_XYZ
+    assert ARRIVED in _status(lua, ns, gx + 12, gy)
 
 
 def test_another_target_in_range_or_a_hidden_one_does_not_arrive(clean):
@@ -130,51 +138,67 @@ def test_talking_to_the_npc_arrives(clean):
     assert ARRIVED not in _status(lua, ns, x + 7, y - 2)
     N.OnNpcWindow(DELLIS)
     assert ARRIVED in _status(lua, ns, x + 4, y)
-    assert N.arrivedNpc is None  # (talked to: no Target button kept)
 
 
-def test_right_by_it_with_no_floor_known_arrives(clean):
+def test_right_by_a_stop_a_floor_off_with_no_npc_arrives_by_an_npc_it_does_not(clean):
+    lua, ns = clean
+    N = ns.Nav
+    x, y, z = DELLIS_XYZ
+    N.SetStops(lua.eval(f"{{ {{ x = {x}, y = {y}, z = {z}, cont = 0, name = 'Upstairs' }} }}"), False, "red")
+    assert ARRIVED not in _status(lua, ns, x + 7, y)
+    assert ARRIVED in _status(lua, ns, x + N.OFF_FLOOR_ARRIVE_YD - 1, y)  # (no NPC to talk to: 3 yd)
+    _stop(lua, ns, DELLIS, DELLIS_XYZ, "Acolyte Dellis")
+    assert ARRIVED not in _status(lua, ns, x + N.OFF_FLOOR_ARRIVE_YD - 1, y)
+
+
+def test_the_door_right_under_her_is_not_arrived_even_once_the_floor_goes_stale(clean):
+    # (Kooki3z's debug line at the library's door, 2026-11-22: "arrived Acolyte Dellis (within 3 yd): 2.9 yd, stop z
+    # 104.8, off up 4.8, ..., floor 99.0, target -": her spot is over the doorway. Standing there the floor followed
+    # goes stale (no road within TRACK_YD), and that's the same as upstairs by her)
     lua, ns = clean
     N = ns.Nav
     _stop(lua, ns, DELLIS, DELLIS_XYZ, "Acolyte Dellis")
     x, y, _ = DELLIS_XYZ
-    assert ARRIVED in _status(lua, ns, x + N.OFF_FLOOR_ARRIVE_YD - 1, y)
+    px, py = x + 2.9, y
+    _at(lua, px, py)
+    lua.execute("AGPS_T = 300")
+    N.AnchorFloor(0, px, py, 99.0)
+    assert N.FollowedZ(0) == 99.0
+    assert ARRIVED not in (N.Status(px, py, 0) or "")
+    lua.execute("AGPS_T = 310")  # (10 s at the door: the floor followed let go)
+    assert N.FollowedZ(0) is None
+    assert ARRIVED not in (N.Status(px, py, 0) or "") and N.dest is not None
+    lua.execute(f"AGPS_GUIDS = {{ target = '{guid(DELLIS)}' }} AGPS_NEAR = true")  # (targeted from the door: in range)
+    assert ARRIVED not in (N.Status(px, py, 0) or "")
+    # (upstairs by her: her window opens, there)
+    N.OnNpcWindow(DELLIS)
+    assert ARRIVED in (N.Status(x + 1, y + 1, 0) or "")
 
 
-def test_a_ground_floor_npc_still_arrives_as_before_and_its_button_stays_till_targeted(clean):
+def test_a_ground_floor_npc_still_arrives_as_before_and_its_button_goes_then(clean):
+    # (Kooki3z, 2026-11-22: "after destination to the NPC is reached, hide the 'target npc' button")
     lua, ns = clean
     N = ns.Nav
     _stop(lua, ns, GILROY, GILROY_XYZ, "Adair Gilroy")
     x, y, _ = GILROY_XYZ
+    _at(lua, x + 15, y)
+    assert _button(lua, ns, 2100)._shown  # (on the way: shown)
     assert ARRIVED in _status(lua, ns, x + 8, y)  # (within the 10 yd circle, as before)
-    assert N.dest is None and N.arrivedNpc is not None and N.arrivedNpc.npcId == GILROY
-    # (the route ended: its Target button still there)
-    b = _button(lua, ns, 2100)
-    assert b._shown and "/targetexact Adair Gilroy" in b._attr["macrotext"]
-    _at(lua, x + 20, y)
-    assert _button(lua, ns, 2101)._shown
-    # (targeted: hidden and done with, not back with another target)
-    lua.execute(f"AGPS_GUIDS = {{ target = '{guid(GILROY)}' }}")
-    assert not _button(lua, ns, 2102)._shown and N.arrivedNpc is None
-    lua.execute("AGPS_GUIDS = nil")
-    assert not _button(lua, ns, 2103)._shown
+    assert N.dest is None
+    assert not _button(lua, ns, 2101)._shown  # (arrived: gone)
 
 
-def test_the_kept_button_goes_on_talking_to_it_or_walking_away(clean):
+def test_after_an_npc_stop_the_next_npc_stops_button_shows(clean):
     lua, ns = clean
-    N, G = ns.Nav, ns.GPS
-    x, y, _ = GILROY_XYZ
-    _stop(lua, ns, GILROY, GILROY_XYZ, "Adair Gilroy")
-    assert ARRIVED in _status(lua, ns, x + 8, y)
-    assert _button(lua, ns, 2200)._shown
-    N.OnNpcWindow(GILROY)
-    assert not _button(lua, ns, 2201)._shown
-    _stop(lua, ns, GILROY, GILROY_XYZ, "Adair Gilroy")
-    assert ARRIVED in _status(lua, ns, x + 8, y)
-    _at(lua, x + G.TARGET_NPC_LEAVE_YD + 5, y)
-    assert not _button(lua, ns, 2202)._shown and N.arrivedNpc is None
-    _at(lua, x + 8, y)
-    assert not _button(lua, ns, 2203)._shown
+    N = ns.Nav
+    gx, gy, gz = GILROY_XYZ
+    dx, dy, dz = DELLIS_XYZ
+    N.SetStops(lua.eval(f"""{{ {{ x = {gx}, y = {gy}, z = {gz}, cont = 0, name = 'Adair Gilroy', npcId = {GILROY},
+      npcName = 'Adair Gilroy' }}, {{ x = {dx}, y = {dy}, z = {dz}, cont = 0, name = 'Acolyte Dellis',
+      npcId = {DELLIS}, npcName = 'Acolyte Dellis' }} }}"""), False, "red")
+    assert ARRIVED not in _status(lua, ns, gx + 8, gy) and N.dest.npcId == DELLIS  # (Gilroy reached: on to Dellis)
+    b = _button(lua, ns, 2200)
+    assert b._shown and "Acolyte Dellis" in b._attr["macrotext"]
 
 
 def test_a_quest_turn_in_stop_goes_to_its_npc_with_its_height_and_target_button(clean):
@@ -292,7 +316,8 @@ def test_with_the_grids_on_or_off_the_door_is_not_arrived_and_the_button_shows(c
             A.dir.Show(A.dir)
             b = _button(lua, ns, 2500 + i)
             assert b._shown and lua.eval("AzerothGPSTargetButton._pts.TOPRIGHT[2] == AGPS_NS.Arrow.dir")
-        # (by her upstairs: within 3 yd, the floor followed there still the street's)
+        # (by her upstairs: her window opened)
+        N.OnNpcWindow(DELLIS)
         assert ARRIVED in _status(lua, ns, x + 1.5, y + 1.5)
         # (a quest's turn-in to her: at her, the same)
         stop = lua.eval(f"{{ x = {x + 25}, y = {y - 10}, cont = 0, name = 'Turn in: Q', quest = {DELLIS_QUEST}, "
@@ -330,9 +355,11 @@ def test_with_arrival_reasons_on_each_arrival_says_why_once(clean):
         lua.execute("AGPS_SAID = {}")
         _stop(lua, ns, DELLIS, DELLIS_XYZ, "Acolyte Dellis")
         lua.execute(f"AGPS_GUIDS = {{ target = '{guid(DELLIS)}' }} AGPS_NEAR = true")
+        assert ARRIVED not in _status(lua, ns, DELLIS_XYZ[0] + 2.5, DELLIS_XYZ[1] + 4)
+        N.OnNpcWindow(DELLIS)
         assert ARRIVED in _status(lua, ns, DELLIS_XYZ[0] + 2.5, DELLIS_XYZ[1] + 4)
         said = list(lua.eval("AGPS_SAID").values())
-        assert len(said) == 1 and "(within 3 yd)" not in said[0] and f"target {DELLIS} in range" in said[0]
+        assert len(said) == 1 and "(npc window)" in said[0] and f"target {DELLIS} in range" in said[0]
     finally:
         N.debugArrival = False
         lua.execute("AGPS_NS.Print = AGPS_OLD_PRINT")

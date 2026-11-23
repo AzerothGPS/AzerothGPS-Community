@@ -26,7 +26,9 @@ Each version's section is its release notes (GitHub and CurseForge).
 ### Fixed
 
 - Controller UI: abandoning quests no longer gets AzerothGPS blocked (Route Here stays out of the quest menus there).
-- An NPC upstairs or in a cellar is no longer "Arrived" at the door below: the directions say to go in and up or down the stairs, quest turn-ins go to their NPC, and the Target button stays until you target or talk to it.
+- An NPC upstairs or in a cellar is no longer "Arrived" at the door below: the directions say to go in and up or down the stairs, and quest turn-ins go to their NPC.
+- The Target button and the floor rules now work for NPCs picked on the map (inside buildings too), by Quick Find, by city places and by /way points at an NPC.
+- A city location (First Aid Trainer, Bank, Inn...) routes to its NPC, the nearest one when there are several.
 - Controller UI: Route Here also stays out of the quest menus when you turn the controller UI on after logging in.
 - Quick Find and search buttons no longer route you off Zephras Isle (or any continent) to a vendor, trainer or innkeeper elsewhere; they say none is known there instead.
 - The Hall of Thanes: its entrance is where it really is, under Ironforge.
