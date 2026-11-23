@@ -278,6 +278,8 @@ def test_the_world_map_option_says_why_its_gray_with_the_controller_ui(game):
         ns.GPS.ControllerUI = lua.eval("function() return true end")
         O.Refresh()
         assert cb.agpsOn is False and cb._enabled is False
+        # (the game sends a disabled button no OnEnter unless it's told to: QA #888/#889 saw no tooltip at all)
+        assert cb._motionWhileDisabled is True
         assert any(str(t).startswith(why) for t in hovered())
         ns.GPS.ControllerUI = lua.eval("function() return false end")
         O.Refresh()

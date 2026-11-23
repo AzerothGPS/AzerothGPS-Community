@@ -17,6 +17,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 ### Fixed
 
+- Options: hovering the grayed world map option (controller UI on) shows its tooltip and why it's gray.
 - A city's class trainer place (Undercity Mage Trainer) routes to that class's trainer, not a portal trainer nearby.
 - The Target button now marks the NPC with the stop's route marker too; it only targeted it.
 - A new stop's marker no longer shows as a gray cog for a moment.

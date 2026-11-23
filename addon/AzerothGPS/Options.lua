@@ -77,6 +77,9 @@ local function Checkbox(parent, label, tooltip, get, set, enabled)
       GameTooltip:Show()
     end)
     cb:SetScript("OnLeave", GameTooltip_Hide)
+    -- (grayed, the game sends a disabled button no OnEnter, so its tooltip and the reason it's gray never showed:
+    -- QA #888/#889, the world map option with the controller UI on)
+    if cb.SetMotionScriptsWhileDisabled then cb:SetMotionScriptsWhileDisabled(true) end
   end
   controls[#controls + 1] = function()
     cb:SetChecked(get())

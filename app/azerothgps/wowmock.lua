@@ -42,6 +42,8 @@ M.IsVisible = function(s) return s._shown end
 M.SetEnabled = function(s, v) s._enabled = v and true or false end -- (recorded)
 M.IsEnabled = function(s) return s._enabled ~= false end -- (as set: enabled unless disabled)
 M.Enable = function(s) s._enabled = true end
+M.SetMotionScriptsWhileDisabled = function(s, v) s._motionWhileDisabled = v and true or false end -- (recorded: the game
+-- sends a disabled button no OnEnter/OnLeave without it)
 M.Disable = function(s) s._enabled = false end
 M.RegisterEvent = function(s, e) s._events[e] = true end
 M.RegisterUnitEvent = M.RegisterEvent
