@@ -16719,9 +16719,9 @@ function G.Init()
 
   -- Quest route: stops for the quest log, fastest order.
   local qr = RoundButton(26, "Interface\\Icons\\Ability_Rogue_Sprint")
-  -- (right-click: its menu of toggles, the Quest Route options, QuestWays.lua; asked 2026-11-22, "extend the quest
-  -- route button with a sub menu to route in different ways like by level, turn ins only, tracked quest only", then
-  -- "make these quick buttons that can be toggled on/off")
+  -- (right-click: its toggle icons popping out as Quick Find's, the Quest Route options, QuestWays.lua; asked 2026-11-22,
+  -- "extend the quest route button with a sub menu to route in different ways like by level, turn ins only, tracked
+  -- quest only", then "make these quick buttons that can be toggled on/off", "should be like the ammo button")
   qr:RegisterForClicks("LeftButtonUp", "RightButtonUp")
   qr:SetScript("OnClick", function(self, button)
     if button == "RightButton" and G.ToggleQuestWays then G.ToggleQuestWays(self) return end
@@ -18495,6 +18495,7 @@ function G.SetQuickFindOpen(on, sub)
   G.quickFindIdle = 0
   if on and G.mapMenu then G.mapMenu.idle = 0 end
   if on and G.searchPanel then G.searchPanel:Hide() end -- (it opens over the flyout, just above Search Places)
+  if on and G.CloseQuestWays then G.CloseQuestWays() end -- (the Quest Route button's icons: one flyout out at a time)
   if G.PlaceQuickFind then G.PlaceQuickFind() end
   return G.quickFindOpen
 end

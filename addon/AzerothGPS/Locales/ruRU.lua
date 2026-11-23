@@ -1829,6 +1829,7 @@ L["Tracked quests only"] = "Только отслеживаемые задани
 L["This zone only"] = "Только эта зона"
 L["Quest Route options..."] = "Настройки маршрута заданий..."
 L["Right-click to choose how it routes."] = "Правый щелчок: выбрать, как строится маршрут."
+L["Your quests in the fastest order, whatever their level. Turns off the level orders."] = "Ваши задания в самом быстром порядке, независимо от уровня. Отключает порядок по уровню."
 L["Quest Route: none of your quests are finished yet (nothing to turn in)."] = "Маршрут заданий: ни одно из ваших заданий ещё не выполнено (нечего сдавать)."
 L["Quest Route: only turn-ins are left (no objectives to do)."] = "Маршрут заданий: осталась только сдача (целей нет)."
 L["Quest Route ways: fastest, low, gray, turnins, objectives, tracked, zone."] = "Способы маршрута заданий: fastest, low, gray, turnins, objectives, tracked, zone."

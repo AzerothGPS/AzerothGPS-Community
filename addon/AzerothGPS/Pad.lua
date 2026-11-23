@@ -683,10 +683,10 @@ function Pad.HintTargets()
     return out
   end
   local g = G()
-  -- (the Quest Route button's menu of toggles open, QuestWays.lua: A's over the highlighted entry, Back's over the
-  -- button it goes back to)
+  -- (the Quest Route button's toggle icons out, QuestWays.lua: A's over the one in focus, Back's over the button it
+  -- goes back to)
   if g and g.QuestWaysOpen and g.QuestWaysOpen() then
-    add(g.QuestWaysSelRow(), "select")
+    add(g.QuestWaysSel(), "select")
     add(g.questWays.owner, "back")
     return out
   end
@@ -1392,6 +1392,11 @@ function Pad.MenuButtons()
   local function add(b)
     if b and b.IsShown and b:IsShown() then out[#out + 1] = b end
   end
+  -- (the Quest Route button's toggle icons out, QuestWays.lua: theirs, as Quick Find's)
+  if g.QuestWaysOpen and g.QuestWaysOpen() then
+    for _, b in ipairs(g.QuestWaysButtons()) do add(b) end
+    if #out > 0 then return out end
+  end
   -- (a flyout in Quick Find's open, Ammo's arrows and bullets: its buttons)
   local sub = g.quickFindOpen and g.quickFindSub
   if sub then
@@ -1480,6 +1485,7 @@ end
 function Pad.MenuParts()
   local g = G()
   if not g or g.quickFindOpen or (g.OpenGroupSlot and g.OpenGroupSlot()) then return nil end
+  if g.QuestWaysOpen and g.QuestWaysOpen() then return nil end
   local col, row = {}, {}
   local order = { barUp = 1, menuUp = 2, barRight = 3, menuRight = 4 }
   local slots = {}
@@ -1528,6 +1534,7 @@ end
 function Pad.CloseMenu()
   local g = G()
   Pad.SetFocus(nil)
+  if g.CloseQuestWays then g.CloseQuestWays() end
   if g.quickFindOpen and g.SetQuickFindOpen then g.SetQuickFindOpen(false) end
   if g.CloseOpenGroup then g.CloseOpenGroup() end
   if g.mapMenu then g.mapMenu:Hide() end
@@ -1538,6 +1545,9 @@ end
 function Pad.MenuParent()
   local g = G()
   if not g then return nil end
+  if g.QuestWaysOpen and g.QuestWaysOpen() and g.questWays.owner and g.questWays.owner:IsShown() then
+    return g.questWays.owner
+  end
   local sub = g.quickFindOpen and g.quickFindSub
   if sub then
     local pb = g.quickFindButtons and g.quickFindButtons[sub.kind]
