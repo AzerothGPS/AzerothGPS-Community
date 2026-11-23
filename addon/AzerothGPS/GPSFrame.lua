@@ -14671,12 +14671,19 @@ end
 -- use button is. "Near" is by the player's x and y alone (the game gives no height): within TARGET_NPC_YD of the stop,
 -- on its level; shown, it stays till TARGET_NPC_LEAVE_YD. Hidden while that NPC is the target already (its creature id
 -- in the target's GUID). Off with the option (`targetNpcButton`, Options > Directions).
--- The same click also marks it (asked by Kooki3z, 2026-11-22: "target button should set the same raid mark"): the
--- macro's "/tm" line puts the stop's route marker over it (the stop's `icon` is a raid icon number, Nav.MARKER_COLORS'
--- order). Only by that click: SetRaidTarget and ClearRaidMarker are restricted in this client, so AzerothGPS never
--- marks or clears a mark by itself, and the mark stays till the player or the game clears it. "~" leaves a unit that
--- has any mark already alone (a second click never toggles ours off, nor takes the player's or another addon's), and
--- "/cleartarget" first with "[@target,exists]" marks nothing else when the NPC isn't found. Options: solo
+-- The same click also marks it (asked by Kooki3z, 2026-11-22: "target button should set the same raid mark") with the
+-- stop's route marker (the stop's `icon` is a raid icon number, Nav.MARKER_COLORS' order). Only by that click:
+-- SetRaidTarget and ClearRaidMarker are restricted in this client, so AzerothGPS never marks or clears a mark by itself,
+-- and the mark stays till the player or the game clears it. Not with "/tm" (1.3.14's macro, which marked nothing:
+-- Kooki3z, 2026-11-23, "raid marking isn't working"): this client's /tm is one of its ordinary slash commands, not
+-- one of the secure ones its macros run untainted, and SetRaidTarget refuses tainted code (GetRaidTargetIndex hands it
+-- secrets too). The macro's last line instead "/click"s a second secure button (TARGET_NPC_MARK_BTN; /click is a
+-- secure command) whose own action is the template's "raidtarget" one, "set-unmarked" on the target: it marks a unit
+-- with no mark and leaves one with any mark alone (a second click never toggles ours off, nor takes the player's or
+-- another addon's mark). That's the client's own secure action for it, so no [@target,nomark]-style condition (there
+-- is none) and nothing read from the target beforehand (the macro is set before the click, and the NPC may not be
+-- targeted yet). "/cleartarget" first with "[@target,exists]" (and the action needing a target besides) marks nothing
+-- else when the NPC isn't found. Options: solo
 -- (`targetNpcMarkSolo`, on), in a party or raid (`targetNpcMarkGroup`, off: the others see the marks, and the
 -- leader may do the marking); in a raid only with lead or assist (the game's rule). Otherwise the macro targets only.
 G.TARGET_NPC_YD = 40 -- shown this close to the NPC's stop (about where /targetexact finds it)
@@ -14707,12 +14714,15 @@ function G.TargetNpcName(d)
   name = name:gsub("[%c;]", " "):gsub("^%s+", ""):gsub("%s+$", "") -- (one line; ";" would split the macro's options)
   return name ~= "" and name or nil
 end
+-- The second button the macro clicks to mark (hidden; it marks the target with the stop's icon, its "marker").
+G.TARGET_NPC_MARK_BTN = "AzerothGPSTargetMarkButton"
+-- The macro, and the raid icon its click marks the NPC with (nil: it targets only).
 function G.TargetNpcMacro(d)
   local name = d and G.TargetNpcName(d)
   if not name then return nil end
   local icon = tonumber(d.icon)
   if icon and icon >= 1 and icon <= 8 and icon % 1 == 0 and G.TargetNpcMarkOk() then
-    return "/cleartarget\n/targetexact " .. name .. "\n/tm [@target,exists] ~" .. icon
+    return "/cleartarget\n/targetexact " .. name .. "\n/click [@target,exists] " .. G.TARGET_NPC_MARK_BTN, icon
   end
   return "/targetexact " .. name
 end
@@ -14761,6 +14771,18 @@ function G.MakeTargetButton(panel)
   b:RegisterForClicks("AnyUp", "AnyDown")
   b:SetSize(G.TARGET_NPC_PX, G.TARGET_NPC_PX)
   b.panel = panel
+  -- (the marker, clicked by the macro's "/click": the template's raidtarget action on the target, never toggling. It
+  -- acts on the up, which is what /click sends (with "cast on key down" on, a /click'd button otherwise does nothing).
+  -- Its "type" and "marker" set with the macro, out of combat; no type: it does nothing)
+  local okm, m = pcall(CreateFrame, "Button", G.TARGET_NPC_MARK_BTN, UIParent, "SecureActionButtonTemplate")
+  if okm and m then
+    m:SetSize(1, 1)
+    m:SetAttribute("useOnKeyDown", false)
+    m:SetAttribute("unit", "target")
+    m:SetAttribute("action", "set-unmarked")
+    m:Hide()
+    b.markBtn = m
+  end
   local icon = b:CreateTexture(nil, "ARTWORK")
   icon:SetAllPoints()
   icon:SetTexture(G.TargetNpcIcon())
@@ -14812,14 +14834,20 @@ function G.UpdateTargetButton()
   if b.macro == nil and not b:IsShown() and not cand then return end -- (no NPC stop: nothing to do)
   local px, py, cont = Geo.PlayerWorld()
   local d = G.TargetNpcStop(px, py, cont, b.macro ~= nil and cand ~= nil and b.stop == cand)
-  local macro = G.TargetNpcMacro(d)
-  if macro ~= b.macro then
-    b.macro, b.stop = macro, macro and d or nil
+  local macro, icon = G.TargetNpcMacro(d)
+  if icon and not b.markBtn then macro, icon = "/targetexact " .. G.TargetNpcName(d), nil end -- (no marker: target only)
+  if macro ~= b.macro or icon ~= b.markIcon then
+    b.macro, b.stop, b.markIcon = macro, macro and d or nil, icon
     b.who = macro and G.TargetNpcName(d) or nil
-    b.marks = macro and macro:find("/tm ", 1, true) ~= nil or nil
-    -- (no macro: no type, so its key does nothing)
+    b.marks = icon and true or nil
+    -- (no macro: no type, so its key does nothing; the marker's type only while the macro clicks it)
     b:SetAttribute("type", macro and "macro" or nil)
     b:SetAttribute("macrotext", macro)
+    local m = b.markBtn
+    if m then
+      m:SetAttribute("type", icon and "raidtarget" or nil)
+      m:SetAttribute("marker", icon)
+    end
   end
   local panel = G.TargetNpcHost(b)
   -- (in a directions panel while one shows (the arrow's, else the map's), not with that NPC targeted already. Its key
