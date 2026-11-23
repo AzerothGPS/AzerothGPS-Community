@@ -117,8 +117,8 @@ end
 -- it back.) Positions and the player's pin names only: no character or realm names.
 F.TEXT_HEADER = "AzerothGPS roads 1"
 F.KINDS = {
-  { kind = "roads", key = "copyRoads", label = L["Roads"], tip = L["Roads you drew or erased with the road tools."] },
-  { kind = "walls", key = "copyWalls", label = L["Walls"], tip = L["Walls you drew or erased with the wall tools."] },
+  { kind = "roads", key = "copyRoads", label = L["Roads"], tip = L["Roads you drew or erased in earlier versions."] },
+  { kind = "walls", key = "copyWalls", label = L["Walls"], tip = L["Walls you drew or erased in earlier versions."] },
   { kind = "routes", key = "copyRoutes", label = L["Routes"],
     tip = L["The ways you went when you reached a stop clearly faster than estimated (kept as you play, on your PC)."] },
   { kind = "pins", key = "copyPins", label = L["Pins"], tip = L["Your pins, and the shared ones you removed."] },

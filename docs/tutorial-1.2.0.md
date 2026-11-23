@@ -17,7 +17,7 @@ be checked without the game. The code is `addon/AzerothGPS/Tutorial.lua`; the te
 - **Any time.** Options > Help has a Tutorial section: **Play All**, a **Play** button for every section (done ones are
   marked), and the checkbox "Offer the tutorial after big updates" (Don't Ask Again turns it off). `/agps tutorial`
   plays all of it, `/agps tutorial <section>` one section (`minimap`, `route`, `quests`, `arrow`, `gather`, `pins`,
-  `search`, `dungeon`, `window`, `roads`), `/agps tutorial exit` leaves it.
+  `search`, `dungeon`, `window`), `/agps tutorial exit` leaves it.
 - **The player does it.** Each step points at the control with a pulsing gold outline and waits for the player to do
   the thing; the addon notices and moves on ("Done!"). Every such step has **Skip Step**. Steps that can't be done on
   the spot (the route across the sea, the dungeon's map) are set up by the addon and have **Next**.
@@ -28,8 +28,7 @@ be checked without the game. The code is `addon/AzerothGPS/Tutorial.lua`; the te
 - **Everything goes back.** The player's settings, route, waiting stops, map view, window size and shape, arrow
   places, layers and tools are put back exactly at the end, on exit, and between sections. The one thing kept: "Keep
   the GPS map as your minimap?" answered Yes.
-- **Nothing of the player's is written.** The example herbs and ore, the practice road and wall and the practice
-  recorded walk live in memory only.
+- **Nothing of the player's is written.** The example herbs and ore live in memory only.
 - **In the game's language.** All of its text is in the ten locale files (134 new lines each).
 
 ## The panel
@@ -264,8 +263,7 @@ drawn, erased or recorded is practice.
 - Leaving: "Tutorial closed: everything is back as you had it. Options > Help plays it again."
 - After a /reload in the middle: "The tutorial was cut short, and everything is back as you had it. Carry on where you
   were?" (Yes / No)
-- It can't start: "The tutorial can't start in combat, in a dungeon, on a flight, while dead or while recording a
-  walk. Try again after." / "not during a game on the map" / "The tutorial is already running."
+- It can't start: "The tutorial can't start in combat, in a dungeon, on a flight or while dead. Try again after." / "not during a game on the map" / "The tutorial is already running."
 - Options > Help: "A short tour of the main features on your own map. Everything goes back to how you had it after."
 
 ## What's saved, and the snapshot

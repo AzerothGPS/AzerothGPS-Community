@@ -364,19 +364,19 @@ O.PAGE_ALIASES = { ["Help improve"] = "Help" }
 O.CREDIT_TEXT = L["Thanks to |cffffd100jigrobbulus|r, creator of OpenMap, for making it open source, so its stitched world map could be built into AzerothGPS as the OpenMap map style. Click the address to select it, then Ctrl+C to copy it:"]
 O.SHARE_INFO = {
   L["|cffffd100What is kept|r"],
-  L["Roads and walls you draw or erase with the road tools, your pins, and the way you went when you reached a stop clearly faster than estimated. Positions, and your pins' names and icons: no character or realm names. Copy Map Data... includes what you tick there."],
+  L["Roads and walls you drew or erased in earlier versions (they still guide your routes), your pins, and the way you went when you reached a stop clearly faster than estimated. Positions, and your pins' names and icons: no character or realm names. Copy Map Data... includes what you tick there."],
   " ",
   L["|cffffd100Where it is kept|r"],
   L["On your PC, in this addon's saved variables (WTF\\Account\\<account>\\SavedVariables\\AzerothGPS.lua). Addons can't send anything from the game."],
   " ",
-  L["|cffffd100How to share your roads, walls and pins|r"],
+  L["|cffffd100How to report a map problem or share your map data|r"],
   L["1. Type |cffffd100/reload|r (it saves all your edits, so every one is copied), then click |cffffd100Copy Map Data...|r and press |cffffd100Ctrl+C|r."],
   L["2. Paste it in either place (click an address below, Ctrl+C, and open it in your browser):"],
   L["    |cffffd100Report form|r: the first address is the report form on azerothgps.com."],
   L["    |cffffd100Discord|r: the second is the AzerothGPS Discord."],
-  L["3. Name the zone and say what you fixed."],
+  L["3. Name the zone and say what's wrong with the map there."],
   " ",
-  L["Roads and walls that check out are added in a later version, for everyone. Your pins stay yours, to share with"],
+  L["Map problems that check out are fixed in a later version, for everyone. Your pins stay yours, to share with"],
   L["other players as you like: they're never put into AzerothGPS's own data."],
 }
 

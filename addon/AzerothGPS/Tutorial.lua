@@ -1315,7 +1315,7 @@ function T.Blocked()
   if ns.inCombat or Is(InCombatLockdown) or Is(UnitIsDeadOrGhost, "player") or Is(UnitOnTaxi, "player")
       or Is(N.DungeonLocked) or Is(N.CurrentInstance) or Is(IsInInstance) or (ns.Record and ns.Record.rec)
       or not ns.Geo.PlayerWorld() then
-    return L["The tutorial can't start in combat, in a dungeon, on a flight, while dead or while recording a walk. Try again after."]
+    return L["The tutorial can't start in combat, in a dungeon, on a flight or while dead. Try again after."]
   end
   return nil
 end

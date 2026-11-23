@@ -9,6 +9,10 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Roads: new roads in Ironforge, down to the Hall of Thanes' way in.
 - Dungeons and raids: every entrance knows its height, so the walk there ends on the right floor (Blackrock Mountain, caves).
 
+### Changed
+
+- Options > Help and Copy Map Data no longer mention the road tools: report map problems through the report form; roads you drew still guide your routes.
+
 ### Fixed
 
 - A new stop's marker no longer shows as a gray cog for a moment.
