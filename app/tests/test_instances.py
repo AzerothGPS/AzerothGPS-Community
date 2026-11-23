@@ -172,7 +172,7 @@ def test_wailing_caverns_portal_is_in_its_cave(inst_env):
 
 
 THANES = 23065  # the Hall of Thanes' level
-THANES_DOOR = (-4772.23, -965.07, 399.04)  # where the game takes you in: stood at in game, under Ironforge
+THANES_DOOR = (-4822.27, -932.42, 399.04)  # where the game takes you in: stood at in game, under Ironforge
 
 
 def test_hall_of_thanes_entrance_is_where_the_game_takes_you_in(inst_env):
