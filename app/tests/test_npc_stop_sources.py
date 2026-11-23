@@ -263,6 +263,21 @@ def test_a_city_place_with_several_npcs_picks_the_one_nearest_the_player(clean):
     assert _confirm(ns).npcId == near[0]
 
 
+def test_a_class_trainer_place_picks_that_classs_trainer_not_its_portal_trainer(clean):
+    # (Kooki3z, 2026-11-23: "in UC for mage trainer you actually chose a portal trainer": Lexington Mortaim, Portal
+    # Trainer, trains mages too and stands nearer the place's spot)
+    lua, ns = clean
+    Lay = ns.Layers
+    ns.CharDB().faction = "Horde"
+    x, y, c, z = _place(lua, ns, 1458, "Undercity Mage Trainer")
+    n = Lay.PlaceNpc("Undercity Mage Trainer", c, x, y)
+    assert n.id in (4566, 4567, 4568)  # (Kaelystia Hatebringer, Pierce Shackleton, Anastasia Hartwell)
+    lx, ly = 1778.2, 65.5  # (Lexington Mortaim: by him, still a mage trainer)
+    n = Lay.PlaceNpc("Undercity Mage Trainer", c, x, y, lx, ly, c)
+    assert n.id in (4566, 4567, 4568)
+    ns.CharDB().faction = "Alliance"
+
+
 def test_a_city_place_with_no_npc_of_its_kind_stays_the_places_spot(clean):
     lua, ns = clean
     G, Lay = ns.GPS, ns.Layers

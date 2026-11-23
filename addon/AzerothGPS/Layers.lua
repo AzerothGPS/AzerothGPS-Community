@@ -2248,17 +2248,21 @@ function Lay.PlaceNpc(name, level, x, y, px, py, pcont)
   local nearPlayer = px and pcont and Geo.Base(pcont) == base
     and (px - x) ^ 2 + (py - y) ^ 2 <= Lay.PLACE_NPC_NEAR_YD ^ 2
   local fx, fy = nearPlayer and px or x, nearPlayer and py or y
-  local best, bd
+  -- (a trainer whose title is the kind's own, "Mage Trainer", before one who only trains that class: Undercity's
+  -- Portal Trainer Lexington Mortaim trains mages too and stands nearer, Kooki3z 2026-11-23)
+  local kind = k[1]:lower()
+  local best, bd, bt
   for _, n in ipairs((Lay.ShippedNpcs())) do
     local offers = (k.trainer and n.trainer == k.trainer) or (k.svc and n.svc and n.svc:find(k.svc, 1, true) ~= nil)
     if offers and (n.side == "B" or not fac or n.side == fac) then
+      local tier = (k.trainer and type(n.title) == "string" and n.title:lower() ~= kind) and 0 or 1
       local sp = n.spawns
       for i = 1, #sp - 3, 4 do
         if Geo.Base(sp[i]) == base and (sp[i + 1] - x) ^ 2 + (sp[i + 2] - y) ^ 2 <= Lay.PLACE_NPC_YD ^ 2 then
           local d2 = (sp[i + 1] - fx) ^ 2 + (sp[i + 2] - fy) ^ 2
-          if not bd or d2 < bd then
-            best, bd = { id = n.id, name = ns.NpcName and ns.NpcName(n.id, n.name) or n.name, cont = sp[i],
-              x = sp[i + 1], y = sp[i + 2], z = sp[i + 3] }, d2
+          if not bt or tier > bt or (tier == bt and d2 < bd) then
+            best, bd, bt = { id = n.id, name = ns.NpcName and ns.NpcName(n.id, n.name) or n.name, cont = sp[i],
+              x = sp[i + 1], y = sp[i + 2], z = sp[i + 3] }, d2, tier
           end
         end
       end
