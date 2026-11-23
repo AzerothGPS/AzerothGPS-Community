@@ -490,3 +490,38 @@ def test_shards_draw_the_same_trips_as_one_run():
     shards = [rq.weigh_trips(6, 21, None, lambda *_: None, None, (i, 3)) for i in range(3)]
     assert sorted((r["k"], r["trip"]) for s in shards for r in s) == [(r["k"], r["trip"]) for r in one]
     assert all(r["k"] % 3 == i for i, s in enumerate(shards) for r in s)
+
+
+def test_kept_rows_are_the_versions_own_and_only_for_the_same_trips(tmp_path):
+    """CI keeps main's rows for the PRs on it (--keep-rows, --before-rows): what the version alone chose, never the
+    fields it took from the older rows it was handed, and only read back for the same trips."""
+    row = {**_row(0, 100), "old_guard": 3, "old_light": 1, "old_walks_blocked": 9, "error": "older walks: boom"}
+    kept = tmp_path / "rows" / "rows.json"
+    rq.save_rows(kept, [row, _row(1, None, error="lua: oops")], 2, 21)
+    rows = rq.load_rows(kept, 2, 21)
+    assert rows == [_row(0, 100), _row(1, None, error="lua: oops")]
+    assert rq.load_rows(kept, 3, 21) is None and rq.load_rows(kept, 2, 22) is None
+    assert rq.load_rows(tmp_path / "none.json", 2, 21) is None and rq.load_rows(None, 2, 21) is None
+    kept.write_text("[1, 2]", encoding="utf-8")
+    assert rq.load_rows(kept, 2, 21) is None
+
+
+def test_kept_older_rows_stand_in_for_weighing_them(tmp_path, monkeypatch):
+    weighed = []
+
+    def weigh(count, seed, replace, log, older, jobs):
+        weighed.append("older" if older is None else "newer")
+        return [{**_row(k, 100 + k), **({"old_guard": 0} if older else {})} for k in range(count)]
+
+    monkeypatch.setattr(rq, "_weigh", weigh)
+    monkeypatch.setattr(rq, "_older_files", lambda ref: {})
+    for name in ("changed_roads", "new_walls", "new_deep", "old_roads"):
+        monkeypatch.setattr(rq, name, lambda ref: None)
+    base, head = tmp_path / "base.json", tmp_path / "head.json"
+    first = rq.run(3, 21, "main", log=lambda *a: None, before_rows=base, keep_rows=head)
+    assert weighed == ["older", "newer"] and base.is_file() and head.is_file()
+    assert "old_guard" not in rq.load_rows(head, 3, 21)[0]
+    weighed.clear()
+    again = rq.run(3, 21, "main", log=lambda *a: None, before_rows=base)
+    assert weighed == ["newer"]  # (the older version's rows read, not weighed)
+    assert again["same"] == first["same"] == 3
