@@ -10,6 +10,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Roads: new roads in Burning Steppes.
 - Roads: a new road in Tanaris.
 - Roads: new roads in Feralas.
+- Roads: a new road in The Barrens, from the Great Lift to Razorfen Downs.
 - Dungeons and raids: every entrance knows its height, so the walk there ends on the right floor (Blackrock Mountain, caves).
 
 ### Changed

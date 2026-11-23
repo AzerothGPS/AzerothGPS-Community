@@ -6633,6 +6633,11 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
               if t[1] == p.bn then t.hop = true end
             end
           end
+          -- (a long one, wide or not: worked out again with the extra far links too, below, and that taken only with
+          -- fewer hops or as many and cheaper. A road walked to Razorfen Downs' door, 2026-11-23, moved Un'Goro's
+          -- joining link onto 1,686 yd over the crater's wall from Tanaris, its blocked ground in short runs: never a
+          -- jump, so never routed round, and the pass from Tanaris was lost)
+          if b and b[2] > R.JUMP_YD then redo = true end
           -- (and the smaller of the road pieces it joins, the one cut off: an end on it tries roads off it too,
           -- `wider`. Loch Modan, 2026-11-14: the Maker's Terrace's roads are joined to the rest only by a link over
           -- the cliffs to Stonesplinter Valley's; a stop there is walked to from Thelsamar's)
