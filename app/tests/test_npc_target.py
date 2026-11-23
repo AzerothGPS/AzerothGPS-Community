@@ -2,9 +2,11 @@
 its row) and the player near it, a "Target <name>" button under the directions panel, and a key for it (Bindings.xml).
 The player's own click only: a secure button whose macro is "/targetexact <name>"; AzerothGPS never calls TargetUnit
 or any other protected function itself (wowmock.lua's AGPS_PROTECTED lists any call). Set only out of combat, hidden as
-combat starts. The same click marks the NPC with the stop's route marker ("/tm", asked 2026-11-22) when the options
-allow it (solo on, party or raid off; a raid with lead or assist only); AzerothGPS never marks or clears a mark itself
-(SetRaidTarget is restricted in this client)."""
+combat starts. The same click marks the NPC with the stop's route marker (asked 2026-11-22) when the options allow it
+(solo on, party or raid off; a raid with lead or assist only): the macro "/click"s a second secure button whose action
+is the game's own "raidtarget" one. Not "/tm": this client runs it as an ordinary, tainted slash command and its
+SetRaidTarget refuses that, so 1.3.14's "/tm" line marked nothing ("raid marking isn't working", 2026-11-23).
+AzerothGPS never marks or clears a mark itself (SetRaidTarget is restricted in this client)."""
 
 import re
 from pathlib import Path
@@ -15,9 +17,24 @@ ADDON = Path(__file__).resolve().parents[2] / "addon" / "AzerothGPS"
 NPC_ID = 6741  # (Innkeeper Renee, Brill)
 NPC_GUID = f"Creature-0-1-0-1-{NPC_ID}-0000ABCDEF"
 TARGET_ONLY = "/targetexact Innkeeper Renee"
-# (the target cleared first and "[@target,exists]": with the NPC not found, nothing else is marked; "~": a unit with
-# any mark already, ours from a click before included, is left alone, so a second click never toggles it off)
-MARKED = "/cleartarget\n/targetexact Innkeeper Renee\n/tm [@target,exists] ~{}"
+# (the target cleared first and "[@target,exists]": with the NPC not found, nothing else is marked. The marker button
+# it clicks does the marking, with the stop's icon: its "set-unmarked" leaves a unit with any mark alone, ours from a
+# click before included, so a second click never toggles it off)
+MARKED = "/cleartarget\n/targetexact Innkeeper Renee\n/click [@target,exists] AzerothGPSTargetMarkButton"
+MARK_BTN = "AzerothGPSTargetMarkButton"
+
+
+def _marker(lua):
+    return lua.eval(MARK_BTN)
+
+
+def _marks_with(lua, icon):
+    # (the marker button set to mark the target with raid icon `icon`, never toggling; None: set to do nothing)
+    m = _marker(lua)
+    if icon is None:
+        return m._attr["type"] is None
+    return (m._attr["type"] == "raidtarget" and m._attr["marker"] == icon and m._attr["unit"] == "target"
+            and m._attr["action"] == "set-unmarked")
 
 
 @pytest.fixture(scope="module")
@@ -71,7 +88,7 @@ def test_the_target_button_shows_near_an_npc_stop_and_targets_it_by_name(clean):
     assert b._shown
     # (solo, the default: marked too, with the stop's route marker, its raid icon: the first stop's is the square, 6)
     assert ns.Nav.stops[1].icon == 6
-    assert b._attr["type"] == "macro" and b._attr["macrotext"] == MARKED.format(6)
+    assert b._attr["type"] == "macro" and b._attr["macrotext"] == MARKED and _marks_with(lua, 6)
     # (an icon, Hunter's Mark's, the Sprint icon's size; no text)
     assert b.icon._tex in (ns.SpellIcon(ns.GPS.TARGET_NPC_SPELL), ns.GPS.TARGET_NPC_ICON_FILE)
     assert (b._w, b._h) == (ns.GPS.TARGET_NPC_PX, ns.GPS.TARGET_NPC_PX)
@@ -168,7 +185,7 @@ def test_the_target_button_works_the_same_with_the_controller_ui_and_touches_no_
         assert ns.GPS.ControllerUI()
         _npc_route(lua, ns)
         b = _update(lua, ns, 1400)
-        assert b._shown and b._attr["macrotext"] == MARKED.format(6)
+        assert b._shown and b._attr["macrotext"] == MARKED
         b._scripts.OnEnter(b)
         b._scripts.OnLeave(b)
         lua.execute(f"AGPS_GUIDS = {{ target = '{NPC_GUID}' }}")
@@ -240,7 +257,7 @@ def test_the_click_marks_the_npc_solo_and_in_a_group_only_when_allowed(clean):
     lua, ns = clean
     G, st = ns.GPS, ns.settings.gps
     _npc_route(lua, ns)
-    assert _update(lua, ns, 1500)._attr["macrotext"] == MARKED.format(6)  # (solo, on by default)
+    assert _update(lua, ns, 1500)._attr["macrotext"] == MARKED  # (solo, on by default)
     st.targetNpcMarkSolo = False
     assert _update(lua, ns, 1501)._attr["macrotext"] == TARGET_ONLY
     st.targetNpcMarkSolo = True
@@ -250,14 +267,14 @@ def test_the_click_marks_the_npc_solo_and_in_a_group_only_when_allowed(clean):
     assert G.targetBtn._attr["macrotext"] == TARGET_ONLY
     st.targetNpcMarkGroup = True
     lua.eval("AGPS_FIRE")("PARTY_LEADER_CHANGED")
-    assert G.targetBtn._attr["macrotext"] == MARKED.format(6)
+    assert G.targetBtn._attr["macrotext"] == MARKED
     # (a raid: only with lead or assist; unreadable, no)
     _group(lua, raid=True)
     assert _update(lua, ns, 1502)._attr["macrotext"] == TARGET_ONLY
     _group(lua, raid=True, assist=True)
-    assert _update(lua, ns, 1503)._attr["macrotext"] == MARKED.format(6)
+    assert _update(lua, ns, 1503)._attr["macrotext"] == MARKED
     _group(lua, raid=True, lead=True)
-    assert _update(lua, ns, 1504)._attr["macrotext"] == MARKED.format(6)
+    assert _update(lua, ns, 1504)._attr["macrotext"] == MARKED
     _group(lua, raid=True, secret=True)
     assert _update(lua, ns, 1505)._attr["macrotext"] == TARGET_ONLY
     st.targetNpcMarkGroup = False
@@ -272,7 +289,7 @@ def test_the_mark_is_the_stops_route_marker(clean, icon):
     ns.Nav.SetStops(lua.eval(f"""{{ {{ x = 2264, y = 300, cont = 0, name = 'Innkeeper Renee', npcId = {NPC_ID},
       npcName = 'Innkeeper Renee', icon = {icon} }} }}"""), False, "red")
     assert ns.Nav.dest.icon == icon
-    assert _update(lua, ns, 1600 + icon)._attr["macrotext"] == MARKED.format(icon)
+    assert _update(lua, ns, 1600 + icon)._attr["macrotext"] == MARKED and _marks_with(lua, icon)
 
 
 def test_a_stop_without_a_raid_marker_is_targeted_only(clean):
@@ -284,7 +301,7 @@ def test_a_stop_without_a_raid_marker_is_targeted_only(clean):
 
 def test_after_the_click_the_button_hides_and_comes_back_only_once_the_target_changes(clean):
     # (the click: the NPC targeted and marked by the game. The button hides then, so no second click from it; with
-    # another target it shows again, and a click then leaves the mark as it is: "~", any mark kept)
+    # another target it shows again, and a click then leaves the mark as it is: "set-unmarked", any mark kept)
     lua, ns = clean
     _npc_route(lua, ns)
     b = _update(lua, ns, 1700)
@@ -293,7 +310,7 @@ def test_after_the_click_the_button_hides_and_comes_back_only_once_the_target_ch
     assert not _update(lua, ns, 1701)._shown
     lua.execute("AGPS_GUIDS = { target = 'Creature-0-1-0-1-1234-0000ABCDEF' }")
     b = _update(lua, ns, 1702)
-    assert b._shown and "~6" in b._attr["macrotext"] and "/tm 6" not in b._attr["macrotext"]
+    assert b._shown and b._attr["macrotext"] == MARKED and _marks_with(lua, 6)
 
 
 def test_with_the_map_as_the_minimap_the_button_hangs_under_the_arrows_directions(clean):
@@ -402,7 +419,7 @@ def test_it_pulses_as_the_quest_route_icon_does_and_says_when_it_marks(clean):
     b._scripts.OnEnter(b)
     ns.settings.gps.targetNpcMarkSolo = False
     b = _update(lua, ns, 2001)
-    assert not b.marks and b._attr["macrotext"] == TARGET_ONLY
+    assert not b.marks and b._attr["macrotext"] == TARGET_ONLY and _marks_with(lua, None)
     b._scripts.OnEnter(b)
     b._scripts.OnLeave(b)
 
@@ -410,3 +427,37 @@ def test_it_pulses_as_the_quest_route_icon_does_and_says_when_it_marks(clean):
 def test_it_is_still_a_secure_button_made_once():
     src = (ADDON / "GPSFrame.lua").read_text(encoding="utf-8")
     assert 'CreateFrame, "Button", "AzerothGPSTargetButton", UIParent, "SecureActionButtonTemplate")' in src
+
+
+def test_the_mark_is_made_by_the_games_secure_raidtarget_action_not_tm(clean):
+    # (Kooki3z, 2026-11-23: "raid marking isn't working". This client's /tm is an ordinary slash command, run tainted
+    # from a macro, and SetRaidTarget refuses tainted code: the NPC was targeted, never marked. /click is a secure
+    # command, and the clicked button's raidtarget action runs in the template's secure code)
+    lua, ns = clean
+    _npc_route(lua, ns)
+    b = _update(lua, ns, 2100)
+    assert "/tm" not in b._attr["macrotext"] and b._attr["macrotext"].endswith("/click [@target,exists] " + MARK_BTN)
+    m = _marker(lua)
+    assert m._name == MARK_BTN and m._parent._name == "UIParent" and not m._shown
+    # (it acts on the up, which is what /click sends: with "cast on key down" on (the default) it would do nothing)
+    assert m._attr["useOnKeyDown"] is False
+    assert _marks_with(lua, 6)
+    # (only the icon changed, the macro the same: the marker's icon follows)
+    ns.Nav.dest.icon = 3
+    assert _update(lua, ns, 2101)._attr["macrotext"] == MARKED and _marks_with(lua, 3)
+    # (marking off, or no NPC stop: the marker does nothing)
+    ns.settings.gps.targetNpcMarkSolo = False
+    assert _update(lua, ns, 2102)._attr["macrotext"] == TARGET_ONLY and _marks_with(lua, None)
+    ns.settings.gps.targetNpcMarkSolo = True
+    assert _update(lua, ns, 2103)._attr["macrotext"] == MARKED and _marks_with(lua, 3)
+    ns.Nav.Clear()
+    ns.GPS.UpdateTargetButton()
+    assert b._attr["type"] is None and _marks_with(lua, None)
+
+
+def test_the_marker_button_is_a_secure_raidtarget_button_that_never_toggles():
+    src = (ADDON / "GPSFrame.lua").read_text(encoding="utf-8")
+    assert 'CreateFrame, "Button", G.TARGET_NPC_MARK_BTN, UIParent, "SecureActionButtonTemplate")' in src
+    assert 'G.TARGET_NPC_MARK_BTN = "AzerothGPSTargetMarkButton"' in src
+    assert 'm:SetAttribute("action", "set-unmarked")' in src  # (never "toggle", the template's default)
+
