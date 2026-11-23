@@ -4784,6 +4784,54 @@ def test_route_here_in_the_quest_details_and_the_quest_menus(game):
         G.groupChoice = lua.eval("{}")
 
 
+def test_the_controller_ui_turned_on_after_login_keeps_route_here_out_of_the_quest_menus(game):
+    # (a player's report for 1.3.14: an error abandoning a quest with the controller. The menus were hooked at login with
+    # the controller UI off and kept getting Route Here once it was on, beside Abandon Quest, issue #887's way to be
+    # blocked: now looked at each time a menu opens, and the details' button hidden while it's on)
+    lua, ns = game
+    G = ns.GPS
+    lua.execute("""
+      AGPS_RH2 = { hook = hooksecurefunc, cui = AGPS_NS.GPS.ControllerUI }
+      local bf = NewWidget("Frame", "AGPSTestQuestBackFrame2")
+      bf.BackButton = NewWidget("Button", "AGPSTestQuestBackButton2")
+      QuestMapFrame = { DetailsFrame = { questID = 2, BackFrame = bf } }
+      AGPS_MENUS = {}
+      Menu = { ModifyMenu = function(tag, cb) AGPS_MENUS[tag] = AGPS_MENUS[tag] or {} table.insert(AGPS_MENUS[tag], cb) end }
+      hooksecurefunc = function(t, k, post)
+        local f = t[k]
+        t[k] = function(...) f(...) post(...) end
+      end
+      QuestObjectiveTracker = { OnBlockHeaderClick = function() end }
+      AGPS_ENTRIES = function(tag, owner)
+        local root = { n = 0, CreateDivider = function() end,
+                       CreateButton = function(self, text) if text == "Route Here" then self.n = self.n + 1 end end }
+        for _, cb in ipairs(AGPS_MENUS[tag] or {}) do cb(owner, root) end
+        return root.n
+      end
+      AGPS_CUI_ON = false
+      AGPS_NS.GPS.ControllerUI = function() return AGPS_CUI_ON end
+    """)
+    entries = lua.eval("AGPS_ENTRIES")
+    try:
+        G.routeHereBtn, G.questMenus, G.routeHereEvents = None, None, None
+        G.InitRouteHere()  # (logged in with the controller UI off: hooked)
+        b = G.routeHereBtn
+        assert G.questMenus and b and b.IsShown(b)
+        assert entries("MENU_QUEST_MAP_LOG_TITLE", lua.eval("{ questID = 3 }")) == 1
+        lua.execute("AGPS_CUI_ON = true")  # (turned on afterwards)
+        assert entries("MENU_QUEST_MAP_LOG_TITLE", lua.eval("{ questID = 3 }")) == 0
+        assert entries("MENU_QUEST_OBJECTIVE_TRACKER", lua.eval("QuestObjectiveTracker")) == 0
+        G.SyncRouteHere()
+        assert not b.IsShown(b)
+        lua.execute("AGPS_CUI_ON = false")  # (off again: as before)
+        G.SyncRouteHere()
+        assert b.IsShown(b) and entries("MENU_QUEST_MAP_LOG_TITLE", lua.eval("{ questID = 3 }")) == 1
+    finally:
+        lua.execute("""hooksecurefunc, AGPS_NS.GPS.ControllerUI = AGPS_RH2.hook, AGPS_RH2.cui
+          QuestMapFrame, Menu, QuestObjectiveTracker = nil, nil, nil""")
+        G.routeHereBtn, G.questMenus, G.routeHereEvents = None, None, None
+
+
 def test_quest_route_asks_before_keeping_a_red_quest(game):
     # (asked 2026-11-07: "do the same for red quests to offer leaving them out of the route") a quest 5 or more levels
     # over the player's (Layers.QuestRed) is asked about as a group quest is; Leave Out leaves it out

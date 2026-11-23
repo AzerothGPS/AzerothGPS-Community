@@ -103,6 +103,16 @@ local function SaveKeys()
   if SaveBindings then SaveBindings(GetCurrentBindingSet and GetCurrentBindingSet() or 1) end
 end
 
+-- The show/hide key's Set Key takes a controller button too (a player's report for 1.3.14: "no way to bind opening the
+-- map to a controller button through the menus"; addon frames get no gamepad events of their own, so Options >
+-- Controller's capture, Pad.BeginCapture, waits for it alongside the keyboard): a pad active, the next button (or the
+-- game's Gamepad Shift/Ctrl/Alt with one, "SHIFT-PADBACK") is the key, saved with SetBinding and SaveBindings by
+-- Pad.SetBind; a button the game uses is asked about first. Escape, or B held, cancels. With the game's controller UI
+-- on, a button press can't open it (Pad.ToggleBlocked): said there, with the macro, and only a keyboard key taken.
+local function PadOn(binding)
+  local P = ns.Pad
+  return binding == O.BINDING and P and P.BeginCapture and P.Device and P.Device() ~= nil and P or nil
+end
 local function KeyBind(parent, label, binding, tip)
   binding = binding or O.BINDING
   local holder = CreateFrame("Frame", nil, parent)
@@ -115,15 +125,56 @@ local function KeyBind(parent, label, binding, tip)
   b:SetPoint("LEFT", text, "RIGHT", 10, 0)
   local msg = holder:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
   msg:SetPoint("LEFT", b, "RIGHT", 8, 0)
-  local waiting = false
+  holder.button, holder.msg = b, msg -- (the tests)
+  O.keyBinds = O.keyBinds or {}
+  O.keyBinds[binding] = holder
+  local waiting, padWait = false, nil
   local function Refresh()
-    local key = GetBindingKey and GetBindingKey(binding)
-    b:SetText(waiting and L["Press a key..."] or (key and (GetBindingText and GetBindingText(key) or key) or L["Not bound"]))
+    local shown = {}
+    for _, key in ipairs({ GetBindingKey and GetBindingKey(binding) }) do
+      if type(key) == "string" then
+        local P = ns.Pad
+        local k = P and P.GameSplit and select(2, P.GameSplit(key))
+        if k and k:find("^PAD") and P.BindLabel then
+          shown[#shown + 1] = P.BindLabel(key) -- (a controller button: as Options > Controller names it, "LT + Back")
+        else
+          shown[#shown + 1] = GetBindingText and GetBindingText(key) or key
+        end
+      end
+    end
+    b:SetText(waiting and (padWait and L["Press a key or button..."] or L["Press a key..."])
+      or (#shown > 0 and table.concat(shown, ", ") or L["Not bound"]))
   end
   local function Stop()
     waiting = false
     b:EnableKeyboard(false)
+    local P = padWait
+    padWait = nil
+    if P and P.Capturing() == "toggle" then P.CancelCapture() end
     Refresh()
+  end
+  -- (waiting for a key: a controller button too, Pad's capture, when a pad's active)
+  local function WaitPad()
+    local P = PadOn(binding)
+    if not P then return end
+    if P.ToggleBlocked and P.ToggleBlocked() then
+      msg:SetText(L["|cffff6060Controller UI on: a keyboard key only (its tooltip says why).|r"])
+      return
+    end
+    local token = {}
+    padWait = P
+    holder.padToken = token
+    P.BeginCapture("toggle", function(r, key, why)
+      if holder.padToken ~= token then return end
+      holder.padToken = nil
+      padWait = nil -- (done: Stop doesn't cancel it again)
+      if r == true then
+        msg:SetText(string.format(L["Controller: %s opens and closes the map."], P.BindLabel(key)))
+      elseif r == "wait" or r == false then
+        msg:SetText("|cffff6060" .. tostring(why or "") .. "|r")
+      end
+      if waiting then Stop() end
+    end)
   end
   b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
   b:SetScript("OnClick", function(_, button)
@@ -142,8 +193,10 @@ local function KeyBind(parent, label, binding, tip)
       Stop()
       return
     end
-    waiting = not waiting
-    b:EnableKeyboard(waiting)
+    if waiting then Stop() return end
+    waiting = true
+    b:EnableKeyboard(true)
+    WaitPad()
     Refresh()
   end)
   b:SetScript("OnKeyDown", function(self, key)
@@ -154,11 +207,14 @@ local function KeyBind(parent, label, binding, tip)
     local full = (IsAltKeyDown() and "ALT-" or "") .. (IsControlKeyDown() and "CTRL-" or "")
       .. (IsShiftKeyDown() and "SHIFT-" or "") .. key
     local before = GetBindingAction and GetBindingAction(full)
+    local keep = {} -- (a controller button it's on stays: a key and a button can both show and hide it)
     local old = GetBindingKey and GetBindingKey(binding)
     while old do -- one key for it
       SetBinding(old)
+      if ns.Pad and ns.Pad.GameSplit and select(2, ns.Pad.GameSplit(old)):find("^PAD") then keep[#keep + 1] = old end
       old = GetBindingKey(binding)
     end
+    for _, k in ipairs(keep) do SetBinding(k, binding) end
     if SetBinding(full, binding) then
       SaveKeys()
       if before and before ~= "" and before ~= binding then
@@ -176,7 +232,12 @@ local function KeyBind(parent, label, binding, tip)
   b:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     GameTooltip:SetText(label, 1, 1, 1)
-    GameTooltip:AddLine(tip or L["Click, then press a key (Shift, Ctrl or Alt with it if you like). The same key shows and hides the map. Escape cancels, right-click clears it. Also in the game's Key Bindings, under AddOns."], nil, nil, nil, true)
+    GameTooltip:AddLine(tip or L["Click, then press a key (Shift, Ctrl or Alt with it if you like) or a controller button. The same key shows and hides the map. Escape cancels, right-click clears it. Also in the game's Key Bindings, under AddOns, and in Options > Controller."], nil, nil, nil, true)
+    local P = binding == O.BINDING and ns.Pad
+    if P and P.ToggleBlocked and P.ToggleBlocked() then
+      GameTooltip:AddLine(" ")
+      GameTooltip:AddLine(P.TOGGLE_UI_NOTE, nil, nil, nil, true)
+    end
     GameTooltip:Show()
   end)
   b:SetScript("OnLeave", GameTooltip_Hide)

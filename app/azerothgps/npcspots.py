@@ -25,7 +25,7 @@ from .paths import ADDON_DIR, RESOURCES
 
 FILE = RESOURCES / "overrides" / "npc_spots.json"
 NPCS_LUA = ADDON_DIR / "Data" / "Npcs.lua"
-LEVELS = (0, 1, 10001)  # (the shipped spawns' levels: Data/Npcs.lua)
+LEVELS = (0, 1, 2991, 10001)  # (the shipped spawns' levels: Data/Npcs.lua; Zephras Isle's since 1.3.14)
 
 
 def load(path: Path = FILE) -> dict:
