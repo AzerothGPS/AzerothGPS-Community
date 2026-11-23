@@ -240,8 +240,11 @@ def test_directions_to_a_dungeon_name_it_in_the_games_language(game):
     steps = str(N.StepsText(99))
     assert n["instances"][DEADMINES] in steps, steps
     assert "Deadmines" not in steps, steps
-    # (the portal's other end, the zone: by its uiMap, found by its English name)
-    assert f'({n["floors"].get(WESTFALL, "Westfall")})' in steps, steps
+    # (the walk ends at the portal, named by the dungeon: the walk inside is its map's once in)
+    assert f'({n["instances"][DEADMINES]})' in steps, steps
+    # (the portal's other end, the zone: by its uiMap, found by its English name; the way out says it)
+    portal = next(ns.Transports[i] for i in range(1, len(ns.Transports) + 1) if ns.Transports[i][4] == 20036)
+    assert str(ns.RideEndName(portal, 1)) == n["floors"].get(WESTFALL, "Westfall")
     N.SetStops(lua.eval("{}"), False, True)
 
 

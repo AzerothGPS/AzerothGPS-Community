@@ -5,7 +5,7 @@ import math
 
 import pytest
 
-from test_addon_lua import env, load, nav_env  # noqa: F401 (fixtures)
+from test_addon_lua import ADDON, env, load, nav_env  # noqa: F401 (fixtures)
 
 pytest.importorskip("lupa")
 
@@ -13,6 +13,7 @@ DM = 20036  # the Deadmines' level (instances.LEVEL_BASE + its MapID)
 WC = 20043  # Wailing Caverns'
 SCHOLO = 20289  # Scholomance's
 DM_INSIDE = (-14.6, -385.5)  # where the portal puts you
+DM_PORTAL = (-11208.7, 1675.9)  # its way in, in the Defias Hideout's mine
 VANCLEEF = (-87.4, -819.9)
 SENTINEL_HILL = (-10630.0, 1040.0)  # Westfall, on the continent
 
@@ -138,12 +139,111 @@ def test_route_from_outside_to_a_boss_takes_the_portal(inst_env):
     # where the portal puts you
     assert math.dist((legs[1].x2, legs[1].y2), (-11208.7, 1675.9)) < 10
     assert math.dist((legs[3].x1, legs[3].y1), DM_INSIDE) < 1
-    # the whole route: walked on the continent, the portal, then the instance's roads
+    # the route from outside: walked on the continent to the portal, and there it ends (the walk inside is the
+    # dungeon's map's, once in: test_a_stop_inside_a_dungeon_is_routed_to_its_portal)
     N.SetStops(lua.table(lua.table(x=VANCLEEF[0], y=VANCLEEF[1], cont=DM, name="Edwin VanCleef")))
     r = N.Route(*SENTINEL_HILL, 0)
     assert r and r.parts
     conts = [r.parts[i].cont for i in range(1, len(r.parts) + 1)]
-    assert conts[0] == 0 and conts[-1] == DM
+    assert set(conts) == {0}
+    last = r.parts[len(r.parts)].pts
+    assert math.dist((last[len(last) - 1], last[len(last)]), DM_PORTAL) < 10
+    assert r.rideSeconds == 0
+
+
+def near_the_deadmines_portal(lua, ns, yd=11.0):
+    """The player in the Defias Hideout's mine, `yd` from the Deadmines' portal (Kooki3z's report, 2026-11-23)."""
+    x, y = DM_PORTAL[0] + yd * math.cos(math.radians(60)), DM_PORTAL[1] + yd * math.sin(math.radians(60))
+    ns.Geo.SetOverride(lua.eval(f"{{ x = {x}, y = {y}, cont = 0, z = 25, indoors = true }}"))
+    return x, y
+
+
+def steps_of(N):
+    st = N.Steps()
+    return [st[i] for i in range(1, len(st) + 1)]
+
+
+def test_a_stop_inside_a_dungeon_is_routed_to_its_portal(inst_env):
+    # (Kooki3z, 11 yd from the Deadmines' portal with a stop inside: "853 yd, 2m 17s" and "Walk 842 yd to your
+    # destination" after the portal; "routing to a spot in the dungeon should only ever lead to the dungeon entrance")
+    lua, ns = inst_env
+    N = ns.Nav
+    x, y = near_the_deadmines_portal(lua, ns)
+    N.SetStops(lua.table(lua.table(x=VANCLEEF[0], y=VANCLEEF[1], cont=DM, name="Edwin VanCleef")))
+    r = N.Route(x, y, 0)
+    # the distance and the time are the portal's: 11 yd, a couple of seconds, no portal ride, nothing inside
+    assert r.length == pytest.approx(11, abs=2)
+    assert r.walkYards == pytest.approx(11, abs=2) and r.totalYards == pytest.approx(11, abs=2)
+    assert r.rideSeconds == 0 and r.totalRide == 0
+    assert N.TripSecs(r.walkYards, r.swimYards, r.rideSeconds, 7) < 3
+    assert all(r.parts[i].cont == 0 for i in range(1, len(r.parts) + 1))
+    # the directions: the walk to the portal, then what's next inside in one line
+    steps = steps_of(N)
+    assert len(steps) == 2
+    assert steps[0].startswith("Walk 11 yd to the portal (Deadmines)")
+    assert steps[1].startswith("Then inside: ") and steps[1].endswith("Edwin VanCleef")
+    # the panel: at the portal, board it; no walk inside counted in its times
+    status = N.Status(x, y, 0)
+    assert "Board the portal to Deadmines" in status
+    assert "2m" not in status and "842" not in status and "853" not in status
+    # the arrow arrives at the portal
+    T = ns.Turns
+    if T:
+        path = T.Path(r)
+        assert path.total == pytest.approx(11, abs=2)
+
+
+def test_further_off_the_panel_says_to_the_portal(inst_env):
+    lua, ns = inst_env
+    N = ns.Nav
+    N.SetStops(lua.table(lua.table(x=VANCLEEF[0], y=VANCLEEF[1], cont=DM, name="Edwin VanCleef")))
+    r = N.Route(*SENTINEL_HILL, 0)
+    status = N.Status(*SENTINEL_HILL, 0)
+    assert "to the portal (then to Deadmines)" in status
+    steps = steps_of(N)
+    assert any(s.startswith("Then inside: ") for s in steps)
+    assert not any(s.startswith("Take the portal") for s in steps)
+    assert r.totalYards == r.walkYards  # (nothing past the portal)
+
+
+def test_inside_the_dungeon_the_walk_inside_is_routed(inst_env):
+    lua, ns = inst_env
+    N = ns.Nav
+    e = ns.Instances[DM].entrances[1]
+    ns.Geo.SetOverride(lua.eval(f"{{ x = {DM_INSIDE[0]}, y = {DM_INSIDE[1]}, cont = {DM}, z = {e[6]} }}"))
+    N.SetStops(lua.table(lua.table(x=VANCLEEF[0], y=VANCLEEF[1], cont=DM, name="Edwin VanCleef")))
+    r = N.Route(*DM_INSIDE, DM)
+    assert r.length > 800 and r.walkYards > 800  # (down the mine, through the foundry, out to the cove)
+    assert all(r.parts[i].cont == DM for i in range(1, len(r.parts) + 1))
+    assert not any(s.startswith("Then inside") for s in steps_of(N))
+
+
+def test_later_stops_count_no_walk_inside_a_dungeon(inst_env):
+    # (a stop after one inside: from the portal out, not through the mine; two stops inside: nothing between them)
+    lua, ns = inst_env
+    N = ns.Nav
+    x, y = near_the_deadmines_portal(lua, ns)
+    rz = boss(ns, DM, "Rhahk'Zor")
+    N.SetStops(lua.table(
+        lua.table(x=rz[3], y=rz[4], cont=DM, name="Rhahk'Zor"),
+        lua.table(x=VANCLEEF[0], y=VANCLEEF[1], cont=DM, name="Edwin VanCleef"),
+        lua.table(x=SENTINEL_HILL[0], y=SENTINEL_HILL[1], cont=0, name="Sentinel Hill")))
+    r = N.Route(x, y, 0)
+    names = [N.stops[i].name for i in range(1, len(N.stops) + 1)]
+    assert names == ["Rhahk'Zor", "Edwin VanCleef", "Sentinel Hill"]  # (the listed order: the fastest too)
+    sts = {names[i - 1]: r.stretches[i] for i in range(1, len(names) + 1)}
+    assert sts["Rhahk'Zor"].walk == pytest.approx(11, abs=2)
+    # the stretch between the two bosses: all inside, nothing counted
+    assert sts["Edwin VanCleef"].walk == 0 and sts["Edwin VanCleef"].ride == 0
+    # the stretch out to Sentinel Hill: from the portal's end on the continent, the walk inside left out
+    out = sts["Sentinel Hill"]
+    legs = [out.legs[i] for i in range(1, len(out.legs) + 1)]
+    assert not any(not leg.ride and leg.cont == DM for leg in legs)
+    first = next(leg for leg in legs if not leg.ride)
+    assert math.dist((first.x1, first.y1), DM_PORTAL) < 10
+    assert r.totalYards == pytest.approx(sts["Rhahk'Zor"].walk + out.walk)
+    steps = steps_of(N)
+    assert sum(1 for s in steps if s.startswith("Then inside: ")) == 2
 
 
 def test_route_out_of_an_instance_takes_the_portal_back(inst_env):
@@ -461,6 +561,34 @@ def test_wow_forevers_own_dungeons_have_their_map_bosses_and_entrances(inst_env)
     assert G.NextBoss(KC)[0] == 2  # (on to the second: the first's name counted it, not all of them)
 
 
+def test_an_instance_with_no_map_yet_opens_nothing(inst_env):
+    # (Kooki3z, 2026-11-23: a click on Nightmare Grove, new in this client, showed the Eastern Kingdoms' art with a few
+    # of its tiles pasted on, far apart; "if there are no maps yet for something new just make left click do nothing",
+    # and its tooltip says so)
+    lua, ns = inst_env
+    load(lua, ns, "Data/Minimap.lua", "Data/Interiors.lua", "Data/Instances.lua", "GPSFrame.lua")
+    G = ns.GPS
+    ns.settings = lua.eval("{ gps = { zoom = 500 } }")
+    NG, KC = 22832, 22875
+    assert ns.CityLevels[NG] and ns.MinimapTiles[2832] is not None  # (tiles, but in patches far apart)
+    assert not G.InstanceHasMap(NG)
+    assert G.InstanceHasMap(DM) and G.InstanceHasMap(KC)  # (a floor grid; one piece of tiles)
+    G.ShowEntrance(lua.table(0, -10382.7, -408.7))  # (its way in in Duskwood, terrain view)
+    assert not G.ShowInstance(NG)
+    browse, free = G.BrowseState()
+    assert free.instance is None and free.cont == 0 and free.x == pytest.approx(-10382.7)
+    # a view of it saved before: back to following
+    G.ApplyView(lua.eval(f"{{ x = 0, y = 0, cont = {NG}, instance = {NG} }}"))
+    assert G.BrowseState()[1] is None
+    # the maps there are still open
+    assert G.ShowInstance(DM) and G.BrowseState()[1].instance == DM
+    assert G.ShowInstance(KC) and G.BrowseState()[1].instance == KC
+    # every locale says it
+    for loc in ("deDE", "esES", "esMX", "frFR", "itIT", "koKR", "ptBR", "ruRU", "zhCN", "zhTW"):
+        text = (ADDON / "Locales" / f"{loc}.lua").read_text(encoding="utf-8")
+        assert 'L["Map and routes inside coming soon"]' in text and 'L["Then inside: %s"]' in text, loc
+
+
 @pytest.mark.parametrize("level,first,last,also", [
     (22999, "Witherfang", "Rath'mael", ("The Butcher", "Bjork")),  # (the Ruins of Lordaeron: round its U, clockwise)
     (23065, "Faldrim Anvilmar", "Durgen Dirgehammer", ("Infurnus", "Plunder")),  # (the Hall of Thanes)
@@ -647,8 +775,9 @@ def test_the_walk_to_blackrock_depths_from_searing_gorge_ends_on_its_floor():
             G.Update()
         st = N.route.stretches[1]
         legs = [st.legs[i] for i in range(1, len(st.legs) + 1)]
-        k = next(i for i, leg in enumerate(legs) if leg.ride and leg.ride[8] == "portal")
-        walk = legs[k - 1]
+        # (the route ends at the portal: the walk inside is the dungeon's map's, N.OutsideInstances)
+        assert st.inside and st.inside.ride[8] == "portal" and st.inside.ride[4] == 20230
+        walk = legs[-1]
         assert walk.walk and (walk.x2, walk.y2) == (portal[2], portal[3])
         tz = [t for c, x, y, t in seen if c == 0 and (x, y) == (portal[2], portal[3])]
         assert tz and all(t == pytest.approx(166.2, abs=3) for t in tz)

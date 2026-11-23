@@ -4644,6 +4644,10 @@ local function PoiButton(i)
       ns.Layers.AddQuestToTooltip(GameTooltip, self.questID)
     end
     if self.note then GameTooltip:AddLine(self.note, 0.7, 0.7, 0.7) end
+    -- (a dungeon or raid with no map yet: its click does nothing, G.ShowInstance)
+    if self.instance and not G.InstanceHasMap(self.instance) then
+      GameTooltip:AddLine(L["Map and routes inside coming soon"], 0.6, 0.6, 0.6)
+    end
     -- (the controller in use: its button, and no mouse-only lines; asked 2026-11-16, "the tool tip controls should be
     -- the controller's not mouse instructions")
     if G.PadTipLine(GameTooltip, "select") then GameTooltip:Show() return end
@@ -12784,11 +12788,31 @@ function G.InstanceBounds(lvl)
   return x0, x1, y0, y1
 end
 
+-- Whether instance level `lvl` has a map to show: its floor grid, else its minimap tiles as one piece (filling at
+-- least INSTANCE_TILES_FILL of their box). A new one whose tiles are bits far apart is none yet (Nightmare Grove's,
+-- 36 tiles in four patches over 406: its map was the Eastern Kingdoms' art with them pasted on; asked 2026-11-23, "if
+-- there are no maps yet for something new just make left click do nothing").
+G.INSTANCE_TILES_FILL = 0.5
+function G.InstanceHasMap(lvl)
+  local P = ns.Passability
+  if P and P.GridBounds and P.GridBounds(lvl) then return true end
+  local l = ns.CityLevels and ns.CityLevels[lvl]
+  local tiles = l and ns.MinimapTiles and ns.MinimapTiles[l.base]
+  if not tiles then return false end
+  local n, tx0, tx1, ty0, ty1 = 0, math.huge, -math.huge, math.huge, -math.huge
+  for k in pairs(tiles) do
+    local tx, ty = math.floor(k / 64), k % 64
+    n, tx0, tx1, ty0, ty1 = n + 1, math.min(tx0, tx), math.max(tx1, tx), math.min(ty0, ty), math.max(ty1, ty)
+  end
+  return n > 0 and n >= (tx1 - tx0 + 1) * (ty1 - ty0 + 1) * G.INSTANCE_TILES_FILL
+end
+
 -- A dungeon's map: its floors, bosses and ways out, fitted in the view. Of wing `wing` (its icon's):
--- that wing fitted, its bosses and usual way.
+-- that wing fitted, its bosses and usual way. None yet (G.InstanceHasMap): nothing, false.
 function G.ShowInstance(lvl, wing)
+  if not G.InstanceHasMap(lvl) then return false end
   local x0, x1, y0, y1 = G.InstanceBounds(lvl)
-  if not x0 then return end
+  if not x0 then return false end
   local wx0, wx1, wy0, wy1 = G.WingBounds(lvl, wing)
   if wx0 then
     wx0, wx1, wy0, wy1 = math.max(x0, wx0), math.min(x1, wx1), math.max(y0, wy0), math.min(y1, wy1)
@@ -12799,7 +12823,7 @@ function G.ShowInstance(lvl, wing)
   free = { x = (x0 + x1) / 2, y = (y0 + y1) / 2, rot = 0, cross = true, cont = lvl, instance = lvl, wing = wing }
   S().zoom = math.max(MIN_ZOOM, math.min(G.MaxZoom(), math.max(x1 - x0, y1 - y0) / 2 * 1.05))
   if recenter then recenter:Show() end
-  elapsed = 1
+  elapsed = 1  return true
 end
 
 -- Back out of a dungeon's map: the terrain view at entrance `e` ({ cont, x, y, ... }).
@@ -18827,7 +18851,8 @@ end
 -- where right-click goes back to. (Api.lua's RestoreView: another addon's game ending.)
 function G.ApplyView(v)
   if not (v and v.x and v.y) then return end
-  if v.instance and not (ns.CityLevels and ns.CityLevels[v.instance]) then return G.Follow() end
+  -- (one gone, or with no map yet: G.InstanceHasMap; a view of Nightmare Grove's saved before it had none)
+  if v.instance and not (ns.CityLevels and ns.CityLevels[v.instance] and G.InstanceHasMap(v.instance)) then return G.Follow() end
   if v.browse and ns.Maps and ns.Maps[v.browse] then
     G.Browse(v.browse, v.browseCont)
     browseZoom = v.browseZoom or browseZoom
