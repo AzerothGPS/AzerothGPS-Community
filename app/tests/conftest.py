@@ -1,7 +1,7 @@
 """The `timing` mark: a test that holds work to a budget by a clock (a slice of background work under FRAME_MS, a click
 under its limit, as many frames of work as a reference PC's CPU gets done).
 
-On CI (the self-hosted runners: 3-CPU containers, up to 15 of them on one 8-core PC, among other repos' jobs) a timing test
+On CI (the self-hosted runners: 2-CPU containers, up to 15 of them on one 8-core PC, among other repos' jobs) a timing test
 that fails an assert is run again, up to TIMING_RERUNS times (pytest-rerunfailures, app[dev]); the gate lists every
 test that passed only on a rerun (.github/scripts/ci_gate.py skips). A preempted slice there runs 2-25x long once
 (5 ms here, 151 against 150 there): never twice in a row in the same spot. A slice really over its budget fails every
