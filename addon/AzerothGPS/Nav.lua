@@ -3235,8 +3235,18 @@ function N.WalkKept(cont, x1, y1, x2, y2)
   local from = c[N.NoWalkCell(x1, y1)]
   return (from and from[to]) or (c["*"] and c["*"][to]) or false
 end
+-- (and to a stop on another continent, a walk on the way to the ride that's a long way round, N.WalkDetour (any walk
+-- but the last: left out, the next plan walked to Menethil's flight master and on to the dock, the same way round, the
+-- Mystic Ward's), the ride check, which
+-- plans again past one, runs only for a stop on the player's continent (Stretch). Reported 2026-11-23: from Ironforge's
+-- bank to Ratchet the plan walked to Menethil Harbor's boat, 1,040 yd straight through the mountain and 8.3k yd round by
+-- Loch Modan, and never took the gryphon from Ironforge 357 yd away; from the Great Forge it flew)
 function N.WithoutBlockedWalks(cont, sx, sy, d, walk, tps, opts, sz, legs, routes, memo)
-  local best, bestLegs, bestRoutes, bestAt, exempt
+  local best, bestLegs, bestRoutes, bestAt
+  local Rt = ns.Router
+  local exempt = Rt and Rt.ZoneAt and { [Rt.ZoneAt(Geo.Base(cont), sx, sy)] = true,
+    [Rt.ZoneAt(Geo.Base(d.cont), d.x, d.y)] = true } or nil
+  local overseas = Geo.Base(d.cont) ~= Geo.Base(cont)
   local tried = {} -- { cont, from cell, to cell }: the walks left out here, in order
   memo = memo or {} -- (the walks routed for the plans here, the stretch's first plan's too: WalkRoutes')
   for _ = 1, N.NO_WALK_TRIES do
@@ -3249,14 +3259,14 @@ function N.WithoutBlockedWalks(cont, sx, sy, d, walk, tps, opts, sz, legs, route
         elseif N.ProvisionalBlockedYards(leg.cont, routes[li]) > 0 then
           bad, provisional = leg, true
           break
+        elseif overseas and li < #legs and N.WalkDetour(leg, routes[li], exempt) then
+          bad = leg
+          break
         end
       end
     end
     if not bad then break end
     if not best then
-      local Rt = ns.Router
-      exempt = Rt and Rt.ZoneAt and { [Rt.ZoneAt(Geo.Base(cont), sx, sy)] = true,
-        [Rt.ZoneAt(Geo.Base(d.cont), d.x, d.y)] = true } or nil
       best, bestLegs, bestRoutes, bestAt = N.PlanWeighed(legs, routes, walk, exempt), legs, routes, 0
     end
     local c = N.noWalk[bad.cont] or {}

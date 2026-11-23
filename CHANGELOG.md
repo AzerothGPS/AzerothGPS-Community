@@ -23,6 +23,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Options: hovering the grayed world map option (controller UI on) shows its tooltip and why it's gray.
 - A city's class trainer place (Undercity Mage Trainer) routes to that class's trainer, not a portal trainer nearby.
 - The Target button now marks the NPC with the stop's route marker too; it only targeted it.
+- Trips to another continent no longer walk a long way round to the boat when a flight is faster: from Ironforge's bank to Ratchet the route walked 8.3k yd by Loch Modan to Menethil Harbor instead of taking the gryphon.
 - A new stop's marker no longer shows as a gray cog for a moment.
 - Setting a route, the map zooms out to show it only once the route is drawn, not while it's still being worked out.
 - A stop inside a dungeon or raid routes to its entrance: the distance and time are to the portal, not the walk inside.
