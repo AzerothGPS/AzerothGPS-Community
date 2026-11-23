@@ -1041,6 +1041,7 @@ function Lay.QuestStops(onlyZone, onlyTracked)
     out[#out + 1] = { x = x, y = y, cont = cont, name = complete and string.format(L["Turn in: %s"], title) or title, questRoute = true,
       quest = id, turnin = complete and true or nil, z = (ns.Nav and ns.Nav.SpawnZ and ns.Nav.SpawnZ(cont, x, y)) or Lay.QuestNpcZ(id, cont, x, y), -- (its NPC's floor, if known)
       parts = not complete and Lay.QuestAreaSpots(id) or nil } -- (its area's other parts: Nav.OrderStops picks one)
+    Lay.AtQuestNpc(out[#out]) -- (a turn-in: at the NPC who takes it, its height and Target button)
     placed[id] = true
     if complete then counts.turnin = counts.turnin + 1 else counts.todo = counts.todo + 1 end
   end
@@ -2066,6 +2067,67 @@ function Lay.QuestNpcZ(qid, cont, x, y)
   end
   return best
 end
+-- The NPCs who take quest `qid` in: the shipped ones' creature ids (Data/QuestNpcs.lua, `agps quest-npcs`: the CMaNGOS
+-- dump's creature_involvedrelation for the NPCs in Data/Npcs.lua, numbers only; read the first time), or nil.
+function Lay.QuestEnders(qid)
+  local packed = ns.QuestEndersPacked
+  if Lay.questEndersFrom ~= packed or not Lay.questEnders then
+    local t = {}
+    if type(packed) == "string" then
+      for q, ids in packed:gmatch("(%d+) ([%d,]+)") do
+        local list = {}
+        for i in ids:gmatch("%d+") do list[#list + 1] = tonumber(i) end
+        t[tonumber(q)] = list
+      end
+    end
+    Lay.questEnders, Lay.questEndersFrom = t, packed
+  end
+  return qid and Lay.questEnders[qid] or nil
+end
+-- Where quest `qid` is turned in near (x, y) on level `cont` (its map spot): the spawn of an NPC who takes it in
+-- (Lay.QuestEnders, the shipped spawns) within QUEST_NPC_STOP_YD, the nearest; for a quest the data has none for, an
+-- NPC talked to whose window had it (`quests`, its spot learned). { id, name, cont, x, y, z } or nil.
+Lay.QUEST_NPC_STOP_YD = 120
+function Lay.QuestNpcSpot(qid, cont, x, y)
+  if not (qid and cont and x and y) then return nil end
+  local base = Geo.Base(cont)
+  local best, bd
+  local function try(id, name, lv, sx, sy, sz)
+    if not (lv and sx and sy) or Geo.Base(lv) ~= base then return end
+    local d2 = (sx - x) ^ 2 + (sy - y) ^ 2
+    if d2 <= Lay.QUEST_NPC_STOP_YD ^ 2 and (not bd or d2 < bd) then
+      best, bd = { id = id, name = name, cont = lv, x = sx, y = sy, z = sz }, d2
+    end
+  end
+  local enders = Lay.QuestEnders(qid)
+  if enders then
+    local _, byId = Lay.ShippedNpcs()
+    for _, id in ipairs(enders) do
+      local n = byId[id]
+      local sp = n and n.spawns or {}
+      for i = 1, #sp - 3, 4 do try(id, n.name, sp[i], sp[i + 1], sp[i + 2], sp[i + 3]) end
+    end
+    return best
+  end
+  for id, n in pairs(NpcDB() or {}) do
+    if type(id) == "number" and type(n) == "table" and n.quests and n.quests[qid] and not n.imported then
+      try(id, n.name, n.cont, n.x, n.y, n.z)
+      for _, s in ipairs(n.spots or {}) do try(id, n.name, s.cont, s.x, s.y, s.z) end
+    end
+  end
+  return best
+end
+-- A quest's turn-in stop (`quest`, `turnin`) put at the NPC who takes it (Lay.QuestNpcSpot; Kooki3z, 2026-11-22): its
+-- spawn's spot and height, and `npcId`/`npcName` (the Target button's), not the quest marker's map spot. Returns it.
+function Lay.AtQuestNpc(stop)
+  if not (stop and stop.quest and stop.turnin) or stop.npcId then return stop end
+  local s = Lay.QuestNpcSpot(stop.quest, stop.cont, stop.x, stop.y)
+  if not s then return stop end
+  stop.x, stop.y, stop.cont = s.x, s.y, s.cont
+  stop.z = s.z or stop.z
+  stop.npcId, stop.npcName = s.id, s.name
+  return stop
+end
 -- The window of an NPC opening (L.NPC_EVENTS): who it is and where the player stands. `options`: the gossip's.
 function Lay.OnNpcWindow(event, options)
   local kind = Lay.NPC_EVENTS[event]
@@ -2075,6 +2137,7 @@ function Lay.OnNpcWindow(event, options)
   if ns.IsSecret(guid) or ns.IsSecret(name) or not name then return false end
   local id = ns.Nav and ns.Nav.NpcOf(guid)
   if not id then return false end -- (an object's: a quest from a board, a chest)
+  if ns.Nav.OnNpcWindow then ns.Nav.OnNpcWindow(id) end -- (the route's stop at it: reached)
   if Geo.Simulated() then return false end -- (the dev tools' simulated player: not where the NPC is)
   local px, py, cont = Geo.PlayerWorld()
   if not px then return false end -- (in a dungeon: no position)

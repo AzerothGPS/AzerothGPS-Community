@@ -14637,16 +14637,30 @@ end
 G.TARGET_NPC_YD = 40 -- shown this close to the NPC's stop (about where /targetexact finds it)
 G.TARGET_NPC_LEAVE_YD = 50 -- ... and hidden again beyond this
 G.TARGET_NPC_EVERY = 0.25 -- seconds between looks (the map closed too: its key works then)
-G.TARGET_NPC_MIN_W, G.TARGET_NPC_MAX_W = 90, 240
 
 -- The stop whose NPC the Target button targets: the route's next stop when it's an NPC, the option on and the player
 -- (px, py on level `cont`) near it (`shown`: within the farther LEAVE_YD); else nil.
+-- (no NPC stop next: the NPC stop just reached, Nav.arrivedNpc, kept till the player targets or talks to it, or goes
+-- TARGET_NPC_LEAVE_YD from it; Kooki3z 2026-11-22: the button went with the route as "Arrived" showed)
+function G.TargetNpcCandidate()
+  local N = ns.Nav
+  local d = N.dest
+  if d and d.npcId then return d end
+  return N.arrivedNpc
+end
 function G.TargetNpcStop(px, py, cont, shown)
   if S().targetNpcButton == false then return nil end
   local N = ns.Nav
-  local d = N.dest
+  local d = G.TargetNpcCandidate()
   if not (d and d.npcId and px and d.x) or N.PlayerLevel(cont) ~= d.cont then return nil end
   local dd = math.sqrt((d.x - px) ^ 2 + (d.y - py) ^ 2)
+  if d == N.arrivedNpc then
+    if dd > G.TARGET_NPC_LEAVE_YD or G.TargetIsNpc(d.npcId) then -- (gone from it, or it's targeted: done)
+      N.arrivedNpc = nil
+      return nil
+    end
+    return d
+  end
   if dd > (shown and G.TARGET_NPC_LEAVE_YD or G.TARGET_NPC_YD) then return nil end
   return d
 end
@@ -14688,21 +14702,44 @@ function G.TargetIsNpc(id)
   return ok and ns.CreatureId(guid) == id or false
 end
 
+-- Its look (asked by Kooki3z, 2026-11-22: "make it fading like the quest route button, to the left of it if quest
+-- route button in there, otherwise use the quest route spot. Use the icon for Hunter's Mark ability"): an icon the
+-- size of the arrow's directions' Quest Route (Sprint) icon, pulsing as it does (TARGET_NPC_PULSE), Hunter's Mark's
+-- (ns.SpellIcon of TARGET_NPC_SPELL, else its file by id). In the arrow's directions: just left of the Sprint icon
+-- while that shows, else in its spot (the panel's top right corner). In the map's directions panel (no Sprint icon
+-- there): its bottom right corner, over the use button while that shows (the column the text keeps clear of). The arrow's
+-- first line keeps clear of it (Arrow.ReserveCorner).
+G.TARGET_NPC_PX = 18
+G.TARGET_NPC_SPELL = 1130 -- (Hunter's Mark)
+G.TARGET_NPC_ICON_FILE = 132212 -- (Interface\Icons\Ability_Hunter_SniperShot, its icon)
+function G.TargetNpcPulse(t) return 0.55 + 0.45 * math.sin((t or GetTime()) * 4) end
+function G.TargetNpcIcon()
+  return ns.SpellIcon and ns.SpellIcon(G.TARGET_NPC_SPELL) or G.TARGET_NPC_ICON_FILE
+end
 function G.MakeTargetButton(panel)
   if G.targetBtn or not CreateFrame or G.clone then return end
-  -- (the secure template last: its OnClick is the one kept, as ns.SecureReloadButton's)
-  local ok, b = pcall(CreateFrame, "Button", "AzerothGPSTargetButton", UIParent,
-    "UIPanelButtonTemplate, SecureActionButtonTemplate")
+  local ok, b = pcall(CreateFrame, "Button", "AzerothGPSTargetButton", UIParent, "SecureActionButtonTemplate")
   if not ok or not b then return end
   -- (both halves: this client's secure buttons act on the key's down while "cast on key down" is on, its default, and
   -- an up-only button does nothing; a mouse click acts on the up)
   b:RegisterForClicks("AnyUp", "AnyDown")
-  b:SetSize(G.TARGET_NPC_MIN_W, 22)
+  b:SetSize(G.TARGET_NPC_PX, G.TARGET_NPC_PX)
   b.panel = panel
+  local icon = b:CreateTexture(nil, "ARTWORK")
+  icon:SetAllPoints()
+  icon:SetTexture(G.TargetNpcIcon())
+  icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+  b.icon = icon
+  local hl = b:CreateTexture(nil, "HIGHLIGHT")
+  hl:SetAllPoints()
+  hl:SetColorTexture(1, 1, 1, 0.25)
   b:Hide()
   b:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_BOTTOM")
-    GameTooltip:SetText(self.who and Format(L["Target %s"], self.who) or L["Target"], 1, 1, 1)
+    GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+    local who = self.who
+    local text = not who and L["Target"]
+      or (self.marks and Format(L["Target %s and mark it"], who) or Format(L["Target %s"], who))
+    GameTooltip:SetText(text, 1, 1, 1)
     GameTooltip:AddLine(L["Your route's next stop. A key for it: Key Bindings > AddOns > AzerothGPS."], nil, nil, nil, true)
     GameTooltip:Show()
   end)
@@ -14717,10 +14754,11 @@ function G.MakeTargetButton(panel)
     -- (off the directions panel too: a protected button anchored to it makes the map window protected in combat)
     b:Hide()
     b:ClearAllPoints()
-    b.placed = nil
+    b.placed, b.spot = nil, nil
   end)
   local wait = 0
   ev:SetScript("OnUpdate", function(_, dt)
+    if b:IsShown() then b:SetAlpha(G.TargetNpcPulse()) end -- (pulsing, as the Sprint icon does)
     wait = wait - (dt or 0)
     if wait > 0 then return end
     wait = G.TARGET_NPC_EVERY
@@ -14734,41 +14772,72 @@ end
 function G.UpdateTargetButton()
   local b = G.targetBtn
   if not b or (InCombatLockdown and InCombatLockdown()) then return end
-  local dest = ns.Nav.dest
-  if b.macro == nil and not b:IsShown() and not (dest and dest.npcId) then return end -- (no NPC stop: nothing to do)
+  local cand = G.TargetNpcCandidate()
+  if b.macro == nil and not b:IsShown() and not cand then return end -- (no NPC stop: nothing to do)
   local px, py, cont = Geo.PlayerWorld()
-  local d = G.TargetNpcStop(px, py, cont, b.macro ~= nil and b.stop == ns.Nav.dest)
+  local d = G.TargetNpcStop(px, py, cont, b.macro ~= nil and cand ~= nil and b.stop == cand)
   local macro = G.TargetNpcMacro(d)
   if macro ~= b.macro then
     b.macro, b.stop = macro, macro and d or nil
     b.who = macro and G.TargetNpcName(d) or nil
+    b.marks = macro and macro:find("/tm ", 1, true) ~= nil or nil
     -- (no macro: no type, so its key does nothing)
     b:SetAttribute("type", macro and "macro" or nil)
     b:SetAttribute("macrotext", macro)
-    if macro then
-      b:SetText(Format(L["Target %s"], b.who))
-      local fs = b.GetFontString and b:GetFontString()
-      local w = (fs and fs.GetStringWidth and fs:GetStringWidth() or 0) + 24
-      b:SetWidth(math.max(G.TARGET_NPC_MIN_W, math.min(G.TARGET_NPC_MAX_W, w)))
-    end
   end
-  local panel = b.panel
-  -- (shown under the directions panel while it shows; not on the minimap square, nor with the panel's buttons hidden,
-  -- nor with that NPC targeted already. Its key works with the map closed too)
-  local show = macro and panel and panel:IsVisible() and not G.MinimapMode() and not G.NavBare()
-    and not G.TargetIsNpc(d.npcId) and true or false
+  local panel = G.TargetNpcHost(b)
+  -- (in a directions panel while one shows (the arrow's, else the map's), not with that NPC targeted already. Its key
+  -- works with them closed too)
+  local show = macro and panel and not G.TargetIsNpc(d.npcId) and true or false
   if not show then
     if b:IsShown() then b:Hide() end
+    if ns.Arrow and ns.Arrow.ReserveCorner then ns.Arrow.ReserveCorner() end -- (the arrow's first line its width back)
     return
   end
-  if not b.placed or not b:IsShown() then
+  local spot = G.TargetNpcSpot(panel)
+  if not b.placed or not b:IsShown() or b.spot ~= spot then
     b:ClearAllPoints()
-    b:SetPoint("TOPRIGHT", panel, "BOTTOMRIGHT", 0, -2)
+    G.PlaceTargetButton(b, panel, spot)
     b:SetFrameStrata(panel:GetFrameStrata())
     b:SetFrameLevel(panel:GetFrameLevel() + 20)
-    b.placed = true
+    b.placed, b.host, b.spot = true, panel, spot
+    b:SetAlpha(G.TargetNpcPulse())
     b:Show()
   end
+  if ns.Arrow and ns.Arrow.ReserveCorner then ns.Arrow.ReserveCorner() end -- (the arrow's first line clear of it)
+end
+-- Where in `panel` it goes: "sprint" (left of the arrow's directions' Quest Route icon, shown), "corner" (that icon's
+-- spot), "use" (the map's panel, over its use button), "map" (the map's panel's corner).
+function G.TargetNpcSpot(panel)
+  local A = ns.Arrow
+  if A and panel == A.dir then
+    local st = A.stale
+    return (st and st:IsShown()) and "sprint" or "corner"
+  end
+  local u = G.useBtn
+  return (u and u:IsShown()) and "use" or "map"
+end
+function G.PlaceTargetButton(b, panel, spot)
+  if spot == "sprint" then
+    b:SetPoint("TOPRIGHT", ns.Arrow.stale, "TOPLEFT", -2, 0)
+  elseif spot == "corner" then
+    b:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -3, -3)
+  else -- (the map's panel: in the column its steps' text keeps clear on the right, G.NavTextInsets' second; over the
+    -- use button while that shows)
+    local _, stepsR = G.NavTextInsets()
+    local x = -math.max(2, stepsR - G.TARGET_NPC_PX - 4)
+    b:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", x, spot == "use" and 5 + 24 + 4 or 5)
+  end
+end
+-- The directions panel it's in: the arrow's (Arrow.lua's AzerothGPSDirections, where the Quest Route icon is) while
+-- they show, else the map's while it shows (not on the minimap square, nor with its buttons hidden), else nil.
+-- (Kooki3z, 2026-11-22: with the GPS map as the minimap the map's panel never shows, and the button never did)
+function G.TargetNpcHost(b)
+  local dir = ns.Arrow and ns.Arrow.dir
+  if dir and dir.IsVisible and dir:IsVisible() then return dir end
+  local panel = b and b.panel
+  if panel and panel:IsVisible() and not G.MinimapMode() and not G.NavBare() then return panel end
+  return nil
 end
 
 -- Near the next stop (option): the map zooms in smoothly for the last yards, and back out

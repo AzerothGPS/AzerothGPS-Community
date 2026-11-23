@@ -38,11 +38,13 @@ def _npc_route(lua, ns, x=2264.0, y=300.0, npc=True):
     ns.Nav.SetStops(lua.eval(f"{{ {{ x = {x}, y = {y}, cont = 0, name = 'Innkeeper Renee'{extra} }} }}"), False, "red")
 
 
-def _update(lua, ns, t):
+def _update(lua, ns, t, arrow=False):
     G = ns.GPS
     lua.execute(f"AGPS_T = {t}")
     G.Update()
-    G.navPanel.Show(G.navPanel)  # (the directions panel up, as with a route worked out)
+    G.navPanel.Show(G.navPanel)  # (the map's directions panel up, as with a route worked out)
+    if not arrow:
+        ns.Arrow.dir.Hide(ns.Arrow.dir)  # (the arrow's directions closed: in the map's panel)
     G.UpdateTargetButton()
     return G.targetBtn
 
@@ -70,10 +72,13 @@ def test_the_target_button_shows_near_an_npc_stop_and_targets_it_by_name(clean):
     # (solo, the default: marked too, with the stop's route marker, its raid icon: the first stop's is the square, 6)
     assert ns.Nav.stops[1].icon == 6
     assert b._attr["type"] == "macro" and b._attr["macrotext"] == MARKED.format(6)
-    assert str(b._text) == "Target Innkeeper Renee"
+    # (an icon, Hunter's Mark's, the Sprint icon's size; no text)
+    assert b.icon._tex in (ns.SpellIcon(ns.GPS.TARGET_NPC_SPELL), ns.GPS.TARGET_NPC_ICON_FILE)
+    assert (b._w, b._h) == (ns.GPS.TARGET_NPC_PX, ns.GPS.TARGET_NPC_PX)
     # (this client's secure buttons act on the key's down; an up-only one does nothing)
     assert set(b._clicks.values()) == {"AnyUp", "AnyDown"}
-    assert lua.eval("AzerothGPSTargetButton._pts.TOPRIGHT[2] == AGPS_NS.GPS.navPanel")  # (under the directions panel)
+    # (in the map's directions panel: its bottom right corner)
+    assert lua.eval("AzerothGPSTargetButton._pts.BOTTOMRIGHT[2] == AGPS_NS.GPS.navPanel")
     # (the stop saved with the route keeps its NPC: the button again after a /reload)
     saved = ns.CharDB().stops[1]
     assert saved.npcId == NPC_ID and saved.npcName == "Innkeeper Renee"
@@ -116,7 +121,12 @@ def test_the_target_button_hides_with_the_npc_targeted_the_panel_hidden_or_the_o
     lua.execute("AGPS_GUIDS = { target = AGPS_SECRET }")  # (a hidden GUID: not known to be it)
     assert _update(lua, ns, 1203)._shown
     lua.execute("AGPS_GUIDS = nil")
-    G.navPanel.Hide(G.navPanel)  # (the directions panel closed: hidden, its key still set)
+    G.navPanel.Hide(G.navPanel)  # (the map's directions panel closed: under the arrow's directions instead)
+    A = ns.Arrow
+    A.dir.Show(A.dir)
+    G.UpdateTargetButton()
+    assert G.targetBtn._shown and lua.eval("AzerothGPSTargetButton._pts.TOPRIGHT[2] == AGPS_NS.Arrow.dir")
+    A.dir.Hide(A.dir)  # (neither shows: hidden, its key still set)
     G.UpdateTargetButton()
     assert not G.targetBtn._shown and G.targetBtn._attr["type"] == "macro"
     st.targetNpcButton = False
@@ -284,3 +294,119 @@ def test_after_the_click_the_button_hides_and_comes_back_only_once_the_target_ch
     lua.execute("AGPS_GUIDS = { target = 'Creature-0-1-0-1-1234-0000ABCDEF' }")
     b = _update(lua, ns, 1702)
     assert b._shown and "~6" in b._attr["macrotext"] and "/tm 6" not in b._attr["macrotext"]
+
+
+def test_with_the_map_as_the_minimap_the_button_hangs_under_the_arrows_directions(clean):
+    # (Kooki3z, 2026-11-22: the GPS map as the minimap, its own directions panel never shows; the arrow's do)
+    lua, ns = clean
+    G, A = ns.GPS, ns.Arrow
+    _npc_route(lua, ns)
+    lua.execute("AGPS_OLD_MM = AGPS_NS.GPS.MinimapMode AGPS_NS.GPS.MinimapMode = function() return true end")
+    try:
+        A.dir.Show(A.dir)
+        b = _update(lua, ns, 1800, arrow=True)
+        assert b._shown and lua.eval("AzerothGPSTargetButton._pts.TOPRIGHT[2] == AGPS_NS.Arrow.dir")
+        A.dir.Hide(A.dir)
+        G.UpdateTargetButton()
+        assert not b._shown
+    finally:
+        lua.execute("AGPS_NS.GPS.MinimapMode = AGPS_OLD_MM")
+    b = _update(lua, ns, 1801)  # (the map's panel showing again, the arrow's closed: in it)
+    assert b._shown and lua.eval("AzerothGPSTargetButton._pts.BOTTOMRIGHT[2] == AGPS_NS.GPS.navPanel")
+
+
+def test_in_the_arrows_directions_it_goes_left_of_the_quest_route_icon_or_in_its_spot(clean):
+    # (Kooki3z, 2026-11-22: "to the left of it if quest route button in there, otherwise use the quest route spot")
+    lua, ns = clean
+    A = ns.Arrow
+    _npc_route(lua, ns)
+    A.dir.Show(A.dir)
+    A.stale.Hide(A.stale)
+    b = _update(lua, ns, 1900, arrow=True)
+    pt = lua.eval("AzerothGPSTargetButton._pts.TOPRIGHT")
+    own = lua.eval("AGPS_NS.Arrow.stale._pts.TOPRIGHT")
+    assert b._shown and lua.eval("AzerothGPSTargetButton._pts.TOPRIGHT[2] == AGPS_NS.Arrow.dir")
+    assert (pt[4], pt[5]) == (own[2], own[3])  # (the Sprint icon's own spot)
+    A.stale.Show(A.stale)  # (the quest route's Sprint icon up: just left of it)
+    _update(lua, ns, 1901, arrow=True)
+    pt = lua.eval("AzerothGPSTargetButton._pts.TOPRIGHT")
+    assert lua.eval("AzerothGPSTargetButton._pts.TOPRIGHT[2] == AGPS_NS.Arrow.stale") and pt[3] == "TOPLEFT"
+    A.stale.Hide(A.stale)
+    _update(lua, ns, 1902, arrow=True)
+    assert lua.eval("AzerothGPSTargetButton._pts.TOPRIGHT[2] == AGPS_NS.Arrow.dir")
+
+
+def test_in_the_maps_panel_it_stays_in_the_column_the_text_keeps_clear(clean):
+    # (the steps' text ends stepsR from the right (G.NavTextInsets): the icon within it, over the use button when shown)
+    lua, ns = clean
+    G = ns.GPS
+    _npc_route(lua, ns)
+    _, steps_r = G.NavTextInsets()
+    for use in (False, True):
+        (G.useBtn.Show if use else G.useBtn.Hide)(G.useBtn)
+        try:
+            b = _update(lua, ns, 1950 + use)
+            pt = lua.eval("AzerothGPSTargetButton._pts.BOTTOMRIGHT")
+        finally:
+            G.useBtn.Hide(G.useBtn)
+        assert b._shown and lua.eval("AzerothGPSTargetButton._pts.BOTTOMRIGHT[2] == AGPS_NS.GPS.navPanel")
+        left = pt[4] - G.TARGET_NPC_PX
+        assert left >= -steps_r and pt[4] <= 0
+        assert pt[5] >= (5 + 24 if use else 0)  # (over the use button, never on it)
+
+
+def _icon_left(lua, ns):
+    # (the icon's left edge, from the panel's right: the arrow's directions' top right corner)
+    G, A = ns.GPS, ns.Arrow
+    pt = lua.eval("AzerothGPSTargetButton._pts.TOPRIGHT")
+    if lua.eval("AzerothGPSTargetButton._pts.TOPRIGHT[2] == AGPS_NS.Arrow.stale"):
+        sp = lua.eval("AGPS_NS.Arrow.stale._pts.TOPRIGHT")
+        return sp[2] - A.stale._w + pt[4] - G.TARGET_NPC_PX
+    return pt[4] - G.TARGET_NPC_PX
+
+
+def test_the_arrows_first_line_never_runs_under_the_icons(clean):
+    # (Kooki3z, 2026-11-22: the icon covered "yd" of "Continue straight, then make a U-turn in 40 yd")
+    lua, ns = clean
+    A = ns.Arrow
+    _npc_route(lua, ns)
+    A.dir.Show(A.dir)
+    for sprint in (False, True):
+        (A.stale.Show if sprint else A.stale.Hide)(A.stale)
+        A.ReserveCorner()
+        b = _update(lua, ns, 1960 + sprint, arrow=True)
+        assert b._shown
+        right = lua.eval("AGPS_NS.Arrow.line1._pts.RIGHT")[2]  # (the line's right end, from the panel's)
+        assert right <= _icon_left(lua, ns) - 1, (sprint, right, _icon_left(lua, ns))
+    # (the icon gone: the line its full width back; the Sprint icon alone still kept clear)
+    A.stale.Hide(A.stale)
+    ns.Nav.Clear()
+    ns.GPS.UpdateTargetButton()
+    assert lua.eval("AGPS_NS.Arrow.line1._pts.RIGHT")[2] == -A.LINE_RIGHT
+    A.stale.Show(A.stale)
+    A.ReserveCorner()
+    assert lua.eval("AGPS_NS.Arrow.line1._pts.RIGHT")[2] <= -(3 + A.stale._w) - 1
+    A.stale.Hide(A.stale)
+    A.ReserveCorner()
+
+
+def test_it_pulses_as_the_quest_route_icon_does_and_says_when_it_marks(clean):
+    lua, ns = clean
+    G = ns.GPS
+    _npc_route(lua, ns)
+    b = _update(lua, ns, 2000)
+    pulses = {round(G.TargetNpcPulse(t), 3) for t in (2000.0, 2000.2, 2000.4, 2000.6)}
+    assert len(pulses) > 1 and all(0.1 <= a <= 1 for a in pulses)
+    assert abs(b._alpha - G.TargetNpcPulse(2000)) < 1e-6  # (shown: at the pulse's alpha)
+    assert b.marks  # (solo: marks too; its tooltip says so)
+    b._scripts.OnEnter(b)
+    ns.settings.gps.targetNpcMarkSolo = False
+    b = _update(lua, ns, 2001)
+    assert not b.marks and b._attr["macrotext"] == TARGET_ONLY
+    b._scripts.OnEnter(b)
+    b._scripts.OnLeave(b)
+
+
+def test_it_is_still_a_secure_button_made_once():
+    src = (ADDON / "GPSFrame.lua").read_text(encoding="utf-8")
+    assert 'CreateFrame, "Button", "AzerothGPSTargetButton", UIParent, "SecureActionButtonTemplate")' in src
