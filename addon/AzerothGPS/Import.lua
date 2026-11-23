@@ -26,8 +26,11 @@ function I.ToStop(w)
   if not b then return nil, L["no map data for that zone"] end
   local u, v = w.x / 100, w.y / 100
   local name = w.name or string.format("%s %.1f, %.1f", m.name or "?", w.x, w.y)
-  return { x = b[3] - v * (b[3] - b[1]), y = b[4] - u * (b[4] - b[2]), cont = Geo.MapCont(w.mapID), name = name,
+  local stop = { x = b[3] - v * (b[3] - b[1]), y = b[4] - u * (b[4] - b[2]), cont = Geo.MapCont(w.mapID), name = name,
     unnamed = not w.name or nil }
+  -- (at an NPC: that NPC's stop, its Target button and floor; Layers.AttachNpc. Kooki3z, 2026-11-22)
+  if ns.Layers and ns.Layers.AttachNpc then ns.Layers.AttachNpc(stop, w.name) end
+  return stop
 end
 
 -- All lines: stops, and { "Line n: error", ... } for the ones that couldn't be read (lines numbered as seen, blank

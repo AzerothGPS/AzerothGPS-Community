@@ -4722,8 +4722,13 @@ local function PoiButton(i)
     if G.Held() then return HeldClick(self.wx, self.wy, self.level or view.cont) end -- (the holder's)
     -- (like a double-click on the map, with its name and icon; a pin's, on its own level; a quest's, its quest)
     local pin = type(self.pin) == "table" and self.pin or nil -- (a pin made from an NPC's search row: that NPC's stop)
+    -- (an NPC's icon or dot (an inside map's, POI kind 16: its G.NpcClickInfo): that NPC's stop, the Target button's.
+    -- Kooki3z 2026-11-22: "npc target button stopped working testing with other npcs", double-clicked under a roof)
+    local npc = type(self.npc) == "table" and self.npc.kind == "npc" and self.npc or nil
+    local npcId = pin and pin.npc or npc and npc.id
+    local npcName = pin and (pin.npcName or pin.name) or npc and npc.name
     G.AddStopAt(self.wx, self.wy, self.name, self.level, self.stopTex, self.z, self.pin ~= nil, self.questID,
-      pin and pin.npc, pin and (pin.npcName or pin.name))
+      npcId, npcName)
   end)
   poiButtons[i] = b
   return b
@@ -14156,6 +14161,27 @@ function G.CliffShade(w, p, s)
   return ax + lx, ay + ly, bx + lx, by + ly
 end
 
+-- The shipped NPC whose spawn is at (x, y) on `level` (within NPC_SPOT_YD; with `z`, its height within NPC_SPOT_Z):
+-- { id, name }, or nil. Every stop made at a known NPC carries it (the Target button, the floor rules), whichever way it
+-- was made (Kooki3z, 2026-11-22).
+G.NPC_SPOT_YD, G.NPC_SPOT_Z = 1, 3
+function G.NpcAtSpot(level, x, y, z)
+  local Lay = ns.Layers
+  if not (Lay and Lay.ShippedNpcs and level and x and y) then return nil end
+  local base = Geo.Base(level)
+  local best, bd
+  for _, n in ipairs((Lay.ShippedNpcs())) do
+    local sp = n.spawns
+    for i = 1, #sp - 3, 4 do
+      local d2 = (sp[i + 1] - x) ^ 2 + (sp[i + 2] - y) ^ 2
+      if d2 <= G.NPC_SPOT_YD ^ 2 and Geo.Base(sp[i]) == base and (not z or math.abs(sp[i + 3] - z) <= G.NPC_SPOT_Z)
+          and (not bd or d2 < bd) then
+        best, bd = n, d2
+      end
+    end
+  end
+  return best and { id = best.id, name = ns.NpcName and ns.NpcName(best.id, best.name) or best.name } or nil
+end
 -- (`npcId`, `npcName`: an NPC's stop, its creature id and name: the Target button's, G.TargetNpcStop)
 function G.AddStopAt(x, y, name, stopCont, tex, z, exact, questID, npcId, npcName)
   local px, py, cont = Geo.PlayerWorld()
@@ -14197,6 +14223,21 @@ function G.AddStopAt(x, y, name, stopCont, tex, z, exact, questID, npcId, npcNam
   end
   -- (`z`: its height, the game's, when known: a city place's, its floor where floors lie over each other)
   local stop = { x = x, y = y, cont = sc, name = name, icon = ns.Nav.NextMarker(ns.Nav.stops, pending), tex = tex, z = z }
+  -- (a named stop with no NPC given, right at a shipped NPC's spawn (a city place, an icon): that NPC's, G.NpcAtSpot)
+  if not tonumber(npcId) and name and not questID and not inst and not via then
+    -- (a city place (a guard's spot near its NPC, often on another floor): at its NPC, the one nearest the player
+    -- when there are several; Layers.PlaceNpc. First: the place's spot can be right at one of several, Stormwind's bank)
+    local n
+    if ns.Layers and ns.Layers.PlaceNpc then
+      n = ns.Layers.PlaceNpc(name, sc, x, y, px, py, cont)
+      if n then
+        stop.x, stop.y, stop.cont, stop.z = n.x, n.y, n.cont, n.z
+        stop.place = name
+      end
+    end
+    n = n or G.NpcAtSpot(sc, x, y, z)
+    if n then npcId, npcName = n.id, n.name end
+  end
   if tonumber(npcId) and not inst and not via then stop.npcId, stop.npcName = tonumber(npcId), npcName end
   -- (a quest's icon: the stop carries its quest, done by it and not by getting there; Nav.QuestStop)
   if questID and ns.Nav.QuestStop then ns.Nav.QuestStop(stop, questID) end
@@ -14640,13 +14681,11 @@ G.TARGET_NPC_EVERY = 0.25 -- seconds between looks (the map closed too: its key 
 
 -- The stop whose NPC the Target button targets: the route's next stop when it's an NPC, the option on and the player
 -- (px, py on level `cont`) near it (`shown`: within the farther LEAVE_YD); else nil.
--- (no NPC stop next: the NPC stop just reached, Nav.arrivedNpc, kept till the player targets or talks to it, or goes
--- TARGET_NPC_LEAVE_YD from it; Kooki3z 2026-11-22: the button went with the route as "Arrived" showed)
+-- (only the stop not reached yet: once it's arrived at the button goes, the next stop's showing if that's an NPC's;
+-- Kooki3z 2026-11-22, "after destination to the NPC is reached, hide the 'target npc' button")
 function G.TargetNpcCandidate()
-  local N = ns.Nav
-  local d = N.dest
-  if d and d.npcId then return d end
-  return N.arrivedNpc
+  local d = ns.Nav.dest
+  return d and d.npcId and d or nil
 end
 function G.TargetNpcStop(px, py, cont, shown)
   if S().targetNpcButton == false then return nil end
@@ -14654,13 +14693,6 @@ function G.TargetNpcStop(px, py, cont, shown)
   local d = G.TargetNpcCandidate()
   if not (d and d.npcId and px and d.x) or N.PlayerLevel(cont) ~= d.cont then return nil end
   local dd = math.sqrt((d.x - px) ^ 2 + (d.y - py) ^ 2)
-  if d == N.arrivedNpc then
-    if dd > G.TARGET_NPC_LEAVE_YD or G.TargetIsNpc(d.npcId) then -- (gone from it, or it's targeted: done)
-      N.arrivedNpc = nil
-      return nil
-    end
-    return d
-  end
   if dd > (shown and G.TARGET_NPC_LEAVE_YD or G.TARGET_NPC_YD) then return nil end
   return d
 end

@@ -1055,6 +1055,10 @@ function N.InsertStop(d, at, force)
   if Locked(force) then return false end
   if #N.stops >= N.MAX_STOPS then return false end
   local c = Copy(d)
+  -- (a guide's step at an NPC, named in its text: that NPC's, for the Target button; Layers.AttachNpc)
+  if (c.rxp or c.zygor or c.polestar or c.questify or c.apr) and ns.Layers and ns.Layers.AttachNpc then
+    ns.Layers.AttachNpc(c, c.name, true)
+  end
   c.icon = c.icon or N.NextMarker(N.stops)
   table.insert(N.stops, math.max(1, math.min(at or 1, #N.stops + 1)), c)
   Changed()
@@ -2168,6 +2172,8 @@ end
 -- `pending`: true).
 N.OFF_FLOOR_Z = 4.5
 N.OFF_FLOOR_ROAD_YD = 40
+N.OFF_FLOOR_NEAR_YD = 10
+N.OFF_FLOOR_LAND_ROAD_YD = 10
 N.OFF_FLOOR_GROUND_YD = 4
 N.OFF_FLOOR_ARRIVE_YD = 3
 N.OFF_FLOOR_LAND_Z = 6
@@ -2184,41 +2190,68 @@ function N.StopOffGround(d)
     return c.way, c.dz
   end
   local best, limit, roads = nil, N.OFF_FLOOR_Z, nil
-  if N.InCapital(d.cont, d.x, d.y) or N.InBuilding(d.cont, d.x, d.y) then
-    local R = ns.Router
-    local hs = R and R.HeightsNear and R.HeightsNear(d.cont, d.x, d.y, N.OFF_FLOOR_ROAD_YD)
+  local R = ns.Router
+  local city = N.InCapital(d.cont, d.x, d.y) or N.InBuilding(d.cont, d.x, d.y)
+  local hs = R and R.HeightsNear and R.HeightsNear(d.cont, d.x, d.y, N.OFF_FLOOR_ROAD_YD)
+  -- (out of a capital's own cells and a building, roads with heights right by it (OFF_FLOOR_LAND_ROAD_YD) still tell
+  -- its floor. Kooki3z 2026-11-22, Ironforge's First Aid trainer, Nissa Firestone, on a balcony at 512.5: her spot is
+  -- off the city's cells, so the ground (759.8, the mountain over Ironforge) was taken, "off no", and the route said
+  -- "Arrived" at 9.8 yd on the floor under her (505.5); the city's roads 2 yd from her are at 505.8 and stairs up)
+  if hs and not city then
+    local near = {}
+    for _, e in ipairs(hs) do
+      if e.d <= N.OFF_FLOOR_LAND_ROAD_YD then near[#near + 1] = e end
+    end
+    hs = near
+  end
+  if city and not hs then
     -- (the roads or their index not ready yet, made in the background in game: not known, `pending`, asked again.
     -- Taken as arrived it was "Arrived" at the door again in Kooki3z's test of #904, 2026-11-22)
-    if not hs then
-      N.lastOffFloor = { d = d, roads = "not ready" }
-      return nil, nil, true
-    end
-    local seen = {}
+    N.lastOffFloor = { d = d, roads = "not ready" }
+    return nil, nil, true
+  end
+  if hs and hs[1] then
+    -- (the floors' roads only, flat ones: a stairs road climbs past every height between its floors. Kooki3z
+    -- 2026-11-22, Gelman Stonehand in Stormwind's Dwarven District, 103.4 yd up: a stairs road 2 yd off him reached
+    -- 99.2, within OFF_FLOOR_Z, so he wasn't a floor off and the route said "Arrived" under him; the floor's roads are
+    -- 96. None flat near: all of them, as before)
+    -- (and only those about as near as the nearest: within OFF_FLOOR_NEAR_YD more. 38 yd from him a road of another
+    -- level at 100 counted as his floor)
+    local seen, flats, nearest = {}, false, nil
     for _, e in ipairs(hs) do
-      local diff = h - e.z
-      if not best or math.abs(diff) < math.abs(best) then best = diff end
-      if #seen < 6 then seen[#seen + 1] = string.format("%.1f@%.0f", e.z, e.d) end
+      if e.flat then flats = true break end
     end
-    -- (no road with a height near at all: not known either, never kept. A road network built without the capital's
-    -- or building's roads yet would have said "not a floor off" for good)
-    if not best then
-      N.lastOffFloor = { d = d, roads = "none" }
-      return nil, nil, true
+    for _, e in ipairs(hs) do
+      if (e.flat or not flats) and (not nearest or e.d < nearest) then nearest = e.d end
+    end
+    for _, e in ipairs(hs) do
+      if (e.flat or not flats) and e.d <= nearest + N.OFF_FLOOR_NEAR_YD then
+        local diff = h - e.z
+        if not best or math.abs(diff) < math.abs(best) then best = diff end
+      end
+      if #seen < 6 then seen[#seen + 1] = string.format("%.1f@%.0f%s", e.z, e.d, e.flat and "" or "s") end
     end
     roads = table.concat(seen, " ")
-  else -- (the land: its ground, up only; its bumps, OFF_FLOOR_LAND_Z. A building's inside roads near are its own)
+  elseif city then
+    -- (no road with a height near at all: not known either, never kept. A road network built without the capital's
+    -- or building's roads yet would have said "not a floor off" for good)
+    N.lastOffFloor = { d = d, roads = "none" }
+    return nil, nil, true
+  else -- (the land: its ground, up only; its bumps, OFF_FLOOR_LAND_Z)
     local r = N.OFF_FLOOR_GROUND_YD
     for _, o in ipairs({ { 0, 0 }, { r, 0 }, { -r, 0 }, { 0, r }, { 0, -r } }) do
       local g = N.GroundAt(d.cont, d.x + o[1], d.y + o[2])
       if g and (not best or math.abs(h - g) < math.abs(best)) then best = h - g end
     end
     roads = best and string.format("ground %.1f", h - best) or "no ground"
+    -- (under the ground: a cave's or a city under a mountain, where the ground is the rock over it: not known)
     if best and best < 0 then best = nil end
     limit = N.OFF_FLOOR_LAND_Z
   end
   local way, dz
   if best and math.abs(best) > limit then way, dz = best > 0 and "up" or "down", math.abs(best) end
   offFloor[d] = { key = key, way = way, dz = dz, roads = roads }
+  N.lastOffFloor = { d = d, roads = roads }
   return way, dz
 end
 -- An NPC's stop (`npcId`) whose NPC the player reached: its window opened (N.OnNpcWindow, from Layers.OnNpcWindow), or
@@ -2237,22 +2270,11 @@ function N.NpcReached(d)
   if not ok2 or secret(near) then return false end
   return near and true or false
 end
--- NPC `id`'s window opened (Layers.OnNpcWindow): the route's next stop at it is reached, and the Target button kept
--- after an NPC stop was reached (N.arrivedNpc) is done with.
+-- NPC `id`'s window opened (Layers.OnNpcWindow): the route's next stop at it is reached.
 function N.OnNpcWindow(id)
   if not id then return end
   local d = N.dest
   if d and d.npcId == id then d.npcMet = true end
-  if N.arrivedNpc and N.arrivedNpc.npcId == id then N.arrivedNpc = nil end
-end
--- An NPC's stop just reached (N.arrivedNpc: a copy, { npcId, npcName, name, icon, x, y, cont, z }): the Target button
--- stays near it until the player targets or talks to it (GPSFrame's G.TargetNpcStop; asked by Kooki3z, 2026-11-22: it
--- went with the route as it ended).
-N.arrivedNpc = nil
-function N.RememberArrivedNpc(d)
-  if not (d and d.npcId) or d.npcMet then return end
-  N.arrivedNpc = { npcId = d.npcId, npcName = d.npcName, name = d.name, icon = d.icon, x = d.x, y = d.y, cont = d.cont,
-    z = d.z }
 end
 -- Why a stop with an NPC or a height was arrived at (Kooki3z, 2026-11-22: "still arrived too early", no video): one
 -- line in the chat, once a stop, with the debug log on (Options > Help, ns.Debug) or `/agps debug arrival`
@@ -5803,21 +5825,33 @@ local function CheckArrival(px, py, cont)
       off, dz, pending = N.StopOffGround(d)
       onFloor = N.OnStopFloor(d)
       why = onFloor and "floor" or "distance"
-    end
-    if at and (off or pending) and not onFloor then
-      if (d.x - px) ^ 2 + (d.y - py) ^ 2 > N.OFF_FLOOR_ARRIVE_YD ^ 2 then at = false else why = "within 3 yd" end
-    end
-    -- (its NPC targeted in interact range: the game's range is 3D, about 10 yd, and reaches through a floor. Kooki3z
-    -- 2026-11-22, the debug line: "npc reached" from downstairs, 7.4 yd across and 4.8 below Acolyte Dellis, the floor
-    -- followed 100.0. So with the stop a floor off and the floor followed known and not its own, only its window
-    -- opening, its floor or 3 yd arrive; the target rule stays for when the floor can't be told)
-    if not at and cont == d.cont and N.NpcReached(d) then
-      local blocked = false
-      if not d.npcMet and FloorNear(d) ~= nil and not N.OnStopFloor(d) then
-        local o = N.StopOffGround(d)
-        blocked = o ~= nil
+      -- (the floor followed here and the stop's height a floor apart: off, whatever the roads by it said. Ironforge,
+      -- 2026-11-22: the floor followed 505.5 under Nissa Firestone at 512.5)
+      local fz = not onFloor and not off and FloorNear(d)
+      if fz and math.abs(fz - N.StopHeight(d)) > N.OFF_FLOOR_Z then
+        off, dz = N.StopHeight(d) > fz and "up" or "down", math.abs(fz - N.StopHeight(d))
       end
-      if not blocked then at, why = true, d.npcMet and "npc window" or "npc reached" end
+    end
+    -- (an NPC's stop a floor off with no road of its floor (its floor never followed there): only its window opening, or
+    -- its floor followed after all. Kooki3z 2026-11-22, the debug lines at the Canals library: "within 3 yd" at the door
+    -- right under Acolyte Dellis (2.9 yd, the floor followed 99.0 against her 104.8), and before that "npc reached"
+    -- from downstairs, targeted 7.4 yd across and 4.8 below: the game's interact range is 3D, about 10 yd, and reaches
+    -- through a floor. Neither can tell the door from her side upstairs, and the floor followed goes stale a few
+    -- seconds into a building with no inside roads (TRACK_STALE), so "unknown" can't tell them either. Other stops a
+    -- floor off (no NPC, or the roads not ready yet, `pending`): within OFF_FLOOR_ARRIVE_YD, or the NPC in range)
+    local npcOff = off ~= nil and d.npcId ~= nil
+    if at and (off or pending) and not onFloor then
+      if npcOff or (d.x - px) ^ 2 + (d.y - py) ^ 2 > N.OFF_FLOOR_ARRIVE_YD ^ 2 then at = false else why = "within 3 yd" end
+    end
+    if not at and cont == d.cont and N.NpcReached(d) then
+      if d.npcMet then
+        at, why = true, "npc window"
+      elseif not N.OnStopFloor(d) and (N.StopOffGround(d)
+          or (FloorNear(d) and math.abs(FloorNear(d) - N.StopHeight(d)) > N.OFF_FLOOR_Z)) then
+        at = false -- (targeted in range, a floor off: through the floor, maybe)
+      else
+        at, why = true, "npc reached"
+      end
     end
     if d.quest and QuestingOn() and not d.questDone then
       -- a quest route stop: done by its quest (QuestCheck), not by getting there; there, it waits
@@ -5840,7 +5874,6 @@ local function CheckArrival(px, py, cont)
     if not (d.questDone or d.served or d.bossDone or at) then break end
     N.ArrivalWhy(d, px, py, cont, why or (d.questDone and "quest") or (d.served and "served") or (d.bossDone and "boss")
       or "?", off, dz, pending)
-    N.RememberArrivedNpc(d) -- (its Target button kept till the NPC is targeted or talked to)
     if ns.Feedback and not N.arrivedAt then ns.Feedback.Arrived(d) end
     if not N.arrivedAt then N.TellArrived(d, #N.stops <= 1) end -- (a loop of several never ends)
     if N.loop and #N.stops > 1 then
