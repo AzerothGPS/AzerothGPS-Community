@@ -10,7 +10,8 @@
 -- them), and a left-click of the button makes the route by them.
 --
 -- The toggles and their groups (at most one on in a group, or none):
---   Order: Lowest level first, About to turn gray first (`questLevelOrder` "low" / "gray"). Fastest order is neither:
+--   Order: Lowest level first, About to turn gray first (`questLevelOrder` "low" / "gray"; gray in Options and the
+--     slash command only, no icon). Fastest order is neither:
 --     on while neither is, turning it on turns both off (clicked while on it stays on: the others turn it off).
 --   What's routed: Turn-ins only (`questTurninsOnly`), Objectives only (`questObjectivesOnly`), Tracked quests only
 --     (`questTrackedOnly`): one turned on turns the other two off. The Options page's check boxes keep the same rule
@@ -40,25 +41,26 @@ local G = ns.GPS
 G.QUEST_WAYS = {
   { id = "fastest", word = "fastest", label = L["Fastest order"], group = "order",
     icon = "Interface\\Icons\\INV_Boots_02",
-    tip = L["Your quests in the fastest order, whatever their level. Turns off the level orders."] },
+    tip = L["Visits your quests in the quickest order."] },
   { id = "low", word = "low", label = L["Lowest level first"], key = "questLevelOrder", value = "low", group = "order",
     icon = "Interface\\Icons\\Spell_ChargePositive",
-    tip = L["The lowest level quests first, a few levels at a time, each few in the fastest order."] },
+    tip = L["Visits your lowest-level quests first."] },
+  -- (About to turn gray first: in Options and /agps questroute gray only, no icon on the flyout; Kooki3z 2026-11-22.
+  -- Set there, Fastest order and Lowest level first both show off: it's neither)
   { id = "gray", word = "gray", label = L["About to turn gray first"], key = "questLevelOrder", value = "gray",
-    group = "order", icon = "Interface\\Icons\\INV_Misc_Bone_HumanSkull_01",
-    tip = L["The quests that turn gray within two more levels of yours first (their experience drops then), then the rest in the fastest order."] },
+    group = "order", noIcon = true },
   { id = "turnins", word = "turnins", label = L["Turn-ins only"], key = "questTurninsOnly", group = "what",
     icon = "Interface\\GossipFrame\\ActiveQuestIcon",
-    tip = L["The Quest Route button takes only the finished quests' turn-ins. Turns off \"only objectives\" and \"only tracked quests\"."] },
+    tip = L["Only goes to quests that are ready to turn in."] },
   { id = "objectives", word = "objectives", label = L["Objectives only"], key = "questObjectivesOnly", group = "what",
     icon = "Interface\\GossipFrame\\AvailableQuestIcon",
-    tip = L["The Quest Route button takes only your quests' objectives, no turn-ins. Turns off \"only turn-ins\" and \"only tracked quests\"."] },
+    tip = L["Only goes to quest objectives, not turn-ins."] },
   { id = "tracked", word = "tracked", label = L["Tracked quests only"], key = "questTrackedOnly", group = "what",
     icon = "Interface\\Icons\\INV_Misc_Eye_01",
-    tip = L["The Quest Route button takes only the quests you track: the ones Questie's tracker shows when it's on, else the ones ticked to track in the quest log. Off: every quest in your log."] },
+    tip = L["Only goes to the quests you're tracking."] },
   { id = "zone", word = "zone", label = L["This zone only"], key = "questZoneOnly",
     icon = "Interface\\Icons\\INV_Misc_Map_01",
-    tip = L["The Quest Route button takes only the quests whose objective or turn-in is in the zone you're in (a city counts as its zone). Off: every quest in your log, anywhere."] },
+    tip = L["Only goes to quests in the zone you're in."] },
 }
 
 local function Settings() return ns.settings and ns.settings.gps or {} end
@@ -177,10 +179,12 @@ end
 function G.QuestWayList()
   local out = {}
   for _, e in ipairs(G.QUEST_WAYS) do
-    out[#out + 1] = { id = e.id, text = e.label, tip = e.tip, icon = e.icon, on = G.QuestToggleOn(e.id) }
+    if not e.noIcon then
+      out[#out + 1] = { id = e.id, text = e.label, tip = e.tip, icon = e.icon, on = G.QuestToggleOn(e.id) }
+    end
   end
   out[#out + 1] = { id = "options", text = L["Quest Route options..."], icon = G.QUEST_WAYS_OPTIONS_ICON,
-    tip = L["Only tracked quests, lowest level first, quests left out: Options > Routing > Quest Route."] }
+    tip = L["Opens the Quest Route settings."] }
   return out
 end
 
