@@ -19946,7 +19946,7 @@ ns.Transports[#ns.Transports + 1] = { 0, 1805.0, 186.0, 22999, 1803.2, 139.3, 15
 -- The Hall of Thanes (map 3065, dungeon)
 ns.CityLevels[23065] = { base = 3065, name = "The Hall of Thanes", instance = true }
 ns.Instances[23065] = { name = "The Hall of Thanes", map = 3065, raid = false,
-  entrances = { { 0, -4843.6, -1057.5, -105.5, 0.8, 510.9 } },
+  entrances = { { 0, -4772.2, -965.1, -105.5, 0.8, 510.9 } },
   bosses = {
     { "Faldrim Anvilmar", -306501, 50.7, 25.9, 500.0, enc = { 3493 }, order = 1 },
     { "Infurnus", -306502, 183.0, -181.4, 486.2, enc = { 3495 }, order = 2 },
@@ -20590,7 +20590,7 @@ ns.Roads[23065] = {
   },
 }
 ns.RoadDrops[23065] = {  }
-ns.Transports[#ns.Transports + 1] = { 0, -4843.6, -1057.5, 23065, -105.5, 0.8, 15, "portal", "Dun Morogh", "The Hall of Thanes", "portal", iz = 510.9 }
+ns.Transports[#ns.Transports + 1] = { 0, -4772.2, -965.1, 23065, -105.5, 0.8, 15, "portal", "Dun Morogh", "The Hall of Thanes", "portal", iz = 510.9, z1 = 399.0 }
 -- Onyxia's Lair (map 249, raid)
 ns.CityLevels[20249] = { base = 249, name = "Onyxia's Lair", instance = true, raid = true }
 ns.Instances[20249] = { name = "Onyxia's Lair", map = 249, raid = true,

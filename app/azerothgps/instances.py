@@ -603,6 +603,18 @@ TERRAIN_SKIP = {2720, 2921, 3002}  # The Searing Basin (its one boss "Testwerk")
 # event boss), the Half-Pint Tavern (unannounced: no place in the world yet)
 
 
+def measured_entrance_z(map_id: int, cont: int, x: float, y: float):
+    """An entrance's height on the continent when measured where the game takes you in (overrides/
+    instance_entrances.json's 4th value: the Hall of Thanes', under Ironforge, z 399), else None. Shipped as the
+    portal's `z1` (Nav's EndZ: the walk there ends on that floor, not the city's streets over it)."""
+    if not ENTRANCES.exists():
+        return None
+    for e in json.loads(ENTRANCES.read_text(encoding="utf-8")).get(str(map_id), []):
+        if len(e) > 3 and e[0] == cont and math.hypot(e[1] - x, e[2] - y) < 1:
+            return float(e[3])
+    return None
+
+
 GUIDE_SPOTS = Path(__file__).resolve().parents[2] / "overrides" / "instance_spots.json"
 
 
@@ -643,8 +655,9 @@ def add_guide_spots(cd: ClientData, server: dict, log=print) -> set:
         ix, iy = it["in"][:2]
         server["teleports"].append({"id": None, "name": f"{names[mid]} - Entering", "map": mid, "x": ix, "y": iy,
                                     "z": z(*it["in"])})
-        for cont, x, y in known.get(key, []):
-            server["teleports"].append({"id": None, "name": f"{names[mid]} - Exiting", "map": cont, "x": x, "y": y, "z": 0.0})
+        for cont, x, y, *zz in known.get(key, []):  # (a height when measured in game: its 4th value)
+            server["teleports"].append({"id": None, "name": f"{names[mid]} - Exiting", "map": cont, "x": x, "y": y,
+                                        "z": float(zz[0]) if zz else 0.0})
         spawns = server["spawns"].setdefault(mid, [])
         for i, (boss, spot) in enumerate(it["bosses"].items()):
             npc = -(mid * 100 + i + 1)
@@ -683,7 +696,8 @@ def terrain_instances(cd: ClientData, built_maps: set, log=print) -> list:
     in the server data or the client), but with terrain and minimap tiles: their map in the
     addon (the tiles) and their bosses (names, DungeonEncounter IDs and order; no spots).
     Entrances from overrides/instance_entrances.json (learned in game or researched):
-    {map id: [[continent, x, y], ...]}. Each: dict(map, name, raid, tiles, bosses, entrances)."""
+    {map id: [[continent, x, y], ...]}, a height as a 4th value when measured (measured_entrance_z).
+    Each: dict(map, name, raid, tiles, bosses, entrances)."""
     import json
 
     known = {}
@@ -832,12 +846,14 @@ def instances_lua(cd: ClientData, built: list, log=print) -> str:
         out.append(f"ns.RoadDrops[{L}] = {{ " + ", ".join(f"[{i + 1}] = {h}" for i, h in sorted(drops.items())) + " }")
         names = {i.level: i.name for i, _u in built}
         for i, (c, x, y, _z, ix, iy, iz, _n) in enumerate(inst.entrances):
+            mz = measured_entrance_z(inst.map_id, c, x, y)
             place = names.get(c) if c >= LEVEL_BASE else (zone_name(cd, c, x, y, zcache) or inst.name)
             if c >= LEVEL_BASE and c not in names:
                 continue  # (from an instance not built: no way in)
             to = inst.name + (f": {named[i][0]}" if named and named[i][0] else "")  # (a wing's: "Scarlet Monastery: Library")
             out.append(f"ns.Transports[#ns.Transports + 1] = {{ {c}, {x:.1f}, {y:.1f}, {L}, {ix:.1f}, {iy:.1f}, "
-                       f"{PORTAL_SECONDS}, \"portal\", {_lua_str(place)}, {_lua_str(to)}, \"portal\", iz = {iz:.1f} }}")
+                       f"{PORTAL_SECONDS}, \"portal\", {_lua_str(place)}, {_lua_str(to)}, \"portal\", iz = {iz:.1f}"
+                       + (f", z1 = {mz:.1f}" if mz is not None else "") + " }")
     # dungeons and raids with their map only (WoW Forever's own): the terrain's minimap tiles,
     # their bosses without spots, entrances when known
     out.append("-- dungeons and raids with their map only (no walk network): ns.MinimapTiles[map id], bosses")
@@ -848,7 +864,7 @@ def instances_lua(cd: ClientData, built: list, log=print) -> str:
         out.append(f"-- {t['name']} (map {t['map']}, {'raid' if t['raid'] else 'dungeon'}, its map only)")
         out.append(f"ns.CityLevels[{L}] = {{ base = {t['map']}, name = {_lua_str(t['name'])}, instance = true, terrain = true"
                    f"{', raid = true' if t['raid'] else ''} }}")
-        ents = ", ".join(f"{{ {c}, {x:.1f}, {y:.1f} }}" for c, x, y in t["entrances"])
+        ents = ", ".join(f"{{ {c}, {x:.1f}, {y:.1f} }}" for c, x, y, *_z in t["entrances"])
         bl = ", ".join(f"{{ {_lua_str(b['name'])}, 0, enc = {{ {','.join(str(e) for e in b['enc'])} }}, order = {i + 1} }}"
                        for i, b in enumerate(t["bosses"]))
         out.append(f"ns.Instances[{L}] = {{ name = {_lua_str(t['name'])}, map = {t['map']}, raid = {str(t['raid']).lower()}, "
