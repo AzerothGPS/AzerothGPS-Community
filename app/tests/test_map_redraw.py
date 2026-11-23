@@ -971,6 +971,7 @@ def test_heading_up_puts_the_player_low_on_the_map(game):
         lua.execute("GetPlayerFacing = function() return 0 end")
 
 
+@pytest.mark.timing
 def test_running_a_route_with_a_flight_stays_within_the_frame(game):
     # (reported: lag spikes rerouting along a route with a flight in it) the walk-vs-ride check in
     # the background, its slices short; in the frame, once the flight is the route, only the walk
@@ -1732,6 +1733,7 @@ def test_the_stops_marks_stay_on_their_world_spot_every_frame(game):
         G.Update()
 
 
+@pytest.mark.timing
 def test_the_first_route_shown_off_teldrassil_takes_the_teleporter():
     # (reported 2026-10-07: "Still getting path off Teldrassil without taking portal... after about 20
     # secs the route just corrected", then after a first fix "corrects after a few seconds now but still
@@ -7850,6 +7852,7 @@ def test_a_search_done_every_frame_doesnt_redraw_past_the_rate(game):
         lua.execute("AGPS_POS[1], AGPS_POS[2] = 2254.0, 293.0")
 
 
+@pytest.mark.timing
 def test_a_route_from_beside_a_caves_roads_is_worked_out_in_short_slices(game):
     # (the overnight trip sweep, 2026-10-07: slices of background work up to 170 ms on Kalimdor) a trip from Dire Maul
     # (the roads near it all a cave's): the route's way onto the roads looked at every road on the continent, sorted

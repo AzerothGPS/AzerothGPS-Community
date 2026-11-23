@@ -403,6 +403,7 @@ def test_a_removed_swims_water_is_banned_for_the_trip(game, trip, start):
     assert not N.noSwim and len(N.swimBans) == 0 and P.At(0, *BAY[1]) == 1
 
 
+@pytest.mark.timing
 def test_the_bay_is_banned_whole_but_not_the_sea(game):
     lua, ns = game
     P = ns.Passability
@@ -474,6 +475,7 @@ def test_the_no_way_line_only_when_there_is_none(game, trip):
     G.removeAsk.Hide(G.removeAsk)
 
 
+@pytest.mark.timing
 def test_banning_a_bay_stays_within_the_frame_budget(game, trip):
     # (the flood at the click is a few milliseconds; the blocks the ban changes are worked out in the background
     # searches, a slice at a time)

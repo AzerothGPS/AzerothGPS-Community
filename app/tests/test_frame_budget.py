@@ -5,11 +5,15 @@ edits): each check here is one of them. Times are CPU milliseconds under lupa, a
 than the game's Lua; the limits leave room for that and are far below the spikes they catch.
 """
 
+import os
+from collections import deque
+
 import pytest
 
 from azerothgps.routecheck import _runtime
 
 FRAME_MS = 40  # the longest a single slice of background work may run (the spikes were 100-300)
+ON_CI = os.environ.get("CI") == "true"  # (GitHub Actions; the shared self-hosted runners, by turns 2-4x slower)
 
 
 @pytest.fixture(scope="module")
@@ -34,6 +38,7 @@ def _drawn(lua, cont, x, y, n=8):
 
 
 # (and Undercity, 10001: its roads were built in the frame on a route through its flight master)
+@pytest.mark.timing
 @pytest.mark.parametrize("cont, x, y", [(0, -9460.0, 60.0), (1, -450.0, -2650.0), (2991, 3000.0, 1000.0),
                                         (10001, 1600.0, 240.0)])
 def test_the_road_network_rebuilds_in_short_slices(game, cont, x, y):
@@ -60,6 +65,7 @@ def test_the_road_network_rebuilds_in_short_slices(game, cont, x, y):
         R.Reset()
 
 
+@pytest.mark.timing
 def test_showing_the_roads_never_builds_them_in_the_frame(game):
     lua, ns = game
     G, R = ns.GPS, ns.Router
@@ -78,6 +84,7 @@ def test_showing_the_roads_never_builds_them_in_the_frame(game):
         R.Reset()
 
 
+@pytest.mark.timing
 def test_merging_many_drawn_roads_stays_cheap(game):
     """Every road or wall edit merges all the drawn roads not in the data yet into the network:
     that has to stay cheap as they pile up in a session (40 took about a second before)."""
@@ -91,6 +98,7 @@ def test_merging_many_drawn_roads_stays_cheap(game):
     assert clock() - a < 250, f"merging 40 drawn roads took {clock() - a:.0f} ms"
 
 
+@pytest.mark.timing
 @pytest.mark.parametrize("cont", [0, 1])
 def test_cave_entrances_are_worked_out_within_a_frame(game, cont):
     lua, ns = game
@@ -103,6 +111,7 @@ def test_cave_entrances_are_worked_out_within_a_frame(game, cont):
 # (the overnight profile, 2026-10-07: the first route on a continent works out the other faction's guards' towns, every
 # guard's circle joined to those it overlaps, and that ran in one piece: 180-220 ms, a hitch. The runtime above has no
 # faction, so the guards were never weighed here: this one has, as in the game)
+@pytest.mark.timing
 @pytest.mark.parametrize("cont, side, x, y", [(0, "H", -9460.0, 60.0), (1, "A", -450.0, -2650.0)])
 def test_the_road_network_with_a_faction_rebuilds_in_short_slices(cont, side, x, y):
     lua, ns = _runtime()  # (fresh: the guards' towns are worked out once per continent and side)
@@ -187,6 +196,7 @@ def test_a_walk_over_the_land_a_little_past_its_reach_when_the_roads_go_far_roun
 
 
 
+@pytest.mark.timing
 def test_a_restored_routes_first_update_never_builds_the_roads_in_the_frame():
     # (QA, 2026-10-07: right after login with a route restored, the arrow's first update followed the
     # player's floor (Nav.TrackCityZ -> Router.HeightsNear), which built Eastern Kingdoms' road network in the frame: a
@@ -266,6 +276,8 @@ def test_giving_up_on_shut_in_cells_finds_the_same_walks(game):
 # provisional every time, a walk in it still searched, and queued again at each recalculation: 2 s of background work a
 # check, every slice of every frame for it, 160 to 200 ms a second live, though the rides take thousands of seconds
 # against a 200 s walk)
+# (timing: the background gets its work a frame by the CPU's clock, so a slow CPU rejoins the walk more)
+@pytest.mark.timing
 @pytest.mark.parametrize("faction", ["Horde", "Alliance"])
 def test_walking_by_brills_buildings_keeps_the_terrain_search_small(faction):
     # (issue #322, the check c116-rt-c: from Brill's square to the Agamand Family Crypt's hills, zoomed in, the live
@@ -401,6 +413,7 @@ REROUTE_STOPS = ("{ { x = -427.73204, y = -1909.33, cont = 0, name = 'Hillsbrad'
 
 # (from 1100, 1150 the walk to Thunder Bluff's flight master is 400 yd: the whole plan again; from the capture's own
 # spot it's 2,000 yd, past Nav.REJOIN_MIN_YD: the way back onto it)
+@pytest.mark.timing
 @pytest.mark.parametrize("sx, sy", [(1100.0, 1150.0), (1212.9, 1258.1)])
 def test_going_off_course_on_a_long_route_works_nothing_out_in_the_frame(sx, sy):
     pytest.importorskip("lupa.lua51")
@@ -449,17 +462,20 @@ def test_going_off_course_on_a_long_route_works_nothing_out_in_the_frame(sx, sy)
     assert N.route and not R.HasWork()
     rides = [str(N.route.legs[i].ride[10]) for i in range(1, len(N.route.legs) + 1) if N.route.legs[i].ride]
     assert rides[0] == "Orgrimmar, Durotar" and "Tarren Mill, Hillsbrad" in rides, rides
+    # (5 ms of background work a frame, the reference PC's: on the CI runner, by turns 2-4x slower, as much work a
+    # frame as that, `_cpu_slower`. Here, as before: 5 ms)
+    budget = 5 * (_cpu_slower(lua) if ON_CI else 1)
     try:
         x, landed, frames = sx, 0, 0
         for _ in range(300):  # (walking east, away from the walk south-west to the flight master: 30 s off course)
             x += 0.7
             before = N.route
-            plans, routes = frame(x, sy, 5)
+            plans, routes = frame(x, sy, budget)
             assert (plans, routes) == (0, 0), f"{plans} plans and {routes} routes in the frame, {x - sx:.0f} yd off"
             frames += 1
             if N.route is not before and N.route and abs(N.route.pts[1] - x) < 40:
                 landed, frames = landed + 1, 0
-            assert frames < 60, "no route from where the player went"  # (two reroutes' worth)
+            assert frames < 60, f"no route from where the player went ({budget:.1f} ms a frame)"  # (two reroutes' worth)
         assert landed >= 5  # (rerouted all the way, from the player's spot each time)
     finally:
         R.WARM, R.SYNC_WALKS = False, True
@@ -503,11 +519,20 @@ def test_sort_by_first_orders_as_the_games_table_sort():
 # CPU time (`_thread_ms`: the other processes' turns on the CPU aren't the client's work, and multiplied by 8 one was
 # a 180 ms slice), and its factor is LIVE_SLOWER * SLOW_REF_MS / a fixed Lua workload's time (`_SLOW_WORK`, the best
 # of SLOW_TIMINGS before the frames): a slower CPU gets a smaller factor, so the modeled client does as much a frame
-# anywhere. SLOW_REF_MS is that best on the dev PC the 8x was tuned on, quiet, by that clock (2026-11-21: 3.3 to 3.4 ms; later in the
-# run the timings spread to 7 ms, so the best of those before, not their median, or one taken again on the way)
+# anywhere. SLOW_REF_MS is that best on the dev PC the 8x was tuned on, quiet, by that clock (2026-11-21: 3.3 to 3.4 ms).
+# The factor is taken again before every frame (`_SlowClock.frame`): the best of the last SLOW_WINDOW frames' short
+# timings, a best, not a median, as before. The CI runners share their PC's 8 cores (16 threads) with up to 15 job
+# containers of 3 CPUs, so how much a CPU millisecond of this thread gets done swings 2-4x there for seconds at a time
+# (the core's other thread busy, the VM's vCPU waiting: a thread's CPU clock counts those too). One factor from the
+# start held a quiet moment's speed for minutes: the slices ran 2-3x long by it, 30 ms against 25 at "7.0x", on main
+# and most PRs, 2026-11-21 to 23. A best of half a second of frames still finds the CPU's quick moments; on this PC
+# its middle factor is the start's (6.4x vs 5.9-7.4x, 2026-11-23))
 LIVE_SLOWER = 8
 SLOW_REF_MS = 3.4
 SLOW_TIMINGS = 9
+SLOW_REF_RUNS = 40  # (the workload's rounds SLOW_REF_MS is for)
+SLOW_FRAME_RUNS = 5  # (each frame's timing: 0.4 ms of the reference PC's)
+SLOW_WINDOW = 15  # (half a second of frames; on a quiet PC its best is the start's)
 # (it makes no garbage: what it left would be the collector's work inside the route's slices, 476 ms ones)
 _SLOW_WORK = """(function()
   local t, sqrt = {}, math.sqrt
@@ -555,25 +580,55 @@ def _thread_ms():
     return lambda: cycles() * 1000.0 / rate
 
 
+def _cpu_slower(lua):
+    """How many times slower than the reference PC this thread runs `_SLOW_WORK` right now (the best of SLOW_TIMINGS;
+    never under 1)."""
+    cpu, work = _thread_ms(), lua.eval(_SLOW_WORK)
+    best = float("inf")
+    for _ in range(SLOW_TIMINGS):
+        c = cpu()
+        work(SLOW_REF_RUNS)
+        best = min(best, cpu() - c)
+    return max(1.0, best / SLOW_REF_MS)
+
+
 class _SlowClock:
     """The pump's clock as a slow client's: the frames' own time plus our work in them at `k` times this thread's CPU
-    time, `k` set so the work goes at LIVE_SLOWER times the reference PC's speed (issue #849)."""
+    time, `k` set so the work goes at LIVE_SLOWER times the reference PC's speed (issue #849). `frame()` before each
+    frame takes `k` again from the CPU's speed then."""
 
     def __init__(self, lua):
         self.lua, self.cpu = lua, _thread_ms()
-        work = lua.eval(_SLOW_WORK)
+        self.work = work = lua.eval(_SLOW_WORK)
         self.timings = []
         for _ in range(SLOW_TIMINGS):
             c = self.cpu()
-            work(40)
+            work(SLOW_REF_RUNS)
             self.timings.append(self.cpu() - c)
-        self.k = LIVE_SLOWER * SLOW_REF_MS / min(self.timings)
+        self.recent = deque([min(self.timings)], maxlen=SLOW_WINDOW)
+        self.k = self.k0 = self.lo = self.hi = LIVE_SLOWER * SLOW_REF_MS / min(self.timings)
+        self.base, self.seg = 0.0, self.cpu()
+
+    def frame(self):
+        """Before a frame: the workload timed again (not counted as the client's work), `k` from the best of the last
+        SLOW_WINDOW timings."""
+        c = self.cpu()
+        self.base += (c - self.seg) * self.k
+        self.work(SLOW_FRAME_RUNS)
+        self.recent.append((self.cpu() - c) * SLOW_REF_RUNS / SLOW_FRAME_RUNS)
+        self.k = LIVE_SLOWER * SLOW_REF_MS / min(self.recent)
+        self.lo, self.hi = min(self.lo, self.k), max(self.hi, self.k)
         self.seg = self.cpu()
 
+    def __str__(self):
+        return (f"clock {self.k0:.1f}x this CPU's at the start, {self.lo:.1f}-{self.hi:.1f}x on the way (the workload "
+                f"{min(self.timings):.1f}-{max(self.timings):.1f} ms at the start)")
+
     def __call__(self):
-        return float(self.lua.eval("AGPS_T")) * 1000.0 + (self.cpu() - self.seg) * self.k
+        return float(self.lua.eval("AGPS_T")) * 1000.0 + self.base + (self.cpu() - self.seg) * self.k
 
 
+@pytest.mark.timing
 def test_route_work_on_a_slow_client_stays_in_its_slices_and_never_pauses_routing():
     pytest.importorskip("lupa.lua51")
     from azerothgps.gameharness import start
@@ -623,6 +678,7 @@ def test_route_work_on_a_slow_client_stays_in_its_slices_and_never_pauses_routin
         for i in range(fps * 600):
             t += 1 / fps
             lua.execute(f"AGPS_T = {t}")
+            clock.frame()
             frame(1 / fps)
             if left is None and (N.route or N.paused):
                 left = fps * 30
@@ -631,7 +687,7 @@ def test_route_work_on_a_slow_client_stays_in_its_slices_and_never_pauses_routin
                 if left <= 0:
                     break
         s = lua.eval("AGPS_SLICES")
-        seen = f"frame {i}, clock {clock.k:.1f}x this CPU's (the workload {min(clock.timings):.1f}-{max(clock.timings):.1f} ms)"
+        seen = f"frame {i}, {clock}"
         print(seen, f"worst {s.worst:.1f} ms, counted {s.counted:.1f} ms")
         assert not N.paused, f"routing paused ({N.paused}); the worst slice counted ran {s.counted:.0f} ms; {seen}"
         assert not N.degraded, seen

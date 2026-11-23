@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-xdist", "lupa"]
+dev = ["pytest", "pytest-xdist", "pytest-rerunfailures", "lupa"]
 
 [project.scripts]
 agps = "azerothgps.cli:main"

@@ -330,6 +330,7 @@ def _big(lua, n_zones=12, per=4000):
     return 2 * n_zones * per
 
 
+@pytest.mark.timing
 def test_the_startup_check_stays_within_the_frame_budget(game):
     lua, ns = game
     total = _big(lua)
@@ -343,6 +344,7 @@ def test_the_startup_check_stays_within_the_frame_budget(game):
     assert ns.Layers.gm2.herbs + ns.Layers.gm2.mines == total
 
 
+@pytest.mark.timing
 def test_the_import_stays_within_the_frame_budget_with_progress(game):
     lua, ns = game
     Lay, G = ns.Layers, ns.GPS
@@ -463,6 +465,7 @@ def test_gathermate2_data_alone_glows_until_imported(game):
     assert _glow(lua, ns)
 
 
+@pytest.mark.timing
 def test_a_large_gathermate2_data_import_stays_within_the_frame_budget(game):
     lua, ns = game
     Lay = ns.Layers
