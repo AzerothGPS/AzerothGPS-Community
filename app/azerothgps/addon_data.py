@@ -445,6 +445,12 @@ def flights_lua(cd: ClientData) -> str:
                       "ns.Flights = {", *rows, "}"]) + "\n"
 
 
+# Place labels (AreaTable ids) left out of Pois.lua: another label already names the same spot.
+# 2177 "Battle Ring" is the Gurubashi Arena's floor; the arena's own label (1741) stays, so the
+# map, search and directions say "Gurubashi Arena" in every language.
+SKIP_PLACE_LABELS = {2177}
+
+
 def pois_lua(cd: ClientData) -> str:
     """ns.Pois[continent] = { {kind, x, y, name, extra}, ... }
     kind: 1 flight master (extra = nodeID, faction "A"/"H"/"AH", and the city level it's down
@@ -464,6 +470,8 @@ def pois_lua(cd: ClientData) -> str:
     for cont in CONTINENTS:
         grid, _ = extract_area_grid(cd, cont)
         for p in town_labels(cd, cont, grid):
+            if p["id"] in SKIP_PLACE_LABELS:
+                continue
             zone = p["ancestors"][-1] if p["ancestors"] else 0
             rows[cont].append(f'{{3,{p["wx"]},{p["wy"]},{_lua_str(p["name"])},{zone},{p["id"]}}}')
     out = [_header(cd, "Points of interest: flight masters, map POIs, place labels."), "ns.Pois = {"]

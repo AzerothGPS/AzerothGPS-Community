@@ -17,6 +17,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 - Options > Help and Copy Map Data no longer mention the road tools: report map problems through the report form; roads you drew still guide your routes.
 - The Deeprun Tram's icons are round and drawn to scale like the map's other icons.
+- Stranglethorn's arena is labeled Gurubashi Arena only (no separate Battle Ring).
 
 ### Fixed
 
