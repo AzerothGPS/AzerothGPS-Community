@@ -144,7 +144,7 @@ ns.Pois = {
     {3,-12416.7,550.0,"The Vile Reef",33,104}, {3,-12150.0,16.7,"Kal'ai Ruins",33,125}, {3,-12350.0,-950.0,"Mosh'Ogg Ogre Mound",33,105}, {3,-12383.3,183.3,"Grom'gol Base Camp",33,117},
     {3,-12450.0,-150.0,"Mizjah Ruins",33,129}, {3,-12550.0,-750.0,"Balia'mah Ruins",33,127}, {3,-12683.3,-516.7,"Ziata'jai Ruins",33,128}, {3,-13616.7,750.0,"Southern Savage Coast",33,1578},
     {3,-13583.3,150.0,"The Cape of Stranglethorn",33,1577}, {3,-12983.3,-750.0,"Ruins of Zul'Mamwe",33,103}, {3,-14883.3,916.7,"South Seas",33,2338}, {3,-13250.0,216.7,"Gurubashi Arena",33,1741},
-    {3,-13216.7,283.3,"Battle Ring",33,2177}, {3,-13416.7,716.7,"Bloodsail Compound",33,1739}, {3,-13316.7,-383.3,"Crystalvein Mine",33,310}, {3,-13350.0,-16.7,"Ruins of Jubuwal",33,477},
+    {3,-13416.7,716.7,"Bloodsail Compound",33,1739}, {3,-13316.7,-383.3,"Crystalvein Mine",33,310}, {3,-13350.0,-16.7,"Ruins of Jubuwal",33,477},
     {3,-14016.7,-483.3,"The Crystal Shore",33,302}, {3,-13683.3,-316.7,"Ruins of Aboraz",33,311}, {3,-13850.0,416.7,"Nek'mani Wellspring",33,1738}, {3,-13783.3,16.7,"Spirit Den",33,1742},
     {3,-13983.3,83.3,"Mistvale Valley",33,1737}, {3,-14183.3,716.7,"Janeiro's Point",33,312}, {3,-14883.3,83.3,"Wild Shore",33,43}, {3,-14350.0,516.7,"Booty Bay",33,35},
     {3,-14650.0,-283.3,"Jaguero Isle",33,297},
