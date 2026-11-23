@@ -577,3 +577,133 @@ def test_the_wheel_keeps_a_looked_at_terrain_view_terrain(inst_env):
     assert G.WheelZoom(1.25) == pytest.approx(z0 * 1.25)
     G.Follow()
 
+def test_blackrock_depths_entrance_has_its_measured_height(inst_env):
+    # (Kooki3z stood at Blackrock Depths' way in, 2026-11-23: (-7179.5, -922.7), z 166.2, deep inside Blackrock Mountain
+    # with its floors stacked: the walk there ends on that floor)
+    import math
+    lua, ns = inst_env
+    rows = ns.Transports
+    portal = next(rows[i] for i in range(1, len(rows) + 1) if rows[i][8] == "portal" and rows[i][4] == 20230)
+    assert math.dist((portal[2], portal[3]), (-7179.5, -922.7)) < 3
+    assert portal.z1 == pytest.approx(166.2, abs=3)
+
+
+
+def _portals(ns):
+    rows = ns.Transports
+    return [rows[i] for i in range(1, len(rows) + 1) if rows[i][8] == "portal"]
+
+
+def test_every_entrance_has_its_height(inst_env):
+    # (Kooki3z, 2026-11-23, after two were measured by hand: "Can you determine this automatically for all dungeon/raid
+    # entrances?" instances.entrance_height: measured, else the server's exit teleport, else the client's trigger, else
+    # the floor there; each checked against the floors at the spot)
+    _, ns = inst_env
+    portals = _portals(ns)
+    assert len(portals) >= 40
+    assert all(isinstance(p.z1, (int, float)) for p in portals), [p[10] for p in portals if p.z1 is None]
+
+
+@pytest.mark.parametrize("level, name, z", [
+    (20230, "Blackrock Depths", 166.2),  # measured in game; the exit teleport puts you at 166.1
+    (23065, "The Hall of Thanes", 399.0),  # measured in game (under Ironforge, its streets at 502)
+    (20036, "Deadmines", 24.6),  # the exit teleport, in the mine (Moonbrook's ground over it: 66.6)
+    (20189, "Scarlet Monastery: Graveyard", 160.3),  # the wings' exit teleports, on the courtyard (the ground: 154)
+    (20189, "Scarlet Monastery: Cathedral", 160.3),
+    (20189, "Scarlet Monastery: Armory", 160.3),
+    (20189, "Scarlet Monastery: Library", 160.3),
+    (20409, "Molten Core", 180.9),  # the exit teleport, in Blackrock Mountain (the peak over it: 815.7)
+    (20329, "Stratholme: Main Gate", 142.8),  # no exit teleport: the gate's floor nearest where you appear inside
+    (20469, "Blackwing Lair", 116.8),
+    (22999, "Ruins of Lordaeron", 70.4),  # measured in game (its floors there: 57.8 and 70.4)  # from Upper Blackrock Spire's orb: its road there (the trigger's middle: 120.6)
+])
+def test_entrance_heights_match_their_sources(inst_env, level, name, z):
+    _, ns = inst_env
+    hits = [p for p in _portals(ns) if p[4] == level and p[10] == name]
+    assert hits and all(p.z1 == pytest.approx(z, abs=3) for p in hits), [(p[10], p.z1) for p in hits]
+
+
+def test_the_walk_to_blackrock_depths_from_searing_gorge_ends_on_its_floor():
+    # (Searing Gorge's side of Blackrock Mountain to inside Blackrock Depths: the walk to its portal is routed to the
+    # door's floor deep in the mountain (166), not the mountain's terrain over it (274) or Molten Core's ledge)
+    from azerothgps.gameharness import start
+    lua, ns = start()
+    G, N, R = ns.GPS, ns.Nav, ns.Router
+    portal = next(p for p in _portals(ns) if p[4] == 20230)
+    seen = []
+    route = R.Route
+
+    def spy(cont, sx, sy, tx, ty, opts=None):
+        seen.append((cont, tx, ty, opts and opts.tz))
+        return route(cont, sx, sy, tx, ty, opts)
+
+    R.Route = spy
+    try:
+        lua.execute("AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = -7012.5, -1065.1, 0")
+        N.SetStops(lua.eval("{ { x = 456.9, y = 34.1, cont = 20230, name = 'Blackrock Depths' } }"), False, "red")
+        G.Follow()
+        for _ in range(10):
+            lua.execute("AGPS_T = AGPS_T + 0.5")
+            G.Update()
+        st = N.route.stretches[1]
+        legs = [st.legs[i] for i in range(1, len(st.legs) + 1)]
+        k = next(i for i, leg in enumerate(legs) if leg.ride and leg.ride[8] == "portal")
+        walk = legs[k - 1]
+        assert walk.walk and (walk.x2, walk.y2) == (portal[2], portal[3])
+        tz = [t for c, x, y, t in seen if c == 0 and (x, y) == (portal[2], portal[3])]
+        assert tz and all(t == pytest.approx(166.2, abs=3) for t in tz)
+        part = N.route.parts[1]
+        assert math.dist((part.pts[len(part.pts) - 1], part.pts[len(part.pts)]), (portal[2], portal[3])) < 3
+    finally:
+        R.Route = route
+        N.Clear()
+
+
+class _Floors:
+    def __init__(self, fl):
+        self.fl = fl
+
+    def at(self, cont, x, y):
+        return self.fl
+
+
+def _inst(map_id=36):
+    from azerothgps.instances import Instance
+    return Instance(map_id, "Test", False, None)
+
+
+def test_entrance_height_takes_the_best_source_and_checks_the_floor():
+    from azerothgps.instances import ENTRANCE_SNAP, entrance_height
+    server = {"teleports": [{"id": 1, "name": "Out", "map": 0, "x": 10.0, "y": 20.0, "z": 101.0}]}
+    trig = [{"ID": 7, "ContinentID": 0, "Pos": (300.0, 300.0, 55.0)}]
+    e = (0, 10.0, 20.0, 101.0, 500.0, 500.0, 0.0, "In")
+    # the exit teleport's height, on a model floor a yard under it (the terrain far over: the cave's roof)
+    h = entrance_height(_inst(), e, server, trig, _Floors([(100.0, "model"), (160.0, "terrain")]))
+    assert (h["z"], h["source"], h["off"], h["snapped"]) == (101.0, "exit teleport", False, False)
+    # off every floor by a few yards: onto the nearest
+    h = entrance_height(_inst(), e, server, trig, _Floors([(94.0, "model")]))
+    assert h["z"] == 94.0 and h["snapped"]
+    # off by more than ENTRANCE_SNAP: kept, flagged
+    h = entrance_height(_inst(), e, server, trig, _Floors([(101.0 - ENTRANCE_SNAP - 5, "terrain")]))
+    assert h["z"] == 101.0 and h["off"]
+    # no height: a client trigger near the spot gives one
+    e2 = (0, 305.0, 300.0, None, 900.0, 900.0, 0.0, "In")
+    h = entrance_height(_inst(), e2, server, trig, _Floors([(54.0, "terrain")]))
+    assert (h["z"], h["source"]) == (55.0, "entrance trigger")
+    # nothing: the floor there, the terrain's; the one nearest where you appear when the instance is in the world's
+    # own coordinates (Stratholme's main gate)
+    e3 = (0, 1000.0, 1000.0, None, 5000.0, 5000.0, 0.0, "In")
+    assert entrance_height(_inst(), e3, server, trig, _Floors([(30.0, "model"), (12.0, "terrain")]))["z"] == 12.0
+    e4 = (0, 1000.0, 1000.0, None, 1010.0, 1005.0, 31.0, "In")
+    assert entrance_height(_inst(), e4, server, trig, _Floors([(30.0, "model"), (12.0, "terrain")]))["z"] == 30.0
+
+
+def test_a_measured_entrance_comes_first_and_moves_the_spot():
+    # (Blackrock Depths': stood at 1.2 yd from the server's exit teleport; a full `instances --write` kept the server's
+    # spot and lost the height when the match was within 1 yd)
+    from azerothgps.instances import entrance_height, measured_entrance
+    assert measured_entrance(230, 0, -7178.4, -922.2) == pytest.approx((-7179.5, -922.7, 166.2))
+    assert measured_entrance(2999, 0, 1805.0, 186.0) == pytest.approx((1804.8, 179.7, 70.4))  # (6.3 yd off)
+    e = (0, -7179.5, -922.7, 166.1, 456.9, 34.1, -68.1, "Blackrock Depths - Entering")
+    h = entrance_height(_inst(230), e, {"teleports": []}, [], _Floors([(274.3, "terrain")]))
+    assert (h["z"], h["source"]) == (166.2, "measured")

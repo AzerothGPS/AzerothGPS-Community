@@ -389,7 +389,7 @@ ns.Roads[20033] = {
   },
 }
 ns.RoadDrops[20033] = {  }
-ns.Transports[#ns.Transports + 1] = { 0, -233.0, 1567.5, 20033, -228.2, 2111.4, 15, "portal", "Silverpine Forest", "Shadowfang Keep", "portal", iz = 76.9 }
+ns.Transports[#ns.Transports + 1] = { 0, -233.0, 1567.5, 20033, -228.2, 2111.4, 15, "portal", "Silverpine Forest", "Shadowfang Keep", "portal", iz = 76.9, z1 = 76.9 }
 -- Stormwind Stockade (map 34, dungeon)
 ns.CityLevels[20034] = { base = 34, name = "Stormwind Stockade", instance = true }
 ns.Instances[20034] = { name = "Stormwind Stockade", map = 34, raid = false,
@@ -625,7 +625,7 @@ ns.Roads[20034] = {
   },
 }
 ns.RoadDrops[20034] = {  }
-ns.Transports[#ns.Transports + 1] = { 0, -8766.1, 845.5, 20034, 49.0, 0.5, 15, "portal", "Stormwind City", "Stormwind Stockade", "portal", iz = -16.4 }
+ns.Transports[#ns.Transports + 1] = { 0, -8766.1, 845.5, 20034, 49.0, 0.5, 15, "portal", "Stormwind City", "Stormwind Stockade", "portal", iz = -16.4, z1 = 88.0 }
 -- Deadmines (map 36, dungeon)
 ns.CityLevels[20036] = { base = 36, name = "Deadmines", instance = true }
 ns.Instances[20036] = { name = "Deadmines", map = 36, raid = false,
@@ -1073,7 +1073,7 @@ ns.Roads[20036] = {
   },
 }
 ns.RoadDrops[20036] = {  }
-ns.Transports[#ns.Transports + 1] = { 0, -11208.7, 1675.9, 20036, -14.6, -385.5, 15, "portal", "Westfall", "Deadmines", "portal", iz = 62.5 }
+ns.Transports[#ns.Transports + 1] = { 0, -11208.7, 1675.9, 20036, -14.6, -385.5, 15, "portal", "Westfall", "Deadmines", "portal", iz = 62.5, z1 = 24.6 }
 -- Wailing Caverns (map 43, dungeon)
 ns.CityLevels[20043] = { base = 43, name = "Wailing Caverns", instance = true }
 ns.Instances[20043] = { name = "Wailing Caverns", map = 43, raid = false,
@@ -2234,7 +2234,7 @@ ns.Roads[20043] = {
   },
 }
 ns.RoadDrops[20043] = {  }
-ns.Transports[#ns.Transports + 1] = { 1, -738.5, -2217.8, 20043, -158.4, 131.6, 15, "portal", "The Barrens", "Wailing Caverns", "portal", iz = -74.3 }
+ns.Transports[#ns.Transports + 1] = { 1, -738.5, -2217.8, 20043, -158.4, 131.6, 15, "portal", "The Barrens", "Wailing Caverns", "portal", iz = -74.3, z1 = 16.9 }
 -- Razorfen Kraul (map 47, dungeon)
 ns.CityLevels[20047] = { base = 47, name = "Razorfen Kraul", instance = true }
 ns.Instances[20047] = { name = "Razorfen Kraul", map = 47, raid = false,
@@ -2689,7 +2689,7 @@ ns.Roads[20047] = {
   },
 }
 ns.RoadDrops[20047] = {  }
-ns.Transports[#ns.Transports + 1] = { 1, -4463.3, -1664.3, 20047, 1942.3, 1544.2, 15, "portal", "The Barrens", "Razorfen Kraul", "portal", iz = 83.3 }
+ns.Transports[#ns.Transports + 1] = { 1, -4463.3, -1664.3, 20047, 1942.3, 1544.2, 15, "portal", "The Barrens", "Razorfen Kraul", "portal", iz = 83.3, z1 = 84.0 }
 -- Blackfathom Deeps (map 48, dungeon)
 ns.CityLevels[20048] = { base = 48, name = "Blackfathom Deeps", instance = true }
 ns.Instances[20048] = { name = "Blackfathom Deeps", map = 48, raid = false,
@@ -3992,7 +3992,7 @@ ns.Roads[20048] = {
   },
 }
 ns.RoadDrops[20048] = {  }
-ns.Transports[#ns.Transports + 1] = { 1, 4246.7, 743.4, 20048, -150.2, 106.6, 15, "portal", "Darkshore", "Blackfathom Deeps", "portal", iz = -39.8 }
+ns.Transports[#ns.Transports + 1] = { 1, 4246.7, 743.4, 20048, -150.2, 106.6, 15, "portal", "Darkshore", "Blackfathom Deeps", "portal", iz = -39.8, z1 = -24.9 }
 -- Uldaman (map 70, dungeon)
 ns.CityLevels[20070] = { base = 70, name = "Uldaman", instance = true }
 ns.Instances[20070] = { name = "Uldaman", map = 70, raid = false,
@@ -4676,8 +4676,8 @@ ns.Roads[20070] = {
   },
 }
 ns.RoadDrops[20070] = {  }
-ns.Transports[#ns.Transports + 1] = { 0, -6066.2, -2954.6, 20070, -228.9, 46.1, 15, "portal", "Loch Modan", "Uldaman: Front Entrance", "portal", iz = -46.0 }
-ns.Transports[#ns.Transports + 1] = { 0, -6620.0, -3765.7, 20070, -212.9, 382.4, 15, "portal", "Badlands", "Uldaman: Back Entrance", "portal", iz = -38.7 }
+ns.Transports[#ns.Transports + 1] = { 0, -6066.2, -2954.6, 20070, -228.9, 46.1, 15, "portal", "Loch Modan", "Uldaman: Front Entrance", "portal", iz = -46.0, z1 = 209.8 }
+ns.Transports[#ns.Transports + 1] = { 0, -6620.0, -3765.7, 20070, -212.9, 382.4, 15, "portal", "Badlands", "Uldaman: Back Entrance", "portal", iz = -38.7, z1 = 266.3 }
 -- Gnomeregan (map 90, dungeon)
 ns.CityLevels[20090] = { base = 90, name = "Gnomeregan", instance = true }
 ns.Instances[20090] = { name = "Gnomeregan", map = 90, raid = false,
@@ -5608,8 +5608,8 @@ ns.Roads[20090] = {
   },
 }
 ns.RoadDrops[20090] = {  }
-ns.Transports[#ns.Transports + 1] = { 0, -5162.6, 927.8, 20090, -329.1, -3.2, 15, "portal", "Dun Morogh", "Gnomeregan: Front Entrance", "portal", iz = -152.9 }
-ns.Transports[#ns.Transports + 1] = { 0, -4859.0, 770.2, 20090, -733.6, 1.9, 15, "portal", "Dun Morogh", "Gnomeregan: Train Depot", "portal", iz = -249.1 }
+ns.Transports[#ns.Transports + 1] = { 0, -5162.6, 927.8, 20090, -329.1, -3.2, 15, "portal", "Dun Morogh", "Gnomeregan: Front Entrance", "portal", iz = -152.9, z1 = 257.2 }
+ns.Transports[#ns.Transports + 1] = { 0, -4859.0, 770.2, 20090, -733.6, 1.9, 15, "portal", "Dun Morogh", "Gnomeregan: Train Depot", "portal", iz = -249.1, z1 = 241.8 }
 -- Sunken Temple (map 109, dungeon)
 ns.CityLevels[20109] = { base = 109, name = "Sunken Temple", instance = true }
 ns.Instances[20109] = { name = "Sunken Temple", map = 109, raid = false,
@@ -6271,7 +6271,7 @@ ns.Roads[20109] = {
   },
 }
 ns.RoadDrops[20109] = {  }
-ns.Transports[#ns.Transports + 1] = { 0, -10176.6, -3995.3, 20109, -315.9, 100.2, 15, "portal", "Swamp of Sorrows", "Sunken Temple", "portal", iz = -131.8 }
+ns.Transports[#ns.Transports + 1] = { 0, -10176.6, -3995.3, 20109, -315.9, 100.2, 15, "portal", "Swamp of Sorrows", "Sunken Temple", "portal", iz = -131.8, z1 = -112.2 }
 -- Razorfen Downs (map 129, dungeon)
 ns.CityLevels[20129] = { base = 129, name = "Razorfen Downs", instance = true }
 ns.Instances[20129] = { name = "Razorfen Downs", map = 129, raid = false,
@@ -6627,7 +6627,7 @@ ns.Roads[20129] = {
   },
 }
 ns.RoadDrops[20129] = {  }
-ns.Transports[#ns.Transports + 1] = { 1, -4659.6, -2524.2, 20129, 2593.7, 1111.2, 15, "portal", "The Barrens", "Razorfen Downs", "portal", iz = 51.0 }
+ns.Transports[#ns.Transports + 1] = { 1, -4659.6, -2524.2, 20129, 2593.7, 1111.2, 15, "portal", "The Barrens", "Razorfen Downs", "portal", iz = 51.0, z1 = 81.4 }
 -- Scarlet Monastery (map 189, dungeon)
 ns.CityLevels[20189] = { base = 189, name = "Scarlet Monastery", instance = true }
 ns.Instances[20189] = { name = "Scarlet Monastery", map = 189, raid = false,
@@ -7942,10 +7942,10 @@ ns.Roads[20189] = {
   },
 }
 ns.RoadDrops[20189] = {  }
-ns.Transports[#ns.Transports + 1] = { 0, 2915.3, -801.6, 20189, 1687.3, 1050.1, 15, "portal", "Tirisfal Glades", "Scarlet Monastery: Graveyard", "portal", iz = 18.7 }
-ns.Transports[#ns.Transports + 1] = { 0, 2915.1, -823.6, 20189, 853.2, 1319.2, 15, "portal", "Tirisfal Glades", "Scarlet Monastery: Cathedral", "portal", iz = 18.7 }
-ns.Transports[#ns.Transports + 1] = { 0, 2886.0, -835.8, 20189, 1608.1, -318.9, 15, "portal", "Tirisfal Glades", "Scarlet Monastery: Armory", "portal", iz = 18.7 }
-ns.Transports[#ns.Transports + 1] = { 0, 2869.3, -820.8, 20189, 253.7, -206.6, 15, "portal", "Tirisfal Glades", "Scarlet Monastery: Library", "portal", iz = 18.7 }
+ns.Transports[#ns.Transports + 1] = { 0, 2915.3, -801.6, 20189, 1687.3, 1050.1, 15, "portal", "Tirisfal Glades", "Scarlet Monastery: Graveyard", "portal", iz = 18.7, z1 = 160.3 }
+ns.Transports[#ns.Transports + 1] = { 0, 2915.1, -823.6, 20189, 853.2, 1319.2, 15, "portal", "Tirisfal Glades", "Scarlet Monastery: Cathedral", "portal", iz = 18.7, z1 = 160.3 }
+ns.Transports[#ns.Transports + 1] = { 0, 2886.0, -835.8, 20189, 1608.1, -318.9, 15, "portal", "Tirisfal Glades", "Scarlet Monastery: Armory", "portal", iz = 18.7, z1 = 160.3 }
+ns.Transports[#ns.Transports + 1] = { 0, 2869.3, -820.8, 20189, 253.7, -206.6, 15, "portal", "Tirisfal Glades", "Scarlet Monastery: Library", "portal", iz = 18.7, z1 = 160.3 }
 -- Zul'Farrak (map 209, dungeon)
 ns.CityLevels[20209] = { base = 209, name = "Zul'Farrak", instance = true }
 ns.Instances[20209] = { name = "Zul'Farrak", map = 209, raid = false,
@@ -8994,7 +8994,7 @@ ns.Roads[20209] = {
   },
 }
 ns.RoadDrops[20209] = {  }
-ns.Transports[#ns.Transports + 1] = { 1, -6795.6, -2890.7, 20209, 1212.7, 842.0, 15, "portal", "Tanaris", "Zul'Farrak", "portal", iz = 8.9 }
+ns.Transports[#ns.Transports + 1] = { 1, -6795.6, -2890.7, 20209, 1212.7, 842.0, 15, "portal", "Tanaris", "Zul'Farrak", "portal", iz = 8.9, z1 = 8.9 }
 -- Blackrock Spire (map 229, dungeon)
 ns.CityLevels[20229] = { base = 229, name = "Blackrock Spire", instance = true }
 ns.Instances[20229] = { name = "Blackrock Spire", map = 229, raid = false,
@@ -9902,11 +9902,11 @@ ns.Roads[20229] = {
   },
 }
 ns.RoadDrops[20229] = {  }
-ns.Transports[#ns.Transports + 1] = { 0, -7524.7, -1228.4, 20229, 78.4, -226.8, 15, "portal", "Burning Steppes", "Blackrock Spire", "portal", iz = 49.8 }
+ns.Transports[#ns.Transports + 1] = { 0, -7524.7, -1228.4, 20229, 78.4, -226.8, 15, "portal", "Burning Steppes", "Blackrock Spire", "portal", iz = 49.8, z1 = 287.2 }
 -- Blackrock Depths (map 230, dungeon)
 ns.CityLevels[20230] = { base = 230, name = "Blackrock Depths", instance = true }
 ns.Instances[20230] = { name = "Blackrock Depths", map = 230, raid = false,
-  entrances = { { 0, -7178.4, -922.2, 456.9, 34.1, -68.1 } },
+  entrances = { { 0, -7179.5, -922.7, 456.9, 34.1, -68.1 } },
   bosses = {
     { "Lord Roccor", 9025, 654.6, -172.4, -73.6, enc = { 228 }, order = 1 },
     { "High Interrogator Gerstahn", 9018, 310.6, -146.3, -70.3, enc = { 227 }, order = 2 },
@@ -11951,7 +11951,7 @@ ns.Roads[20230] = {
   },
 }
 ns.RoadDrops[20230] = {  }
-ns.Transports[#ns.Transports + 1] = { 0, -7178.4, -922.2, 20230, 456.9, 34.1, 15, "portal", "Searing Gorge", "Blackrock Depths", "portal", iz = -68.1 }
+ns.Transports[#ns.Transports + 1] = { 0, -7179.5, -922.7, 20230, 456.9, 34.1, 15, "portal", "Searing Gorge", "Blackrock Depths", "portal", iz = -68.1, z1 = 166.2 }
 -- Scholomance (map 289, dungeon)
 ns.CityLevels[20289] = { base = 289, name = "Scholomance", instance = true }
 ns.Instances[20289] = { name = "Scholomance", map = 289, raid = false,
@@ -12491,7 +12491,7 @@ ns.Roads[20289] = {
   },
 }
 ns.RoadDrops[20289] = {  }
-ns.Transports[#ns.Transports + 1] = { 0, 1273.9, -2553.1, 20289, 190.8, 126.3, 15, "portal", "Western Plaguelands", "Scholomance", "portal", iz = 137.2 }
+ns.Transports[#ns.Transports + 1] = { 0, 1273.9, -2553.1, 20289, 190.8, 126.3, 15, "portal", "Western Plaguelands", "Scholomance", "portal", iz = 137.2, z1 = 91.8 }
 -- Stratholme (map 329, dungeon)
 ns.CityLevels[20329] = { base = 329, name = "Stratholme", instance = true }
 ns.Instances[20329] = { name = "Stratholme", map = 329, raid = false,
@@ -13552,9 +13552,9 @@ ns.Roads[20329] = {
   },
 }
 ns.RoadDrops[20329] = {  }
-ns.Transports[#ns.Transports + 1] = { 0, 3233.1, -4048.3, 20329, 3590.9, -3643.2, 15, "portal", "Eastern Plaguelands", "Stratholme: Service Entrance", "portal", iz = 138.5 }
-ns.Transports[#ns.Transports + 1] = { 0, 3392.3, -3378.5, 20329, 3392.9, -3395.0, 15, "portal", "Eastern Plaguelands", "Stratholme: Main Gate", "portal", iz = 143.1 }
-ns.Transports[#ns.Transports + 1] = { 0, 3392.3, -3378.5, 20329, 3392.8, -3364.4, 15, "portal", "Eastern Plaguelands", "Stratholme: Main Gate", "portal", iz = 143.0 }
+ns.Transports[#ns.Transports + 1] = { 0, 3233.1, -4048.3, 20329, 3590.9, -3643.2, 15, "portal", "Eastern Plaguelands", "Stratholme: Service Entrance", "portal", iz = 138.5, z1 = 108.4 }
+ns.Transports[#ns.Transports + 1] = { 0, 3392.3, -3378.5, 20329, 3392.9, -3395.0, 15, "portal", "Eastern Plaguelands", "Stratholme: Main Gate", "portal", iz = 143.1, z1 = 142.7 }
+ns.Transports[#ns.Transports + 1] = { 0, 3392.3, -3378.5, 20329, 3392.8, -3364.4, 15, "portal", "Eastern Plaguelands", "Stratholme: Main Gate", "portal", iz = 143.0, z1 = 142.7 }
 -- Maraudon (map 349, dungeon)
 ns.CityLevels[20349] = { base = 349, name = "Maraudon", instance = true }
 ns.Instances[20349] = { name = "Maraudon", map = 349, raid = false,
@@ -15440,8 +15440,8 @@ ns.Roads[20349] = {
   },
 }
 ns.RoadDrops[20349] = {  }
-ns.Transports[#ns.Transports + 1] = { 1, -1468.2, 2614.2, 20349, 1016.8, -458.5, 15, "portal", "Desolace", "Maraudon: Orange", "portal", iz = -43.5 }
-ns.Transports[#ns.Transports + 1] = { 1, -1182.8, 2877.4, 20349, 755.1, -617.7, 15, "portal", "Desolace", "Maraudon: Purple", "portal", iz = -32.9 }
+ns.Transports[#ns.Transports + 1] = { 1, -1468.2, 2614.2, 20349, 1016.8, -458.5, 15, "portal", "Desolace", "Maraudon: Orange", "portal", iz = -43.5, z1 = 76.4 }
+ns.Transports[#ns.Transports + 1] = { 1, -1182.8, 2877.4, 20349, 755.1, -617.7, 15, "portal", "Desolace", "Maraudon: Purple", "portal", iz = -32.9, z1 = 85.9 }
 -- Ragefire Chasm (map 389, dungeon)
 ns.CityLevels[20389] = { base = 389, name = "Ragefire Chasm", instance = true }
 ns.Instances[20389] = { name = "Ragefire Chasm", map = 389, raid = false,
@@ -16042,7 +16042,7 @@ ns.Roads[20389] = {
   },
 }
 ns.RoadDrops[20389] = {  }
-ns.Transports[#ns.Transports + 1] = { 1, 1815.0, -4419.2, 20389, 0.8, -8.2, 15, "portal", "Orgrimmar", "Ragefire Chasm", "portal", iz = -15.5 }
+ns.Transports[#ns.Transports + 1] = { 1, 1815.0, -4419.2, 20389, 0.8, -8.2, 15, "portal", "Orgrimmar", "Ragefire Chasm", "portal", iz = -15.5, z1 = -18.8 }
 -- Dire Maul (map 429, dungeon)
 ns.CityLevels[20429] = { base = 429, name = "Dire Maul", instance = true }
 ns.Instances[20429] = { name = "Dire Maul", map = 429, raid = false,
@@ -18799,18 +18799,18 @@ ns.Roads[20429] = {
   },
 }
 ns.RoadDrops[20429] = {  }
-ns.Transports[#ns.Transports + 1] = { 1, -3738.6, 934.5, 20429, 47.5, -153.7, 15, "portal", "Feralas", "Dire Maul: East", "portal", iz = -2.7 }
-ns.Transports[#ns.Transports + 1] = { 1, -3829.7, 1250.5, 20429, -203.2, -323.0, 15, "portal", "Feralas", "Dire Maul: East", "portal", iz = -2.7 }
-ns.Transports[#ns.Transports + 1] = { 1, -4031.2, 129.3, 20429, 10.6, -837.0, 15, "portal", "Feralas", "Dire Maul: East", "portal", iz = -32.4 }
-ns.Transports[#ns.Transports + 1] = { 1, -3829.7, 1250.5, 20429, -65.7, 159.6, 15, "portal", "Feralas", "Dire Maul: West", "portal", iz = -3.5 }
-ns.Transports[#ns.Transports + 1] = { 1, -3749.4, 1249.2, 20429, 33.1, 159.0, 15, "portal", "Feralas", "Dire Maul: West", "portal", iz = -3.5 }
-ns.Transports[#ns.Transports + 1] = { 1, -3520.2, 1078.4, 20429, 254.9, -19.5, 15, "portal", "Feralas", "Dire Maul: North", "portal", iz = -2.6 }
+ns.Transports[#ns.Transports + 1] = { 1, -3738.6, 934.5, 20429, 47.5, -153.7, 15, "portal", "Feralas", "Dire Maul: East", "portal", iz = -2.7, z1 = 161.0 }
+ns.Transports[#ns.Transports + 1] = { 1, -3829.7, 1250.5, 20429, -203.2, -323.0, 15, "portal", "Feralas", "Dire Maul: East", "portal", iz = -2.7, z1 = 160.2 }
+ns.Transports[#ns.Transports + 1] = { 1, -4031.2, 129.3, 20429, 10.6, -837.0, 15, "portal", "Feralas", "Dire Maul: East", "portal", iz = -32.4, z1 = 26.5 }
+ns.Transports[#ns.Transports + 1] = { 1, -3829.7, 1250.5, 20429, -65.7, 159.6, 15, "portal", "Feralas", "Dire Maul: West", "portal", iz = -3.5, z1 = 160.2 }
+ns.Transports[#ns.Transports + 1] = { 1, -3749.4, 1249.2, 20429, 33.1, 159.0, 15, "portal", "Feralas", "Dire Maul: West", "portal", iz = -3.5, z1 = 160.2 }
+ns.Transports[#ns.Transports + 1] = { 1, -3520.2, 1078.4, 20429, 254.9, -19.5, 15, "portal", "Feralas", "Dire Maul: North", "portal", iz = -2.6, z1 = 161.1 }
 -- Ruins of Lordaeron (map 2999, dungeon)
 ns.CityLevels[22999] = { base = 2999, name = "Ruins of Lordaeron", instance = true, terrain = true }
 ns.MinimapTiles = ns.MinimapTiles or {}
 ns.MinimapTiles[2999] = { [1947]=7255712, [1948]=7255730, [1949]=7255748, [2011]=7255718, [2012]=7255736, [2013]=7255754, [2075]=7255724, [2076]=7255742, [2077]=7255760, }
 ns.Instances[22999] = { name = "Ruins of Lordaeron", map = 2999, raid = false,
-  entrances = { { 0, 1805.0, 186.0, 1803.2, 139.3, 61.7 } },
+  entrances = { { 0, 1804.8, 179.7, 1803.2, 139.3, 61.7 } },
   bosses = {
     { "Witherfang", -299901, 1632.5, 73.6, 61.7, enc = { 3353 }, order = 1 },
     { "The Butcher", -299902, 1468.0, 174.8, 61.6, enc = { 3355 }, order = 2 },
@@ -19942,7 +19942,7 @@ ns.Roads[22999] = {
   },
 }
 ns.RoadDrops[22999] = {  }
-ns.Transports[#ns.Transports + 1] = { 0, 1805.0, 186.0, 22999, 1803.2, 139.3, 15, "portal", "Tirisfal Glades", "Ruins of Lordaeron", "portal", iz = 61.7 }
+ns.Transports[#ns.Transports + 1] = { 0, 1804.8, 179.7, 22999, 1803.2, 139.3, 15, "portal", "Tirisfal Glades", "Ruins of Lordaeron", "portal", iz = 61.7, z1 = 70.4 }
 -- The Hall of Thanes (map 3065, dungeon)
 ns.CityLevels[23065] = { base = 3065, name = "The Hall of Thanes", instance = true }
 ns.Instances[23065] = { name = "The Hall of Thanes", map = 3065, raid = false,
@@ -20862,7 +20862,7 @@ ns.Roads[20249] = {
   },
 }
 ns.RoadDrops[20249] = {  }
-ns.Transports[#ns.Transports + 1] = { 1, -4750.4, -3754.4, 20249, 30.9, -54.1, 15, "portal", "Dustwallow Marsh", "Onyxia's Lair", "portal", iz = -5.0 }
+ns.Transports[#ns.Transports + 1] = { 1, -4750.4, -3754.4, 20249, 30.9, -54.1, 15, "portal", "Dustwallow Marsh", "Onyxia's Lair", "portal", iz = -5.0, z1 = 49.0 }
 -- Zul'Gurub (map 309, raid)
 ns.CityLevels[20309] = { base = 309, name = "Zul'Gurub", instance = true, raid = true }
 ns.Instances[20309] = { name = "Zul'Gurub", map = 309, raid = true,
@@ -22074,7 +22074,7 @@ ns.Roads[20309] = {
   },
 }
 ns.RoadDrops[20309] = {  }
-ns.Transports[#ns.Transports + 1] = { 0, -11916.2, -1206.9, 20309, -11916.6, -1243.5, 15, "portal", "Stranglethorn Vale", "Zul'Gurub", "portal", iz = 92.5 }
+ns.Transports[#ns.Transports + 1] = { 0, -11916.2, -1206.9, 20309, -11916.6, -1243.5, 15, "portal", "Stranglethorn Vale", "Zul'Gurub", "portal", iz = 92.5, z1 = 92.3 }
 -- Molten Core (map 409, raid)
 ns.CityLevels[20409] = { base = 409, name = "Molten Core", instance = true, raid = true }
 ns.Instances[20409] = { name = "Molten Core", map = 409, raid = true,
@@ -22889,7 +22889,7 @@ ns.Roads[20409] = {
   },
 }
 ns.RoadDrops[20409] = {  }
-ns.Transports[#ns.Transports + 1] = { 0, -7508.3, -1039.7, 20409, 1091.9, -467.0, 15, "portal", "Burning Steppes", "Molten Core", "portal", iz = -105.1 }
+ns.Transports[#ns.Transports + 1] = { 0, -7508.3, -1039.7, 20409, 1091.9, -467.0, 15, "portal", "Burning Steppes", "Molten Core", "portal", iz = -105.1, z1 = 180.9 }
 -- Blackwing Lair (map 469, raid)
 ns.CityLevels[20469] = { base = 469, name = "Blackwing Lair", instance = true, raid = true }
 ns.Instances[20469] = { name = "Blackwing Lair", map = 469, raid = true,
@@ -23595,7 +23595,7 @@ ns.Roads[20469] = {
   },
 }
 ns.RoadDrops[20469] = {  }
-ns.Transports[#ns.Transports + 1] = { 20229, 178.7, -474.4, 20469, -7672.3, -1107.0, 15, "portal", "Blackrock Spire", "Blackwing Lair", "portal", iz = 396.7 }
+ns.Transports[#ns.Transports + 1] = { 20229, 178.7, -474.4, 20469, -7672.3, -1107.0, 15, "portal", "Blackrock Spire", "Blackwing Lair", "portal", iz = 396.7, z1 = 116.0 }
 -- Ruins of Ahn'Qiraj (map 509, raid)
 ns.CityLevels[20509] = { base = 509, name = "Ruins of Ahn'Qiraj", instance = true, raid = true }
 ns.Instances[20509] = { name = "Ruins of Ahn'Qiraj", map = 509, raid = true,
@@ -26123,7 +26123,7 @@ ns.Roads[20509] = {
   },
 }
 ns.RoadDrops[20509] = {  }
-ns.Transports[#ns.Transports + 1] = { 1, -8415.7, 1502.4, 20509, -8436.5, 1519.2, 15, "portal", "Gates of Ahn'Qiraj", "Ruins of Ahn'Qiraj", "portal", iz = 31.9 }
+ns.Transports[#ns.Transports + 1] = { 1, -8415.7, 1502.4, 20509, -8436.5, 1519.2, 15, "portal", "Gates of Ahn'Qiraj", "Ruins of Ahn'Qiraj", "portal", iz = 31.9, z1 = 30.7 }
 -- Ahn'Qiraj Temple (map 531, raid)
 ns.CityLevels[20531] = { base = 531, name = "Ahn'Qiraj Temple", instance = true, raid = true }
 ns.Instances[20531] = { name = "Ahn'Qiraj Temple", map = 531, raid = true,
@@ -28245,7 +28245,7 @@ ns.Roads[20531] = {
   },
 }
 ns.RoadDrops[20531] = {  }
-ns.Transports[#ns.Transports + 1] = { 1, -8239.0, 1993.2, 20531, -8221.4, 2014.3, 15, "portal", "Gates of Ahn'Qiraj", "Ahn'Qiraj Temple", "portal", iz = 129.1 }
+ns.Transports[#ns.Transports + 1] = { 1, -8239.0, 1993.2, 20531, -8221.4, 2014.3, 15, "portal", "Gates of Ahn'Qiraj", "Ahn'Qiraj Temple", "portal", iz = 129.1, z1 = 129.1 }
 -- Naxxramas (map 533, raid)
 ns.CityLevels[20533] = { base = 533, name = "Naxxramas", instance = true, raid = true }
 ns.Instances[20533] = { name = "Naxxramas", map = 533, raid = true,
@@ -32910,7 +32910,7 @@ ns.Roads[20533] = {
   },
 }
 ns.RoadDrops[20533] = {  }
-ns.Transports[#ns.Transports + 1] = { 0, 3133.1, -3730.3, 20533, 3005.9, -3435.0, 15, "portal", "Eastern Plaguelands", "Naxxramas", "portal", iz = 293.9 }
+ns.Transports[#ns.Transports + 1] = { 0, 3133.1, -3730.3, 20533, 3005.9, -3435.0, 15, "portal", "Eastern Plaguelands", "Naxxramas", "portal", iz = 293.9, z1 = 138.7 }
 -- dungeons and raids with their map only (no walk network): ns.MinimapTiles[map id], bosses
 -- without spots (kills still count), ns.Instances[level].terrain = true
 ns.MinimapTiles = ns.MinimapTiles or {}
