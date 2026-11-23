@@ -82,6 +82,21 @@ def test_pithwick_is_reached_by_kooki3zs_walk_into_his_shop(game):
     assert all(abs(r.fz[i] - 504) <= 2 for i in range(len(pts) - 2, len(pts) + 1))
 
 
+THANES_DOOR = (-4822.27, -932.42, 399.04)  # (the Hall of Thanes' way in, under the city: test_instances.py's)
+
+
+@pytest.mark.parametrize("start", [FORGE, FORGE_WEST], ids=["forge", "forge-west"])
+def test_the_hall_of_thanes_door_is_reached_down_kooki3zs_walks(game, start):
+    # (issue #918: walked in game from the halls at 502 down to the Hall of Thanes' floor at 399; before, the route
+    # stayed on the streets at 502 and its last step went to the door 100 yd under them)
+    lua, ns = game
+    r, pts = _route(lua, ns, start, THANES_DOOR)
+    assert (r.blocked or 0) == 0
+    assert r.length <= 700, r.length
+    assert math.dist(pts[-2], pts[-1]) <= 10  # (the walk ends by the portal)
+    assert all(abs(r.fz[i] - THANES_DOOR[2]) <= 3 for i in range(len(pts) - 2, len(pts) + 1))
+
+
 def test_cave_near_down_only_under_the_citys_floor(game):
     lua, ns = game
     R = ns.Router
