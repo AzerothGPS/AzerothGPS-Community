@@ -215,7 +215,7 @@ def cmd_route_sweep(args) -> int:
 def cmd_route_quality(args) -> int:
     from .routequality import run
 
-    res = run(args.trips, args.seed, args.against, jobs=args.jobs)
+    res = run(args.trips, args.seed, args.against, jobs=args.jobs, before_rows=args.before_rows, keep_rows=args.keep_rows)
     out_dir = DATA / "debug" / "route-quality"
     out_dir.mkdir(parents=True, exist_ok=True)
     out = out_dir / "report.json"
@@ -1340,6 +1340,9 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--seed", type=int, default=21)
     sp.add_argument("--against", default="HEAD", help="the git ref to compare with (default HEAD: the uncommitted changes)")
     sp.add_argument("--jobs", type=int, default=3, help="processes, each a share of the trips (CI's 3: keep it so a run here matches CI's)")
+    sp.add_argument("--before-rows", type=Path, help="the --against version's rows kept by an earlier run: used when there "
+                                                     "for the same trips, else weighed and written there (CI's cache)")
+    sp.add_argument("--keep-rows", type=Path, help="write the working tree's own rows here (CI keeps main's)")
     sp.set_defaults(fn=cmd_route_quality)
 
     sp = sub.add_parser("trip-sweep", help="random trips planned and followed as in game: flights, levels, detours, frame budget")

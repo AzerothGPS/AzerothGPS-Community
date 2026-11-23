@@ -74,6 +74,7 @@ for the 1,785 walked west over the land before (1.45 times), 700 s to 811 s.
 
 from __future__ import annotations
 
+import json
 import math
 import random
 import re
@@ -706,14 +707,66 @@ def guards_by(replace: dict | None, rows: list[dict]) -> list[int]:
     return out
 
 
-def run(count: int, seed: int, against: str, log=print, jobs: int = 1) -> dict:
+# (the fields a row gets only from the `older` rows weigh_trips is handed: left out of the rows kept for another run)
+OLDER_FIELDS = ("old_guard", "old_light", "old_walks_blocked")
+
+
+def own_rows(rows: list[dict]) -> list[dict]:
+    """The rows as weigh_trips gives them without `older`: what the version alone chose (kept for a later run)."""
+    out = []
+    for row in rows:
+        row = {k: v for k, v in row.items() if k not in OLDER_FIELDS}
+        if str(row.get("error", "")).startswith("older walks: "):
+            del row["error"]
+        out.append(row)
+    return out
+
+
+def load_rows(path: Path | None, count: int, seed: int) -> list[dict] | None:
+    """Rows kept by an earlier run (save_rows) for the same trips, or None (no file, other trips, unreadable)."""
+    if path is None or not Path(path).is_file():
+        return None
+    try:
+        kept = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(kept, dict):
+        return None
+    rows = kept.get("rows")
+    if kept.get("trips") != count or kept.get("seed") != seed or not isinstance(rows, list) or len(rows) != count:
+        return None
+    return rows
+
+
+def save_rows(path: Path, rows: list[dict], count: int, seed: int) -> None:
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"trips": count, "seed": seed, "rows": own_rows(rows)}), encoding="utf-8")
+
+
+def run(count: int, seed: int, against: str, log=print, jobs: int = 1, before_rows: Path | None = None,
+        keep_rows: Path | None = None) -> dict:
+    """`before_rows`: the older version's rows kept by an earlier run (CI's cache: main's own rows, weighed when main
+    changed its routing files, `keep_rows`), used instead of weighing them again when they're the same trips, and
+    written there when weighed here. `keep_rows`: the working tree's own rows written there (own_rows).
+    (2026-11-23, Kooki3z: "look for CI timing improvements": the older version's half of a PR's ~11 minutes was the
+    same rows for every PR on the same main.) The cache key is CI's (.github/scripts/ci_gate.py rows-key): which rows
+    are the same is the routing files' business, as which changes need this check is."""
     older = _older_files(against)
     log(f"route-quality: {count} trips (seed {seed}); {against}: {len(older)} addon files differ"
         + (f" ({', '.join(sorted(older)[:6])}{'...' if len(older) > 6 else ''})" if older else ""))
-    log(f"  {against}:")
-    before = _weigh(count, seed, older or None, log, None, jobs)
+    before = load_rows(before_rows, count, seed)
+    if before is not None:
+        log(f"  {against}: {len(before)} rows kept from an earlier run ({before_rows})")
+    else:
+        log(f"  {against}:")
+        before = _weigh(count, seed, older or None, log, None, jobs)
+        if before_rows is not None:
+            save_rows(before_rows, before, count, seed)
     log("  the working tree:")
     after = _weigh(count, seed, None, log, before, jobs)
+    if keep_rows is not None:
+        save_rows(keep_rows, after, count, seed)
     if older:  # (the newer routes past the older version's guards: `unguarded`)
         for row, yd in zip(after, guards_by(older, after)):
             row["new_old_guard"] = yd
