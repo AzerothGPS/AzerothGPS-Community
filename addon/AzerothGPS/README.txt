@@ -1,4 +1,4 @@
-AzerothGPS 1.3.13
+AzerothGPS 1.3.14
 =================
 
 Car-GPS style navigation for World of Warcraft: a map window with routes along the roads,

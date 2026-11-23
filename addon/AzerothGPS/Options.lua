@@ -348,13 +348,16 @@ O.LANGUAGES = { { "enUS", "English" }, { "deDE", "Deutsch" }, { "esES", "Espa\19
 -- prep, like the toc's version (Kooki3z 2026-11-20: "part of release prep like how we update the version number in
 -- the addon in game should be the What's New section in help"): test_options checks it's never older than the toc,
 -- release.yml that it's the tag's.
-O.WHATS_NEW_VERSION = "1.3.13"
+O.WHATS_NEW_VERSION = "1.3.14"
 O.WHATS_NEW = {
-  L["- Quest Route: order by level, lowest first or about to turn gray first (Options > Routing > Quest Route)."],
-  L["- Quest Route: a quest you leave out stays out until you put it back."],
-  L["- Routes to an NPC inside a building go round to its door and in."],
-  L["- Less stutter while a route is worked out on slower PCs."],
-  L["- Fixed: with Questie, quest turn-ins no longer show twice on the map."],
+  L["- Quest Route: right-click the button and toggle icons pop out, like Quick Find's: by level, turn-ins only, objectives only, tracked quests, this zone."],
+  L["- Near an NPC stop, a pulsing Target button targets the NPC and marks it (Options > Directions)."],
+  L["- The GPS map window shows over the game's windows: quest log, bags, world map."],
+  L["- Controller: the Quest Route button's toggle icons work from the controller (X pops them out)."],
+  L["- Road and wall drawing and Record are no longer part of AzerothGPS; roads you drew still guide your routes."],
+  L["- Zephras Isle: its NPCs are in the search and Quick Find before you've talked to them."],
+  L["- Controller: the show/hide key can be a controller button (Options > Keys and buttons)."],
+  L["- An NPC upstairs or in a cellar is no longer reached at the door below; quest turn-ins go to their NPC."],
 }
 -- A page's old id, still asked for by other code and addons (API.ShowOptions): the page it's on now.
 O.PAGE_ALIASES = { ["Help improve"] = "Help" }
