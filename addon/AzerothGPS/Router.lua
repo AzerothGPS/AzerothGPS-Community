@@ -1730,14 +1730,45 @@ local function Bridges(nodes, adj, short, nearOverlay, skip, zs, nz)
       samples[gi] = sm
     end
     local far = {}
+    -- (a node's nearest `k` of a group's every node, within `reach` yards: the buckets ring by ring; { d2, b } each)
+    local member = {}
+    for gi, gr in ipairs(order) do
+      for _, n in ipairs(groups[gr]) do member[n] = gi end
+    end
+    local function nearestOf(a, gj, reach, k)
+      local ax, ay = nodes[a * 2 - 1], nodes[a * 2]
+      local bx, by = math.floor(ax / B), math.floor(ay / B)
+      local reach2 = reach * reach
+      local near = {}
+      for r = 0, math.ceil(reach / B) + 1 do
+        if #near >= k and (r - 1) * B > math.sqrt(near[k][1]) then break end
+        for kx = bx - r, bx + r do
+          for ky = by - r, by + r do
+            if kx == bx - r or kx == bx + r or ky == by - r or ky == by + r then
+              for _, b in ipairs(buckets[kx * 65536 + ky] or EMPTY) do
+                if member[b] == gj and zok(a, b) then
+                  local dx, dy = nodes[b * 2 - 1] - ax, nodes[b * 2] - ay
+                  local d2 = dx * dx + dy * dy
+                  if d2 <= reach2 then near[#near + 1] = { d2, b } end
+                end
+              end
+            end
+          end
+        end
+        table.sort(near, function(x, y) return x[1] < y[1] or (x[1] == y[1] and x[2] < y[2]) end)
+        for i = #near, k + 1, -1 do near[i] = nil end
+      end
+      return near
+    end
+    local extra2 = R.BRIDGE_FAR_EXTRA_YD * R.BRIDGE_FAR_EXTRA_YD
     for gi = 1, #order do
       Breathe(gi, 2)
       for gj = gi + 1, #order do
         local bd, ba, bb
         -- (and from each sampled node of the group with fewer of them, its own nearest: `alts`, the few shortest,
         -- for the extra links below: a short road's two ends, one of them maybe the open side)
-        local sa, sb = samples[gi], samples[gj]
-        if #sb < #sa then sa, sb = sb, sa end
+        local sa, sb, gb = samples[gi], samples[gj], gj
+        if #sb < #sa then sa, sb, gb = sb, sa, gi end
         local alts = {}
         for _, a in ipairs(sa) do
           local ax, ay = nodes[a * 2 - 1], nodes[a * 2]
@@ -1749,11 +1780,26 @@ local function Bridges(nodes, adj, short, nearOverlay, skip, zs, nz)
           end
           if ad then
             if not bd or ad < bd then bd, ba, bb = ad, a, ab end
-            if ad <= R.BRIDGE_FAR_EXTRA_YD * R.BRIDGE_FAR_EXTRA_YD then alts[#alts + 1] = { ad, a, ab } end
+            if ad <= extra2 then alts[#alts + 1] = { ad, a, ab } end
+          end
+        end
+        -- (two groups this near: each alt to its nearest few of the other group's every node, not its sample's
+        -- nearest, and below no two ending on one node. A new road's end up on Un'Goro's rim, 2026-11-23, was the
+        -- nearest node for every alt from the pass's roads, over the crater's wall, and the pass had no way to
+        -- Gadgetzan's roads)
+        if bd and bd <= extra2 then
+          alts = {}
+          for i, a in ipairs(sa) do
+            BreatheIfOver(i, 1)
+            for _, nb in ipairs(nearestOf(a, gb, R.BRIDGE_FAR_EXTRA_YD, R.BRIDGE_FAR_ALTS)) do
+              alts[#alts + 1] = { nb[1], a, nb[2] }
+            end
           end
         end
         if bd then
-          table.sort(alts, function(x, y) return x[1] < y[1] or (x[1] == y[1] and x[2] < y[2]) end)
+          table.sort(alts, function(x, y)
+            return x[1] < y[1] or (x[1] == y[1] and (x[2] < y[2] or (x[2] == y[2] and x[3] < y[3])))
+          end)
           far[#far + 1] = { math.sqrt(bd), ba, bb, order[gi], order[gj], alts = alts }
         end
       end
@@ -1770,14 +1816,20 @@ local function Bridges(nodes, adj, short, nearOverlay, skip, zs, nz)
       local ga, gb = p[4], p[5]
       if p[1] <= R.BRIDGE_FAR_EXTRA_YD and ((extra[ga] or 0) < R.BRIDGE_FAR_EXTRA or (extra[gb] or 0) < R.BRIDGE_FAR_EXTRA) then
         extra[ga], extra[gb] = (extra[ga] or 0) + 1, (extra[gb] or 0) + 1
-        for i = 1, math.min(#p.alts, R.BRIDGE_FAR_ALTS) do
-          local alt = p.alts[i]
-          local k = math.min(alt[2], alt[3]) * 1048576 + math.max(alt[2], alt[3])
-          -- (a set of their own: `kept` drops a pair's short link for its joining copy, and an extra one is no
-          -- link at all in most routes)
-          if not kept[k] and not extraKept[k] then
-            extraKept[k] = true
-            links[#links + 1] = { math.sqrt(alt[1]), alt[2], alt[3], keep = true, extra = true }
+        -- (the shortest, one a sampled node as before, and ending on nodes no shorter one ends on: four over the
+        -- crater's wall to one node took the places, 2026-11-23)
+        local used, n = {}, 0
+        for _, alt in ipairs(p.alts) do
+          if n >= R.BRIDGE_FAR_ALTS then break end
+          if not used[alt[2]] and not used[alt[3]] then
+            used[alt[2]], used[alt[3]], n = true, true, n + 1
+            local k = math.min(alt[2], alt[3]) * 1048576 + math.max(alt[2], alt[3])
+            -- (a set of their own: `kept` drops a pair's short link for its joining copy, and an extra one is no
+            -- link at all in most routes)
+            if not kept[k] and not extraKept[k] then
+              extraKept[k] = true
+              links[#links + 1] = { math.sqrt(alt[1]), alt[2], alt[3], keep = true, extra = true }
+            end
           end
         end
       end
