@@ -5324,12 +5324,16 @@ local function DrawStopPins(toScreen, viewCont)
     n = n + 1
     local b = StopPin(n)
     b.icon:SetTexCoord(0, 1, 0, 1) -- (a reused pin: no round icon's crop left on it; an atlas sets its own after)
+    -- (all by ns.SetIcon, so what the pin shows is what G.ScaledIcon draws at its size: a pin reused from a ride's (the
+    -- lift's gear) set by SetTexture kept the gear as its source, and G.RoundIcon put the gear's scaled file back over a
+    -- new stop's marker until the pins were laid out again; Kooki3z 2026-11-23, "sometimes when marking a stop its a cog
+    -- wheel then the correct icon")
     if d.learnNode then -- (a flight master's detour: the map's own icon for it, as a stop made from a map icon)
-      b.icon:SetTexture(TAXI_ICON.unlearned)
+      ns.SetIcon(b.icon, TAXI_ICON.unlearned)
     elseif d.ride then -- (a ride the route takes: its icon where it's boarded)
       ns.SetIcon(b.icon, G.RideIcon(d))
     else
-      b.icon:SetTexture(ns.Nav.StopIcon(d))
+      ns.SetIcon(b.icon, ns.Nav.StopIcon(d))
     end
     b.icon:SetAlpha(pendingIndex and 0.75 or 1)
     local fl = not (d.learnNode or d.ride) and ns.Nav.StopFloor(d) -- (upstairs or in a cellar: a stairs badge)
