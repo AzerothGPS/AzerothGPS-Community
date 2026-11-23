@@ -128,6 +128,7 @@ class Instance:
     entrances: list = field(default_factory=list)  # [(cont, x, y, z, ix, iy, iz, label)]
     bosses: list = field(default_factory=list)  # [dict]
     notes: list = field(default_factory=list)
+    heights: list = field(default_factory=list)  # per entrance: entrance_height's dict (the portal's z1)
 
     @property
     def level(self) -> int:
@@ -206,6 +207,9 @@ def entrances(cd: ClientData, inst: Instance, server: dict, triggers: list) -> l
         if any(math.hypot(e[4] - t["x"], e[5] - t["y"]) < 20 and e[0] == spot[0] and
                math.hypot(e[1] - spot[1], e[2] - spot[2]) < 20 for e in out):
             continue  # (the same way in twice)
+        m = measured_entrance(inst.map_id, spot[0], spot[1], spot[2])
+        if m:  # (stood at in game: its spot and height, Blackrock Depths' 1.2 yd from the server's)
+            spot = (spot[0],) + m
         out.append((spot[0], spot[1], spot[2], spot[3], t["x"], t["y"], t["z"], t["name"]))
     return out or inner
 
@@ -609,10 +613,145 @@ def measured_entrance_z(map_id: int, cont: int, x: float, y: float):
     portal's `z1` (Nav's EndZ: the walk there ends on that floor, not the city's streets over it)."""
     if not ENTRANCES.exists():
         return None
+    m = measured_entrance(map_id, cont, x, y)
+    return m[2] if m else None
+
+
+def measured_entrance(map_id: int, cont: int, x: float, y: float):
+    """The spot and height measured in game for the entrance at (cont, x, y) (within MEASURED_NEAR yd: Blackrock
+    Depths' was 1.2 yd from the server's exit teleport, the Ruins of Lordaeron's 6.3 from its guessed spot): (x, y, z), else None."""
+    if not ENTRANCES.exists():
+        return None
     for e in json.loads(ENTRANCES.read_text(encoding="utf-8")).get(str(map_id), []):
-        if len(e) > 3 and e[0] == cont and math.hypot(e[1] - x, e[2] - y) < 1:
-            return float(e[3])
+        if len(e) > 3 and e[0] == cont and math.hypot(e[1] - x, e[2] - y) < MEASURED_NEAR:
+            return float(e[1]), float(e[2]), float(e[3])
     return None
+
+
+MEASURED_NEAR = 10.0  # yards: a measured entrance this near the built one is that one (stood at 6.3 yd from
+# the Ruins of Lordaeron's guessed spot; a dungeon's ways in are 20 yd and more apart, the Scarlet Monastery's 22)
+ENTRANCE_FLOOR = 3.0  # yards: an entrance's height is on a floor (the terrain or a model's) within this
+ENTRANCE_SNAP = 12.0  # yards: a height off every floor goes to the nearest floor within this (else kept, flagged)
+ENTRANCE_RING = 2.0  # yards: the floors looked for round the spot (a teleport's spot at a model floor's edge)
+TRIGGER_NEAR = 30.0  # yards: a client way-in trigger this near a spot with no height gives it one
+SAME_COORDS = 100.0  # yards: where you appear inside this near the way in: the instance is in the world's coordinates
+
+
+class EntranceFloors:
+    """The floors at spots on the continents (0, 1): the terrain's (not over a hole) and the models' placed there
+    (their floor faces, instance_faces). For entrance_height: the heights there, read once per continent."""
+
+    def __init__(self, cd: ClientData):
+        self.cd = cd
+        self.ground, self.placed, self.faces = {}, {}, {}
+
+    def at(self, cont: int, x: float, y: float) -> list:
+        """Every floor's height at (x, y), or within ENTRANCE_RING of it: [(z, "terrain" | "model")], sorted."""
+        from .caves import Ground
+
+        if cont not in self.ground:
+            self.ground[cont] = Ground(self.cd, cont)
+            self.placed[cont] = I.placements(self.cd, cont)
+        g = self.ground[cont]
+        ring = [(x, y)] + [(x + ENTRANCE_RING * math.cos(a), y + ENTRANCE_RING * math.sin(a))
+                           for a in np.linspace(0, 2 * math.pi, 8, endpoint=False)]
+        out = []
+        h, _ok = g.sample([x], [y])
+        if np.isfinite(h[0]) and not g.holes([x], [y])[0]:
+            out.append((round(float(h[0]), 1), "terrain"))
+        for p in self.placed[cont]:
+            x0, y0, x1, y1 = p.bounds
+            if not (x0 - ENTRANCE_RING <= x <= x1 + ENTRANCE_RING and y0 - ENTRANCE_RING <= y <= y1 + ENTRANCE_RING):
+                continue
+            if p.uid not in self.faces:
+                try:
+                    self.faces[p.uid] = instance_faces(self.cd, [p])[0]
+                except Exception:  # (a model this reader can't take)
+                    self.faces[p.uid] = []
+            for poly, hs, *_ in self.faces[p.uid]:
+                for qx, qy in ring:
+                    z = _in_triangle(poly, hs, qx, qy)
+                    if z is not None:
+                        out.append((round(z, 1), "model"))
+                        break
+        return sorted(set(out))
+
+
+def inside_floor_z(nodes: list, x: float, y: float, z: float) -> float:
+    """A way in from inside another instance (Blackwing Lair's from Upper Blackrock Spire's orb): its trigger's height
+    is the box's middle, so the height of that instance's road node nearest (x, y) within ENTRANCE_SNAP yd, of those
+    within ENTRANCE_SNAP yd of z; else z."""
+    near = [(math.hypot(nx - x, ny - y), nz) for nx, ny, nz in nodes
+            if math.hypot(nx - x, ny - y) <= ENTRANCE_SNAP and abs(nz - z) <= ENTRANCE_SNAP]
+    return float(min(near)[1]) if near else z
+
+
+def _in_triangle(poly, hs, x, y):
+    """The triangle's height at (x, y) when (x, y) is in it, else None."""
+    (ax, ay), (bx, by), (cx, cy) = poly
+    d = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy)
+    if abs(d) < 1e-9:
+        return None
+    l1 = ((by - cy) * (x - cx) + (cx - bx) * (y - cy)) / d
+    l2 = ((cy - ay) * (x - cx) + (ax - cx) * (y - cy)) / d
+    l3 = 1 - l1 - l2
+    if min(l1, l2, l3) < -1e-6:
+        return None
+    return l1 * hs[0] + l2 * hs[1] + l3 * hs[2]
+
+
+def entrance_height(inst: Instance, e: tuple, server: dict, triggers: list, floors: EntranceFloors) -> dict:
+    """An entrance's height on the continent, shipped as its portal's `z1` (Nav's EndZ: the walk there ends on that
+    floor, not on another one stacked over or under it: Blackrock Mountain's, the caves', under Ironforge). The best
+    source first: measured in game (overrides/instance_entrances.json's 4th value), the server's exit teleport's
+    height where it puts you outside, the client's way-in trigger near the spot, else the floor under the spot (the
+    terrain's when it has one, else the highest model floor). A source's height is checked against the floors there
+    (the terrain or a model floor within ENTRANCE_FLOOR yd); off them, it goes to the nearest within ENTRANCE_SNAP.
+    dict(z, source, floor (the nearest floor's height, None: none there), dz, snapped, off (no floor near))."""
+    c, x, y, z = e[:4]
+    m = measured_entrance(inst.map_id, c, x, y)
+    if m:
+        return {"z": m[2], "source": "measured", "floor": None, "dz": None, "snapped": False, "off": False}
+    if c not in (0, 1):  # (in through another instance: the trigger's height in there, Blackwing Lair's)
+        return {"z": None if z is None else round(float(z), 1), "source": "trigger inside", "floor": None,
+                "dz": None, "snapped": False, "off": False}
+    src = None
+    if z is not None:
+        if any(t["map"] == c and math.hypot(t["x"] - x, t["y"] - y) < 1 and t["id"] is not None
+               for t in server["teleports"]):
+            src = "exit teleport"
+        elif any(t["ContinentID"] == c and math.hypot(t["Pos"][0] - x, t["Pos"][1] - y) < 1 for t in triggers):
+            src = "entrance trigger"
+        # (else a guide-placed way out with no height measured: its 0.0 is no height)
+    if src is None:
+        z = None
+        near = sorted((math.hypot(t["Pos"][0] - x, t["Pos"][1] - y), t) for t in triggers
+                      if t["ContinentID"] == c and math.hypot(t["Pos"][0] - x, t["Pos"][1] - y) < TRIGGER_NEAR)
+        if near:
+            z, src = float(near[0][1]["Pos"][2]), "entrance trigger"
+    fl = floors.at(c, x, y)
+    if z is None:
+        if not fl:
+            return {"z": None, "source": "none", "floor": None, "dz": None, "snapped": False, "off": True}
+        # (an instance in the world's own coordinates, its way in just inside: Stratholme's main gate, the Ruins of
+        # Lordaeron: the floor nearest where you appear in there; else the terrain's, else the highest model floor)
+        ix, iy, iz = e[4:7]
+        terr = [h for h, k in fl if k == "terrain"]
+        if iz is not None and math.hypot(ix - x, iy - y) < SAME_COORDS:
+            z = min((h for h, _k in fl), key=lambda h: abs(h - iz))
+        else:
+            z = terr[0] if terr else max(h for h, _k in fl)
+        return {"z": round(z, 1), "source": "floor", "floor": z, "dz": 0.0, "snapped": False, "off": False}
+    z = round(float(z), 1)
+    if not fl:
+        return {"z": z, "source": src, "floor": None, "dz": None, "snapped": False, "off": True}
+    best = min((h for h, _k in fl), key=lambda h: abs(h - z))
+    dz = round(z - best, 1)
+    if abs(dz) <= ENTRANCE_FLOOR:
+        return {"z": z, "source": src, "floor": best, "dz": dz, "snapped": False, "off": False}
+    if abs(dz) <= ENTRANCE_SNAP:
+        return {"z": round(best, 1), "source": src, "floor": best, "dz": dz, "snapped": True, "off": False}
+    return {"z": z, "source": src, "floor": best, "dz": dz, "snapped": False, "off": True}
 
 
 GUIDE_SPOTS = Path(__file__).resolve().parents[2] / "overrides" / "instance_spots.json"
@@ -742,7 +881,7 @@ def instances_lua(cd: ClientData, built: list, log=print) -> str:
            "-- ns.Instances[level]: name, map, raid, entrances { cont, x, y, inside x, y, z, wing (door = ...) },",
            "-- wings (ways in into parts of their own, the Scarlet Monastery's), bosses { name, npc,",
            "-- x, y, z, enc = DungeonEncounter IDs, order = the usual kill order when known, wing }. Each entrance",
-           "-- is a portal in ns.Transports (continent end, instance end).",
+           "-- is a portal in ns.Transports (continent end, instance end; z1 the continent end's height).",
            "local _, ns = ...",
            "ns.CityLevels = ns.CityLevels or {}",
            "ns.Instances = ns.Instances or {}",
@@ -750,9 +889,12 @@ def instances_lua(cd: ClientData, built: list, log=print) -> str:
            "ns.RoadDrops = ns.RoadDrops or {}",
            "ns.Transports = ns.Transports or {}"]
     zcache: dict = {}
+    road_z: dict = {}  # level: [(x, y, z)] of its road nodes (a way in from inside it: its floor, inside_floor_z)
     for inst, u in built:
         L = inst.level
         nodes, edges, drops, zs = instance_roads(u)
+        if zs:
+            road_z[L] = [(x, y, z) for (x, y), z in zip(nodes, zs)]
         from .roads.lifts import add_instance_lifts, wait_yards
 
         lifts = add_instance_lifts(inst.map_id, nodes, edges, zs, log)  # (Gnomeregan's: roads/lifts.py)
@@ -846,7 +988,9 @@ def instances_lua(cd: ClientData, built: list, log=print) -> str:
         out.append(f"ns.RoadDrops[{L}] = {{ " + ", ".join(f"[{i + 1}] = {h}" for i, h in sorted(drops.items())) + " }")
         names = {i.level: i.name for i, _u in built}
         for i, (c, x, y, _z, ix, iy, iz, _n) in enumerate(inst.entrances):
-            mz = measured_entrance_z(inst.map_id, c, x, y)
+            mz = inst.heights[i]["z"] if i < len(inst.heights) else measured_entrance_z(inst.map_id, c, x, y)
+            if c >= LEVEL_BASE and mz is not None:
+                mz = inside_floor_z(road_z.get(c, []), x, y, mz)
             place = names.get(c) if c >= LEVEL_BASE else (zone_name(cd, c, x, y, zcache) or inst.name)
             if c >= LEVEL_BASE and c not in names:
                 continue  # (from an instance not built: no way in)
@@ -890,8 +1034,15 @@ def build_all(cd: ClientData, data_dir, log=print, only=None, report=None) -> li
     add_guide_spots(cd, server, log)
     orders = boss_order()
     out = []
+    triggers = cd.table("AreaTrigger")
+    floors = EntranceFloors(cd)
     for inst in load_instances(cd, server, only):
         missing = order_bosses(inst, orders, server)
+        inst.heights = [entrance_height(inst, e, server, triggers, floors) for e in inst.entrances]
+        for e, h in zip(inst.entrances, inst.heights):
+            if h["off"] or h["snapped"] or h["z"] is None:
+                log(f"  {inst.name}: way in at ({e[1]:.1f}, {e[2]:.1f}): height {h['z']} ({h['source']}), "
+                    + ("off every floor" if h["off"] else f"moved {h['dz']:+.1f} yd onto a floor"))
         why = None
         if not inst.entrances:
             why = "no entrance (no teleport into it in the server's data, no ghost entrance in the client's)"
