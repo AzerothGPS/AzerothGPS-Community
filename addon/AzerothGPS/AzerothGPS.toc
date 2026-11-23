@@ -54,6 +54,7 @@ Data\GuideFloors.lua
 Data\NpcFloors.lua
 Data\Npcs.lua
 Data\VendorItems.lua
+Data\QuestNpcs.lua
 Data\NpcNames\deDE.lua
 Data\NpcNames\esES.lua
 Data\NpcNames\esMX.lua

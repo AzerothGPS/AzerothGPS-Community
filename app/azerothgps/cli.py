@@ -941,6 +941,19 @@ def cmd_npcs(args) -> int:
     return 0
 
 
+def cmd_quest_npcs(args) -> int:
+    """Who takes each quest in, the shipped NPCs only (Data/QuestNpcs.lua)."""
+    from .paths import data_dir
+    from .questnpcs import FILE, build, lua_text
+
+    enders = build(data_dir())
+    print(f"{len(enders)} quests with a shipped NPC to turn them in")
+    if args.write:
+        FILE.write_text(lua_text(enders), encoding="utf-8", newline="\n")
+        print(f"wrote {FILE} ({FILE.stat().st_size // 1024} KB)")
+    return 0
+
+
 def cmd_npc_names(args) -> int:
     """The shipped NPCs' names in each client language (Data/NpcNames/<locale>.lua, from AzerothCore)."""
     from .npc_names import LOCALES, OUT_DIR, build, lua_text
@@ -1559,6 +1572,10 @@ def main(argv: list[str] | None = None) -> int:
     sp = sub.add_parser("npcs", help="every friendly NPC, for the search (Data/Npcs.lua)")
     sp.add_argument("--write", action="store_true")
     sp.set_defaults(fn=cmd_npcs)
+
+    sp = sub.add_parser("quest-npcs", help="who takes each quest in, for turn-in stops (Data/QuestNpcs.lua)")
+    sp.add_argument("--write", action="store_true")
+    sp.set_defaults(fn=cmd_quest_npcs)
 
     sp = sub.add_parser("npc-names", help="the shipped NPCs' names in each client language (Data/NpcNames/, AzerothCore)")
     sp.add_argument("--write", action="store_true")

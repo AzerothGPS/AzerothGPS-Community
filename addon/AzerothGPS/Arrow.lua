@@ -489,6 +489,7 @@ local function Update(dt)
   else
     stale:Hide()
   end
+  A.ReserveCorner()
   if useIcon:IsShown() then -- (the hearthstone's icon in the arrow's place: glowing, as the remake button pulses)
     local a = 0.55 + 0.45 * math.sin(GetTime() * 4)
     useIcon:SetAlpha(0.75 + 0.25 * a)
@@ -793,6 +794,28 @@ local function Panel(name)
   return f
 end
 
+-- The first line kept clear of the icons in the panel's top right corner (Kooki3z, 2026-11-22: the Target button
+-- covered "yd" at the end of "Continue straight, then make a U-turn in 40 yd"): the Quest Route (Sprint) icon and the
+-- Target button (GPSFrame's, its spot "sprint" or "corner": G.TargetNpcSpot), their width and CORNER_GAP more off its
+-- right end; the line then shortens as for a narrow panel (UpdateText's short form). Set again only on a change.
+A.LINE_RIGHT, A.CORNER_GAP = 8, 3
+function A.ReserveCorner()
+  if not (line1 and dir) then return end
+  local reserve = 0
+  if stale and stale:IsShown() then reserve = 3 + (stale.GetWidth and stale:GetWidth() or 18) end
+  local G = ns.GPS
+  local b = G and G.targetBtn
+  if b and b:IsShown() and b.host == dir then
+    reserve = (reserve > 0 and reserve + 2 or 3) + (b.GetWidth and b:GetWidth() or 18)
+  end
+  local right = reserve > 0 and math.max(A.LINE_RIGHT, reserve + A.CORNER_GAP) or A.LINE_RIGHT
+  if A.lineRight == right then return end
+  A.lineRight = right
+  line1:ClearAllPoints()
+  line1:SetPoint("TOPLEFT", 8, -8)
+  line1:SetPoint("RIGHT", -right, 0)
+end
+
 function A.Init()
   if frame then return end
   dir = Panel("AzerothGPSDirections")
@@ -825,6 +848,7 @@ function A.Init()
   end)
   stale:SetScript("OnLeave", GameTooltip_Hide)
   stale:Hide()
+  A.stale = stale -- (the Target button goes left of it: GPSFrame's G.TargetNpcSpot)
 
   -- resize grip (the directions' bottom-right), while unlocked
   grip = CreateFrame("Button", nil, dir)
@@ -885,6 +909,7 @@ function A.Init()
   line1:SetPoint("TOPLEFT", 8, -8)
   line1:SetPoint("RIGHT", -8, 0)
   line1:SetJustifyH("LEFT")
+  A.line1 = line1 -- (the tests)
   line2 = dir:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   line2:SetPoint("TOPLEFT", line1, "BOTTOMLEFT", 0, -2)
   line2:SetPoint("RIGHT", -8, 0)

@@ -319,6 +319,10 @@ Command = function(msg)
       ns.GPS.Redraw()
     elseif b == "layers" then
       ns.Print(ns.Layers.Describe())
+    elseif b == "arrival" then
+      -- (why a stop with an NPC or a height was arrived at: a chat line each, Nav.ArrivalWhy)
+      ns.Nav.debugArrival = not ns.Nav.debugArrival
+      ns.Print("arrival reasons " .. (ns.Nav.debugArrival and "on" or "off"))
     elseif b == "rotsign" then
       ns.GPS.rotSign = -ns.GPS.rotSign
       ns.Print("tile rotation sign now " .. ns.GPS.rotSign)
