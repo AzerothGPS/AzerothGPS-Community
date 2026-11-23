@@ -5081,6 +5081,7 @@ local function DrawPois(pois, zoom)
         b:SetPoint("CENTER", poiLayer, "CENTER", p[2], p[3])
       end
       G.RoundIcon(b, b.icon, G.PoiGameIcon(p))
+      if p.under and b.icon.ring then b.icon.ring:Hide() end -- (its icon hidden under a stop's marker: its ring too)
       b:Show()
     end
   end
@@ -5369,7 +5370,9 @@ local function DrawStopPins(toScreen, viewCont)
     end
     -- (round with its ring as the icon it was made from, with Round icons on: asked 2026-11-16, "with double clicking
     -- and routing to a rounded icon, it 'selects' and shows a square icon instead"; a ride's or detour's art as it is)
-    G.RoundIcon(b, b.icon, not (d.learnNode or d.ride) and ns.Nav.StopIcon(d) or nil)
+    -- (the tram's and the lift's gear round too, as the map's tram ends under it: G.PoiGameIcon)
+    local gear = d.ride and (d.kind == "tram" or d.kind == "lift") and G.RideIcon(d) or nil
+    G.RoundIcon(b, b.icon, gear or not (d.learnNode or d.ride) and ns.Nav.StopIcon(d) or nil)
     b:Show()
   end
   -- every stop's marker (the route is worked out and drawn only to the ones ahead, PlannedStops:
@@ -5786,7 +5789,10 @@ function G.PoiGameIcon(p)
   local tex
   if p[1] == 12 then tex = ns.Pins and ns.Pins.IconTexture(p.icon)
   elseif p[1] == 4 then tex = p.icon
-  elseif p[1] == 16 then tex = p.npcIcon end
+  elseif p[1] == 16 then tex = p.npcIcon
+  elseif p[1] == 10 then tex = DOCK_ICON[p.kind] end -- (the Deeprun Tram's ends, the gear: round as the others, Kooki3z
+  -- 2026-11-23 "make the deeprun tram icons rendered to scale and round like the other icons"; our own ship and
+  -- zeppelin art isn't a game icon, as it is)
   return G.IsGameIcon(tex) and tex or nil
 end
 function G.DrawParty(cx, cy, rot, s, viewCont)

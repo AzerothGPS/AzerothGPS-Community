@@ -16,6 +16,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 ### Changed
 
 - Options > Help and Copy Map Data no longer mention the road tools: report map problems through the report form; roads you drew still guide your routes.
+- The Deeprun Tram's icons are round and drawn to scale like the map's other icons.
 
 ### Fixed
 
