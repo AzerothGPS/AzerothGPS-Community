@@ -8,6 +8,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 - Roads: new roads in Ironforge, down to the Hall of Thanes' way in.
 - Roads: new roads in Burning Steppes.
+- Roads: new roads in Feralas.
 - Dungeons and raids: every entrance knows its height, so the walk there ends on the right floor (Blackrock Mountain, caves).
 
 ### Changed
