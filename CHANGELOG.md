@@ -12,6 +12,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Roads: a new road in Tanaris.
 - Roads: new roads in Feralas.
 - Roads: a new road in The Barrens, from the Great Lift to Razorfen Downs.
+- Roads: new roads in The Hinterlands.
 - Dungeons and raids: every entrance knows its height, so the walk there ends on the right floor (Blackrock Mountain, caves).
 
 ### Changed
