@@ -890,10 +890,36 @@ def cmd_npc_spots(args) -> int:
     from . import npcspots
 
     path = Path(args.overrides) if args.overrides else npcspots.FILE
+    lpath = Path(args.logged) if getattr(args, "logged", None) else npcspots.LOGGED_FILE
     lua = Path(args.npcs_lua) if args.npcs_lua else npcspots.NPCS_LUA
+    logged = npcspots.load_logged(lpath)
     if args.import_file:
         marks = json.loads(Path(args.import_file).read_text(encoding="utf-8"))
         marks = marks.get("marks", []) if isinstance(marks, dict) else marks
+        # (the logger's marks of NPCs not shipped: new NPCs, overrides/logged_npcs.json; the rest move shipped spawns)
+        shipped = set(npcspots.parse_lua(lua.read_text(encoding="utf-8"))[1])
+        known = {int(k) for k in logged["npcs"]}
+        def unshipped(m):
+            try:
+                nid = int(m["id"])
+            except (KeyError, TypeError, ValueError):
+                return False
+            return npcspots.is_logged(m) and (nid not in shipped or nid in known)
+        new_npcs = [m for m in marks if unshipped(m)]
+        marks = [m for m in marks if not unshipped(m)]
+        if args.write:
+            added = npcspots.merge_logged(new_npcs, shipped - known, lpath)
+            logged = npcspots.load_logged(lpath)
+        else:
+            import tempfile
+            with tempfile.TemporaryDirectory() as tmp:
+                tp = Path(tmp) / "logged.json"
+                npcspots.save_logged(logged, tp)
+                added = npcspots.merge_logged(new_npcs, shipped - known, tp)
+                logged = npcspots.load_logged(tp)
+        print(f"{len(added)} new spot(s) of NPCs not shipped yet, from {len(new_npcs)} logger mark(s)")
+        for nid, s in added:
+            print(f"  {nid} {s['name'] or '?'} ({s['zone'] or '?'}): {s['x']:.1f}, {s['y']:.1f} on level {s['level']}")
         if args.write:
             new = npcspots.merge_marks(marks, path)
         else:  # (what it would take in)
@@ -907,7 +933,7 @@ def cmd_npc_spots(args) -> int:
     else:
         doc = npcspots.load(path)
         new = []
-    text, applied = npcspots.patch_lua(lua.read_text(encoding="utf-8"), doc, log=print)
+    text, applied = npcspots.patch_lua(lua.read_text(encoding="utf-8"), doc, log=print, logged=logged)
     for nid, done in sorted(applied.items()):
         for s, moved in done:
             how = "added as a spawn" if moved is None else f"moved {moved:.1f} yd"
@@ -931,7 +957,9 @@ def cmd_npcs(args) -> int:
     npcs, rep = build(data_dir())
     spawns = sum(len(n["spawns"]) for n in npcs.values())
     print(f"{len(npcs)} NPCs, {spawns} spawns; left out: " +
-          ", ".join(f"{v} {k}" for k, v in sorted(rep.items()) if k != "kept"))
+          ", ".join(f"{v} {k}" for k, v in sorted(rep.items()) if k not in ("kept", "logged")))
+    if rep.get("logged"):
+        print(f"{rep['logged']} NPC(s) logged in game added (overrides/logged_npcs.json)")
     fixed = npcspots.apply(npcs, npcspots.load(), log=print)  # (the spots marked in game: overrides/npc_spots.json)
     if fixed:
         print(f"{sum(len(v) for v in fixed.values())} spot(s) of {len(fixed)} NPC(s) from overrides/npc_spots.json")
@@ -1589,11 +1617,13 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--write", action="store_true")
     sp.set_defaults(fn=cmd_place_names)
 
-    sp = sub.add_parser("npc-spots", help="NPC spots marked in game into overrides/npc_spots.json and Data/Npcs.lua")
+    sp = sub.add_parser("npc-spots", help="NPC spots marked in game into overrides/npc_spots.json (and NPCs not "
+                        "shipped yet, from the NPC logger, into overrides/logged_npcs.json) and Data/Npcs.lua")
     sp.add_argument("--import", dest="import_file", metavar="MARKS_JSON",
                     help="marks to take in (a JSON list: id, name, level, cont, x, y, z, zone, time, client)")
     sp.add_argument("--write", action="store_true", help="write the overrides and Data/Npcs.lua")
     sp.add_argument("--overrides", help=argparse.SUPPRESS)
+    sp.add_argument("--logged", help=argparse.SUPPRESS)
     sp.add_argument("--npcs-lua", help=argparse.SUPPRESS)
     sp.set_defaults(fn=cmd_npc_spots)
 

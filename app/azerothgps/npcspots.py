@@ -160,11 +160,140 @@ def parse_lua(text: str) -> tuple[str, dict]:
     return head, npcs
 
 
-def patch_lua(text: str, doc: dict, log=None) -> tuple[str, dict]:
+def patch_lua(text: str, doc: dict, log=None, logged: dict | None = None) -> tuple[str, dict]:
     """Data/Npcs.lua's text with the override spots put in (the dump not needed: only the spawns marked change).
     Spots already in are moved onto themselves, so patching again changes nothing."""
     from .npcs import lua_text
 
     _, npcs = parse_lua(text)
+    add_logged(npcs, logged if logged is not None else load_logged(), log=log)  # (the NPCs logged in game)
     applied = apply(npcs, doc, log=log)
     return lua_text(npcs), applied
+
+
+# ---- NPCs AzerothGPS doesn't ship yet, logged in game (asked 2026-11-23: Riverglades, Mount Hyjal and Shen'dralas have
+# no NPCs in the 1.12 dump, the client's files or a test server). A plugin's NPC logger keeps every NPC the
+# player meets that isn't shipped as a mark with `source` "logger" (its services, title, faction too); the import puts
+# those of NPCs not shipped into LOGGED_FILE (reviewed in the pickup's PR like npc_spots.json), and both the generator
+# (`agps npcs --write`, npcs.build: after the dump and Zephras Isle's snapshot) and `agps npc-spots --write` add them
+# to Data/Npcs.lua. Kept per NPC id:
+#
+#     {"npcs": {"<id>": {"name", "sub", "svc", "side", "source": "logger",
+#                        "spawns": [{"level", "x", "y", "z"?, "zone", "time", "live", "npcLevel"?}]}}}
+#
+# An NPC the dump has (a later dump) is the dump's: the logged one is skipped.
+
+LOGGED_FILE = RESOURCES / "overrides" / "logged_npcs.json"
+LOGGED_SAME_YD = 20.0  # (spots of one NPC this near: one spawn, the newest)
+# The logger's services (its `svc`, "gossip,merchant") as Data/Npcs.lua's letters.
+LOGGED_SERVICES = {"gossip": "g", "quest": "q", "merchant": "v", "flight": "f", "trainer": "t", "innkeeper": "i",
+                   "banker": "b", "auctioneer": "a", "stable": "s"}
+SVC_ORDER = "gqvfthibpdmasr"  # (the dump's order: npcs.SERVICES)
+
+
+def load_logged(path: Path = LOGGED_FILE) -> dict:
+    p = Path(path)
+    if not p.exists():
+        return {"npcs": {}}
+    doc = json.loads(p.read_text(encoding="utf-8"))
+    doc.setdefault("npcs", {})
+    return doc
+
+
+def save_logged(doc: dict, path: Path = LOGGED_FILE) -> None:
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    ordered = {"npcs": {}}
+    for k, n in sorted(doc["npcs"].items(), key=lambda kv: int(kv[0])):
+        ordered["npcs"][k] = dict(n, spawns=sorted(n["spawns"], key=lambda s: s["time"]))
+    p.write_text(json.dumps(ordered, indent=1) + "\n", encoding="utf-8", newline="\n")
+
+
+def _svc_letters(letters: str, words: str) -> str:
+    """Data/Npcs.lua's service `letters` with the logger's `words` ("gossip,merchant") added, in the dump's order."""
+    have = set(letters or "")
+    for word in (words or "").split(","):
+        have.add(LOGGED_SERVICES.get(word.strip(), ""))
+    return "".join(c for c in SVC_ORDER if c in have)
+
+
+def _side(faction) -> str:
+    return {"Alliance": "A", "Horde": "H"}.get(str(faction or ""), "B")
+
+
+def is_logged(m: dict) -> bool:
+    return isinstance(m, dict) and m.get("source") == "logger"
+
+
+def merge_logged(marks: list[dict], shipped: set[int], path: Path = LOGGED_FILE) -> list[tuple[int, dict]]:
+    """The logger's marks of NPCs not in `shipped` (Data/Npcs.lua's ids), or logged before, into LOGGED_FILE (by their
+    time: one already there is skipped). The new ones, (id, spawn)."""
+    doc = load_logged(path)
+    have = {int(s["time"]) for n in doc["npcs"].values() for s in n["spawns"]}
+    new = []
+    for m in marks:
+        if not is_logged(m):
+            continue
+        got = spot_of(m)
+        if not got:
+            continue
+        nid, s = got
+        if s["time"] in have or (nid in shipped and str(nid) not in doc["npcs"]):
+            continue
+        have.add(s["time"])
+        if m.get("npcLevel") is not None:
+            s["npcLevel"] = int(m["npcLevel"])
+        n = doc["npcs"].setdefault(str(nid), {"name": s["name"], "sub": "", "svc": "", "side": "B",
+                                              "source": "logger", "spawns": []})
+        n["name"] = s["name"] or n["name"]
+        if m.get("title"):
+            n["sub"] = str(m["title"])
+        n["svc"] = _svc_letters(n["svc"], str(m.get("svc") or ""))
+        if "innkeeper" not in (n["name"] + " " + n["sub"]).lower():
+            n["svc"] = n["svc"].replace("i", "")
+        if m.get("faction"):
+            n["side"] = _side(m["faction"])
+        n["spawns"].append(s)
+        new.append((nid, s))
+    if new:
+        save_logged(doc, path)
+    return new
+
+
+def logged_spawns(n: dict) -> list[tuple]:
+    """A logged NPC's spawns (level, x, y, z): its spots, those of one level within LOGGED_SAME_YD one (the newest; its
+    height the newest known)."""
+    out: list[list] = []
+    for s in sorted(n["spawns"], key=_order):
+        spawn = [s["level"], s["x"], s["y"], s.get("z", 0.0)]
+        for i, (lv, x, y, _) in enumerate(out):
+            if lv == s["level"] and math.hypot(x - s["x"], y - s["y"]) <= LOGGED_SAME_YD:
+                if "z" not in s:  # (a height known from an older spot there: kept)
+                    spawn[3] = out[i][3]
+                out[i] = spawn
+                break
+        else:
+            out.append(spawn)
+    return [tuple(sp) for sp in out]
+
+
+def add_logged(npcs: dict, doc: dict, dump_ids: set[int] | None = None, log=None) -> list[int]:
+    """The logged NPCs (LOGGED_FILE's doc) into `npcs` in place, each written from the doc whole (so adding again
+    changes nothing); one in `dump_ids` (the dump has it now) is skipped. Their ids."""
+    from .npcs import server_trainer_kind
+
+    out = []
+    for key, n in sorted(doc.get("npcs", {}).items(), key=lambda kv: int(kv[0])):
+        nid = int(key)
+        if dump_ids is not None and nid in dump_ids:
+            if log:
+                log(f"logged npc {nid} ({n.get('name', '?')}): the dump has it now, skipped")
+            continue
+        spawns = logged_spawns(n)
+        if not spawns:
+            continue
+        npcs[nid] = {"name": n["name"], "sub": n.get("sub", ""), "svc": n.get("svc", ""),
+                     "trainer": server_trainer_kind(0x10 if "t" in n.get("svc", "") else 0, n.get("sub", "")),
+                     "side": n.get("side", "B"), "spawns": spawns}
+        out.append(nid)
+    return out

@@ -195,7 +195,18 @@ def build(data_dir: Path, ft: dict[int, dict] | None = None, undercity=None):
             n["spawns"].append((level, x, y, z))
             report["kept"] += 1
     _add_server(npcs, report, ft, alliance, horde, undercity=undercity)
+    _add_logged(npcs, report)
     return npcs, dict(report)
+
+
+def _add_logged(npcs, report, doc=None):
+    """The NPCs logged in game that neither the dump nor the server snapshot has (overrides/logged_npcs.json:
+    npcspots.py)."""
+    from . import npcspots
+
+    for nid in npcspots.add_logged(npcs, doc if doc is not None else npcspots.load_logged(), dump_ids=set(npcs),
+                                   log=print):
+        report["logged"] += 1
 
 
 def server_rows(path: Path = SERVER_FILE) -> list[dict]:
