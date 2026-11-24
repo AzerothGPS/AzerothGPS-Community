@@ -99,6 +99,12 @@ local function Copy(d)
   -- (a stop with no height of its own at an NPC's spot: that NPC's, N.SpawnZ. Not a guide's: theirs is looked up their
   -- own way, the guides' shipped waypoint heights first, RestedXP.lua's X.HeightXY; nor a corpse's)
   local z = d.z
+  -- (at a dungeon's or raid's way in, its icon's spot: its portal's height, N.EntrancePortalAt; Kooki3z 2026-11-23,
+  -- Blackrock Depths' stop "arrived" on the mountainside 108 yd over its door)
+  if z == nil and not d.corpse and N.EntrancePortalAt then
+    local t = N.EntrancePortalAt(d.cont, d.x, d.y)
+    z = t and t.z1 or nil
+  end
   if z == nil and not (d.corpse or d.rxp or d.zygor or d.polestar or d.questify or d.apr) and N.SpawnZ then
     z = N.SpawnZ(d.cont, d.x, d.y)
   end
@@ -2405,6 +2411,19 @@ function N.InCapital(level, px, py)
   local R = ns.Router
   return px and R and R.CapitalAt and R.CapitalAt(level, px, py) or false
 end
+-- Whether the game's map for the player is a capital's (Data/Capitals.lua's uiMap), its edges too (Ironforge's Tinker
+-- Town and the tram's end lie outside its city grid, N.InCapital). Under a mountain there with IsIndoors false (mounts
+-- allowed), its streets are not the ground's (Router.OffUnderground; test_tram_ride, 2026-11-24).
+function N.InCapitalMap()
+  local map = C_Map and C_Map.GetBestMapForUnit and C_Map.GetBestMapForUnit("player")
+  if not map then return false end
+  for _, list in pairs(ns.Capitals or {}) do
+    for _, c in ipairs(list) do
+      if c[3] == map then return true end
+    end
+  end
+  return false
+end
 -- (a hearthstone into an inn with its inside lands the player on the innkeeper's floor (the bind point): followed from
 -- there. Its floor wasn't known in there till they walked out of a door, and a trainer upstairs was "arrived" under it,
 -- the 1.1.5 test pass. Taken within HEARTH_TRACK_YD of where it landed, HEARTH_TRACK_SECONDS after; Teleports.lua)
@@ -2452,6 +2471,18 @@ function N.OutsideFloor(level, px, py, hs, z)
   end
   return true
 end
+-- Whether the player is indoors in halls under the ground with their roads' heights (the roads near UNDER_GROUND_Z or
+-- more under the map's ground: Blackrock Mountain's halls by Blackrock Spire's and Blackrock Depths' doors, floors over
+-- floors, 255 and 266 there under the mountain at 561): their floor followed as in a building (TrackCityZ), so the
+-- route keeps to it and a stop's floor tells arrival, as an NPC's. Kooki3z 2026-11-23, by Blackrock Spire's door: the
+-- route started on one floor and then the other as the nearest road changed, "said 3 yd up then went away", a U-turn.
+function N.InHallsUnderGround(level, px, py)
+  local R = ns.Router
+  if N.Indoors() ~= true or not (px and R and R.HeightsNear and R.GroundZ) then return false end
+  local hs = R.HeightsNear(level, px, py, N.TRACK_YD)
+  local gz = hs and hs[1] and R.GroundZ(level, px, py)
+  return gz ~= nil and hs[1].z < gz - N.UNDER_GROUND_Z
+end
 function N.TrackCityZ(level, px, py)
   -- (on a flight: not walked, nothing followed; started again where it lands. Orgrimmar, 2026-11-15: flown in over the
   -- city, the floor followed was the streets' under the wind rider, kept on landing up on the tower (no road at that
@@ -2461,8 +2492,12 @@ function N.TrackCityZ(level, px, py)
     return nil
   end
   local l = ns.CityLevels and ns.CityLevels[level]
+  -- (a cave with floors over floors only with the player indoors, IsIndoors: outdoors they're on the ground over it,
+  -- not on its floor under them. Kooki3z 2026-11-23: over Wailing Caverns' door its floor 138 yd down was followed, and
+  -- the walk to the door went straight down to it; Router.CaveDown's rule)
   local building = not l and px and ((ns.Indoors and ns.Indoors[level] and N.InBuilding(level, px, py))
-    or N.InCapital(level, px, py) or (ns.Router and ns.Router.InLayeredCave and ns.Router.InLayeredCave(level, px, py)))
+    or N.InCapital(level, px, py) or (N.Indoors() ~= false and ns.Router and ns.Router.InLayeredCave
+      and ns.Router.InLayeredCave(level, px, py)) or N.InHallsUnderGround(level, px, py))
   if not ((l and not l.instance) or building) or not (px and ns.Router and ns.Router.HeightsNear) then return nil end
   local now = GetTime()
   -- (followed a moment ago on this level; not since TRACK_STALE, or the clock went back: started again)
@@ -3306,6 +3341,33 @@ function N.WithoutBlockedWalks(cont, sx, sy, d, walk, tps, opts, sz, legs, route
   return bestLegs, bestRoutes
 end
 
+-- The dungeon's or raid's portal (a row of ns.Transports) whose end out here is at (x, y) on `cont`'s continent, within
+-- ENTRANCE_SPOT_YD (its icon's spot, G.InstanceEntrances), or nil.
+N.ENTRANCE_SPOT_YD = 3
+function N.EntrancePortalAt(cont, x, y)
+  if not (cont and x and y) then return nil end
+  local base = Geo.Base(cont)
+  for _, t in ipairs(ns.Transports or {}) do
+    if t[8] == "portal" and N.IsInstanceLevel(t[4]) and Geo.Base(t[1]) == base
+        and (t[2] - x) ^ 2 + (t[3] - y) ^ 2 <= N.ENTRANCE_SPOT_YD ^ 2 then
+      return t
+    end
+  end
+  return nil
+end
+
+-- A stop at a dungeon's or raid's way in deep under the ground there (UNDER_GROUND_Z or more under the map's ground:
+-- Blackrock Depths' door at 166 in the mountain, its side at 274): not reached by x and y from up top. The game gives
+-- no height (UnitPosition's z is 0 here), so the player's IsIndoors tells: outdoors, they're over it (CheckArrival).
+N.UNDER_GROUND_Z = 10
+function N.EntranceUnderGround(d)
+  local t = d and N.EntrancePortalAt(d.cont, d.x, d.y)
+  local h = t and N.StopHeight(d)
+  local R = ns.Router
+  local gz = h and R and R.GroundZ and R.GroundZ(d.cont, d.x, d.y)
+  return gz ~= nil and h < gz - N.UNDER_GROUND_Z
+end
+
 -- Whether level `lvl` is a dungeon's or a raid's (Data/Instances.lua), not a map between places (the Deeprun Tram's).
 function N.IsInstanceLevel(lvl)
   local l = lvl and ns.CityLevels and ns.CityLevels[lvl]
@@ -4067,7 +4129,7 @@ local function Compute(px, py, cont, d, offroad)
   local t1 = ns.PerfStart and ns.PerfStart()
   N.noWayCliff = nil -- (set again by the stretches: no way but a cliff)
   local first = Stretch(cont, px, py, d, walk, { offroad = offroad, transient = true, fixed = { offroad = offroad },
-    teleports = tps, indoors = N.Indoors(), swimming = N.Swimming(), here = here,
+    teleports = tps, indoors = N.Indoors(), swimming = N.Swimming(), here = here, capitalMap = N.InCapitalMap(),
     z = N.PlayerZ() or N.TrackCityZ(cont, px, py) or N.TrackRaisedZ(cont, px, py) })
   if t1 then ns.PerfEnd("route calculation: next stop", t1) end
   if not first then return nil end
@@ -5855,14 +5917,38 @@ end
 -- Reaching a stop that isn't the last one moves on to the next stop; reaching the last
 -- one marks the trip as arrived (cleared a few seconds later by Tick). A questing stop
 -- (see above) is reached when its quests are done, not by getting there.
+-- Whether the route's walk to stop `d` (the next) is done where the player stands: what's left of it shows as 0 yd
+-- (under ZERO_YD), no ride left on the way, and its end by the player (within ARRIVED_YD). Asked 2026-11-23, Kooki3z:
+-- "if player gets to the entrance or anything and it says 0 yds 0 s then we arrived (assuming floor is correct)": a
+-- route ending short of the stop (a dungeon's door for a stop inside it, N.OutsideInstances; the end of the roads near)
+-- sat at "0 yd 0 s" never arriving. CheckArrival's floor checks still say no on a floor known to be another.
+N.ZERO_YD = 0.5
+function N.RouteDone(d, px, py)
+  local r = N.route
+  if not (r and d and d == N.dest and px) or r.flying or r.pending or (r.rideSeconds or 0) > 0 then return false end
+  if (r.length or math.huge) >= N.ZERO_YD or (r.walkYards or math.huge) >= N.ZERO_YD then return false end
+  local last
+  for _, p in ipairs(r.parts or {}) do
+    if p.stop == 1 then last = p end
+  end
+  local pts = last and last.pts
+  if not (pts and #pts >= 2) then return false end
+  return (pts[#pts - 1] - px) ^ 2 + (pts[#pts] - py) ^ 2 <= ARRIVED_YD ^ 2
+end
+
 local function CheckArrival(px, py, cont)
   local d = N.dest
   while d do
     if d.corpse then return false end -- at your body: it stays until you're alive (DeathCheck)
     local at = cont == d.cont and math.sqrt((d.x - px) ^ 2 + (d.y - py) ^ 2) <= ARRIVED_YD
+    -- (or the route's walk to it done, "0 yd": N.RouteDone; the floor checks below still apply)
+    local done = not at and d == N.dest and N.RouteDone(d, px, py)
+    if done then at = true end
     -- (a stop on a floor of a building, the player's floor followed there and another: not there yet; Brill's inn,
     -- 2026-10-06: "arrived" on the ground floor under a trainer upstairs)
     if at and N.OffStopFloor(d) then at = false end
+    -- (a dungeon's way in deep under the ground, the player outdoors: on the ground over it, N.EntranceUnderGround)
+    if at and N.Indoors() == false and N.EntranceUnderGround(d) then at = false end
     -- (a stop in a room reached through a teleporter: only once the player came in by it, N.RoomWatch)
     if at then
       local room = N.StopRoom(d)
@@ -5878,7 +5964,7 @@ local function CheckArrival(px, py, cont)
     if at then
       off, dz, pending = N.StopOffGround(d)
       onFloor = N.OnStopFloor(d)
-      why = onFloor and "floor" or "distance"
+      why = onFloor and "floor" or done and "route done" or "distance"
       -- (the floor followed here and the stop's height a floor apart: off, whatever the roads by it said. Ironforge,
       -- 2026-11-22: the floor followed 505.5 under Nissa Firestone at 512.5)
       local fz = not onFloor and not off and FloorNear(d)
@@ -6289,6 +6375,8 @@ function N.Status(px, py, cont)
   N.MaybeReorder(px, py, cont)
   local d = N.dest
   local r = N.Route(px, py, cont)
+  -- (the route just worked out ends here, "0 yd": arrived now, not a tick later; N.RouteDone)
+  if r and N.RouteDone(d, px, py) and CheckArrival(px, py, cont) then return L["|cff40ff40Arrived|r"] end
   if r then N.WatchFollowing(r, cont) end -- (low performance: paused when not followed, N.AUTO_PAUSE_*)
   if N.paused then return N.PausedText() end
   if not r then
@@ -6303,6 +6391,9 @@ function N.Status(px, py, cont)
   working = nil -- (the next time: picked again)
   local cur, walk, mount, mounted, ability = N.Speeds()
   local head = N.FormatDistance(r.length)
+  -- (at the route's end, not arrived (a floor off, known): the floor's hint, not "0 yd" (N.RouteDone))
+  local hint = N.HeightText(px, py, cont) or N.FloorText(px, py, cont)
+  if r.length < N.ZERO_YD and hint then head, hint = hint, nil end
   local multi = #N.stops > 1
   if multi then head = string.format("|T%s:14|t 1/%d  %s", N.StopIcon(d), #N.stops, head) end
   local t, from, atDock = NextRide(r, px, py)
@@ -6348,7 +6439,6 @@ function N.Status(px, py, cont)
     end
     head = table.concat(q, "\n") .. "\n" .. head
   end
-  local hint = N.HeightText(px, py, cont) or N.FloorText(px, py, cont)
   if hint then head = head .. "\n" .. hint end
   local into = N.IntoBuildingText(px, py, cont) -- (a stop up a floor with no road there: the way on, in words)
   if into then head = head .. "\n" .. into end

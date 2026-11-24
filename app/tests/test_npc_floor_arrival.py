@@ -386,3 +386,25 @@ def test_targeted_in_range_from_the_floor_below_is_not_arrived(clean):
     _stop(lua, ns, DELLIS, DELLIS_XYZ, "Acolyte Dellis")
     N.AnchorFloor(0, x + 4, y, 104.8)
     assert ARRIVED in (N.Status(x + 4, y, 0) or "")
+
+
+def test_at_the_routes_end_a_floor_off_shows_the_floor_not_0_yd(clean):
+    # (Kooki3z 2026-11-23: "if player gets to the entrance or anything and it says 0 yds 0 s then we arrived (assuming
+    # floor is correct)": at the route's end on a floor known to be another, not arrived, and the floor said, not "0 yd")
+    lua, ns = clean
+    N, G = ns.Nav, ns.GPS
+    _stop(lua, ns, DELLIS, DELLIS_XYZ, "Acolyte Dellis")
+    x, y, _ = DELLIS_XYZ
+    _at(lua, x + 7, y - 2)
+    for t in range(4):
+        lua.execute(f"AGPS_T = {400 + t}")
+        G.Update()
+    p = N.route.parts[len(N.route.parts)]
+    ex, ey = p.pts[len(p.pts) - 1], p.pts[len(p.pts)]
+    _at(lua, ex, ey)
+    lua.execute("AGPS_T = 405")
+    G.Update()
+    text = N.Status(ex, ey, 0) or ""
+    assert ARRIVED not in text and N.dest is not None, text
+    first = text.split("\n")[0]
+    assert "0 yd" not in first and ("Above you" in first or "Upstairs" in first), text

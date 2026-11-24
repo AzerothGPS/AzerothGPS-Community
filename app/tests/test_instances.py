@@ -836,3 +836,127 @@ def test_a_measured_entrance_comes_first_and_moves_the_spot():
     e = (0, -7179.5, -922.7, 166.1, 456.9, 34.1, -68.1, "Blackrock Depths - Entering")
     h = entrance_height(_inst(230), e, {"teleports": []}, [], _Floors([(274.3, "terrain")]))
     assert (h["z"], h["source"]) == (166.2, "measured")
+
+
+@pytest.mark.parametrize("level", [
+    20230,  # Blackrock Depths: its door 108 yd under the side of Blackrock Mountain (Kooki3z's report)
+    20036,  # the Deadmines: in the mine under Moonbrook
+    20043,  # Wailing Caverns: in its cave under the Barrens
+    20249,  # Onyxia's Lair, a raid: in its cave in Dustwallow Marsh
+])
+def test_a_dungeons_icon_stop_is_its_door_and_not_reached_from_the_ground_over_it(level):
+    # (Kooki3z 2026-11-23, on the side of Blackrock Mountain with Blackrock Depths' icon double-clicked: "Arrive at
+    # destination, 6 yd, 0 s", "this is on the mountain, says I'm here"; the stop was the icon's spot with no height)
+    from azerothgps.gameharness import start
+    lua, ns = start()
+    G, N = ns.GPS, ns.Nav
+    portal = next(p for p in _portals(ns) if p[4] == level)
+    cont = portal[1]
+    ents = G.InstanceEntrances(cont)
+    e = next(ents[i] for i in range(1, len(ents) + 1) if ents[i].level == level)
+    assert e.x == pytest.approx(portal[2]) and e.y == pytest.approx(portal[3])
+    # on the ground right over its door, outdoors
+    x, y = portal[2] + 4, portal[3] + 4
+    lua.execute("IsIndoors = function() return AGPS_INDOORS end; AGPS_INDOORS = false")
+    lua.execute(f"AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = {x}, {y}, {cont}")
+    assert G.AddStopAt(e.x, e.y, e.name, e.cont)  # (its icon double-clicked)
+    G.ConfirmRoute()
+    try:
+        for _ in range(10):
+            lua.execute("AGPS_T = AGPS_T + 0.5")
+            G.Update()
+        # the stop is its door, at the door's height
+        d = N.stops[1]
+        assert d and d.z == pytest.approx(portal.z1)
+        assert N.EntranceUnderGround(d)
+        # not "Arrived" up there: by the way in, not straight down through the ground
+        status = str(N.Status(x, y, cont))
+        assert "Arrived" not in status, status
+        assert N.stops[1] and N.route
+        part = N.route.parts[1]
+        assert N.route.length > 20 and len(part.pts) > 4, (N.route.length, len(part.pts))
+        # in at its door (indoors): there
+        lua.execute(f"AGPS_INDOORS = true; AGPS_POS[1], AGPS_POS[2] = {portal[2] + 1}, {portal[3]}")
+        assert "Arrived" in str(N.Status(portal[2] + 1, portal[3], cont))
+    finally:
+        N.Clear()
+
+
+def _walk_the_route(lua, ns, x, y, cont, steps=60, stride=4.0):
+    """Walks the player along the route as drawn, `stride` yd a step; returns the maneuvers seen and the last status."""
+    G, N, T = ns.GPS, ns.Nav, ns.Turns
+    seen, status = [], None
+    for _ in range(steps):
+        for _ in range(2):
+            lua.execute("AGPS_T = AGPS_T + 0.5")
+            G.Update()
+        status = str(N.Status(x, y, cont))
+        if "Arrived" in status or not N.route:
+            break
+        _, ms = T.Ahead(N.route, "stop")
+        seen += [str(ms[i].text) for i in range(1, len(ms) + 1)] if ms else []
+        p = N.route.parts[1]
+        pts = [(p.pts[i], p.pts[i + 1]) for i in range(1, len(p.pts), 2)]
+        left = stride
+        for (ax, ay), (bx, by) in zip(pts, pts[1:]):
+            if math.dist((x, y), (ax, ay)) > 0.01 and left == stride:
+                ax, ay = x, y
+            d = math.dist((ax, ay), (bx, by))
+            if d >= left:
+                x, y = ax + (bx - ax) * left / d, ay + (by - ay) * left / d
+                break
+            x, y, left = bx, by, left - d
+        lua.execute(f"AGPS_POS[1], AGPS_POS[2] = {x}, {y}")
+    return seen, status
+
+
+@pytest.mark.parametrize("level,start,floor", [
+    (20229, (-7546.0, -1270.0), 266.0),  # Blackrock Spire: its entrance halls, floors 255 and 266 over each other
+    (20230, (-7200.0, -950.0), None),  # Blackrock Depths: the hall to its door
+])
+def test_a_dungeons_door_in_halls_under_a_mountain_is_walked_on_their_floor_and_arrived_at(level, start, floor):
+    # (Kooki3z 2026-11-23, in Blackrock Spire's entrance halls with its door the stop: "said 3 yd up then went away",
+    # "Continue straight, then make a U-turn in 37 yd". The halls' floors weren't followed (not a capital, a building or
+    # a layered cave), so the route started on whichever floor's road was nearest. "Maybe for floor routing we use the
+    # same logic we do for NPCs": followed as in a building, N.InHallsUnderGround, the door's height its floor)
+    from azerothgps.gameharness import start as start_game
+    lua, ns = start_game()
+    G, N = ns.GPS, ns.Nav
+    portal = next(p for p in _portals(ns) if p[4] == level)
+    x, y = start
+    lua.execute("IsIndoors = function() return true end")
+    lua.execute(f"AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = {x}, {y}, 0")
+    assert N.InHallsUnderGround(0, portal[2], portal[3]) or N.InHallsUnderGround(0, x, y)
+    ents = G.InstanceEntrances(0)
+    e = next(ents[i] for i in range(1, len(ents) + 1) if ents[i].level == level)
+    assert G.AddStopAt(e.x, e.y, e.name, e.cont)
+    G.ConfirmRoute()
+    try:
+        for _ in range(4):
+            lua.execute("AGPS_T = AGPS_T + 0.5")
+            G.Update()
+        if floor:
+            assert N.FollowedZ(0) == pytest.approx(floor, abs=2)  # (its floor followed, as in a building)
+        seen, status = _walk_the_route(lua, ns, x, y, 0)
+        assert not any("U-turn" in s for s in seen), seen
+        assert "Arrived" in status, status
+    finally:
+        N.Clear()
+
+
+def test_at_the_door_of_a_dungeon_with_a_stop_inside_it_is_arrived(inst_env):
+    # (Kooki3z 2026-11-23: "if player gets to the entrance or anything and it says 0 yds 0 s then we arrived (assuming
+    # floor is correct)". A stop inside the Deadmines: the route ends at its door (N.OutsideInstances); there, 0 yd)
+    lua, ns = inst_env
+    N = ns.Nav
+    x, y = near_the_deadmines_portal(lua, ns)
+    N.SetStops(lua.table(lua.table(x=VANCLEEF[0], y=VANCLEEF[1], cont=DM, name="Edwin VanCleef")))
+    r = N.Route(x, y, 0)
+    assert r.length > 5 and "Arrived" not in str(N.Status(x, y, 0))
+    p = r.parts[len(r.parts)]
+    ex, ey = p.pts[len(p.pts) - 1], p.pts[len(p.pts)]
+    assert math.dist((ex, ey), DM_PORTAL) < 3
+    ns.Geo.SetOverride(lua.eval(f"{{ x = {ex}, y = {ey}, cont = 0, z = 25, indoors = true }}"))
+    lua.execute("GetTime = function() return 100 end")
+    assert "Arrived" in str(N.Status(ex, ey, 0))
+    assert N.dest is None
