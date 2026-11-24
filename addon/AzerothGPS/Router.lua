@@ -3379,7 +3379,7 @@ local function BlockedYards(cont, x1, y1, x2, y2)
   local n = math.max(1, math.floor(d / 4))
   local blocked = 0
   for i = 0, n do
-    BreatheIfOver(i + 1, 16) -- (a long line decodes the grid's rows as it goes)
+    BreatheIfOver(i + 1, 4) -- (a long line decodes the grid's rows as it goes: 16 samples were 10 ms on the slow-client clock, #986)
     local t = i / n
     if P.At(cont, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t) == 2 then blocked = blocked + d / (n + 1) end
   end
@@ -3393,7 +3393,7 @@ local function BlockedRun(cont, x1, y1, x2, y2)
   local n = math.max(1, math.floor(d / 4))
   local run, most = 0, 0
   for i = 0, n do
-    BreatheIfOver(i + 1, 16)
+    BreatheIfOver(i + 1, 4)
     local t = i / n
     if P.At(cont, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t) == 2 then
       run = run + d / n
@@ -3876,10 +3876,14 @@ local function NearestEdgesRaw(cont, x, y, z)
       table.sort(ds)
       if ((ring - 1) * SEG_BUCKET) ^ 2 > ds[R.NEAREST_ENOUGH] then break end
     end
+    -- (the ring's own cells only, in the order the whole square's scan met them: kx, then ky. Scanning the square,
+    -- (2 ring + 1)^2 cells a ring, a spot far from any road was 19 ms between pauses on the slow-client clock, #986)
     for kx = bx - ring, bx + ring do
-      for ky = by - ring, by + ring do
-        if math.max(math.abs(kx - bx), math.abs(ky - by)) == ring then
-          local bucket = idx[Key(kx, ky)] or {}
+      local edge = kx == bx - ring or kx == bx + ring
+      local kyStep = (edge or ring == 0) and 1 or 2 * ring
+      for ky = by - ring, by + ring, kyStep do
+        local bucket = idx[Key(kx, ky)]
+        if bucket then
           for j = 1, #bucket - 2, 3 do
             local ei, i, along = bucket[j], bucket[j + 1], bucket[j + 2]
             local sk = ei * 100000 + i
@@ -4877,7 +4881,7 @@ function R.Smooth(cont, r)
   local smoothable = { [R.KIND_ROAD] = true, [R.KIND_OFFROAD] = true }
   local out, ok = { pts[1], pts[2] }, {}
   local outF = fz and { fz[1] } or nil -- (the floors of the points kept)
-  local i, steps = 1, 0
+  local i, steps, checks = 1, 0, 0
   while i < n do
     steps = steps + 1
     Breathe(steps, 10) -- (in a background job: a pause now and then; each step checks the ground)
@@ -4886,6 +4890,7 @@ function R.Smooth(cont, r)
     if smoothable[k] then
       local along, j = 0, i
       local flo, fhi = fz and fz[i], fz and fz[i]
+      local junction, cost, costTo, hs, hsTo = false, 0, i, 0, i -- (the pieces from i up to costTo, hsTo)
       while j < n and kinds[j] == k do
         local ax, ay = P(j)
         local bx, by = P(j + 1)
@@ -4899,15 +4904,25 @@ function R.Smooth(cont, r)
           if fhi - flo > R.SMOOTH_FLOOR_Z then break end
         end
         j = j + 1
+        -- (by the clock too: a step looks at every chord out to SMOOTH_SPAN, each its ground, water and guards, and
+        -- over a walk's closely spaced points that was 64 ms between pauses on the slow-client clock, issue #986)
+        checks = checks + 1
+        BreatheIfOver(checks, 1)
         if j >= i + 2 then
           local x1, y1 = P(i)
           local x2, y2 = P(j)
           local chord = Dist(x1, y1, x2, y2)
-          local dev, junction = 0, false
+          local dev = 0
           for m = i + 1, j - 1 do
             local mx, my = P(m)
             dev = math.max(dev, SegDev(mx, my, x1, y1, x2, y2))
-            if k == R.KIND_ROAD and R.JunctionAt and R.JunctionAt(cont, mx, my) then junction = true end
+          end
+          -- (the junctions, the pieces' cost and their guards' yards are kept as j goes on, each point and piece
+          -- looked at once, in the order they were added up before: for every j again they were the square of the
+          -- points within SMOOTH_SPAN, a walk's 1 yd points 3,000 HostileYards a step, #986)
+          if k == R.KIND_ROAD and R.JunctionAt and not junction then
+            local mx, my = P(j - 1)
+            if R.JunctionAt(cont, mx, my) then junction = true end
           end
           local jog = along >= chord * R.SMOOTH_RATIO and dev > R.SMOOTH_TOL
           if jog and ns.Passability and ns.Passability.HillyAlong and ns.Passability.HillyAlong(cont, pts, i, j) then
@@ -4919,20 +4934,20 @@ function R.Smooth(cont, r)
             -- (nor across water the route went round: a walk round a pond south of Tarren Mill was cut straight
             -- across it, open ground being all it asked, 2026-11-19. Its cost at the swim cost, not its yards)
             if type(walk) == "number" and walk > chord + 0.5 then
-              local cost = 0
-              for m = i, j - 1 do
-                local ax, ay = P(m)
-                local bx, by = P(m + 1)
+              while costTo < j do
+                local ax, ay = P(costTo)
+                local bx, by = P(costTo + 1)
                 cost = cost + (ns.Passability.SegmentCost(cont, ax, ay, bx, by, 0) or Dist(ax, ay, bx, by))
+                costTo = costTo + 1
               end
               if walk > cost + 0.5 then walk = nil end
             end
             if walk then
-              local hs = 0
-              for m = i, j - 1 do
-                local ax, ay = P(m)
-                local bx, by = P(m + 1)
+              while hsTo < j do
+                local ax, ay = P(hsTo)
+                local bx, by = P(hsTo + 1)
                 hs = hs + R.HostileYards(cont, ax, ay, bx, by)
+                hsTo = hsTo + 1
               end
               if R.HostileYards(cont, x1, y1, x2, y2) <= hs + 1 then best = j end
             end
