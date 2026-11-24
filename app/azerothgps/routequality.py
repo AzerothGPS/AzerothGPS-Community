@@ -74,6 +74,7 @@ for the 1,785 walked west over the land before (1.45 times), 700 s to 811 s.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import random
@@ -722,8 +723,20 @@ def own_rows(rows: list[dict]) -> list[dict]:
     return out
 
 
-def load_rows(path: Path | None, count: int, seed: int) -> list[dict] | None:
-    """Rows kept by an earlier run (save_rows) for the same trips, or None (no file, other trips, unreadable)."""
+def trip_places(older: dict | None = None) -> str:
+    """A fingerprint of the places the trips are drawn from (tripsweep._places: Data/Pois.lua), the older version's
+    own when `older` (_older_files) has it, else the working tree's. A place added or taken out moves every trip drawn
+    after it: rows kept from another list are other trips (2026-11-24, #978's Battle Ring)."""
+    text = (older or {}).get("Data/Pois.lua")
+    if text is None:
+        f = ADDON_DIR / "Data" / "Pois.lua"
+        text = f.read_text(encoding="utf-8") if f.is_file() else ""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+def load_rows(path: Path | None, count: int, seed: int, places: str | None = None) -> list[dict] | None:
+    """Rows kept by an earlier run (save_rows) for the same trips, or None (no file, other trips, unreadable). With
+    `places` (trip_places), only rows drawn from those places."""
     if path is None or not Path(path).is_file():
         return None
     try:
@@ -735,13 +748,16 @@ def load_rows(path: Path | None, count: int, seed: int) -> list[dict] | None:
     rows = kept.get("rows")
     if kept.get("trips") != count or kept.get("seed") != seed or not isinstance(rows, list) or len(rows) != count:
         return None
+    if places is not None and kept.get("places") != places:
+        return None
     return rows
 
 
-def save_rows(path: Path, rows: list[dict], count: int, seed: int) -> None:
+def save_rows(path: Path, rows: list[dict], count: int, seed: int, places: str | None = None) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"trips": count, "seed": seed, "rows": own_rows(rows)}), encoding="utf-8")
+    path.write_text(json.dumps({"trips": count, "seed": seed, "places": places, "rows": own_rows(rows)}),
+                    encoding="utf-8")
 
 
 def run(count: int, seed: int, against: str, log=print, jobs: int = 1, before_rows: Path | None = None,
@@ -755,18 +771,20 @@ def run(count: int, seed: int, against: str, log=print, jobs: int = 1, before_ro
     older = _older_files(against)
     log(f"route-quality: {count} trips (seed {seed}); {against}: {len(older)} addon files differ"
         + (f" ({', '.join(sorted(older)[:6])}{'...' if len(older) > 6 else ''})" if older else ""))
-    before = load_rows(before_rows, count, seed)
+    # (kept rows only for the trips this run draws: the same places, trip_places)
+    places = trip_places(older)
+    before = load_rows(before_rows, count, seed, places)
     if before is not None:
         log(f"  {against}: {len(before)} rows kept from an earlier run ({before_rows})")
     else:
         log(f"  {against}:")
         before = _weigh(count, seed, older or None, log, None, jobs)
         if before_rows is not None:
-            save_rows(before_rows, before, count, seed)
+            save_rows(before_rows, before, count, seed, places)
     log("  the working tree:")
     after = _weigh(count, seed, None, log, before, jobs)
     if keep_rows is not None:
-        save_rows(keep_rows, after, count, seed)
+        save_rows(keep_rows, after, count, seed, trip_places())
     if older:  # (the newer routes past the older version's guards: `unguarded`)
         for row, yd in zip(after, guards_by(older, after)):
             row["new_old_guard"] = yd

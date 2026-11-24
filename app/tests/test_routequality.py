@@ -525,3 +525,26 @@ def test_kept_older_rows_stand_in_for_weighing_them(tmp_path, monkeypatch):
     again = rq.run(3, 21, "main", log=lambda *a: None, before_rows=base)
     assert weighed == ["newer"]  # (the older version's rows read, not weighed)
     assert again["same"] == first["same"] == 3
+
+
+def test_kept_rows_from_other_places_are_weighed_again(tmp_path, monkeypatch):
+    """2026-11-24: rows kept before #978 took a place out of Data/Pois.lua were other trips row by row; read back, a
+    routing PR showed trips "worse" and "lost" that were never its own. Kept rows carry their places' fingerprint."""
+    weighed = []
+
+    def weigh(count, seed, replace, log, older, jobs):
+        weighed.append("older" if older is None else "newer")
+        return [_row(k, 100 + k) for k in range(count)]
+
+    monkeypatch.setattr(rq, "_weigh", weigh)
+    monkeypatch.setattr(rq, "_older_files", lambda ref: {})
+    for name in ("changed_roads", "new_walls", "new_deep", "old_roads"):
+        monkeypatch.setattr(rq, name, lambda ref: None)
+    base = tmp_path / "base.json"
+    rq.save_rows(base, [_row(k, 100 + k) for k in range(3)], 3, 21, "other places")
+    assert rq.load_rows(base, 3, 21) is not None and rq.load_rows(base, 3, 21, rq.trip_places()) is None
+    rq.run(3, 21, "main", log=lambda *a: None, before_rows=base)
+    assert weighed == ["older", "newer"]  # (weighed again, not read back)
+    assert rq.load_rows(base, 3, 21, rq.trip_places()) is not None
+    # (an older version with its own places: those are its trips')
+    assert rq.trip_places({"Data/Pois.lua": "ns.Pois = {}"}) != rq.trip_places()
