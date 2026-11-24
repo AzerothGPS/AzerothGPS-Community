@@ -30,6 +30,9 @@ Each version's section is its release notes (GitHub and CurseForge).
 - Setting a route, the map zooms out to show it only once the route is drawn, not while it's still being worked out.
 - A stop inside a dungeon or raid routes to its entrance: the distance and time are to the portal, not the walk inside.
 - Clicking a dungeon or raid with no map yet (Nightmare Grove) does nothing; its tooltip says the map is coming soon.
+- A dungeon's or raid's entrance stop (Blackrock Depths) is its door at its height: no more "Arrived" on the ground above it; the route goes in.
+- Blackrock Mountain's halls: the route keeps to your floor to Blackrock Spire's and Blackrock Depths' doors, no U-turns.
+- At the end of a route ("0 yd") you've arrived; a floor off, it says which way instead of "0 yd".
 
 ## 1.3.14
 

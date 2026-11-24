@@ -4277,6 +4277,22 @@ function R.OffRaised(g, list, nearer, cont, x, y)
   return (any and out[1]) and out or list
 end
 
+-- The start's road candidates without those deep under the ground where they are (a road with heights UNDER_GROUND_Z or
+-- more under the map's ground: Blackrock Mountain's halls under its side), for a player outdoors (IsIndoors false) with
+-- no floor followed: up top, not in there. Kooki3z 2026-11-23, on Blackrock Mountain's side over Blackrock Depths' door:
+-- the walk went 6 yd straight down onto its roads at 166 under the ground at 274, "Arrived". None left: as they were.
+R.UNDER_GROUND_Z = 10
+function R.OffUnderground(g, list, cont)
+  if not (g and g.nz and list and list[1]) then return list end
+  local out, any = {}, false
+  for _, c in ipairs(list) do
+    local h = R.RoadFloor(g, c)
+    local gz = h and R.GroundZ(cont, c.px, c.py)
+    if gz and h < gz - R.UNDER_GROUND_Z then any = true else out[#out + 1] = c end
+  end
+  return (any and out[1]) and out or list
+end
+
 -- Whether (x, y) at height z is on a raised road of graph `g` (within RAISED_ON_YD, its floor within SAME_FLOOR_Z).
 R.RAISED_ON_YD = 8
 function R.OnRaised(g, cont, x, y, z)
@@ -5887,6 +5903,13 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
     offFloor = (inT or inS) and not (sz and tz and math.abs(sz - tz) <= R.SAME_FLOOR_Z) and true or false
     if offFloor then direct = nil end
   end
+  -- (a stop deep under the ground there, a dungeon's door in a mountain, from a start not at its height: by the roads
+  -- in, never straight down through the rock; Kooki3z 2026-11-23, Blackrock Depths' door 108 yd under the side of
+  -- Blackrock Mountain, 6 yd straight and "Arrived")
+  if direct and not layered and tz and not (sz and math.abs(sz - tz) <= R.SAME_FLOOR_Z) then
+    local gz = R.GroundZ(cont, tx, ty)
+    if gz and tz < gz - R.UNDER_GROUND_Z then direct, offFloor = nil, true end
+  end
   -- (straight past the other faction's guards isn't a way to go if there's another)
   if direct and R.HostileYards(cont, sx, sy, tx, ty, nil, exempt) > 0 then direct = nil end
   Breathe(1, 1)
@@ -5975,6 +5998,13 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
   -- roads under it, not up onto it overhead; it's reached by its ends, the route going round to one. Asked 2026-11-18
   -- for 1.3.10: "pathing would know if an area is accessible based on player position")
   if not layered and g.raised and not (opts and opts.z) then ss = R.OffRaised(g, ss, nil, cont, sx, sy) end
+  -- (and outdoors with no floor followed: not onto roads deep under the ground there, R.OffUnderground. Not on a
+  -- capital's map (opts.capitalMap, Nav.InCapitalMap): Ironforge's streets are under Dun Morogh's mountain and the game
+  -- says outdoors there (mounts allowed); from its tram end every road near was dropped and the walk went over the
+  -- mountain through the Wetlands, test_tram_ride, 2026-11-24)
+  if not layered and g.nz and opts and opts.indoors == false and not opts.z and not opts.capitalMap then
+    ss = R.OffUnderground(g, ss, cont)
+  end
   -- (and a stop with no height by a road under one, nearer it than the raised road: not off the side of the bridge)
   if not layered and g.raised and not (opts and opts.tz) then ts = R.OffRaised(g, ts, true, cont, tx, ty) end
   -- a city: roads on the same floor as the start or the stop (the nearest may be on a
