@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from pathlib import Path
 
 from .paths import ADDON_DIR, RESOURCES
@@ -152,6 +153,10 @@ def parse_lua(text: str) -> tuple[str, dict]:
             lv, x, y, z = one.split(" ")
             sp.append((int(lv), float(x), float(y), float(z)))
         npcs[int(i)] = {"name": name, "sub": sub, "svc": svc, "trainer": trainer, "side": side, "spawns": sp}
+    m = re.search(r"^-- From the server snapshot:(.*)$", rest, re.M)  # (lua_text's last line: where they came from)
+    for i in (m.group(1).split() if m else ()):
+        if int(i) in npcs:
+            npcs[int(i)]["from"] = "server"
     return head, npcs
 
 

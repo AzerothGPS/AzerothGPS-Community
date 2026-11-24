@@ -2,7 +2,7 @@
 "nearest" vendor, class trainer or innkeeper routed off the island instead of to the NPCs right there, e.g. the mage
 trainer Anathamaas Aetherwind at about 65.9, 80.6). The isle (level 2991, WoW Forever's own) isn't in the 1.12 dump
 the shipped NPCs came from, so none of its NPCs were known before talking to them, and Quick Find took the first
-mainland one when none was on the player's continent. Now: the isle's NPCs ship (npcs.py's ISLE_FILE, `agps npcs`),
+mainland one when none was on the player's continent. Now: the isle's NPCs ship (npcs.py's SERVER_FILE, `agps npcs`),
 the nearest of a kind is the one on the player's own land, and with none there Quick Find says so instead of routing
 off it."""
 from collections import defaultdict
@@ -27,13 +27,13 @@ def test_the_isles_npcs_are_shipped():
 
 
 def test_the_generator_reads_the_isles_rows_by_the_same_rules():
-    from azerothgps.npcs import ISLE, _add_isle, isle_rows, isle_services, isle_trainer_kind
+    from azerothgps.npcs import ISLE, _add_server, server_rows, server_services, server_trainer_kind
 
-    rows = isle_rows()
+    rows = [r for r in server_rows() if int(r["map"]) == ISLE]
     assert any(r["name"] == "Anathamaas Aetherwind" for r in rows) and all(int(r["map"]) == ISLE for r in rows)
-    assert isle_services(65536 | 128 | 1) == "gvi" and isle_services(4096 | 128) == "vr"
-    assert isle_trainer_kind(19, "Mage Trainer") == "MAGE" and isle_trainer_kind(145, "Miner") == "Mining"
-    assert isle_trainer_kind(2, "Mage Trainer") == ""  # (no trainer flag: not a trainer)
+    assert server_services(65536 | 128 | 1) == "gvi" and server_services(4096 | 128) == "vr"
+    assert server_trainer_kind(19, "Mage Trainer") == "MAGE" and server_trainer_kind(145, "Miner") == "Mining"
+    assert server_trainer_kind(2, "Mage Trainer") == ""  # (no trainer flag: not a trainer)
     alliance = {"Faction": 1, "FactionGroup": 3, "FriendGroup": 2, "EnemyGroup": 12, "Enemies": [0], "Friend": [0]}
     horde = {"Faction": 2, "FactionGroup": 5, "FriendGroup": 4, "EnemyGroup": 10, "Enemies": [0], "Friend": [0]}
     ft = {35: {"Faction": 35, "FactionGroup": 0, "FriendGroup": 0, "EnemyGroup": 0, "Enemies": [0], "Friend": [1, 2]},
@@ -47,7 +47,7 @@ def test_the_generator_reads_the_isles_rows_by_the_same_rules():
     npcs = {6491: {"name": "Spirit Healer", "sub": "", "svc": "gh", "trainer": "", "side": "B",
                    "spawns": [(0, 1.0, 1.0, 1.0)]}}
     report = defaultdict(int)
-    _add_isle(npcs, report, ft, alliance, horde, rows=[
+    _add_server(npcs, report, ft, alliance, horde, rows=[
         row(1, "Inna", "Innkeeper", 65665), row(2, "Mage", "Mage Trainer", 19),
         row(3, "Hostile", "", 2, faction=14), row(4, "Guard", "", 1, extra=0x8000),
         row(6491, "Spirit Healer", "", 16385), row(2, "Mage", "Mage Trainer", 19, x=2000.4)])
