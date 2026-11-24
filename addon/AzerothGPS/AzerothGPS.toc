@@ -1,5 +1,5 @@
 ## Interface: 16001
-## Title: AzerothGPS
+## Title: |cff2680ffAzerothGPS|r
 ## Notes: Car-GPS style navigation: a square map with routes and turn-by-turn directions. Display only; never automates anything.
 ## Category: Map
 ## Author: AzerothGPS
