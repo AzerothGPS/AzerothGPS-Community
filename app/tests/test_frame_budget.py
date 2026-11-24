@@ -6,7 +6,6 @@ than the game's Lua; the limits leave room for that and are far below the spikes
 """
 
 import os
-from collections import deque
 
 import pytest
 
@@ -520,7 +519,7 @@ def test_sort_by_first_orders_as_the_games_table_sort():
 # a 180 ms slice), and its factor is LIVE_SLOWER * SLOW_REF_MS / a fixed Lua workload's time (`_SLOW_WORK`, the best
 # of SLOW_TIMINGS before the frames): a slower CPU gets a smaller factor, so the modeled client does as much a frame
 # anywhere. SLOW_REF_MS is that best on the dev PC the 8x was tuned on, quiet, by that clock (2026-11-21: 3.3 to 3.4 ms).
-# The factor is taken again before every frame (`_SlowClock.frame`): the best of the last SLOW_WINDOW frames' short
+# The factor was taken again before every frame (#938): the best of the last half second of frames' short
 # timings, a best, not a median, as before. The CI runners share their PC's 8 cores (16 threads) with up to 15 job
 # containers of 3 CPUs, so how much a CPU millisecond of this thread gets done swings 2-4x there for seconds at a time
 # (the core's other thread busy, the VM's vCPU waiting: a thread's CPU clock counts those too). One factor from the
@@ -531,8 +530,6 @@ LIVE_SLOWER = 8
 SLOW_REF_MS = 3.4
 SLOW_TIMINGS = 9
 SLOW_REF_RUNS = 40  # (the workload's rounds SLOW_REF_MS is for)
-SLOW_FRAME_RUNS = 5  # (each frame's timing: 0.4 ms of the reference PC's)
-SLOW_WINDOW = 15  # (half a second of frames; on a quiet PC its best is the start's)
 # (it makes no garbage: what it left would be the collector's work inside the route's slices, 476 ms ones)
 _SLOW_WORK = """(function()
   local t, sqrt = {}, math.sqrt
@@ -592,43 +589,37 @@ def _cpu_slower(lua):
     return max(1.0, best / SLOW_REF_MS)
 
 
-class _SlowClock:
-    """The pump's clock as a slow client's: the frames' own time plus our work in them at `k` times this thread's CPU
-    time, `k` set so the work goes at LIVE_SLOWER times the reference PC's speed (issue #849). `frame()` before each
-    frame takes `k` again from the CPU's speed then."""
-
-    def __init__(self, lua):
-        self.lua, self.cpu = lua, _thread_ms()
-        self.work = work = lua.eval(_SLOW_WORK)
-        self.timings = []
-        for _ in range(SLOW_TIMINGS):
-            c = self.cpu()
-            work(SLOW_REF_RUNS)
-            self.timings.append(self.cpu() - c)
-        self.recent = deque([min(self.timings)], maxlen=SLOW_WINDOW)
-        self.k = self.k0 = self.lo = self.hi = LIVE_SLOWER * SLOW_REF_MS / min(self.timings)
-        self.base, self.seg = 0.0, self.cpu()
-
-    def frame(self):
-        """Before a frame: the workload timed again (not counted as the client's work), `k` from the best of the last
-        SLOW_WINDOW timings."""
-        c = self.cpu()
-        self.base += (c - self.seg) * self.k
-        self.work(SLOW_FRAME_RUNS)
-        self.recent.append((self.cpu() - c) * SLOW_REF_RUNS / SLOW_FRAME_RUNS)
-        self.k = LIVE_SLOWER * SLOW_REF_MS / min(self.recent)
-        self.lo, self.hi = min(self.lo, self.k), max(self.hi, self.k)
-        self.seg = self.cpu()
-
-    def __str__(self):
-        return (f"clock {self.k0:.1f}x this CPU's at the start, {self.lo:.1f}-{self.hi:.1f}x on the way (the workload "
-                f"{min(self.timings):.1f}-{max(self.timings):.1f} ms at the start)")
-
-    def __call__(self):
-        return float(self.lua.eval("AGPS_T")) * 1000.0 + self.base + (self.cpu() - self.seg) * self.k
+# (PR #993, 2026-11-24) The slow client's clock counts the Lua VM's instructions, not a CPU's time. By the CPU
+# clock above (#849, #938) the test failed every try on main and the world grid chain on 2026-11-23/24 (6 of 8 main
+# pushes after #988): on the CI runners a CPU millisecond got 2-4x less done from one moment to the next, and the
+# workload's best, taken a frame before, didn't follow it, so route slices of 10-16 ms here read 28-172 ms there. On
+# this PC the same clock also put the collector's steps into the slices: built slices of 63-80 ms with 90k instructions
+# (by the count, 5 ms). Counting instructions, a slice is as long on every machine and every run: a loop in a job that
+# doesn't pause is still as long as its steps, and the collector's work (no pause splits it) and the C functions'
+# (one instruction a call) aren't counted. VM_PER_MS is the route work's own rate on the reference PC by the CPU clock
+# above at LIVE_SLOWER: 18,200-18,600 instructions a millisecond (the reference dev PC, 2026-11-24; the workload's is 36,000)
+VM_PER_MS = 18000
+VM_HOOK = 1000  # (instructions a count: 0.06 ms of the modeled client)
+# (a Lua 5.1 hook's function is kept per coroutine: a new one inherits the count but not the function, so the jobs'
+# coroutines get theirs as they're made; the addon makes them with coroutine.create)
+_VM_CLOCK = """(function(per_ms, every)
+  AGPS_VM = 0
+  local sethook, create, clock = debug.sethook, coroutine.create, debugprofilestop
+  local function count() AGPS_VM = AGPS_VM + every end
+  sethook(count, "", every)
+  coroutine.create = function(f)
+    local co = create(f)
+    sethook(co, count, "", every)
+    return co
+  end
+  debugprofilestop = function() return AGPS_T * 1000 + AGPS_VM / per_ms end
+  return function()
+    sethook()
+    coroutine.create, debugprofilestop = create, clock
+  end
+end)"""
 
 
-@pytest.mark.timing
 def test_route_work_on_a_slow_client_stays_in_its_slices_and_never_pauses_routing():
     pytest.importorskip("lupa.lua51")
     from azerothgps.gameharness import start
@@ -638,9 +629,8 @@ def test_route_work_on_a_slow_client_stays_in_its_slices_and_never_pauses_routin
     lua.execute('UnitFactionGroup = function() return "Alliance", "Alliance" end; AGPS_LEVEL = 12')
     ns.CharDB().faction = "Alliance"
     lua.execute("AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = -3700.0, -900.0, 0")
-    # (the frames' own time, and our work in them as the slow client's)
-    clock = _SlowClock(lua)
-    lua.globals().debugprofilestop = clock
+    # (the frames' own time, and our work in them as the slow client's: VM_PER_MS instructions a millisecond)
+    undo = lua.eval(_VM_CLOCK)(VM_PER_MS, VM_HOOK)
     R.Reset()  # (nothing built: as after a .go onto the continent)
     R.WARM, R.SYNC_WALKS = True, False
     N.STUTTER_WATCH = True
@@ -678,7 +668,6 @@ def test_route_work_on_a_slow_client_stays_in_its_slices_and_never_pauses_routin
         for i in range(fps * 600):
             t += 1 / fps
             lua.execute(f"AGPS_T = {t}")
-            clock.frame()
             frame(1 / fps)
             if left is None and (N.route or N.paused):
                 left = fps * 30
@@ -687,17 +676,17 @@ def test_route_work_on_a_slow_client_stays_in_its_slices_and_never_pauses_routin
                 if left <= 0:
                     break
         s = lua.eval("AGPS_SLICES")
-        seen = f"frame {i}, {clock}"
+        seen = f"frame {i}, {lua.eval('AGPS_VM')} Lua instructions"
         print(seen, f"worst {s.worst:.1f} ms, counted {s.counted:.1f} ms")
         assert not N.paused, f"routing paused ({N.paused}); the worst slice counted ran {s.counted:.0f} ms; {seen}"
         assert not N.degraded, seen
         assert N.route, seen
         assert s.built > 0 and R.GraphReady(0)  # (the roads were built in a route's job, in slices)
         assert s.counted < N.STUTTER_MS, f"a slice of route work ran {s.counted:.0f} ms; {seen}"
-        # (the road data's too, though not counted: 117 ms before. 3x: the clock here runs the garbage collector's steps
-        # 8x too, and those no pause splits; on the CI runner, about 3x slower than a dev PC, a table.sort Bridges did in
-        # one go made a 74 ms slice and failed 2x: Router.SortByFirst. 14-21 ms here since)
+        # (the road data's too, though not counted: 117 ms before. A table.sort Bridges did in one go made a 74 ms slice
+        # on the CI runner: Router.SortByFirst. By the instruction count 22 ms, 2026-11-24)
         assert s.worst < 3 * N.STUTTER_MS, f"a slice ran {s.worst:.0f} ms; {seen}"
     finally:
+        undo()
         N.STUTTER_WATCH, N.STUTTER_RESUME_GRACE = False, grace
         R.WARM, R.SYNC_WALKS = False, True
