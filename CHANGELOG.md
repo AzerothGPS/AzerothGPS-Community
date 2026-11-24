@@ -6,6 +6,7 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 ### New
 
+- Search: NPCs that were missing, like the junior profession trainers in Northshire and the PvP quartermasters in Stormwind.
 - Roads: new roads in Ironforge, down to the Hall of Thanes' way in.
 - Roads: new roads in Burning Steppes.
 - Roads: a new road in Tanaris.

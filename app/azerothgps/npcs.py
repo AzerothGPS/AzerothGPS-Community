@@ -16,10 +16,16 @@ both), and its spawns: level (the continent, or Undercity's 10001 down there as 
 Search only: nothing routed or drawn. Packed into one string (`ns.NpcsPacked`) the addon reads at its first search
 (Layers' `L.ShippedNpcs`), so the login costs nothing but the string.
 
-Zephras Isle (level 2991, WoW Forever's own island in the sky) isn't in the 1.12 dump: its NPCs come from ISLE_FILE,
-a snapshot of a WoW Forever world database's creature spawns there with something to offer (ISLE_SQL; numbers and
-names only), read by the same rules with that database's newer npcflag bits (ISLE_SERVICES). Without them the
-search found nothing of a kind on the isle and "nearest" sent the player off it (a player's report, 1.3.14).
+What the 1.12 dump lacks comes from SERVER_FILE, a snapshot of a WoW Forever world database's creature spawns with
+something to offer on the two continents and Zephras Isle (SERVER_SQL; numbers and names only), read by the same
+rules with that database's newer npcflag bits (SERVER_SERVICES):
+- Zephras Isle (level 2991, WoW Forever's own island in the sky): all its NPCs. Without them the search found nothing
+  of a kind on the isle and "nearest" sent the player off it (a player's report, 1.3.14).
+- the continents: a spawn whose NPC (by id, or by name) the dump has within MATCH_YD on the same level is the dump's;
+  the rest ship too (WoW Forever's own: Elwynn's junior profession trainers, Stormwind's PvP quartermasters; a
+  scan for missing NPCs, 2026-11-23). Npcs.lua's last line lists the NPCs that came from the snapshot.
+Riverglades (WoW Forever's own zone) has none in either: the client data's flight masters and places there ship
+as points of interest (gen-addon-data's Data/Pois.lua), and its quest POI/vignette tables have nothing there.
 
 `agps npcs` reports; `--write` writes Data/Npcs.lua. Run it again when the dump or the snapshot changes.
 """
@@ -55,18 +61,24 @@ PROFESSIONS = (("alchem", "Alchemy"), ("blacksmith", "Blacksmithing"), ("armor c
                ("physician", "First Aid"), ("surgeon", "First Aid"), ("fish", "Fishing"), ("herbal", "Herbalism"),
                ("leather", "Leatherworking"), ("miner", "Mining"), ("mining", "Mining"), ("skinn", "Skinning"),
                ("tailor", "Tailoring"))
-ISLE_FILE = Path(__file__).parent / "data" / "isle_npcs.tsv"
+SERVER_FILE = Path(__file__).parent / "data" / "server_npcs.tsv"
 ISLE = 2991
-# (the query the snapshot was made with, on a TrinityCore-style world database; its columns renamed as ISLE_FILE's)
-ISLE_SQL = ("SELECT c.guid, c.id, c.map, c.position_x, c.position_y, c.position_z, c.MovementType, t.name, t.subname, "
-            "t.faction, IF(c.npcflag <> 0, c.npcflag, t.npcflag), t.type, t.unit_flags, t.flags_extra "
-            "FROM creature c JOIN creature_template t ON t.entry = c.id "
-            "WHERE c.map = 2991 AND (t.npcflag <> 0 OR c.npcflag <> 0)")
+TOWN_YD = 150.0  # (a snapshot NPC "both sides" stands with the dump's NPCs this near: their town's side, if one)
+MATCH_YD = 40.0  # (a snapshot spawn this near one of the dump's same NPC is that one: the two databases' spots differ)
+# (the query the snapshot was made with, read-only on a TrinityCore-style server's world database; its
+# columns named as SERVER_FILE's header, "NULL" subnames written empty)
+SERVER_SQL = ("SELECT c.guid AS guid, c.id AS id, c.map AS map, c.position_x AS x, c.position_y AS y, "
+              "c.position_z AS z, c.MovementType AS movement, t.name AS name, t.subname AS subname, "
+              "t.faction AS faction, IF(c.npcflag <> 0, c.npcflag, t.npcflag) AS npcflag, t.type AS type, "
+              "t.unit_flags AS unit_flags, t.flags_extra AS flags_extra, "
+              "IFNULL((SELECT MAX(e.eventEntry) FROM game_event_creature e WHERE e.guid = c.guid), 0) AS event "
+              "FROM creature c JOIN creature_template t ON t.entry = c.id "
+              "WHERE c.map IN (0, 1, 2991) AND (t.npcflag <> 0 OR c.npcflag <> 0) ORDER BY c.map, c.id, c.guid")
 # that database's NPCFlags (newer than 1.12's) -> the services' letters
-ISLE_SERVICES = ((0x1, "g"), (0x2, "q"), (0x80, "v"), (0x2000, "f"), (0x10, "t"), (0x4000, "h"), (0x10000, "i"),
+SERVER_SERVICES = ((0x1, "g"), (0x2, "q"), (0x80, "v"), (0x2000, "f"), (0x10, "t"), (0x4000, "h"), (0x10000, "i"),
                  (0x20000, "b"), (0x40000, "p"), (0x80000, "d"), (0x100000, "m"), (0x200000, "a"), (0x400000, "s"),
                  (0x1000, "r"))
-ISLE_GUARD_FLAG = 0x8000  # (its flags_extra: a guard)
+SERVER_GUARD_FLAG = 0x8000  # (its flags_extra: a guard)
 CLASS_TRAINER = re.compile(r"^(Warrior|Paladin|Hunter|Rogue|Priest|Shaman|Mage|Warlock|Druid) Trainer$", re.I)
 NOISE = re.compile(r"\b(Trigger|DND|UNUSED|PH|Dummy|Visual|Invisible|Placeholder|Test|Bunny|Spawner)\b|Only GM|\[|\]",
                    re.I)
@@ -182,23 +194,23 @@ def build(data_dir: Path, ft: dict[int, dict] | None = None, undercity=None):
                 continue
             n["spawns"].append((level, x, y, z))
             report["kept"] += 1
-    _add_isle(npcs, report, ft, alliance, horde)
+    _add_server(npcs, report, ft, alliance, horde, undercity=undercity)
     return npcs, dict(report)
 
 
-def isle_rows(path: Path = ISLE_FILE) -> list[dict]:
-    """ISLE_FILE's rows (tab-separated, a header line)."""
+def server_rows(path: Path = SERVER_FILE) -> list[dict]:
+    """SERVER_FILE's rows (tab-separated, a header line)."""
     lines = Path(path).read_text(encoding="utf-8").splitlines()
     keys = lines[0].split("	")
     return [dict(zip(keys, ln.split("	"))) for ln in lines[1:] if ln.strip()]
 
 
-def isle_services(flags: int) -> str:
-    return "".join(c for bit, c in ISLE_SERVICES if flags & bit)
+def server_services(flags: int) -> str:
+    return "".join(c for bit, c in SERVER_SERVICES if flags & bit)
 
 
-def isle_trainer_kind(flags: int, sub: str) -> str:
-    """A trainer's kind on the isle by its subname (the snapshot's trainer_class is 0 for all): "Mage Trainer" its
+def server_trainer_kind(flags: int, sub: str) -> str:
+    """A snapshot NPC's trainer kind by its subname (the snapshot's trainer_class is 0 for all): "Mage Trainer" its
     class's file name, a profession's by its word ("Alchemist", "Miner"), "Riding", "Pet"; "" for the rest."""
     if not flags & 0x10:
         return ""
@@ -218,36 +230,63 @@ def isle_trainer_kind(flags: int, sub: str) -> str:
     return ""
 
 
-def _add_isle(npcs, report, ft, alliance, horde, rows=None):
-    """Zephras Isle's NPCs (isle_rows) into `npcs`, by _left_out's rules: one already shipped (the Spirit Healer)
-    gets the isle's spawns too."""
-    for r in (rows if rows is not None else isle_rows()):
-        if int(r["map"]) != ISLE:
-            continue
+def _in_dump(npcs, by_name, i, name, level, x, y) -> bool:
+    """Whether the dump's NPCs have this one (its id, else its name) within MATCH_YD on the same level."""
+    base = lambda lv: 0 if lv == UNDERCITY else lv
+    cands = ([npcs[i]] if i in npcs else []) + by_name.get(name, [])
+    return any(base(sl) == base(level) and math.hypot(sx - x, sy - y) <= MATCH_YD
+               for n in cands for sl, sx, sy, _ in n["spawns"])
+
+
+def _town_side(town, level, x, y) -> str:
+    """The side of the town or capital at a spot: "A" or "H" when the dump's NPCs within TOWN_YD are all of one
+    faction (the server's "both" for Stormwind's PvP officers: Alliance's, a Horde player can't use them), else "B"."""
+    sides = {sd for sl, sx, sy, sd in town if sl == level and math.hypot(sx - x, sy - y) <= TOWN_YD} - {"B"}
+    return sides.pop() if len(sides) == 1 else "B"
+
+
+def _add_server(npcs, report, ft, alliance, horde, rows=None, undercity=None):
+    """SERVER_FILE's NPCs (server_rows) into `npcs`, by _left_out's rules: the isle's all (one already shipped, the
+    Spirit Healer, gets the isle's spawns too), the continents' those the dump lacks (_in_dump); a new one is marked
+    `"from": "server"`."""
+    by_name = defaultdict(list)
+    town = []  # (the dump's spawns with their side: a capital's or town's side around a spot)
+    for n in npcs.values():
+        by_name[n["name"]].append(n)
+        town += [(sl, sx, sy, n["side"]) for sl, sx, sy, _ in n["spawns"]]
+    for r in (rows if rows is not None else server_rows()):
+        m = int(r["map"])
         f = ft.get(int(r["faction"]))
         flags = int(r["npcflag"])
         extra = int(r["flags_extra"])
         t = {"Name": r["name"], "SubName": r["subname"] or "NULL", "NpcFlags": str(flags),
              "CreatureType": r["type"], "UnitFlags": r["unit_flags"],
-             "ExtraFlags": str((GUARD_FLAG if extra & ISLE_GUARD_FLAG else 0) | (extra & INVISIBLE))}
-        why = _left_out(t, f, {"guid": r["guid"], "MovementType": r["movement"]}, {}, alliance, horde)
+             "ExtraFlags": str((GUARD_FLAG if extra & SERVER_GUARD_FLAG else 0) | (extra & INVISIBLE))}
+        why = _left_out(t, f, {"guid": r["guid"], "MovementType": r["movement"]},
+                        {r["guid"]: int(r.get("event") or 0)}, alliance, horde)
         if why:
             report[why] += 1
             continue
         x, y, z = (round(float(r[k]), 1) for k in ("x", "y", "z"))
-        n = npcs.get(int(r["id"]))
+        level = UNDERCITY if m == 0 and z < UNDER_Z and undercity and undercity(x, y, z) else m
+        i = int(r["id"])
+        if m != ISLE and _in_dump(npcs, by_name, i, r["name"], level, x, y):
+            report["in the dump"] += 1
+            continue
+        n = npcs.get(i)
         if n is None:
             sub = r["subname"]
-            svc = isle_services(flags)
+            svc = server_services(flags)
             if "innkeeper" not in (r["name"] + " " + sub).lower():
                 svc = svc.replace("i", "")
-            n = npcs[int(r["id"])] = {"name": r["name"], "sub": sub, "svc": svc,
-                                      "trainer": isle_trainer_kind(flags, sub), "side": side(f, alliance, horde),
-                                      "spawns": []}
-        if any(sl == ISLE and math.hypot(sx - x, sy - y) <= SAME_YD for sl, sx, sy, _ in n["spawns"]):
+            n = npcs[i] = {"name": r["name"], "sub": sub, "svc": svc, "trainer": server_trainer_kind(flags, sub),
+                           "side": side(f, alliance, horde), "spawns": [], "from": "server"}
+            if n["side"] == "B" and m != ISLE:
+                n["side"] = _town_side(town, level, x, y)
+        if any(sl == level and math.hypot(sx - x, sy - y) <= SAME_YD for sl, sx, sy, _ in n["spawns"]):
             report["same spot"] += 1
             continue
-        n["spawns"].append((ISLE, x, y, z))
+        n["spawns"].append((level, x, y, z))
         report["kept"] += 1
 
 
@@ -302,7 +341,8 @@ def lua_text(npcs: dict) -> str:
         lines.append("|".join((str(i), n["name"], n["sub"], n["svc"], n["trainer"], n["side"], spawns)))
     body = "\n".join(lines)
     assert "]==]" not in body
-    out = ["-- GENERATED by `agps npcs --write` from the CMaNGOS dump's creatures and Zephras Isle's (isle_npcs.tsv).",
+    out = ["-- GENERATED by `agps npcs --write` from the CMaNGOS dump's creatures and a WoW Forever server snapshot's",
+           "-- (server_npcs.tsv: Zephras Isle's, and the continents' the dump lacks).",
            "-- Do not edit by hand.",
            "-- Every friendly NPC (or neutral one with something to offer), for the search only (asked 2026-11-14,",
            "-- \"Ship all NPCs\"): one line each, id|name|subname|services|trainer|side|spawns, its spawns",
@@ -313,4 +353,6 @@ def lua_text(npcs: dict) -> str:
            "ns.NpcsPacked = [==[",
            body,
            "]==]"]
+    server = sorted(i for i, n in npcs.items() if n.get("from") == "server")
+    out.append("-- From the server snapshot: " + " ".join(map(str, server)))
     return "\n".join(out) + "\n"
