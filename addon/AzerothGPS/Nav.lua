@@ -9,6 +9,7 @@ local N = {}
 ns.Nav = N
 
 local DEFAULT_RUN = 7 -- yd/s, normal run speed
+N.SPEED_SANE = 3 -- (an ability's speed kept only up to this many times the plain run: past it, GM speed or a buff)
 local ARRIVED_YD = 10
 local REROUTE_SECONDS = 2 -- at most this often while moving (option rerouteSeconds, Performance)
 local REROUTE_MOVED_YD = 15 -- ...and only after moving this far (scaled with it)
@@ -98,18 +99,39 @@ local version = 0 -- bumped when the stops change (cache key for the stretches b
 local function Copy(d)
   -- (a stop with no height of its own at an NPC's spot: that NPC's, N.SpawnZ. Not a guide's: theirs is looked up their
   -- own way, the guides' shipped waypoint heights first, RestedXP.lua's X.HeightXY; nor a corpse's)
-  local z = d.z
+  -- (else every stop's best guess when it's made, N.GuessStopZ: the grid's floor, the ground, a road's near; `zSource`
+  -- says which, "unknown" when none in range, not looked for again)
+  local z, zSource = d.z, d.zSource
   -- (at a dungeon's or raid's way in, its icon's spot: its portal's height, N.EntrancePortalAt; Kooki3z 2026-11-23,
   -- Blackrock Depths' stop "arrived" on the mountainside 108 yd over its door)
   if z == nil and not d.corpse and N.EntrancePortalAt then
     local t = N.EntrancePortalAt(d.cont, d.x, d.y)
-    z = t and t.z1 or nil
+    if t and t.z1 then z, zSource = t.z1, "own" end
   end
-  if z == nil and not (d.corpse or d.rxp or d.zygor or d.polestar or d.questify or d.apr) and N.SpawnZ then
-    z = N.SpawnZ(d.cont, d.x, d.y)
+  if z ~= nil then
+    zSource = zSource or "own"
+  elseif zSource == nil and not d.corpse and N.EntrancePortalAt then
+    -- (at a dungeon's or raid's way in, its icon's spot: its portal's height, N.EntrancePortalAt; Kooki3z 2026-11-23,
+    -- Blackrock Depths' stop "arrived" on the mountainside 108 yd over its door. A known height, as an NPC's)
+    local t = N.EntrancePortalAt(d.cont, d.x, d.y)
+    if t and t.z1 then z, zSource = t.z1, "portal" end
+  end
+  if z == nil and zSource == nil and not (d.corpse or d.rxp or d.zygor or d.polestar or d.questify or d.apr)
+      and N.GuessStopZ then
+    z, zSource = N.GuessStopZ(d)
+  end
+  -- (a guess is the route's height for the stop, `guessZ` (N.StopZ), not the stop's own: arriving and "Above you"
+  -- go by a known height only, an NPC's, a portal's or its own. The map's ground's in the open land kept aside,
+  -- `groundZ`: there the land's routes go as they did; by a city's grid (under Thunder Bluff's cliffs) it's the route's
+  -- height)
+  local groundZ, guessZ = d.groundZ, d.guessZ
+  if z and zSource ~= "own" and zSource ~= "npc" and zSource ~= "portal" then
+    if zSource == "terrain" and not N.InGridBox(d.cont, d.x, d.y) then groundZ = z else guessZ = z end
+    z = nil
   end
   return { x = d.x, y = d.y, cont = d.cont, name = d.name, icon = d.icon, corpse = d.corpse, questRoute = d.questRoute,
-    tex = d.tex, boss = d.boss, enc = d.enc, z = z, quest = d.quest, turnin = d.turnin,
+    tex = d.tex, boss = d.boss, enc = d.enc, z = z, zSource = zSource, groundZ = groundZ, guessZ = guessZ, quest = d.quest,
+    turnin = d.turnin,
     parts = d.parts, partAt = d.partAt, -- (a quest area in parts, Layers.QuestAreaSpots: the one chosen, OrderStops)
     rxp = d.rxp, -- (a RestedXP step's: its key, RestedXP.lua)
     zygor = d.zygor, -- (a Zygor step's: its key, Zygor.lua)
@@ -118,11 +140,17 @@ local function Copy(d)
     apr = d.apr, -- (an Azeroth Pilot Reloaded step's: its key, AzerothPilot.lua)
     questie = d.questie, -- (Questie's "Set TomTom Target", Import.QuestieTarget)
     npcId = d.npcId, npcName = d.npcName, -- (an NPC's from the search or its pin: its creature id and name, the Target button's)
-    listed = d.listed } -- (a trip in its listed order's, N.keepOrder)
+    listed = d.listed, -- (a trip in its listed order's, N.keepOrder)
+    avoidJumps = d.avoidJumps, -- (its leg's jumps avoided: "spell" or "all", N.AvoidLegJumps)
+    avoidSwim = d.avoidSwim } -- (its leg's swimming avoided, N.AvoidLegSwim)
 end
 
 -- The stops are saved per character, so /reload and relogging keep the route.
+-- (not while the tutorial's spell-jump demo has the route, N.demoRoute: its example trip is never saved, the player's
+-- own stays in the saved variables as it was and comes back with N.Restore when the demo ends; Tutorial.lua)
+N.demoRoute = nil
 local function Save()
+  if N.demoRoute then return end
   local cdb = ns.CharDB and ns.db and ns.CharDB()
   if not cdb then return end
   local list = {}
@@ -151,6 +179,13 @@ local function Save()
   cdb.skipRides = (#list > 0 and #rides > 0) and rides or nil
   cdb.noSwim = (#list > 0 and N.noSwim) or nil -- (a swim removed from this trip: N.SkipSwim)
   cdb.swimBans = (#list > 0 and N.noSwim and N.swimBans and #N.swimBans > 0) and N.swimBans or nil -- (its water)
+  -- (the jumps avoided on this trip, N.AvoidJump, and the fall spell picked for it, N.PickFallSpell)
+  local bans = {}
+  for _, b in ipairs(N.jumpBans or {}) do
+    if not b.auto then bans[#bans + 1] = b end -- (the trip planner's own, N.CheckSpellJumps: worked out again)
+  end
+  cdb.jumpBans = (#list > 0 and #bans > 0) and bans or nil
+  cdb.fallPick = (#list > 0 and N.fallPick) or nil
   -- (the other faction's towns said in chat for this trip, N.CheckHostileRoute: not said again after a /reload)
   local towns = {}
   for name in pairs(N.hostileSaid or {}) do towns[#towns + 1] = name end
@@ -177,6 +212,36 @@ N.FRESH_SECONDS = 20
 local settledAt -- (the stops' version settled: N.Checking)
 function N.Fresh()
   return N.freshAt ~= nil and N.dest ~= nil and settledAt ~= version and GetTime() - N.freshAt < N.FRESH_SECONDS
+end
+
+-- With world routing (new, test) on (WorldGrid.lua): the stops' first full answer still to land, the route shown (if
+-- any) a stand-in while a search it depends on is still going (its `pending`: the grid's walk, the Router's own walks
+-- over the land). Its searches keep the warm-up's bigger slices till then (GPS.PumpBudget), not only for FRESH_SECONDS;
+-- and it's drawn faded and the directions say "Working out the route..." (N.StandIn). Kooki3z 2026-11-23: the stand-in
+-- showed about a minute, a straight line through a ridge in the Wetlands, a road detour by Steamwheedle Port in
+-- Tanaris, at 1 ms a frame. Once landed (a route with no pending for these stops, Apply), a reroute's searches go back
+-- to 1 ms (issue #316). At most LANDING_SECONDS from the stops changing: a route that never settles isn't held for good.
+-- Past that, still while one of the grid's searches is running (WorldGrid.jobCount), to LANDING_MAX_SECONDS: the
+-- route-speed study, 2026-11-25: a long leg still searched at 90 s (22 s of search at a quarter of each frame) fell to
+-- 1 ms a frame there, four times slower for the rest of it, just the trips that were slowest already.
+N.LANDING_SECONDS = 90
+N.LANDING_MAX_SECONDS = 300
+local landedAt -- (the stops' version whose first full answer landed)
+function N.Landing()
+  local WG = ns.WorldGrid
+  if not (N.dest and WG and WG.On and WG.On()) or N.paused or landedAt == version then return false end
+  local age = N.freshAt and GetTime() - N.freshAt or 0
+  if age < N.LANDING_SECONDS then return true end
+  return age < N.LANDING_MAX_SECONDS and (WG.jobCount or 0) > 0
+end
+-- The route shown is a stand-in (N.Landing, and it's pending): faded on the map, no turns, "Working out the route...".
+-- With world routing on, any route still pending is the line while the grid works (Router.GridWaiting): never turns
+-- from it, landing or not (Kooki3z 2026-11-23: no fallback route followed).
+function N.StandIn()
+  local r = N.route
+  if r == nil or not r.pending then return false end
+  local WG = ns.WorldGrid
+  return N.Landing() or (WG and WG.On and WG.On()) or false
 end
 
 -- A route through `stops` ({ x, y, cont, name?, icon? } each) in the given order, or in
@@ -383,7 +448,8 @@ function N.SwimSpans(part, i)
   local pts, k = part.pts, part.kinds and part.kinds[i]
   local x1, y1, x2, y2 = pts[2 * i - 1], pts[2 * i], pts[2 * i + 1], pts[2 * i + 2]
   if x2 and k == R.KIND_OFFROAD then
-    local wet = P.WaterSpans(part.cont, x1, y1, x2, y2)
+    local wet = N.GridWaterSpans(part, i) -- (a grid piece: its grid's own water; else the terrain's cells)
+    if wet == nil then wet = P.WaterSpans(part.cont, x1, y1, x2, y2) end
     if wet then
       local len = math.sqrt((x2 - x1) ^ 2 + (y2 - y1) ^ 2)
       for j = 1, #wet - 1, 2 do
@@ -396,6 +462,42 @@ function N.SwimSpans(part, i)
   end
   memo[i] = v
   return v
+end
+-- A world-grid piece's swims (part.fz: its floors, the grid's): where the grid's surface at its height is water
+-- (WorldGrid's F_SWIM), sampled every GRID_SWIM_STEP yards: { t1, t2, ... } or false; nil when not a grid piece. The
+-- terrain's water cells (8.3 yd, Passability.WaterSpans) read a wade along a river's shallow edge as a swim, the ground
+-- 0.3 yd under the water the grid walks: "Swim 328 yd" drawn down the Southfury from its bridge (item 78c, Kooki3z).
+N.GRID_SWIM_STEP = 2
+N.GRID_SWIM_NEAR_Z = 3
+function N.GridWaterSpans(part, i)
+  local WG = ns.WorldGrid
+  local fz = part.fz
+  if not (fz and fz[i] and fz[i + 1] and WG and WG.On and WG.On() and WG.Cont and WG.SurfacesAt) then return nil end
+  local c = WG.Cont(part.cont)
+  if not c then return nil end
+  local pts = part.pts
+  local x1, y1, x2, y2 = pts[2 * i - 1], pts[2 * i], pts[2 * i + 1], pts[2 * i + 2]
+  local len = math.sqrt((x2 - x1) ^ 2 + (y2 - y1) ^ 2)
+  local n = math.max(1, math.floor(len / N.GRID_SWIM_STEP + 0.5))
+  local out, from
+  for s = 0, n - 1 do
+    local t = (s + 0.5) / n
+    local z = fz[i] + (fz[i + 1] - fz[i]) * t
+    local ss = WG.SurfacesAt(c, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t, z)
+    local s0 = ss[1]
+    local wet = s0 and math.abs(s0.z - z) <= N.GRID_SWIM_NEAR_Z and s0.f % 2 == 1 or false
+    if wet and not from then from = s / n end
+    if not wet and from then
+      out = out or {}
+      out[#out + 1], out[#out + 2] = from, s / n
+      from = nil
+    end
+  end
+  if from then
+    out = out or {}
+    out[#out + 1], out[#out + 2] = from, 1
+  end
+  return out or false
 end
 -- Pieces of a route piece for drawing it: fn(t1, t2, hostile, swim) for each stretch from 0 to 1, in order: the other
 -- faction's guards' reach (N.HostileSpans) and the swims (N.SwimSpans) cut it alike.
@@ -857,6 +959,207 @@ local function GuardPlace(c, x, y)
   local m = z and ns.Maps and ns.Maps[z]
   return m and ns.ZoneName(z, m.name) or nil
 end
+-- A town of the other faction's guards by its name (item 99, Kooki3z 2026-11-25: "Through enemy territory: Greenpaw
+-- Village", a lone NPC's walk named after the nearest village): continent `cont`, side `side` (Router.HostileSide's),
+-- any of its circles `i` (the index of its x in ns.Hostile[cont][side]). Of the towns (Data/Pois.lua kind 2), else
+-- place labels (kind 3), within HOSTILE_TOWN_NAME_YD of one of its guards, the one nearest where it's met: the walk
+-- (x1, y1)-(x2, y2) past it, else circle i itself (the guards along Dun Algaz and on to Thelsamar are "Dun Algaz"
+-- walked through the pass, N.HOSTILE_TOWN_AS; "Thelsamar" hovered there). None: its guards' own name (ns.HostileGuards: the NPC most of
+-- its circles are, "Ashenvale Sentinel"); else as before (GuardPlace). A town's labels and guards worked out once.
+N.HOSTILE_TOWN_NAME_YD = 200
+local townNames = setmetatable({}, { __mode = "k" }) -- [Router's towns table] = { [root] = { labels, name } }
+local function TownLabels(cont, side, list, town, root)
+  local members, x0, y0, x1, y1 = {}, math.huge, math.huge, -math.huge, -math.huge
+  for j = 1, #list - 2, 3 do
+    if (town[j] or j) == root then
+      members[#members + 1] = j
+      x0, y0 = math.min(x0, list[j]), math.min(y0, list[j + 1])
+      x1, y1 = math.max(x1, list[j]), math.max(y1, list[j + 1])
+    end
+  end
+  local yd = N.HOSTILE_TOWN_NAME_YD
+  local labels = {}
+  for _, p in ipairs(ns.Pois and ns.Pois[cont] or {}) do
+    if (p[1] == 2 or p[1] == 3) and p[4] and p[2] >= x0 - yd and p[2] <= x1 + yd and p[3] >= y0 - yd
+        and p[3] <= y1 + yd then
+      for _, j in ipairs(members) do
+        if (p[2] - list[j]) ^ 2 + (p[3] - list[j + 1]) ^ 2 <= yd * yd then
+          labels[#labels + 1] = p
+          break
+        end
+      end
+    end
+  end
+  local name, kind = nil, 3
+  for _, p in ipairs(labels) do
+    if p[1] == 2 then kind = 2 end
+  end
+  if not labels[1] then
+    local g = ns.HostileGuards and ns.HostileGuards[cont] and ns.HostileGuards[cont][side]
+    if g and g.at then
+      local count, top, topN = {}, nil, 0
+      for _, j in ipairs(members) do
+        local id = g.at[(j + 2) / 3]
+        if id and id ~= 0 then
+          count[id] = (count[id] or 0) + 1
+          if count[id] > topN or (count[id] == topN and id < top) then top, topN = id, count[id] end
+        end
+      end
+      if top and g.who and g.who[top] then name = ns.NpcName(top, g.who[top]) end
+    end
+    name = name or GuardPlace(cont, list[root], list[root + 1]) or "?"
+  end
+  return { labels = labels, kind = kind, name = name }
+end
+function N.HostileTownName(cont, side, i, x1, y1, x2, y2)
+  local R = ns.Router
+  local list = ns.Hostile and ns.Hostile[cont] and ns.Hostile[cont][side]
+  if not (list and list[i] and R and R.HostileTowns) then return nil end
+  local town = R.HostileTowns(cont, side)
+  local root = town[i] or i
+  local memo = townNames[town]
+  if not memo then
+    memo = {}
+    townNames[town] = memo
+  end
+  local t = memo[root]
+  if not t then
+    t = TownLabels(cont, side, list, town, root)
+    memo[root] = t
+  end
+  if t.name then return t.name end
+  if not x1 then x1, y1 = list[i], list[i + 1] end
+  x2, y2 = x2 or x1, y2 or y1
+  local vx, vy = x2 - x1, y2 - y1
+  local L2 = vx * vx + vy * vy
+  local best, bd
+  for _, p in ipairs(t.labels) do
+    if p[1] == t.kind then
+      local u = L2 > 0 and math.max(0, math.min(1, ((p[2] - x1) * vx + (p[3] - y1) * vy) / L2)) or 0
+      local d = (x1 + vx * u - p[2]) ^ 2 + (y1 + vy * u - p[3]) ^ 2
+      if not bd or d < bd then best, bd = p, d end
+    end
+  end
+  local as = best and N.HOSTILE_TOWN_AS[best[4]]
+  if as then return ns.PlaceName(as) end
+  return ns.PoiName(best)
+end
+-- Labels a town is never named by, and the place read instead (Kooki3z 2026-11-25: the guards along Dun Algaz and the
+-- pass are "Dun Algaz", not their post "Algaz Station"). English names; the place label's own name in the game's
+-- language (ns.PlaceName).
+N.HOSTILE_TOWN_AS = { ["Algaz Station"] = "Dun Algaz" }
+-- The other faction's guard zones in the box (x0, y0)-(x1, y1) on continent `cont` (item 98, Kooki3z 2026-11-25: drawn
+-- wherever they're near, with or without a route; never the player's own faction's): { { x, y, r, i }, ... } (i: the
+-- circle's index, N.HostileTownName's), or {} with no faction known. The circles are kept per map tile
+-- (ENEMY_TILE_YD), each tile's list made once, and only the tiles under the box looked at.
+N.ENEMY_TILE_YD = 400
+local enemyTiles = {} -- [cont .. side] = { list = ns.Hostile's, [tile key] = { i, ... } }
+local EnemyTiles
+function N.EnemyZonesIn(cont, x0, y0, x1, y1)
+  local side = N.Faction and N.Faction()
+  local list = side and ns.Hostile and ns.Hostile[cont] and ns.Hostile[cont][side]
+  if not list then return {} end
+  local tiles = EnemyTiles(cont, side, list)
+  local T, out, seen = N.ENEMY_TILE_YD, {}, {}
+  for kx = math.floor(math.min(x0, x1) / T), math.floor(math.max(x0, x1) / T) do
+    for ky = math.floor(math.min(y0, y1) / T), math.floor(math.max(y0, y1) / T) do
+      for _, i in ipairs(tiles[kx * 65536 + ky] or {}) do
+        local x, y, r = list[i], list[i + 1], list[i + 2]
+        if not seen[i] and x + r >= math.min(x0, x1) and x - r <= math.max(x0, x1) and y + r >= math.min(y0, y1)
+            and y - r <= math.max(y0, y1) then
+          seen[i] = true
+          out[#out + 1] = { x, y, r, i }
+        end
+      end
+    end
+  end
+  return out
+end
+EnemyTiles = function(cont, side, list)
+  local key = cont .. side
+  local tiles = enemyTiles[key]
+  if not tiles or tiles.list ~= list then
+    tiles = { list = list }
+    local T = N.ENEMY_TILE_YD
+    for i = 1, #list - 2, 3 do
+      local x, y, r = list[i], list[i + 1], list[i + 2]
+      for kx = math.floor((x - r) / T), math.floor((x + r) / T) do
+        for ky = math.floor((y - r) / T), math.floor((y + r) / T) do
+          local k = kx * 65536 + ky
+          local t = tiles[k]
+          if not t then
+            t = {}
+            tiles[k] = t
+          end
+          t[#t + 1] = i
+        end
+      end
+    end
+    enemyTiles[key] = tiles
+  end
+  return tiles
+end
+-- The guard zones drawn (Kooki3z on 6195a75c: item 98 drew every one in the map's view; as before it, only those near):
+-- of N.EnemyZonesIn's in the box, those within ENEMY_NEAR_PLAYER_YD of the player at (px, py) (the minimap's view, about)
+-- and those route `r` passes within ENEMY_NEAR_ROUTE_YD of (N.EnemyZonesNearRoute: the ones it bends round or walks by).
+N.ENEMY_NEAR_PLAYER_YD = 300
+N.ENEMY_NEAR_ROUTE_YD = 200
+function N.EnemyZonesShown(cont, x0, y0, x1, y1, px, py, r)
+  local all = N.EnemyZonesIn(cont, x0, y0, x1, y1)
+  if not all[1] then return all end
+  local near = r and N.EnemyZonesNearRoute(r, cont) or nil
+  local P = N.ENEMY_NEAR_PLAYER_YD
+  local out = {}
+  for _, z in ipairs(all) do
+    local d = px and math.sqrt((z[1] - px) ^ 2 + (z[2] - py) ^ 2) - z[3]
+    if (d and d <= P) or (near and near[z[4]]) then out[#out + 1] = z end
+  end
+  return out
+end
+-- The guard zones (their circles' indexes, a set) route `r` passes within ENEMY_NEAR_ROUTE_YD of on continent `cont`,
+-- worked out once a route, faction and continent.
+local nearRoute = setmetatable({}, { __mode = "k" }) -- [route] = { [cont .. side] = set }
+function N.EnemyZonesNearRoute(r, cont)
+  local side = N.Faction and N.Faction()
+  local list = side and ns.Hostile and ns.Hostile[cont] and ns.Hostile[cont][side]
+  if not (list and r and r.parts) then return nil end
+  local memo = nearRoute[r]
+  if not memo then
+    memo = {}
+    nearRoute[r] = memo
+  end
+  local key = cont .. side
+  if memo[key] then return memo[key] end
+  local tiles, T, D = EnemyTiles(cont, side, list), N.ENEMY_TILE_YD, N.ENEMY_NEAR_ROUTE_YD
+  local set = {}
+  for _, part in ipairs(r.parts) do
+    local pts = part.pts
+    if part.cont == cont and pts and #pts >= 2 then
+      local n = #pts
+      for k = 1, math.max(1, n - 3), 2 do
+        local ax, ay = pts[k], pts[k + 1]
+        local bx, by = pts[k + 2] or ax, pts[k + 3] or ay
+        local vx, vy = bx - ax, by - ay
+        local L2 = vx * vx + vy * vy
+        for kx = math.floor((math.min(ax, bx) - D) / T), math.floor((math.max(ax, bx) + D) / T) do
+          for ky = math.floor((math.min(ay, by) - D) / T), math.floor((math.max(ay, by) + D) / T) do
+            for _, i in ipairs(tiles[kx * 65536 + ky] or {}) do
+              if not set[i] then
+                local zx, zy = list[i], list[i + 1]
+                local u = L2 > 0 and math.max(0, math.min(1, ((zx - ax) * vx + (zy - ay) * vy) / L2)) or 0
+                local d = math.sqrt((ax + vx * u - zx) ^ 2 + (ay + vy * u - zy) ^ 2) - list[i + 2]
+                if d <= D then set[i] = true end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+  memo[key] = set
+  return set
+end
+
 -- The other faction's towns the route walks through: { { name, yards }, ... } most first, or nil. Not the towns at a
 -- walk's own ends (a stop in one, the player in one: R.HostileTownsNear, as the router leaves them out).
 function N.HostileOnRoute(r)
@@ -877,7 +1180,10 @@ function N.HostileOnRoute(r)
             for t, yd in pairs(acc) do
               local key = c .. ":" .. t
               yards[key] = (yards[key] or 0) + yd
-              at[key] = at[key] or { c, list[t], list[t + 1] }
+              -- (named where the route walks the most past it: N.HostileTownName)
+              if not at[key] or yd > at[key][7] then
+                at[key] = { c, t, pts[i], pts[i + 1], pts[i + 2], pts[i + 3], yd }
+              end
             end
           end
         end
@@ -888,7 +1194,7 @@ function N.HostileOnRoute(r)
   for key, yd in pairs(yards) do
     if yd >= N.HOSTILE_WARN_YD then
       local a = at[key]
-      local name = GuardPlace(a[1], a[2], a[3]) or "?"
+      local name = N.HostileTownName(a[1], side, a[2], a[3], a[4], a[5], a[6]) or "?"
       if seen[name] then
         seen[name][2] = seen[name][2] + yd
       else
@@ -907,6 +1213,7 @@ end
 -- over and over on a trip through Dun Algaz). Looked for in the background (Router.Background: the whole route sampled
 -- every few yards, not in a frame).
 N.hostileSaid = {} -- [town's name] = said in chat this trip
+N.hostileAsking = nil -- ("Take it?" up: its question, N.CheckHostileRoute)
 local hostileChecked, hostileNames
 local hostileNoteRoute, hostileNoteHas -- (N.HostileNote: the route it was looked for on, and whether it passes guards)
 function N.CheckHostileRoute()
@@ -919,12 +1226,34 @@ function N.CheckHostileRoute()
   if hostileChecked == key then return end
   hostileChecked, hostileNames = key, nil
   local function Said(towns)
-    if hostileChecked ~= key or not towns then return end -- (the route changed meanwhile, or none)
+    if hostileChecked ~= key then return end -- (the route changed meanwhile)
+    towns = N.WithEnemyCapital(d, towns or nil)
+    if not towns then return end
     local names = {}
     for k, t in ipairs(towns) do
       if k <= 3 then names[k] = t[1] end
     end
     hostileNames = table.concat(names, ", ")
+    -- (avoiding them and still through them: no way round found. Asked once a trip, "Take it?" (Kooki3z 2026-11-23,
+    -- Horde in Loch Modan past Thelsamar's guards and over the Stonewrought Dam with no question; the standing rule:
+    -- only enemy ground, ask "take it?" and route through). Yes: as it is; no: the safe way with a ride where the
+    -- ride check finds one (N.AnswerRisk), else said in chat as before. The trip's answer, N.riskOk.trip, as the ride
+    -- check's own "Risk enemy territory?": one question a trip either way)
+    -- (not with the ride check's own "Risk enemy territory?" up or coming: one question)
+    if avoiding and N.RiskAnswer(d) == nil and not N.hostileAsking and not N.riskQuestion and not N.riskAsking
+        and ns.GPS and ns.GPS.ConfirmHostile then
+      local q = { key = N.RiskKey(d), towns = towns }
+      N.hostileAsking = q
+      local asked = ns.GPS.ConfirmHostile(names, N.Faction and N.Faction(), function()
+        N.hostileAsking = nil
+        N.AnswerRisk(q, true)
+      end, function()
+        N.hostileAsking = nil
+        N.AnswerRisk(q, false)
+      end)
+      if not asked then N.hostileAsking = nil end
+    end
+    -- (and the chat line once a trip, as before)
     local new = false
     for _, name in ipairs(names) do
       if not N.hostileSaid[name] then new, N.hostileSaid[name] = true, true end
@@ -941,6 +1270,115 @@ function N.CheckHostileRoute()
   else
     Said(N.HostileOnRoute(r))
   end
+end
+-- "Take it?" -> No, and the way round the guards never settled (item 87, Kooki3z on e96d80ee: a Horde 60 in Dun
+-- Morogh by Gol'Bolar Quarry to the Wetlands past Dun Algaz, minutes of "Routing..." and a faded line; Dun Algaz is the
+-- only pass, so there's no way round on foot). With the trip's answer No, a route not settled clear of the guards within
+-- REFUSED_SECONDS (a ride round them, found by then, is settled and clear): its searches stopped (routing paused) and
+-- the player told and asked again, "No way around ... Take the way past them?" Yes: the way past them; No: the route
+-- cleared. Watched per route version (a stop reached starts it again); `N.refused`: { version, at, ok, asked }.
+N.REFUSED_SECONDS = 10
+N.refused = nil
+N.guardsAsking = nil -- (the question up: N.GiveUpRefused)
+-- Whether route `r` passes the other faction's guards (N.HostileOnRoute's towns: the stops' own left out, as the router
+-- leaves them), worked out once a route.
+local throughGuards = setmetatable({}, { __mode = "k" })
+function N.RouteThroughGuards(r)
+  if not r then return false end
+  local v = throughGuards[r]
+  if v == nil then
+    v = N.HostileOnRoute(r) ~= nil
+    throughGuards[r] = v
+  end
+  return v
+end
+function N.CheckRefused(now)
+  local d = N.dest
+  if not (d and not d.corpse and N.riskOk and N.riskOk.trip == false) then
+    N.refused = nil
+    return
+  end
+  local f = N.refused
+  -- (the clock held while a question about the guards is up, or routing paused)
+  local waiting = N.paused or N.hostileAsking or N.riskAsking or N.guardsAsking
+  if not f or f.version ~= version or waiting then
+    if not (f and f.version == version and (f.ok or f.asked)) then f = { version = version, at = now } end
+    N.refused = f
+    if waiting then return end
+  end
+  if f.ok or f.asked then return end
+  local r = N.route
+  if r and not r.pending and not N.RouteThroughGuards(r) then
+    f.ok = true -- (round them: settled)
+    return
+  end
+  if now - f.at < N.REFUSED_SECONDS then return end
+  f.asked = true
+  N.GiveUpRefused()
+end
+-- The way round the guards given up: its searches stopped, and the player asked whether to take the way past them.
+function N.GiveUpRefused()
+  local d = N.dest
+  if not d then return end
+  local q = { key = N.RiskKey(d) }
+  local towns = hostileNames
+  N.DropRideChecks()
+  if ns.Router and ns.Router.DropBackground then ns.Router.DropBackground() end
+  N.SetPaused(true, "guards")
+  local trip = N.trip
+  local function Yes()
+    N.guardsAsking = nil
+    if N.trip ~= trip then return end
+    N.SetPaused(false)
+    N.AnswerRisk(q, true)
+  end
+  local function No(clicked)
+    N.guardsAsking = nil
+    if N.trip ~= trip then return end
+    if not clicked then return end -- (let go unanswered: left paused, Resume Routing tries again)
+    if ns.Print then ns.Print(L["Route cleared: no way around the other faction's guards."]) end
+    N.Clear()
+  end
+  N.guardsAsking = q
+  local asked = ns.GPS and ns.GPS.ConfirmNoWayRound and ns.GPS.ConfirmNoWayRound(towns, Yes, No)
+  if not asked then
+    if ns.Print then ns.Print(L["No way around the other faction's guards: the route goes past them."]) end
+    Yes()
+  end
+  return asked
+end
+-- `towns` (N.HostileOnRoute's) with the other faction's capital the stop is in put first (Kooki3z 2026-11-23, Horde to
+-- the Hall of Thanes under Ironforge: a stop's own town is left out of the route's towns, as the router leaves its
+-- guards' cost out to get in at all, and a capital's walk in went by with no question). A capital: one of
+-- ns.Capitals' whose map holds the stop, with the other faction's guards within ENEMY_CAPITAL_YD of it.
+N.ENEMY_CAPITAL_YD = 120
+function N.WithEnemyCapital(d, towns)
+  local side = N.Faction and N.Faction()
+  local c = d and d.cont and Geo.Base(d.cont)
+  local list = side and c and ns.Hostile and ns.Hostile[c] and ns.Hostile[c][side]
+  if not (list and d.x) then return towns end
+  local name
+  for _, cap in ipairs(ns.Capitals and ns.Capitals[c] or {}) do
+    local m = ns.Maps and ns.Maps[cap[3]]
+    local b = m and m.bounds
+    if b and d.x >= math.min(b[1], b[3]) and d.x <= math.max(b[1], b[3]) and d.y >= math.min(b[2], b[4])
+        and d.y <= math.max(b[2], b[4]) then
+      name = ns.ZoneName and ns.ZoneName(cap[3], cap[1]) or cap[1]
+      break
+    end
+  end
+  if not name then return towns end
+  local near = false
+  for i = 1, #list - 2, 3 do
+    if (list[i] - d.x) ^ 2 + (list[i + 1] - d.y) ^ 2 <= N.ENEMY_CAPITAL_YD ^ 2 then near = true break end
+  end
+  if not near then return towns end
+  for _, t in ipairs(towns or {}) do
+    if t[1] == name then return towns end
+  end
+  local out = { { name, 0 } }
+  for _, t in ipairs(towns or {}) do out[#out + 1] = t end
+  return out
 end
 -- The directions panel's line for it, or nil.
 function N.HostileNote()
@@ -994,7 +1432,14 @@ N.trip = 0
 function N.SetStops(stops, fastest, force, keep)
   if Locked(force) then return false end
   if not N.SameTrip(stops) then -- (another trip: its towns said again, N.CheckHostileRoute; it swims again, N.SkipSwim)
-    N.hostileSaid, N.noSwim, N.swimBans = {}, nil, {}
+    N.hostileSaid, N.noSwim, N.swimBans, N.hostileAsking = {}, nil, {}, nil
+    -- (and the last trip's background searches dropped: never waited behind, item 82h)
+    if ns.Router and ns.Router.DropBackground then ns.Router.DropBackground() end
+    -- (and its walks ruled out (the ride check's, N.noWalk) and kept, a new trip "red" (asked about a zone too high and
+    -- confirmed) too: they're the last trip's. Item 82h: a 550 yd trip in the Barrens after one to Gadgetzan, its walk
+    -- barred by the last trip's ride check, planned by way of Gadgetzan and "no way"; set elsewhere and back, it settled)
+    N.noWalk, N.walkKept = {}, {}
+    N.ResetJumps() -- (and jumps again: N.AvoidJump, N.PickFallSpell)
   end
   if force ~= "red" then
     -- (the "risk it?" answers kept for the stops still in it: the same route set again, a quest route's update, a
@@ -1036,7 +1481,7 @@ function N.SetStops(stops, fastest, force, keep)
     N.stops[#N.stops + 1] = c
   end
   Changed()
-  if fastest and not N.keepOrder and #N.stops > 1 and not N.KeepCityOrder() then N.OrderStops() end
+  if fastest and not N.keepOrder and #N.stops > 1 and not N.KeepCityOrder() then N.OrderNow() end
   return true
 end
 
@@ -1052,7 +1497,7 @@ function N.AddStop(d, fastest, force)
   N.stops[#N.stops + 1] = c
   Changed()
   -- (a route kept in its listed order: the new stop stays at the end)
-  if fastest and not N.loop and not N.keepOrder and #N.stops > 1 and not N.KeepCityOrder() then N.OrderStops() end
+  if fastest and not N.loop and not N.keepOrder and #N.stops > 1 and not N.KeepCityOrder() then N.OrderNow() end
   return true
 end
 
@@ -1327,7 +1772,9 @@ function N.Clear()
   N.stops, N.loop, N.keepOrder = {}, false, false
   N.paused, N.pauseWatch = nil, nil
   N.redOk, N.skipLearn, N.noWalk, N.walkKept, N.riskOk, N.riskQuestion, N.riskAsking = {}, {}, {}, {}, {}, nil, nil
-  N.hostileSaid, N.noSwim, N.swimBans = {}, nil, {}
+  N.hostileSaid, N.noSwim, N.swimBans, N.hostileAsking = {}, nil, {}, nil
+  N.ResetJumps()
+  if ns.Router and ns.Router.DropBackground then ns.Router.DropBackground() end -- (its searches with it: item 82h)
   N.trip = N.trip + 1
   N.ClearSkippedRides()
   Changed()
@@ -1377,6 +1824,7 @@ function N.Restore()
     for _, v in ipairs(ok and b.rows or {}) do ok = ok and type(v) == "number" end
     if ok then N.swimBans[#N.swimBans + 1] = { cont = b.cont, rows = b.rows, n = b.n, lifted = b.lifted == true or nil } end
   end
+  N.RestoreJumps(#N.stops > 0 and cdb or nil)
   if next(N.skipRides) then N.FlightsChanged() end
   N.dest = N.stops[1]
   N.route, N.arrivedAt = nil, nil
@@ -2083,7 +2531,10 @@ function N.SaveTrack()
   cdb.floorTrack = fresh and { level = track.level, x = track.x, y = track.y, z = track.z, time = time and time() } or nil
 end
 -- No floor followed from here on (the tests: one test's floor isn't the next one's).
-function N.ResetTrack() track, raisedTrack = nil, nil end
+function N.ResetTrack()
+  track, raisedTrack = nil, nil
+  if ns.CityGrid then ns.CityGrid.track = nil end -- (and the city grid's floor followed with it)
+end
 -- The floor followed (N.TrackCityZ) a moment ago, on `level` when given, or nil.
 function N.FollowedZ(level)
   local now = GetTime()
@@ -2103,7 +2554,7 @@ end
 -- a spawn on another floor was picked.
 N.SPAWN_YD, N.SPAWN_CELL = 2, 8
 local spawnIx = {} -- [level] = { src = its list, [cell] = { x, y, z, ... } }
-function N.SpawnZ(level, x, y)
+function N.SpawnZ(level, x, y, r)
   local t = level and x and y and ns.NpcFloors and ns.NpcFloors[level]
   if not t then return nil end
   local C = N.SPAWN_CELL
@@ -2118,10 +2569,11 @@ function N.SpawnZ(level, x, y)
     end
     spawnIx[level] = ix
   end
-  local best, bd = nil, N.SPAWN_YD ^ 2
+  local best, bd = nil, (r or N.SPAWN_YD) ^ 2
   local cx, cy = math.floor(x / C), math.floor(y / C)
-  for dx = -1, 1 do
-    for dy = -1, 1 do
+  local k = r and math.ceil(r / C) or 1 -- (`r`: the nearest within it, N.GuessStopZ's)
+  for dx = -k, k do
+    for dy = -k, k do
       local b = ix[(cx + dx) * 65536 + cy + dy]
       for i = 1, b and #b - 2 or 0, 3 do
         local d = (b[i] - x) ^ 2 + (b[i + 1] - y) ^ 2
@@ -2130,6 +2582,143 @@ function N.SpawnZ(level, x, y)
     end
   end
   return best
+end
+-- A stop's height when it's made (asked 2026-11-23, Thunder Bluff's east rim to the Mulgore ground below, placed on
+-- the map with no height: the route went 126 yd straight off the cliff): its own; else an NPC's spot's there
+-- (N.SpawnZ); else its town place's floor (N.StopHeight); else the grid's floor at the spot (N.GridFloorZ, a city
+-- level's N.CityFloor); else the map's ground (N.GroundAt); else the nearest road's, shipped NPC's or town place's
+-- within STOP_Z_YD. Beyond that the height's unknown: nil, never the player's. Returns z (or nil) and where it came
+-- from: "own", "npc", "place", "grid", "building", "terrain", "near", "unknown". (N.StopZ reads it back: a stop's z.)
+N.STOP_Z_YD = 35
+-- Whether the map's ground's height z at (x, y) is far over a city grid's floors near it (the rock over them).
+N.ROCK_OVER_Z = 20
+function N.OverGridFloors(level, x, y, z)
+  local CG = ns.CityGrid
+  for name, d in pairs(ns.CityGridData or {}) do
+    if (d.level or d.cont) == level and x >= d.x0 and y >= d.y0 and x < d.x0 + d.w * d.cell and y < d.y0 + d.h * d.cell then
+      local c = CG and CG.City(name)
+      local top
+      for _, f in ipairs(c and CG.SurfacesAt(c, x, y) or {}) do top = math.max(top or f.z, f.z) end
+      if top and z > top + N.ROCK_OVER_Z then return true end
+    end
+  end
+  return false
+end
+-- Whether (x, y) on `level` is in a city grid's box (its margin round the city too: the ground under its cliffs).
+function N.InGridBox(level, x, y)
+  for _, d in pairs(ns.CityGridData or {}) do
+    if (d.level or d.cont) == level and x >= d.x0 and y >= d.y0 and x < d.x0 + d.w * d.cell and y < d.y0 + d.h * d.cell then
+      return true
+    end
+  end
+  return false
+end
+N.STOP_GROUND_Z = 8 -- (a grid's floor this near the map's ground is the ground floor, N.GridFloorZ)
+N.STOP_BUILDING_YD = 16 -- (a building's roads this near the spot: its floors, N.GuessStopZ)
+function N.GridFloorZ(level, x, y, mapZ)
+  local CG = ns.CityGrid
+  local name = CG and CG.GridCityAt and CG.GridCityAt(level, x, y)
+  local c = name and CG.City(name)
+  local ci = c and CG.CellAt(c, x, y)
+  if not (ci and CG.Count(c, ci) > 0) then return nil end
+  local zs = {}
+  for k = 0, CG.Count(c, ci) - 1 do zs[#zs + 1] = CG.Z(c, CG.First(c, ci) + k) end
+  table.sort(zs)
+  if #zs == 1 then return zs[1] end
+  -- (several floors: placed on an interior map, its floor (`mapZ`, the map's height); on a zone's or the continent's,
+  -- the ground's: the floor nearest the map's ground, else the lowest (a city under the rock, Ironforge))
+  local near = mapZ
+  if not near and not (ns.CityLevels and ns.CityLevels[level]) then
+    local g = N.GroundAt(level, x, y)
+    if g then
+      local best
+      for _, z in ipairs(zs) do
+        if math.abs(z - g) <= N.STOP_GROUND_Z and (not best or math.abs(z - g) < math.abs(best - g)) then best = z end
+      end
+      if best then return best end
+    end
+  end
+  if near then
+    local best = zs[1]
+    for _, z in ipairs(zs) do
+      if math.abs(z - near) < math.abs(best - near) then best = z end
+    end
+    return best
+  end
+  return zs[1]
+end
+local function NearZ(level, x, y, r)
+  local best, bd = nil, r * r
+  local hs = ns.Router and ns.Router.HeightsNear and ns.Router.HeightsNear(level, x, y, r)
+  for _, h in ipairs(hs or {}) do
+    if h.d * h.d < bd then best, bd = h.z, h.d * h.d end
+  end
+  local sz = N.SpawnZ(level, x, y, math.sqrt(bd))
+  if sz then best = sz end -- (nearer than the road: SpawnZ's within the road's distance)
+  local base = Geo.Base and Geo.Base(level) or level
+  for _, t in pairs(ns.TownPlaces or {}) do
+    if t.cont == base then
+      for _, p in ipairs(t) do
+        if p.z and p.x then
+          local d = (p.x - x) ^ 2 + (p.y - y) ^ 2
+          if d < bd then best, bd = p.z, d end
+        end
+      end
+    end
+  end
+  return best
+end
+function N.GuessStopZ(d)
+  if not (d and d.x and d.y and d.cont) then return nil, "unknown" end
+  if d.z ~= nil then return d.z, d.zSource or "own" end
+  local cont, x, y = d.cont, d.x, d.y
+  local z = N.SpawnZ(cont, x, y)
+  if z then return z, "npc" end
+  z = N.StopHeight(d)
+  if z then return z, "place" end
+  local l = ns.CityLevels and ns.CityLevels[cont]
+  z = l and l.zoff and N.CityFloor and N.CityFloor(cont, x, y)
+  if z then return z + l.zoff, "grid" end
+  z = N.GridFloorZ(cont, x, y, d.mapZ)
+  if z then return z, "grid" end
+  -- (in a building with its inside (ns.Indoors), placed on the zone's map: its ground floor, the road in it nearest the
+  -- ground under it (the map's ground reads none in a building, N.GroundAt); Brill's inn, its trainers upstairs)
+  if not d.mapZ and N.InBuilding(cont, x, y) and ns.Router and ns.Router.HeightsNear then
+    local GD = ns.Ground
+    local was = GD and GD.force
+    if GD then GD.force = true end
+    local ok, gz = pcall(function() return GD and GD.At and GD.At(cont, x, y) end)
+    if GD then GD.force = was end
+    gz = ok and type(gz) == "number" and gz or nil
+    if gz then
+      local best
+      for _, h in ipairs(ns.Router.HeightsNear(cont, x, y, N.STOP_BUILDING_YD) or {}) do
+        if not best or math.abs(h.z - gz) < math.abs(best - gz) then best = h.z end
+      end
+      if best and math.abs(best - gz) <= N.STOP_GROUND_Z then return best, "building" end
+    end
+  end
+  if not (ns.CityLevels and ns.CityLevels[cont]) then
+    -- (the map's ground, else the shipped heights (Ground.Sample): never a road's under the hill nearby first. Item 82g:
+    -- no map ground there, a stop north of Lushwater Oasis took the Wailing Caverns' road under the hill, 155 yd down)
+    z = N.GroundAt(cont, x, y)
+    if not z and ns.Ground and ns.Ground.Sample then
+      local ok, h = pcall(ns.Ground.Sample, cont, x, y)
+      z = ok and type(h) == "number" and h or nil
+    end
+    -- (not the rock over a city's floors: Ironforge's mountain 856 over the Hall of Thanes' way in, 2026-11-23)
+    if z and not N.OverGridFloors(cont, x, y, z) then return z, "terrain" end
+  end
+  z = NearZ(cont, x, y, N.STOP_Z_YD)
+  if z then return z, "near" end
+  -- (none in range: unknown, said to a listening hook; same shape as the offline list,
+  -- data/height_unknown.json)
+  local hook = N.heightUnknownHook
+  if hook then
+    pcall(hook, { id = d.id or d.npcId or d.quest, name = d.name, cont = cont, map = d.map, x = x, y = y,
+      source = d.source or (d.quest and "quest") or (d.npc and "npc") or "stop", why = "no height in range" })
+  end
+  return nil, "unknown"
 end
 -- The player followed on the stop's floor (N.StopFloor): the floor followed in a building or city, about the stop's
 -- height (SAME_FLOOR_Z), near it (FLOOR_HINT_YD).
@@ -2182,6 +2771,19 @@ N.OFF_FLOOR_NEAR_YD = 10
 N.OFF_FLOOR_LAND_ROAD_YD = 10
 N.OFF_FLOOR_GROUND_YD = 4
 N.OFF_FLOOR_ARRIVE_YD = 3
+N.NPC_BY_YD = 2
+-- (an NPC serving across a counter, NPC_COUNTER_SERVICES (Data/Npcs.lua's letters: b a banker, a an auctioneer): the
+-- player can't stand by it; Kooki3z 2026-11-23, "except for auctioneers and bankers, they are sometimes further away
+-- like in orgrimmar". About the game's interact range across one)
+N.NPC_COUNTER_YD, N.NPC_COUNTER_SERVICES = 7, "ba"
+function N.NpcByYd(d)
+  local Lay = ns.Layers
+  if not (Lay and Lay.ShippedNpcs and d and d.npcId) then return N.NPC_BY_YD end
+  local _, byId = Lay.ShippedNpcs()
+  local n = byId and byId[d.npcId]
+  if n and n.svc and n.svc:find("[" .. N.NPC_COUNTER_SERVICES .. "]") then return N.NPC_COUNTER_YD end
+  return N.NPC_BY_YD
+end
 N.OFF_FLOOR_LAND_Z = 6
 local offFloor = setmetatable({}, { __mode = "k" })
 function N.StopOffGround(d)
@@ -2260,6 +2862,20 @@ function N.StopOffGround(d)
   N.lastOffFloor = { d = d, roads = roads }
   return way, dz
 end
+-- How far the stop is over the player when that's more than UNDER_STOP_Z: by the ground under the player, out of the
+-- capitals (their streets lie over the terrain, Stormwind's 40 yd), buildings, caves and the underground cities (the
+-- ground there is the rock over the player); nil otherwise. A mesa's top or a tower over the ground the player is on.
+N.UNDER_STOP_Z = 12
+function N.PlayerUnderStop(d, px, py)
+  local h = d and px and N.StopHeight(d)
+  if not h or (ns.CityLevels and ns.CityLevels[d.cont]) then return nil end
+  if N.InCapital(d.cont, px, py) or N.InBuilding(d.cont, px, py) then return nil end
+  local R = ns.Router
+  if R and R.InLayeredCave and R.InLayeredCave(d.cont, px, py) then return nil end
+  local g = N.GroundAt(d.cont, px, py)
+  if g and h - g > N.UNDER_STOP_Z then return h - g end
+  return nil
+end
 -- An NPC's stop (`npcId`) whose NPC the player reached: its window opened (N.OnNpcWindow, from Layers.OnNpcWindow), or
 -- it's the target and within the game's interact range (CheckInteractDistance on the target, index NPC_INTERACT: about
 -- 10 yd; read only). The game gives no player height, so this is how an NPC upstairs is known reached.
@@ -2322,10 +2938,40 @@ function N.IntoBuildingText(px, py, cont)
   if (d.x - px) ^ 2 + (d.y - py) ^ 2 > N.INTO_BUILDING_YD ^ 2 or N.NpcReached(d) then return nil end
   local way = N.StopOffGround(d)
   if not way then return nil end
+  -- (only with the player known to be on another floor than the stop: standing by Nissa Firestone on her balcony it
+  -- said "Go into the building, then up the stairs"; Kooki3z 2026-11-23)
+  local zp, h = N.PlayerHeightNear(d.cont, px, py), N.StopHeight(d)
+  if not (zp and h) or math.abs(h - zp) <= N.OFF_FLOOR_Z then return nil end
+  way = h > zp and "up" or "down"
   if way == "down" then return "|cff80c0ff" .. L["Go into the building, then down the stairs"] .. "|r" end
   return "|cffffc080" .. L["Go into the building, then up the stairs"] .. "|r"
 end
 -- (in a capital's own cells too (indoor routes phase 3, 2026-10-06): its roads have their floors, `nz`)
+-- The player's height, for the height hints: the floor followed, else the roads by the player when they're all one floor
+-- (within TRACK_STEP: a floor and a stairs road up from it can't tell which the player is on), else out on the land the
+-- ground under them; never the terrain in a capital, a building, a cave or an underground city, where it's the rock or
+-- the land over them (Kooki3z 2026-11-23, by Nissa Firestone on her balcony in Ironforge: "Below you, 251 yd down",
+-- the mountain's top at 760 over her 512.5). Nil when not known.
+function N.PlayerHeightNear(cont, px, py)
+  if not (cont and px) then return nil end
+  local fz = N.FollowedZ(cont)
+  if fz then return fz end
+  if ns.CityLevels and ns.CityLevels[cont] then return nil end
+  local R = ns.Router
+  local hs = R and R.HeightsNear and R.HeightsNear(cont, px, py, N.TRACK_YD)
+  if hs and hs[1] then
+    local lo, hi = hs[1].z, hs[1].z
+    for _, e in ipairs(hs) do lo, hi = math.min(lo, e.z), math.max(hi, e.z) end
+    if hi - lo <= N.TRACK_STEP then return hs[1].z end
+    return nil
+  end
+  if N.InCapital(cont, px, py) or N.InBuilding(cont, px, py)
+      or (R and R.InLayeredCave and R.InLayeredCave(cont, px, py)) then
+    return nil
+  end
+  if not hs then return nil end -- (the roads not ready yet: no guess)
+  return N.GroundAt(cont, px, py)
+end
 
 -- Rooms reached only through a teleporter (a Transports row's `room`, its end: Stormwind's mage trainers' room under the
 -- city, by the Wizard's Sanctum's portal at the top of its tower; asked 2026-11-17, "Path here says below but the trainer
@@ -2471,6 +3117,34 @@ function N.OutsideFloor(level, px, py, hs, z)
   end
   return true
 end
+-- The height of the route's own floor under (px, py) on `level`: its leg within TRACK_ROUTE_YD near where it's
+-- followed, by the route's heights (`fz`, a city grid's), or nil. Taken by N.TrackCityZ while the player walks the
+-- route at about that height: a ramp down under a road over it (Orgrimmar's way out to Razor Hill, 2026-11-23: the
+-- floor followed stayed on the road overhead at 24 while the route went down to 16 under it, then jumped, and the
+-- route was worked out again in the city).
+N.TRACK_ROUTE_YD, N.TRACK_ROUTE_LEGS = 3, 8
+function N.RouteFloorAt(level, px, py)
+  local r = N.route
+  local full = r and r.fullFirst
+  local fz = full and full.fz
+  if not (fz and full.cont == level and full.pts) then return nil end
+  local pts = full.pts
+  local i0 = math.max(1, (r.followIdx or 1) - 1)
+  local best, bz = N.TRACK_ROUTE_YD ^ 2, nil
+  for i = i0, math.min(#pts / 2 - 1, i0 + N.TRACK_ROUTE_LEGS) do
+    local za, zb = fz[i], fz[i + 1]
+    if za and zb then
+      local ax, ay, bx, by = pts[2 * i - 1], pts[2 * i], pts[2 * i + 1], pts[2 * i + 2]
+      local vx, vy = bx - ax, by - ay
+      local L2 = vx * vx + vy * vy
+      local t = L2 > 0 and math.max(0, math.min(1, ((px - ax) * vx + (py - ay) * vy) / L2)) or 0
+      local dx, dy = ax + vx * t - px, ay + vy * t - py
+      local d2 = dx * dx + dy * dy
+      if d2 <= best then best, bz = d2, za + (zb - za) * t end
+    end
+  end
+  return bz
+end
 -- Whether the player is indoors in halls under the ground with their roads' heights (the roads near UNDER_GROUND_Z or
 -- more under the map's ground: Blackrock Mountain's halls by Blackrock Spire's and Blackrock Depths' doors, floors over
 -- floors, 255 and 266 there under the mountain at 561): their floor followed as in a building (TrackCityZ), so the
@@ -2482,6 +3156,25 @@ function N.InHallsUnderGround(level, px, py)
   local hs = R.HeightsNear(level, px, py, N.TRACK_YD)
   local gz = hs and hs[1] and R.GroundZ(level, px, py)
   return gz ~= nil and hs[1].z < gz - N.UNDER_GROUND_Z
+end
+-- Whether the world grid has floors over floors at (px, py) on `level`: surfaces there more than TRACK_STEP apart in
+-- height. In halls under the ground the roads near the player may all be one floor's while the player stands on
+-- another with no road (item 89, Kooki3z 2026-11-25: on Blackrock Mountain's ring over the lava, 261, his recorded walk
+-- on the Molten Span's floor, 182, passes under it; the start took the span's road as his floor and the route to
+-- Blackrock Depths went from under him, not down the ring). There the start's floor is left to the grid's own
+-- (N.TrackGridZ: followed, else the highest surface under the ground).
+function N.GridStackedAt(level, px, py)
+  local WG = ns.WorldGrid
+  if not (px and WG and WG.On and WG.On() and WG.SurfacesAt and WG.Cont) then return false end
+  local c = WG.Cont(level)
+  if not c then return false end
+  local ok, ss = pcall(WG.SurfacesAt, c, px, py)
+  if not (ok and ss and ss[1]) then return false end
+  local lo, hi = ss[1].z, ss[1].z
+  for _, e in ipairs(ss) do
+    if e.z < lo then lo = e.z elseif e.z > hi then hi = e.z end
+  end
+  return hi - lo > N.TRACK_STEP
 end
 function N.TrackCityZ(level, px, py)
   -- (on a flight: not walked, nothing followed; started again where it lands. Orgrimmar, 2026-11-15: flown in over the
@@ -2533,10 +3226,13 @@ function N.TrackCityZ(level, px, py)
     -- route went in, up and back down. Not onto stairs (under them, the passage jumped up onto their middle) and never
     -- from one floor to another (floors over floors): TRACK_STEP.
     local indoor = N.InBuilding(level, px, py)
+    -- (on the route, at about its height: its own floor, N.RouteFloorAt; not a road over or under it)
+    local rz = not indoor and N.RouteFloorAt(level, px, py)
+    if rz and math.abs(rz - track.z) <= N.TRACK_STEP then z, flat, edge = rz, track.flat, nil end
     -- (first the roads joined to the one followed, N.TRACK_JOINED_YD)
     local joined = track.edge and track.graph == (ns.Router.DebugGraph and ns.Router.DebugGraph(level)) -- (the same build)
       and ns.Router.EdgesJoined and ns.Router.EdgesJoined(level, track.edge, N.TRACK_JOINED_YD)
-    if joined and not indoor then
+    if joined and not indoor and not z then
       for _, h in ipairs(hs) do
         if joined[h.edge] and math.abs(h.z - track.z) <= N.TRACK_STEP then
           z, flat, edge = h.z, h.flat, h.edge
@@ -2638,6 +3334,12 @@ function N.TrackCityZ(level, px, py)
         end
       end
       if not (first and clear) then return nil end
+      -- (in halls under the ground, not a city's level, a building or a capital: the roads all one floor but the grid's
+      -- floors stacked there, unknown; N.GridStackedAt)
+      if not l and not N.InBuilding(level, px, py) and not N.InCapital(level, px, py)
+          and N.InHallsUnderGround(level, px, py) and N.GridStackedAt(level, px, py) then
+        return nil
+      end
       -- (down in a city's level, a floor with a lower one's road within TRACK_UNDER_YD: the player may be under it, on
       -- open floor below a walkway. Undercity, 2026-11-14: started on the walkways over the ring by the Rogues' Quarter,
       -- the player on the ring under them; "repair" went 559 yd round by the Trade Quarter, "14 yd down")
@@ -2655,7 +3357,9 @@ function N.TrackCityZ(level, px, py)
       if math.abs(h.z - z) <= 0.5 then edge = h.edge break end
     end
   end
-  track = { level = level, z = z, at = now, look = now, x = px, y = py, flat = flat, edge = edge,
+  local anchored = same and track.anchored
+  if anchored and (px - anchored[1]) ^ 2 + (py - anchored[2]) ^ 2 > N.ANCHOR_YD ^ 2 then anchored = nil end
+  track = { level = level, z = z, at = now, look = now, x = px, y = py, flat = flat, edge = edge, anchored = anchored,
     graph = ns.Router.DebugGraph and ns.Router.DebugGraph(level) }
   return z
 end
@@ -2702,9 +3406,136 @@ function N.TrackRaisedZ(level, px, py)
   return nil
 end
 function N.ResetRaisedTrack() raisedTrack = nil end -- (the tests)
+-- The player's floor read off the world grid's route being followed (bake8, Blackrock Mountain 2026-11-23: the spire's
+-- entrance halls are floors over floors under the mountain, Data/Heights.lua's ground is its top 300 yd up, and with no
+-- height from the game a recalculation started on the hall's floor nearest that top: the directions flipped, a U-turn
+-- back up the switchbacks). Within ROUTE_Z_YD of a piece of the route on the player's level with heights (`fz`), its
+-- height there: the piece the route came over last time first (within TRACK_STEP of that height), else the earliest
+-- piece along the route (the route starts at the player; it passes over itself on switchbacks). Only with world
+-- routing on (the option off: as before).
+N.ROUTE_Z_YD = 6
+local routeTrack -- { route, z }
+-- The floor followed over the world grid's surfaces where they're stacked (item 45, Kooki3z 2026-11-24: in
+-- Maraudon's outer cave the route flipped and turned round where passages cross over and under each other; with no
+-- floor followed there, each route started on whichever passage's surface the spot had first, and from the other
+-- passage the way is long). The surface at about the height last followed (GRID_TRACK_STEP: a ramp walked, a step
+-- down; a fall past it, the nearest below) while the player moved no more than GRID_TRACK_JUMP_YD since; with one
+-- surface there, that one. Nil when it's not known (stacked and nothing followed yet: the search picks, as before).
+N.GRID_TRACK_STEP, N.GRID_TRACK_JUMP_YD = 6, 40
+local gridTrack -- ({ level, z, x, y, at })
+function N.TrackGridZ(level, px, py)
+  local WG = ns.WorldGrid
+  if not (px and WG and WG.On and WG.On() and WG.SurfacesAt and WG.Cont) or (UnitOnTaxi and UnitOnTaxi("player")) then
+    gridTrack = nil
+    return nil
+  end
+  local c = WG.Cont(level)
+  if not c then gridTrack = nil return nil end
+  local ok, ss = pcall(WG.SurfacesAt, c, px, py)
+  if not (ok and ss and ss[1]) then return nil end
+  local now = GetTime()
+  local t = gridTrack
+  local fresh = t and t.level == level and now - t.at < N.TRACK_STALE
+    and (t.x - px) ^ 2 + (t.y - py) ^ 2 <= N.GRID_TRACK_JUMP_YD ^ 2
+  local z
+  if #ss == 1 then
+    z = ss[1].z
+  elseif fresh then
+    local best, bd, below, bz
+    for _, e in ipairs(ss) do
+      local dz = math.abs(e.z - t.z)
+      if not bd or dz < bd then best, bd = e.z, dz end
+      if e.z < t.z and (not bz or e.z > bz) then below, bz = e.z, e.z end
+    end
+    z = (bd and bd <= N.GRID_TRACK_STEP) and best or below or best
+  else
+    -- (nothing followed yet: indoors (a cave) the highest surface under the terrain there, outdoors the one nearest the
+    -- terrain; his spot in Maraudon's outer cave has the cave's floor, 86.5, under the hill's top, 139)
+    local GS = ns.Ground and ns.Ground.Sample
+    local gz = GS and GS(level, px, py)
+    if gz then
+      local indoors = N.Indoors and N.Indoors()
+      local best, bd
+      for _, e in ipairs(ss) do
+        if indoors then
+          if e.z < gz - 3 and (not best or e.z > best) then best = e.z end
+        else
+          local dz = math.abs(e.z - gz)
+          if not bd or dz < bd then best, bd = e.z, dz end
+        end
+      end
+      z = best
+    end
+  end
+  if z then
+    gridTrack = { level = level, z = z, x = px, y = py, at = now }
+  elseif not fresh then
+    gridTrack = nil
+  end
+  -- (only where stacked, and indoors: a cave's crossing passages. Out on the land a height given each time moved the
+  -- route's start off the sand south of Gadgetzan and its walk to Uldum never landed, test_world_grid's)
+  return (#ss > 1 and N.Indoors and N.Indoors()) and z or nil
+end
+-- The floor followed over the world grid's stacked surfaces (N.TrackGridZ) a moment ago on `level`, or nil.
+function N.GridFollowedZ(level)
+  local t = gridTrack
+  local now = GetTime()
+  if t and t.z and t.level == level and now >= t.at and now - t.at < N.TRACK_STALE then return t.z end
+  return nil
+end
+-- The player's floor on `level` for the map's route (G.FloorFade): the game's height, else the floor followed (a
+-- building's, a capital's, Undercity's, a bridge's: N.FollowedZ), else the world grid's; nil when not known.
+function N.PlayerFloorZ(level)
+  return N.PlayerZ() or N.FollowedZ(level) or N.GridFollowedZ(level)
+end
+function N.TrackRouteZ(level, px, py)
+  local WG = ns.WorldGrid
+  local r = N.route or (N.KeptRoute and N.KeptRoute())
+  if not (px and r and r.parts and WG and WG.On and WG.On()) then
+    routeTrack = nil
+    return nil
+  end
+  -- (not from a route still worked out, the stand-in meanwhile: its heights aren't a floor walked. The Deadmines' door,
+  -- bake9 with #983's stop heights: the Router's own by the hideout's upper tunnel, 34.5 at the door for the floor's
+  -- 27.5, set the player's floor, and the grid's walk to the portal started up there, 67 yd round for 22)
+  if r.pending then return nil end
+  local first, cont
+  for _, p in ipairs(r.parts) do
+    local pts, fz = p.pts, p.fz
+    if p.cont == level and pts and fz and #pts >= 4 then
+      for i = 1, #pts / 2 - 1 do
+        local ax, ay, bx, by = pts[2 * i - 1], pts[2 * i], pts[2 * i + 1], pts[2 * i + 2]
+        local za, zb = fz[i], fz[i + 1]
+        if za and zb then
+          local vx, vy = bx - ax, by - ay
+          local L2 = vx * vx + vy * vy
+          local t = L2 > 0 and math.max(0, math.min(1, ((px - ax) * vx + (py - ay) * vy) / L2)) or 0
+          local dx, dy = ax + vx * t - px, ay + vy * t - py
+          if dx * dx + dy * dy <= N.ROUTE_Z_YD * N.ROUTE_Z_YD then
+            local z = za + (zb - za) * t
+            if routeTrack and math.abs(z - routeTrack.z) <= N.TRACK_STEP then
+              cont = z
+              break
+            end
+            first = first or z
+          end
+        end
+      end
+      if cont then break end
+    end
+  end
+  local z = cont or first
+  routeTrack = z and { z = z } or nil
+  return z
+end
+function N.ResetRouteTrack() routeTrack = nil end -- (the tests)
 -- The player's floor known at (px, py) on `level`: the game height `z` of an NPC whose window just opened (they stand
 -- by it; its shipped spawn's, Layers.OnNpcWindow). Down in a city's level or in a capital, followed from there: the
 -- road near at about that height, else `z` itself. Whether it was taken.
+N.ANCHOR_YD = 10
+function N.TrackAnchored(level)
+  return track ~= nil and track.anchored ~= nil and track.level == level
+end
 function N.AnchorFloor(level, px, py, z)
   local l = ns.CityLevels and ns.CityLevels[level]
   if not (z and px and ((l and not l.instance) or N.InCapital(level, px, py)) and ns.Router and ns.Router.HeightsNear) then
@@ -2715,7 +3546,10 @@ function N.AnchorFloor(level, px, py, z)
     if not best and math.abs(h.z - z) <= N.TRACK_STEP then best, flat = h.z, h.flat end
   end
   local now = GetTime()
-  track = { level = level, z = best or z, at = now, look = now, x = px, y = py, flat = flat }
+  -- (`anchored`: the city grid's floor guess not taken over it within ANCHOR_YD, N.TrackAnchored; at Acolyte Dellis
+  -- upstairs the grid has only the street's floor under her, and took the player back down to it)
+  track = { level = level, z = best or z, at = now, look = now, x = px, y = py, flat = flat, anchored = { px, py } }
+  if ns.CityGrid then ns.CityGrid.track = nil end
   return true
 end
 
@@ -2755,6 +3589,12 @@ local ridePending = {} -- ["ride:" .. key] = a ride check queued and not done (N
 -- again at the next; walking by Dun Algaz, up to five checks a square, each planning the trip six times over)
 local rideSpot = {}
 function N.RideChecking() return next(ridePending) ~= nil end
+-- The ride checks queued dropped unanswered (N.GiveUpRefused): none waited on.
+function N.DropRideChecks()
+  local R = ns.Router
+  if R and R.DropBackground then R.DropBackground(nil, function(key) return tostring(key):find("^ride:") ~= nil end) end
+  for k in pairs(ridePending) do ridePending[k] = nil end
+end
 -- (for /agps debug route: what the ride checks remember, each answer and its plan's legs in short)
 function N.RideDebug()
   local out = {}
@@ -2787,13 +3627,19 @@ function N.AnswerRisk(q, yes)
     rideFinal[q.stopKey] = true -- (the player's answer: final till the check is)
     if rideLast[q.stopKey] and q.plan then ridePlanLast[q.stopKey] = q.plan end -- (the way with the ride itself)
   end
-  N.Invalidate(false)
+  -- (No: the legs worked out again too (their memo dropped), the grid's now round the guards only; kept, the leg
+  -- through them came back. Item 63b, Kooki3z 2026-11-24: "No" and the route stayed through the enemy spot)
+  if yes then N.Invalidate(false) else N.Invalidate(true, "costs") end
 end
 -- Seconds for a walk along `pts` as planning weighs it: the zones too high for the player (but
 -- `exempt`) counted extra (PlanYards), and water at swimming's cost (Passability's: across the sea
 -- to an island isn't a walk to take over the boat).
 local function Weighed(cont, pts, walk, exempt, blocked)
   local P = ns.Passability
+  -- (a spell jumping route off a rim, Router.SpellJumpOwn: its cliff face is jumped, not walked; its ground weighed as
+  -- the Router took it, not at the blocked ground's cost)
+  local R = ns.Router
+  if R and R.spellJumpPts and R.spellJumpPts[pts] then blocked, P = 0, nil end
   -- (yards straight over ground the terrain blocks, `blocked`: at the router's own cost for them,
   -- not ruled out: a bridge the terrain doesn't know, Thandol Span, was one on both ways)
   local yards = (blocked or 0) * ((ns.Router and ns.Router.BLOCKED_PENALTY or 12) - 1)
@@ -2822,8 +3668,8 @@ N.LEG_MEMO_MAX = 64
 local legMemo, legMemoN = {}, 0
 local function LegRoute(cont, x1, y1, x2, y2, o, fixed)
   if not fixed then return ns.Router.Route(cont, x1, y1, x2, y2, o) end
-  local key = string.format("%d:%.1f:%.1f:%.1f:%.1f:%s:%s:%s:%s", cont, x1, y1, x2, y2, tostring(o.z), tostring(o.tz),
-    tostring(o.offroad), tostring(o.roads))
+  local key = string.format("%d:%.1f:%.1f:%.1f:%.1f:%s:%s:%s:%s:%s:%s", cont, x1, y1, x2, y2, tostring(o.z), tostring(o.tz),
+    tostring(o.offroad), tostring(o.roads), tostring(o.maxDrop), tostring(o.noSwim))
   local r = legMemo[key]
   if r then return r end
   r = ns.Router.Route(cont, x1, y1, x2, y2, o)
@@ -2876,8 +3722,8 @@ local function WalkRoutes(legs, sx, sy, d, opts, sz, memo)
       local nxt = legs[li + 1]
       local endZ = toStop and N.StopZ(d) or (nxt and nxt.ride and EndZ(nxt.ride, nxt.from)) or nil
       local fromPlayer = opts.transient and leg.x1 == sx and leg.y1 == sy
-      local key = memo and string.format("%d:%.1f:%.1f:%.1f:%.1f:%s:%s", leg.cont, leg.x1, leg.y1, leg.x2, leg.y2,
-        tostring(legZ), tostring(endZ))
+      local key = memo and string.format("%d:%.1f:%.1f:%.1f:%.1f:%s:%s:%s", leg.cont, leg.x1, leg.y1, leg.x2, leg.y2,
+        tostring(legZ), tostring(endZ), tostring(opts.maxDrop), tostring(opts.noSwim))
       out[li] = key and memo[key] or LegRoute(leg.cont, leg.x1, leg.y1, leg.x2, leg.y2,
         LegOpts(fromPlayer and opts or opts.fixed, legZ, endZ), not fromPlayer)
       if key then memo[key] = out[li] end
@@ -2918,7 +3764,13 @@ end
 N.NO_WALK_LONGER_YD, N.NO_WALK_LONGER_ROAD = 1000, 0.75
 function N.WalkLonger(leg, r, exempt, offRoad)
   if not (r and r.pts and #r.pts >= 4) or r.pending or Unwalkable(r) then return 0 end
-  if not (r.length and r.length > 0 and (offRoad or (r.road or 0) >= r.length * N.NO_WALK_LONGER_ROAD)) then return 0 end
+  -- (the world grid's walk, 1.4.0 test, as the roads: walked on the map's own ground, where it goes is real, not a terrain
+  -- search's way round. A10 from the Lost Fleet to Crown Guard Tower, route-quality 2026-11-23: by its straight lines the
+  -- plan flew to Aerie Peak, its walk on the grid 5,570 yd (2,330 straight), not a long way round, and the check stopped
+  -- there (3,170 s), never trying Chillwind Camp's, its walk 3,102 yd (2,074 s with the grid off))
+  if not (r.length and r.length > 0 and (offRoad or r.worldGrid or (r.road or 0) >= r.length * N.NO_WALK_LONGER_ROAD)) then
+    return 0
+  end
   local planned = N.PlanYards(leg.cont, leg.x1, leg.y1, leg.x2, leg.y2, false, exempt) * N.WALK_FACTOR
   return math.max(0, Weighed(leg.cont, r.pts, 1, exempt, r.blocked) - planned)
 end
@@ -2990,25 +3842,55 @@ function N.CityStart(cont, d)
   return cont ~= d.cont and ns.CityLevels and ns.CityLevels[cont] ~= nil and Geo.Base(cont) == d.cont or false
 end
 
-local function CompareRide(cont, sx, sy, d, walk, tps, opts, sz)
+-- A plan with a ride that is ahead of the walk on paper (the route-speed study, 2026-11-25): its rides' times and its
+-- own walks straight come to no more than the walk all the way straight, which no routed walk beats. Its seconds, the
+-- walk's at the least; nil otherwise (no ride, a stop on another level, a start down in a city, a short trip). Such a
+-- trip takes its ride at once and its check never routes the walk all the way: with the flight known from the
+-- Crossroads to Gadgetzan the route (a flight and 107 yd on foot) waited 9 s on the 8.5k yd walk's search, 38k nodes,
+-- and its best way was searched after, 200k more; Orgrimmar to Silithus ran that walk to its cap.
+N.RIDE_FIRST = true
+local function RideAhead(cont, x, y, d, legs, walk)
+  if not (N.RIDE_FIRST and legs) or d.cont ~= cont or N.CityStart(cont, d) then return nil end
+  local straight = math.sqrt((d.x - x) ^ 2 + (d.y - y) ^ 2)
+  if straight < N.RIDE_CHECK_MIN_YD then return nil end
+  local least, rides = 0, false
+  for _, leg in ipairs(legs) do
+    rides = rides or leg.ride ~= nil
+    least = least + (leg.ride and (leg.ride[7] or 0) or math.sqrt((leg.x2 - leg.x1) ^ 2 + (leg.y2 - leg.y1) ^ 2) / walk)
+  end
+  if not rides or least > straight / walk then return nil end
+  return straight / walk
+end
+N.RideAhead = RideAhead -- (tests)
+
+-- (`full`: the walk all the way routed whatever the plan looks like on paper, RideAhead's second look)
+local function CompareRide(cont, sx, sy, d, walk, tps, opts, sz, full)
   -- (the player's spot rounded; a stop's as it is: it doesn't move, and 25 yd off Cliffspring Falls' was out of the
   -- cave it's down in, so the ride compared wasn't the one taken, the overnight trip sweep, 2026-10-07)
   local q = N.RIDE_CHECK_ROUND
   local qx, qy = sx, sy
   if opts.transient then qx, qy = math.floor(sx / q + 0.5) * q, math.floor(sy / q + 0.5) * q end
   local legs = N.Plan(cont, qx, qy, walk, d, tps, math.huge)
-  local fixed = { fixed = opts.fixed }
+  -- (its plans' walks are side walks, `side`: to docks and flight masters, searched WorldGrid.SIDE_WALK_CAP nodes at
+  -- most; the walks to the stop itself and the walk all the way, `lr`, as ever)
+  local sideOpts = { side = true }
+  for k, v in pairs(opts.fixed or {}) do sideOpts[k] = v end
+  local fixed = { fixed = sideOpts }
   -- (down in a city on the stop's continent, N.CityStart: no walk there in one, the way out is the city's lift or
   -- tunnel, a ride of the plan's. Only the ways with a ride weighed against each other, the walk out among them; the
   -- walk all the way never wins here, `lr` none)
   local city = N.CityStart(cont, d)
-  local lr = not city and LegRoute(cont, qx, qy, d.x, d.y, LegOpts(opts.fixed, sz, N.StopZ(d)), true)
+  -- (the ride ahead on paper, RideAhead: its own walks routed first, the walk all the way not at all when the ride's
+  -- routed time is still under the walk's least and it passes no guards; else the whole comparison, `full`)
+  local ahead = not full and RideAhead(cont, qx, qy, d, legs, walk) or nil
+  local noWalk = city or ahead ~= nil
+  local lr = not noWalk and LegRoute(cont, qx, qy, d.x, d.y, LegOpts(opts.fixed, sz, N.StopZ(d)), true)
   if not legs then return { won = false, final = true } end
-  if not city and not (lr and lr.pts and lr.length and lr.length >= N.RIDE_CHECK_MIN_YD) then return { won = false, final = true } end
+  if not noWalk and not (lr and lr.pts and lr.length and lr.length >= N.RIDE_CHECK_MIN_YD) then return { won = false, final = true } end
   local Rt = ns.Router
   local exempt = Rt and Rt.ZoneAt and { [Rt.ZoneAt(Geo.Base(cont), sx, sy)] = true, [Rt.ZoneAt(Geo.Base(d.cont), d.x, d.y)] = true }
-  local walkGuard = (city or Unwalkable(lr)) and 0 or N.HostileWalkYards(cont, lr.pts)
-  local walkSecs = (city or Unwalkable(lr)) and math.huge or Weighed(cont, lr.pts, walk, exempt, lr.blocked)
+  local walkGuard = (noWalk or Unwalkable(lr)) and 0 or N.HostileWalkYards(cont, lr.pts)
+  local walkSecs = (noWalk or Unwalkable(lr)) and math.huge or Weighed(cont, lr.pts, walk, exempt, lr.blocked)
   -- (issue #348: as an Alliance player walking by Brill, every check was provisional, the ride's walks to far flight
   -- masters and docks, 6k to 30k yd, still searched: each check routed them all, 2 s of background work, and was queued
   -- again at the next recalculation, without a break, though the walk took 211 s and the rides alone thousands.) The
@@ -3085,6 +3967,19 @@ local function CompareRide(cont, sx, sy, d, walk, tps, opts, sz)
     pending = pending or p
     if N.HostileBetter(s, g, secs, guard) then legs, routes, secs, guard, replanned = try, tryRoutes, s, g, true end
   end
+  if ahead then
+    -- (its walks still searched: the ride for now; routed and no longer under the walk's least, or past guards: the
+    -- walk all the way routed after all)
+    if pending then
+      N.lastRideCheck = string.format("with rides %.0fs (walks still searched) vs the walk at least %.0fs: rides (provisional, not remembered)",
+        secs, ahead)
+      return { won = true, final = false, legs = legs, x = qx, y = qy, replanned = replanned }
+    end
+    if not (secs <= ahead and guard < N.HOSTILE_RIDE_YD) then return CompareRide(cont, sx, sy, d, walk, tps, opts, sz, true) end
+    N.lastRideCheck = string.format("walk at least %.0fs (not routed) vs with rides %.0fs (%.0f past guards)%s: rides",
+      ahead, secs, guard, replanned and " (planned again past a long way round)" or "")
+    return { won = true, final = true, legs = legs, x = qx, y = qy, replanned = replanned, ahead = true }
+  end
   pending = pending or (lr and lr.pending)
   local won = N.HostileBetter(secs, guard, walkSecs, walkGuard) or (secs == math.huge and walkSecs == math.huge) -- (neither: the plan's ride)
   -- (one way HOSTILE_RIDE_YD or more nearer the other faction's guards, and the safe one HOSTILE_SLOWER or more slower:
@@ -3144,7 +4039,7 @@ end
 -- searches were still running); meanwhile the plan's walk, and the route worked out again once the
 -- comparison says ride. Remembered once final (not on provisional routes: a straight line while a
 -- terrain search runs makes the walk look short).
-local function RideInstead(cont, sx, sy, d, walk, tps, opts, sz)
+local function RideInstead(cont, sx, sy, d, walk, tps, opts, sz, planRides)
   local legs = N.Plan(cont, sx, sy, walk, d, tps, math.huge)
   local rides = false
   for _, leg in ipairs(legs or {}) do rides = rides or leg.ride ~= nil end
@@ -3182,9 +4077,14 @@ local function RideInstead(cont, sx, sy, d, walk, tps, opts, sz)
       if res.final and res.won and ridePlan[key] then ridePlanLast[stopKey] = ridePlan[key] end
       -- (the other way, or the ride that won isn't the one the route has: the route worked out again)
       if res.won ~= before or (ridePlan[key] and PlanKey(ridePlan[key].legs) ~= PlanKey(legs)) then N.Invalidate(false) end
-    end)
+    end, nil, true) -- (`low`: it and its walks after the route's own searches, Router.Pump; 2026-11-23, the sand south
+    -- of Gadgetzan to Uldum: the check's 90 walks between docks and flight masters queued ahead of the straight walk there,
+    -- which was dropped half searched, and the route settled on walking round by Steamwheedle Port)
     won = rideCheck[key]
     if won == nil then won = rideLast[stopKey] end
+    -- (nothing said for this stop yet, the plan itself rides and is ahead of the walk on paper, RideAhead: the ride
+    -- meanwhile, the walk all the way never asked for; the check, queued above, says so or routes the walk after all)
+    if won == nil and planRides and RideAhead(cont, sx, sy, d, legs, walk) then won = true end
   else
     -- (once: added on every recalculation, the 2026-11-18 capture's said it 60 times over)
     local said = N.lastRideCheck or ""
@@ -3211,6 +4111,9 @@ N.NO_WALK_YD, N.NO_WALK_PIECE_YD, N.NO_WALK_TRIES = 600, 100, 3
 function N.LineBlockedYards(cont, r)
   local P, R = ns.Passability, ns.Router
   if not (r and r.pts and r.kinds and P and P.SegmentCost and R) then return 0 end
+  -- (the world grid's walk, 1.4.0 test: walked on the map's own mesh, its straight pieces over ground the terrain grid
+  -- calls steep or closed aren't blocked; WorldGrid.lua)
+  if r.worldGrid then return 0 end
   local yd, pts, looked = 0, r.pts, 0
   for i, k in ipairs(r.kinds) do
     if k == R.KIND_OFFROAD then
@@ -3239,6 +4142,10 @@ end
 -- for the planning call it's made in (WithoutBlockedWalks): searched by the next, the walk is judged by what was found.
 function N.ProvisionalBlockedYards(cont, r)
   if not (r and r.pending) then return 0 end
+  -- (the world grid's line meanwhile, Router.GridWaiting: not judged by the terrain grid; the grid's own answer decides
+  -- once it lands, a way or no way. Kooki3z 2026-11-23: the old routing fighting the grid; the walk from Tanaris' sands
+  -- to Uldum was left out for the flights while searched)
+  if r.worldGrid then return 0 end
   local yd = N.LineBlockedYards(cont, r)
   return yd >= N.NO_WALK_YD and yd or 0
 end
@@ -3288,6 +4195,15 @@ function N.WithoutBlockedWalks(cont, sx, sy, d, walk, tps, opts, sz, legs, route
       end
     end
     if not bad then break end
+    -- (the walk left out is to the stop, and the world grid can't reach the stop from round here (WorldGrid.Unreached):
+    -- every other plan ends with a walk to it too, no way as well; none tried. Item 84c: Kooki3z's stop inside the
+    -- Wailing Caverns, the plans by Ratchet's, Thunder Bluff's and Orgrimmar's flight masters searched for it, the
+    -- route never settling)
+    local WG = ns.WorldGrid
+    if not bad.ride and bad.cont == d.cont and WG and WG.StopUnreached and WG.On and WG.On()
+        and (bad.x2 - d.x) ^ 2 + (bad.y2 - d.y) ^ 2 <= 1 and WG.StopUnreached(d.cont, d.x, d.y) then
+      break
+    end
     if not best then
       local Rt = ns.Router
       exempt = Rt and Rt.ZoneAt and { [Rt.ZoneAt(Geo.Base(cont), sx, sy)] = true,
@@ -3403,7 +4319,86 @@ function N.OutsideInstances(legs, routes, d, here)
 end
 
 N.INTERIM_WALK_SHARE = 2
+local function WithDrop(o, cap)
+  if not o then return o end
+  local c = {}
+  for k, v in pairs(o) do c[k] = v end
+  c.maxDrop = cap
+  return c
+end
+-- Two walks meeting at a place, `a` ending there and `b` starting there (flat point lists): the way out and back along
+-- the same line cut, while the two stay within SPUR_YD of each other going back along `a` and on along `b` (out along
+-- Ratchet's pier to its dock and back, items 65/65b). Returns `a` and `b` trimmed and the yards cut (both sides), or
+-- nil when the spur is under SPUR_MIN_YD.
+N.SPUR_YD, N.SPUR_MIN_YD, N.SPUR_STEP = 12, 30, 4
+function N.TrimSpur(a, b)
+  if not (a and b and #a >= 4 and #b >= 4) then return nil end
+  local function Walker(pts, back)
+    local n = #pts / 2
+    local i = back and n or 1
+    local w = { x = pts[2 * i - 1], y = pts[2 * i], i = i, along = 0 }
+    function w.Step(d)
+      while d > 0 do
+        local j = back and w.i - 1 or w.i + 1
+        if j < 1 or j > n then return false end
+        local qx, qy = pts[2 * j - 1], pts[2 * j]
+        local seg = math.sqrt((qx - w.x) ^ 2 + (qy - w.y) ^ 2)
+        if seg > d then
+          w.x, w.y = w.x + (qx - w.x) * d / seg, w.y + (qy - w.y) * d / seg
+          w.along = w.along + d
+          return true
+        end
+        w.x, w.y, w.i, d = qx, qy, j, d - seg
+        w.along = w.along + seg
+      end
+      return true
+    end
+    return w
+  end
+  local wa, wb = Walker(a, true), Walker(b, false)
+  local spur = 0
+  while true do
+    local okA, okB = wa.Step(N.SPUR_STEP), wb.Step(N.SPUR_STEP)
+    if not (okA and okB) then break end
+    if (wa.x - wb.x) ^ 2 + (wa.y - wb.y) ^ 2 > N.SPUR_YD * N.SPUR_YD then break end
+    spur = wa.along
+  end
+  if spur < N.SPUR_MIN_YD then return nil end
+  -- (cut at `spur` yards back along `a` and on along `b`: the points past it dropped, the cut point added)
+  local function Cut(pts, back, d)
+    local n = #pts / 2
+    local w = Walker(pts, back)
+    w.Step(d)
+    local out = {}
+    if back then
+      for k = 1, w.i do out[#out + 1], out[#out + 2] = pts[2 * k - 1], pts[2 * k] end
+      if out[#out - 1] ~= w.x or out[#out] ~= w.y then out[#out + 1], out[#out + 2] = w.x, w.y end
+    else
+      out[1], out[2] = w.x, w.y
+      for k = w.i + 1, n do out[#out + 1], out[#out + 2] = pts[2 * k - 1], pts[2 * k] end
+      if #out < 4 then out[3], out[4] = pts[2 * n - 1], pts[2 * n] end
+    end
+    return out
+  end
+  local a2, b2 = Cut(a, true, spur), Cut(b, false, spur)
+  b2[1], b2[2] = a2[#a2 - 1], a2[#a2] -- (the two joined where the first now ends: no gap between)
+  return a2, b2, spur * 2
+end
+
 local function Stretch(cont, sx, sy, d, walk, opts, sz)
+  -- (the leg's jumps avoided, N.LegMaxDrop: its walks searched with that drop limit)
+  local cap = N.LegMaxDrop(d)
+  if cap then
+    opts = WithDrop(opts, cap)
+    opts.fixed = WithDrop(opts.fixed or {}, cap)
+  end
+  -- (and its swimming avoided, N.AvoidLegSwim)
+  if d.avoidSwim then
+    opts = WithDrop(opts, opts.maxDrop)
+    opts.noSwim = true
+    opts.fixed = WithDrop(opts.fixed or {}, opts.fixed and opts.fixed.maxDrop)
+    opts.fixed.noSwim = true
+  end
   -- from the player's position: the teleports ready now may start the trip
   local tps = opts.teleports -- the teleports this stretch may start with (AssignTeleports)
   local legs, planSecs = N.Plan(cont, sx, sy, walk, d, tps)
@@ -3420,10 +4415,15 @@ local function Stretch(cont, sx, sy, d, walk, opts, sz)
     local r = routes[1]
     check = r and not r.pending and r.length >= N.RIDE_CHECK_FAR_YD or false
   end
+  -- (a stop the world grid can't reach from round here (WorldGrid.Unreached: a short leg's whole budget searched in
+  -- vain): no ride weighed, its last walk to the same stop no way too. Item 84c: Kooki3z's stop inside the Wailing
+  -- Caverns; the ride check's walks to Ratchet's, Thunder Bluff's and Orgrimmar's flight masters were searched for it)
+  local WG = ns.WorldGrid
+  if check and WG and WG.On and WG.On() and WG.StopUnreached and WG.StopUnreached(d.cont, d.x, d.y) then check = false end
   -- (and from down in a city on the stop's continent with a ride, N.CityStart: the rides weighed, not the walk)
   local city = rides and N.CityStart(cont, d)
   if ((#legs == 1 and legs[1].walk) or rides) and legs[1].cont == cont and (d.cont == cont or city) and check then
-    local ride, rideRoutes, won = RideInstead(cont, sx, sy, d, walk, tps, opts, sz)
+    local ride, rideRoutes, won = RideInstead(cont, sx, sy, d, walk, tps, opts, sz, rides)
     if ride then
       legs, routes = ride, rideRoutes
     elseif won == false and rides and not city then -- (walking all the way wins)
@@ -3450,6 +4450,21 @@ local function Stretch(cont, sx, sy, d, walk, opts, sz)
   legs, routes = N.WithoutBlockedWalks(cont, sx, sy, d, walk, tps, opts, sz, legs, routes, memo)
   local inside
   legs, routes, inside = N.OutsideInstances(legs, routes, d, opts.here)
+  -- (a plan with rides or through a point (two walks), one of whose walks has no way: the plain walk instead, when it
+  -- has one, never no route
+  -- at all. Item 82h: a 550 yd trip in the Barrens planned by the Crossroads' flight master, whose walk there had no way
+  -- on the grid; the whole trip came out "no way" though the walk round the hill is 723 yd)
+  do
+    local hasRide, bad = false, false
+    for li, leg in ipairs(legs) do
+      if leg.ride then hasRide = true elseif routes[li] and routes[li].noWay then bad = true end
+    end
+    if (hasRide or #legs > 1) and bad and d.cont == cont then
+      local wl = { { walk = true, cont = cont, x1 = sx, y1 = sy, x2 = d.x, y2 = d.y } }
+      local wr = WalkRoutes(wl, sx, sy, d, opts, sz)
+      if wr[1] and not wr[1].noWay then legs, routes = wl, wr end
+    end
+  end
   -- (a walk with no way there, the Router's `noWay`: a line through a wall or over blocked ground with
   -- no roads or walk round: none, "No way there found", rather than that line drawn; a broken road
   -- network drew one over the mountains from Ironforge, 2026-10-01)
@@ -3467,6 +4482,7 @@ local function Stretch(cont, sx, sy, d, walk, opts, sz)
     if not leg.ride and r and r.noWay then
       -- (none but up or down a cliff, the Router's `cliff`: said so, N.CLIFF_TEXT)
       if r.cliff then N.noWayCliff = true end
+      if r.gridGap then N.noWayGrid = true end -- (the world grid's: "No way found yet", WorldGrid.NoWay)
       return nil
     end
   end
@@ -3493,6 +4509,26 @@ local function Stretch(cont, sx, sy, d, walk, opts, sz)
       rode = true
     else
       local lr = routes[li]
+      -- (two walks in a row, a dock or tower walked to and away from with no ride: the way out and back along the same
+      -- line cut, N.TrimSpur. Items 65/65b)
+      local prevPart = st.parts[#st.parts]
+      local prevLeg = legs[li - 1]
+      if prevPart and prevPart.leg == prevLeg and prevLeg and not prevLeg.ride and prevPart.cont == leg.cont then
+        local a2, b2, cut = N.TrimSpur(prevPart.pts, lr.pts)
+        if cut then
+          prevPart.pts = a2
+          prevPart.kinds = { unpack(prevPart.kinds or {}, 1, math.max(0, #a2 / 2 - 1)) }
+          if prevPart.fz then prevPart.fz = { unpack(prevPart.fz, 1, #a2 / 2) } end
+          if prevPart.zs then prevPart.zs = { unpack(prevPart.zs, 1, #a2 / 2) } end
+          lr = setmetatable({ pts = b2, kinds = { unpack(lr.kinds or {}, #lr.kinds - (#b2 / 2 - 1) + 1) },
+            fz = lr.fz and { unpack(lr.fz, #lr.fz - #b2 / 2 + 1) } or nil,
+            zs = lr.zs and { unpack(lr.zs, #lr.zs - #b2 / 2 + 1) } or nil, length = math.max(0, (lr.length or 0) - cut / 2),
+            road = lr.road, pending = lr.pending }, { __index = lr })
+          st.walk = st.walk - cut / 2
+          N.stats = N.stats or {}
+          N.stats.spursTrimmed = (N.stats.spursTrimmed or 0) + 1
+        end
+      end
       st.parts[#st.parts + 1] = { cont = leg.cont, pts = lr.pts, kinds = lr.kinds, zs = lr.zs, fz = lr.fz, leg = leg,
         blocked = lr.blocked, unconnected = lr.unconnected }
       st.walk, st.road = st.walk + lr.length, st.road + lr.road
@@ -3508,17 +4544,86 @@ local later = {} -- the stretches between stops don't depend on the player: cach
 local pairCosts, pairCount = {}, 0 -- OrderStops: planned seconds between two stops
 N.ORDER_WALK_YD = 1200 -- OrderStops: stops closer than this are just walked (no plan needed)
 local kept -- the last route, kept through Invalidate to compare a recalculation with
+function N.KeptRoute() return kept end -- (N.TrackRouteZ's, the route followed while it's worked out again)
 
 -- Following the route like a car GPS: while the player stays near the first part (the
 -- walk from them), trim what's behind them and count the distances down, without
 -- recalculating anything. False when they're off the route (then it's recalculated).
 N.JOIN_REPICK_YD = 10 -- off the walk to the road by this much: it's worked out again
+-- A jump down a ledge or across a gap ahead (Router.KIND_DROP, KIND_JUMP) holds the route at its top (Kooki3z 2026-11-22:
+-- "when at a jump down location, don't clear until jump happens or rerouting is needed"): standing at the ledge, the
+-- player is still before it, however near the foot is across, so "Jump down here" and the orange arrow stay. It's
+-- passed when the player falls (IsFalling: readable, no secret returns in this client's API docs) within
+-- JUMP_FALL_YD of its top, or is on the route past its foot (JUMP_PAST_YD along, JUMP_PAST_NEAR_YD off it) and away
+-- from the top; walking off from the top (JUMP_LEAVE_YD, having been within JUMP_AT_YD of it): the route again.
+N.JUMP_AT_YD, N.JUMP_LEAVE_YD, N.JUMP_FALL_YD = 6, 12, 10
+N.JUMP_PAST_YD, N.JUMP_PAST_NEAR_YD = 3, 2.5
+local function JumpKind(k)
+  local R = ns.Router
+  return k ~= nil and R and (k == R.KIND_DROP or k == R.KIND_JUMP)
+end
+local function Falling()
+  if not IsFalling then return false end
+  local ok, v = pcall(IsFalling)
+  return ok and not (ns.IsSecret and ns.IsSecret(v)) and v == true
+end
+-- The next jump on route r not passed yet (its index in r.fullFirst), within `upTo` yards along; nil where none. A jump
+-- the player falls at or comes down past is marked passed (r.jumpsPassed); `leave`: true when they walked off from it.
+function N.JumpHold(r, px, py, upTo)
+  local full = r.fullFirst
+  if not (full and r.cum) then return nil end
+  local pts, kinds, cum = full.pts, full.kinds, r.cum
+  r.jumpsPassed = r.jumpsPassed or {}
+  for i = r.followIdx or 1, #pts / 2 - 1 do
+    if upTo and cum[i] > upTo then return nil end
+    if JumpKind(kinds[i]) and not JumpKind(kinds[i - 1]) and not r.jumpsPassed[i] then
+      local tx, ty = pts[2 * i - 1], pts[2 * i]
+      local d = math.sqrt((px - tx) ^ 2 + (py - ty) ^ 2)
+      -- (its foot: the end of the jump's pieces)
+      local f = i
+      while JumpKind(kinds[f + 1]) do f = f + 1 end
+      if d <= N.JUMP_FALL_YD and Falling() then
+        r.jumpsPassed[i], r.atJump = true, nil
+      else
+        -- (on the lower section, past the foot, and away from the top)
+        local past = false
+        for k = f + 1, #pts / 2 - 1 do
+          if cum[k] > cum[f + 1] + N.JUMP_PAST_YD + 20 then break end
+          local ax, ay, bx, by = pts[2 * k - 1], pts[2 * k], pts[2 * k + 1], pts[2 * k + 2]
+          local vx, vy = bx - ax, by - ay
+          local L2 = vx * vx + vy * vy
+          local t = L2 > 0 and math.max(0, math.min(1, ((px - ax) * vx + (py - ay) * vy) / L2)) or 0
+          local along = cum[k] + (cum[k + 1] - cum[k]) * t
+          local off = math.sqrt((ax + vx * t - px) ^ 2 + (ay + vy * t - py) ^ 2)
+          if off <= N.JUMP_PAST_NEAR_YD and along >= cum[f + 1] + N.JUMP_PAST_YD and d > N.JUMP_PAST_YD then
+            past = true
+            break
+          end
+        end
+        if past then
+          r.jumpsPassed[i], r.atJump = true, nil
+        else
+          if d <= N.JUMP_AT_YD then r.atJump = i end
+          return i, r.atJump == i and d > N.JUMP_LEAVE_YD
+        end
+      end
+    end
+  end
+  return nil
+end
+
 local function Follow(r, px, py, ahead)
   local full = r.fullFirst
   if not full then return false end
   local pts, kinds, cum = full.pts, full.kinds, r.cum
   local best, bi, bt
   local upTo = ahead and (r.consumed or 0) + ahead
+  -- (a jump ahead not taken yet: the route held at its top; walked off from it, the route again)
+  local hold, leave = N.JumpHold(r, px, py, (r.consumed or 0) + N.TRIM_AHEAD_YD)
+  if leave then
+    r.atJump = nil
+    return false
+  end
   -- (in a building, the player's floor followed (N.TrackCityZ): not a stretch of the route on another floor, over or
   -- under them; Brill's inn, 2026-10-06: under a trainer upstairs, the route was trimmed to its last yards up there.
   -- Down in Undercity by the route's own heights, `zs`: a walkway over the ring)
@@ -3527,7 +4632,9 @@ local function Follow(r, px, py, ahead)
   local tz = floors and N.FollowedZ(full.cont)
   for i = r.followIdx, #pts / 2 - 1 do
     if upTo and cum[i] > upTo then break end -- (trimming only: the stretch just ahead)
+    if hold and i > hold then break end -- (nothing past a jump not taken: the foot is near across, not along)
     local ax, ay, bx, by = pts[2 * i - 1], pts[2 * i], pts[2 * i + 1], pts[2 * i + 2]
+    if hold and i == hold then bx, by = ax, ay end -- (on the jump: at its top)
     local off = tz and floors[i] and floors[i + 1]
       and (tz < math.min(floors[i], floors[i + 1]) - N.SAME_FLOOR_Z or tz > math.max(floors[i], floors[i + 1]) + N.SAME_FLOOR_Z)
     if not off then
@@ -4117,25 +5224,37 @@ function N.Rerouting()
   return false
 end
 -- The route from (px, py) worked out: the stretch to the next stop and those after it (a few more
--- each call), assembled; nil when there's no way.
-local function Compute(px, py, cont, d, offroad)
+-- each call), assembled; nil when there's no way. `firstOnly`: the stretch to the next stop alone (a trip's first route,
+-- nothing shown yet: 1.4.0, Kooki3z: "on a multi stop route, go ahead and work out and plot the closest stop's route
+-- then continue working out the rest in the background"; the stretches after it come in from the later jobs, N.Route,
+-- appended as each is done. From Brill with five stops round Lordaeron the first route took 25 times as long, the
+-- stretch to stop 2 worked out with it before anything was drawn).
+N.FIRST_STOP_FIRST = true -- (false: the whole first route at once, the order with it, as before 1.4.0: the tests' yardstick)
+local function Compute(px, py, cont, d, offroad, firstOnly)
   local _, walk = N.Speeds()
   -- (the dungeon or raid the player's in: its insides routed, the others' left out, N.OutsideInstances)
   local here = N.IsInstanceLevel(cont) and cont or nil
   local key = version .. ":" .. tostring(offroad) .. ":" .. tostring(here)
   if later.key ~= key then later = { key = key, done = {}, here = here } end
   local tps = AssignTeleports(cont, px, py, d, walk)
+  -- (the walk to this stop searched before the planner's other walks: Router.SetFocus)
+  if ns.Router.SetFocus and d then ns.Router.SetFocus(d.cont, d.x, d.y) end
   if ns.Router.Breathe then ns.Router.Breathe(1, 1) end -- (in a background job: a pause between the parts)
   local t1 = ns.PerfStart and ns.PerfStart()
   N.noWayCliff = nil -- (set again by the stretches: no way but a cliff)
+  N.noWayGrid = nil -- (and no way on the world grid's data)
+  -- (indoors only: item 45, a cave's stacked floors; out on the land its surface look-ups in the route's job held the
+  -- sand-to-Uldum walk back from landing)
+  local gridZ = N.Indoors and N.Indoors() and N.TrackGridZ(cont, px, py) or nil
   local first = Stretch(cont, px, py, d, walk, { offroad = offroad, transient = true, fixed = { offroad = offroad },
     teleports = tps, indoors = N.Indoors(), swimming = N.Swimming(), here = here, capitalMap = N.InCapitalMap(),
-    z = N.PlayerZ() or N.TrackCityZ(cont, px, py) or N.TrackRaisedZ(cont, px, py) })
+    z = N.PlayerZ() or N.TrackCityZ(cont, px, py) or N.TrackRouteZ(cont, px, py) or N.TrackRaisedZ(cont, px, py)
+      or gridZ })
   if t1 then ns.PerfEnd("route calculation: next stop", t1) end
   if not first then return nil end
   if ns.Router.Breathe then ns.Router.Breathe(1, 1) end
   -- (routing cut back to the first stop, N.degraded: the stretches after it kept as they are)
-  if not N.degraded then
+  if not N.degraded and not firstOnly then
     local t2 = ns.PerfStart and ns.PerfStart()
     FillLater(walk, offroad, N.LATER_PER_CALL)
     if t2 then ns.PerfEnd("route calculation: later stops", t2) end
@@ -4155,10 +5274,12 @@ function Apply(new, old, px, py, cont, offroad, now, trim)
     if trim then Follow(new, px, py) end -- (worked out a moment ago, in the background: from where the player is now)
   end
   N.route, kept = new, new
+  if new and not new.pending and new.version == version then landedAt = version end -- (N.Landing: the first full answer)
   N.warming = nil
   N.routeX, N.routeY, N.routeTime, N.routeOffroad, N.routeCont = px, py, now, offroad, cont
   N.trimX, N.trimY = px, py
   N.CheckRedRoute(px, py, cont, now)
+  if new and N.CheckSpellJumps then N.CheckSpellJumps(new) end -- (each spell jump survivable, the faster way: spell jumping)
   return new
 end
 
@@ -4189,7 +5310,8 @@ function Rejoin(old, px, py, cont, offroad)
   while cum[j + 1] < along do j = j + 1 end
   local f = (along - cum[j]) / math.max(cum[j + 1] - cum[j], 1e-6)
   local tx, ty = pts[2 * j - 1] + (pts[2 * j + 1] - pts[2 * j - 1]) * f, pts[2 * j] + (pts[2 * j + 2] - pts[2 * j]) * f
-  local lr = ns.Router.Route(full.cont, px, py, tx, ty, { offroad = offroad, transient = true })
+  local lr = ns.Router.Route(full.cont, px, py, tx, ty, { offroad = offroad, transient = true,
+    maxDrop = N.LegMaxDrop(N.stops[1]) }) -- (the first leg's jumps avoided: N.AvoidLegJumps)
   if not lr or Unwalkable(lr) then return nil end
   local np, nk = {}, {}
   for k = 1, #lr.pts do np[k] = lr.pts[k] end
@@ -4300,10 +5422,13 @@ function N.Route(px, py, cont)
   if ns.Taxi and ns.Taxi.Riding and ns.Taxi.Riding() then return r or kept end
   if r and r.flying then r, kept = nil, nil end -- just landed: work the route out afresh
   -- the continent's road data is still being built in the background (a moment)
-  -- (and the levels the stops are on: a city's, down a lift)
+  -- (and the level the next stop is on: a city's, down a lift. The later stops' levels are built by the stretches' own
+  -- background jobs, after the way to the next stop is drawn: 1.4.0, the first leg first; a trip from Brill with stops
+  -- in Kalimdor built Kalimdor's roads before anything was drawn)
   if not r and ns.Router.WarmUp then
     local busy = ns.Router.WarmUp(cont, px, py)
-    for _, s in ipairs(N.stops) do
+    for i, s in ipairs(N.stops) do
+      if i > 1 and N.FIRST_STOP_FIRST then break end
       if s.cont and s.cont ~= cont then busy = ns.Router.WarmUp(s.cont, s.x, s.y) or busy end
     end
     -- (and the underground cities on this continent: a route through one's flight master or
@@ -4314,11 +5439,11 @@ function N.Route(px, py, cont)
       end
     end
     if busy then
-      N.warming = true
+      N.warming, N.warmingGraph = true, true
       return nil
     end
   end
-  N.warming = nil
+  N.warming, N.warmingGraph = nil, nil
   local moved = r and ((px - N.routeX) ^ 2 + (py - N.routeY) ^ 2) or math.huge
   -- stretches between stops still to work out: one more, same route from the player. In the game, in the
   -- background (they don't depend on the player; a far pair of stops was 40 to 85 ms in the frame, the
@@ -4352,12 +5477,13 @@ function N.Route(px, py, cont)
   end
   local rerouteSecs, rerouteYd, searchSecs = N.RerouteTiming()
   -- (in a city, the next stop outside it, on the route: kept as it is, N.CityHold)
-  if r and N.routeOffroad == offroad and N.routeCont == cont and N.CityHold(px, py, cont)
+  -- (not the route of the trip's order before, shown until this one's is in: N.OrderStops' "after")
+  if r and r.version == version and N.routeOffroad == offroad and N.routeCont == cont and N.CityHold(px, py, cont)
       and (moved <= rerouteYd ^ 2 or Follow(r, px, py)) then
     if moved > rerouteYd ^ 2 then N.routeX, N.routeY, N.trimX, N.trimY = px, py, px, py end
     return r
   end
-  if searchDirty and r and now - searchRecalcAt >= searchSecs then
+  if searchDirty and r and r.version == version and now - searchRecalcAt >= searchSecs then
     r, N.route = nil, nil
     moved = math.huge
     searchDirty, searchRecalcAt = false, now
@@ -4404,12 +5530,22 @@ function N.Route(px, py, cont)
       N.route = old
     end
     local key = "route:" .. version .. ":" .. tostring(offroad)
+    -- (nothing of this trip shown: the way to the next stop first)
+    local firstOnly = N.FIRST_STOP_FIRST and old == nil and (N.route == nil or N.route.version ~= version)
+    local asked = version
     ns.Router.Background(key, function()
-      return Compute(px, py, cont, d, offroad)
+      return Compute(px, py, cont, d, offroad, firstOnly)
     end, function(res)
+      -- (no way, worked out for the trip still shown: its stand-in dropped, so it says so ("No way found yet",
+      -- N.noWayGrid) instead of "Working out the route..." for good. Item 82g, Kooki3z on b84cff45: a 550 yd trip in
+      -- the Barrens, its walk leg no way on the grid, pending for minutes with nothing left to wait on)
+      if not res then
+        if asked == version and N.route and N.route.pending then N.route, N.warming = nil, nil end
+        return
+      end
       -- (still this route's stops: in, unless the one shown is clearly shorter; from where the
       -- player is now)
-      if not res or res.version ~= version then return end
+      if res.version ~= version then return end
       local cur = N.route or kept
       if cur and not (cur.version == version and cur.cont == res.cont) then cur = nil end
       Apply(res, cur, N.playerX or px, N.playerY or py, res.cont, offroad, GetTime(), true)
@@ -4429,6 +5565,12 @@ function N.Route(px, py, cont)
         end, true)
       end
     end
+    -- (the trip put in a quick order when set, N.OrderNow: the fastest order worked out now, after the way to its first
+    -- stop, before the stretches after it)
+    if N.orderDue == version then
+      N.orderDue = nil
+      N.OrderAfter(px, py, cont)
+    end
     -- (queued now, or already: what's shown meanwhile, never worked out in the frame as well)
     N.warming = N.route == nil or nil
     return N.route
@@ -4440,17 +5582,84 @@ function N.Route(px, py, cont)
 end
 -- (the routing work done in the frame, outside the background's jobs: the stutter watch's, N.RouteWork)
 local RouteNow = N.Route
+-- A route still waiting on a grid search WorldGrid.WAIT_MAX_SECONDS after its stops were set: worked out again (at most
+-- every WAIT_KICK_SECONDS), so the leg's wait is given up and the Router's own walk taken meanwhile (WorldGrid's
+-- WaitedTooLong, the search put behind the others). Item 56: nothing asked for the leg again with the player standing
+-- still, and the route stayed "Working out the route..." for as long as the search did.
+N.WAIT_KICK_SECONDS = 5
+-- A route left waiting on nothing: pending (or no route yet, "Working out the route...") with no background job queued
+-- and no grid search running for ORPHAN_SECONDS: worked out again (item 80, Kooki3z on 1e503bf8: Orgrimmar to
+-- north-west of Astranaar pending 8 minutes, the plan's legs waiting on a search no longer there; a /reload and the same
+-- stop settled in seconds). Counted (WorldGrid.stats.orphans) and said in the debug log.
+N.ORPHAN_SECONDS = 3
+local waitKickAt, orphanSince
+local function Idle()
+  local R, WG = ns.Router, ns.WorldGrid
+  return not (R and R.HasWork and R.HasWork()) and not (WG and (WG.jobCount or 0) > 0)
+end
+local function KickWait(r)
+  local WG = ns.WorldGrid
+  if not GetTime then return end
+  local now = GetTime()
+  -- (no route yet counts only once the roads are built: N.warmingGraph, their build's own frames, isn't waiting)
+  local waiting = (r and r.pending) or (not r and N.dest and N.warming and not N.warmingGraph)
+  if waiting and Idle() then
+    orphanSince = orphanSince or now
+    if now - orphanSince >= N.ORPHAN_SECONDS and not (waitKickAt and now - waitKickAt < N.WAIT_KICK_SECONDS) then
+      waitKickAt, orphanSince = now, nil
+      if WG and WG.stats then WG.stats.orphans = (WG.stats.orphans or 0) + 1 end
+      local D = ns.Debug
+      if D and D.Log then pcall(D.Log, "route orphaned", { pending = r and r.pending or nil, warming = N.warming }) end
+      N.Invalidate(true)
+      return
+    end
+  else
+    orphanSince = nil
+  end
+  if not (r and r.pending and WG and WG.StaleWait) or not WG.StaleWait() then return end
+  if waitKickAt and now - waitKickAt < N.WAIT_KICK_SECONDS then return end
+  waitKickAt = now
+  N.Invalidate(true)
+end
+-- What a route is waiting on, for `/agps route` (item 80c: what we keep asking for): its state, the grid's searches
+-- queued (each one's leg, age and nodes), the background jobs, and the counts of waits given up and orphans.
+function N.WaitReport()
+  local out = {}
+  local r, R, WG = N.route, ns.Router, ns.WorldGrid
+  local now = GetTime and GetTime() or 0
+  out[#out + 1] = string.format("route: %s, %s; stops %d, warming %s, no way %s", r and "shown" or "none",
+    r and (r.pending and "pending" or "settled") or "-", #N.stops, tostring(N.warming and true or false),
+    tostring(N.noWayGrid and true or false))
+  local n = 0
+  for key, j in pairs(WG and WG.jobs or {}) do
+    n = n + 1
+    if n <= 6 then
+      out[#out + 1] = string.format("  grid search %s: %.0f s, %s%s", tostring(key), now - (j.since or now),
+        j.rush and "fast" or "full", j.rushed and ", waited too long" or "")
+    end
+  end
+  out[#out + 1] = string.format("grid searches: %d queued; background work: %s; waits given up %d, orphans %d",
+    n, tostring(R and R.HasWork and R.HasWork() or false), WG and WG.stats and WG.stats.waitedOut or 0,
+    WG and WG.stats and WG.stats.orphans or 0)
+  return out
+end
 function N.Route(px, py, cont)
-  if coroutine.running() or not debugprofilestop then return RouteNow(px, py, cont) end
+  if coroutine.running() or not debugprofilestop then
+    local r = RouteNow(px, py, cont)
+    if not coroutine.running() then KickWait(r) end
+    return r
+  end
   local t0 = debugprofilestop()
   local r = RouteNow(px, py, cont)
   N.RouteWork(debugprofilestop() - t0)
+  KickWait(r)
   return r
 end
 
 -- Once a route is worked out (settled, or 3 s on): walking through a zone too high for the
 -- player asks first (GPSFrame's ConfirmRedRoute); no clears the route.
 local redChecked, redSeenAt = nil, nil
+local redPartial -- (a route still coming in, looked at with this many stretches)
 local redAsking -- (RedKey() while asked)
 local redYes, redTrip -- (the question's yes, while it's up; the trip it's about, N.trip)
 -- The route the check is about: the stops, and the rides left out of it (a ride removed is a route of its
@@ -4475,7 +5684,7 @@ function N.CheckRedRoute(px, py, cont, now)
   local q = N.riskQuestion
   if q and q.key ~= N.RiskKey(d) then q, N.riskQuestion = nil, nil end
   if N.riskAsking and N.riskAsking.key ~= N.RiskKey(d) then N.riskAsking = nil end -- (another trip's, never answered)
-  if q and not N.riskAsking and ns.GPS and ns.GPS.ConfirmRisk then
+  if q and not N.riskAsking and not N.hostileAsking and ns.GPS and ns.GPS.ConfirmRisk then
     N.riskAsking = q
     local asked = ns.GPS.ConfirmRisk(q, function()
       N.riskAsking = nil
@@ -4498,8 +5707,15 @@ function N.CheckRedRoute(px, py, cont, now)
   if N.RideChecking and N.RideChecking() then return end
   if redSeenAt == nil or redSeenAt[1] ~= key then redSeenAt = { key, now } end
   if r.pending and now - redSeenAt[2] < 3 then return end
-  redChecked = key
+  -- (the trip's stretches still coming in, N.StretchesPending: what's in asked about now, the rest once it's all in;
+  -- looked at once for each stretch more, not every redraw)
+  local partial = N.StretchesPending()
+  local look = partial and (key .. ":" .. N.StretchesIn(r)) or nil
+  if partial and redPartial == look then return end
+  redPartial = look
   local zones = N.RedOnRoute(r, px, py, cont)
+  if partial and not zones then return end
+  redChecked = key
   if not (zones and ns.GPS and ns.GPS.ConfirmRedRoute) then return end
   redAsking = key
   local trip = N.trip
@@ -4562,6 +5778,19 @@ function N.AskSkipped()
     end)
 end
 
+-- How many of the stretches between the stops planned route `r` has (worked out, a way or none).
+function N.StretchesIn(r)
+  local n = 0
+  for i = 2, N.PlannedStops() do
+    if r.stretches and r.stretches[i] ~= nil then n = n + 1 end
+  end
+  return n
+end
+-- Whether the trip's stretches after the first are still being worked out (the route shown has only some of them).
+function N.StretchesPending()
+  return not N.degraded and LaterMissing() and N.route ~= nil and N.route.version == version and not N.route.flying
+end
+
 -- Keep route `old` instead of the recalculated `new`? When `new` is clearly longer (the
 -- whole trip, rides counted at walking speed) and either still provisional or `old` hasn't
 -- been kept for KEEP_SECONDS yet. (The caller also checks the player is still on `old`.)
@@ -4571,6 +5800,9 @@ end
 function N.KeepOld(old, new, walk, now)
   if old.pending and not new.pending then return false end
   if new.pending and not old.pending then return true end
+  -- (more of the trip's stretches in it than the one shown, the trip's first route coming in a stretch at a time: its
+  -- yards aren't the same trip's)
+  if N.StretchesIn(new) > N.StretchesIn(old) then return false end
   local function cost(r) return (r.totalYards or 0) + (r.totalRide or 0) * walk end
   if cost(new) <= cost(old) * LONGER_SHARE + LONGER_YD then return false end
   return new.pending or now - (old.keptSince or now) < KEEP_SECONDS
@@ -4594,7 +5826,9 @@ function N.Invalidate(all, fresh)
   N.route = nil -- (kept stays, to compare the recalculation with)
   if all ~= false then later.done = {} end -- redone a few a frame; shown until replaced
   if fresh then pairCosts, pairCount = {}, 0 end
-  if fresh then kept, rideCheck, ridePlan, rideLast, N.noWalk, N.walkKept, rideSpot = nil, {}, {}, {}, {}, {}, {} end
+  -- (fresh == "costs": the planned costs only, the ride check's answers kept: "Take it?" -> No, item 63b)
+  if fresh == true then kept, rideCheck, ridePlan, rideLast, N.noWalk, N.walkKept, rideSpot = nil, {}, {}, {}, {}, {}, {} end
+  if fresh == "costs" then kept, N.noWalk, N.walkKept = nil, {}, {} end
   if all ~= false then legMemo, legMemoN = {}, 0 end
 end
 
@@ -4603,6 +5837,29 @@ end
 -- stops, nearest-first improved by 2-opt beyond that. `onlyIfFaster`: keep the current
 -- order unless the best one is clearly faster (REORDER_GAIN). Returns whether it changed.
 N.REORDER_GAIN_SECONDS, N.REORDER_GAIN_SHARE = 15, 0.10
+-- A trip set in the game (1.4.0: the way to its first stop drawn first, N.Route): put in order at once by a quick
+-- estimate (OrderStops' "quick": the times already known, else straight lines; every rule the same), then the fastest
+-- order worked out in the background after the way to its first stop (N.OrderAfter, OrderStops' "after", pausing between
+-- its plans). The same first stop: the order behind it changed in place, the stretches after it worked out again, the
+-- route shown meanwhile. Another one: the trip set again in that order, the route shown kept on the map until the new
+-- one's in (no "Working out the route..." between). In the tests (Router.SYNC_WALKS), the full order at once, as before.
+N.QUICK_OTHER_LEVEL_YD = 6000 -- (quick estimate: a stop on another continent, about this far)
+function N.OrderNow()
+  local R = ns.Router
+  if R.WARM and not R.SYNC_WALKS and N.FIRST_STOP_FIRST then
+    N.OrderStops(nil, nil, nil, nil, "quick")
+    N.orderDue = version
+    return
+  end
+  N.OrderStops()
+end
+function N.OrderAfter(px, py, cont)
+  local v = version
+  ns.Router.Background("order:" .. v, function()
+    if version ~= v then return false end
+    return N.OrderStops(px, py, cont, nil, "after")
+  end)
+end
 N.PART_ROUNDS = 3 -- a quest's area in parts: rounds of choosing the parts, then the order again
 N.PART_GAIN_SECONDS = 5 -- ... another part only when it saves at least this much
 -- The quest route ordered by level (players' request relayed by Kooki3z 2026-11-21: "Be able to prioritize quests by
@@ -4658,8 +5915,9 @@ function N.OnLevelUp()
   return true
 end
 
-function N.OrderStops(px, py, cont, onlyIfFaster)
+function N.OrderStops(px, py, cont, onlyIfFaster, mode)
   local n = #N.stops
+  local v0 = version
   if n < 2 then return false end
   if N.ListedOrder() then return false end -- (a trip in its listed order: never, whoever asks)
   if N.stops[1].corpse then return false end -- your body stays first (corpse run)
@@ -4678,7 +5936,11 @@ function N.OrderStops(px, py, cont, onlyIfFaster)
     -- between two stops the time doesn't change: remembered (not from the player)
     local key = not fromPlayer and string.format("%d:%.0f:%.0f>%d:%.0f:%.0f@%.2f", a.cont, a.x, a.y, b.cont, b.x, b.y, walk)
     local secs = key and pairCosts[key]
+    if not secs and mode == "quick" then -- (straight, another continent's stop about QUICK_OTHER_LEVEL_YD away)
+      return (d or N.QUICK_OTHER_LEVEL_YD) * N.WALK_FACTOR / walk
+    end
     if not secs then
+      if mode == "after" and ns.Router.Breathe then ns.Router.Breathe(1, 1) end -- (a pause between its plans)
       secs = select(2, N.Plan(a.cont, a.x, a.y, walk, b)) or math.huge
       if key then
         if pairCount > 20000 then pairCosts, pairCount = {}, 0 end
@@ -4829,7 +6091,7 @@ function N.OrderStops(px, py, cont, onlyIfFaster)
   -- again, until nothing changes (a few rounds at most)
   local moved, partWas = false, {}
   for j = 2, n + 1 do partWas[j] = N.stops[j - 1].partAt end
-  for _ = 1, N.PART_ROUNDS do
+  for _ = 1, mode == "quick" and 0 or N.PART_ROUNDS do
     local changed = false
     for k, j in ipairs(best) do
       local d = N.stops[j - 1]
@@ -4865,6 +6127,7 @@ function N.OrderStops(px, py, cont, onlyIfFaster)
     Fill()
     Order()
   end
+  if mode == "after" and version ~= v0 then return false end -- (the stops changed while it was worked out)
   local same = true
   for k, j in ipairs(best) do if j ~= k + 1 then same = false end end
   if same and not moved then return false end
@@ -4885,6 +6148,24 @@ function N.OrderStops(px, py, cont, onlyIfFaster)
       if d.x ~= q.x or d.y ~= q.y then d.x, d.y, d.cont, d.z = q.x, q.y, q.cont, nil end
     end
     ordered[k] = d
+  end
+  if mode == "after" then
+    if ordered[1] == N.stops[1] and not moved then
+      -- (the same first stop: the order behind it changed, its stretches worked out again, the route shown meanwhile)
+      N.stops = ordered
+      later = { key = later.key, done = {} }
+      N.Invalidate(true)
+      Save()
+      return true
+    end
+    local shown = N.route -- (OrderStops' own `kept` is the city's stops)
+    N.stops = ordered
+    Changed()
+    if shown and not shown.flying then
+      -- (another first stop: the route shown stays until the new trip's is in, worked out at once: N.Route)
+      N.route, N.routeTime = shown, -math.huge
+    end
+    return true
   end
   N.stops = ordered
   Changed()
@@ -5158,21 +6439,36 @@ end
 -- (the Speed stat and items in it), or the ability's while it's on.
 -- GetUnitSpeed is secret in combat; the last values seen are used then.
 local lastSwim = N.SWIM_SPEED -- the swim speed (GetUnitSpeed's fourth value: items and Aquatic Form in it)
+-- (run / swim from one reading on foot: not mounted, on a flight, with a speed ability on or in a shapeshift form; the
+-- two read at different moments gave a swim at GM speed 5 or Aquatic Form's against a plain run: run / swim under 1,
+-- a yard swum as cheap as one walked. Item 62/63a, Kooki3z 2026-11-24 on the Southfury: 350 yd swum down the river)
+N.swimRatio = nil
 function N.SwimSpeed() return lastSwim end
+function N.SwimRatio() return N.swimRatio end
+function N.ResetSpeeds()
+  lastSwim, N.swimRatio, lastRun, plainSeen = N.SWIM_SPEED, nil, DEFAULT_RUN, nil
+  local cdb = ns.CharDB and ns.CharDB()
+  if cdb then cdb.moveSpeeds, cdb.mountSpeed = nil, nil end
+end
 function N.Speeds()
-  local cur, run
-  local ok, a, b, _, sw = pcall(GetUnitSpeed, "player")
+  local cur, run, sw
+  local ok, a, b, _, s4 = pcall(GetUnitSpeed, "player")
   if ok and a and not ns.IsSecret(a) then cur, run = a, b end
-  if ok and type(sw) == "number" and not ns.IsSecret(sw) and sw > 0.5 then lastSwim = sw end
+  if ok and type(s4) == "number" and not ns.IsSecret(s4) and s4 > 0.5 then sw = s4 end
   -- a flight counts as mounted to the game: not here (and its speed isn't a mount's)
   local onTaxi = UnitOnTaxi and UnitOnTaxi("player") or false
   local mounted = not onTaxi and IsMounted and IsMounted() or false
   local cdb = ns.CharDB and ns.CharDB()
   local ability = N.MoveAbility()
+  local form = GetShapeshiftForm and (GetShapeshiftForm() or 0) or 0
+  if sw and run and run > 0 and not onTaxi and not mounted and not (ability and ability.active) and form == 0 then
+    lastSwim, N.swimRatio = sw, run / sw
+  end
   if run and run > 0 and not onTaxi and not mounted then
     if ability and ability.active then
       -- (its speed as the server has it, kept per character)
-      if cdb and run > lastRun + 0.2 then
+      -- (not a reading far past the plain run's: GM speed, a buff; the latest kept, never only the highest)
+      if cdb and run > lastRun + 0.2 and run <= lastRun * N.SPEED_SANE then
         cdb.moveSpeeds = cdb.moveSpeeds or {}
         cdb.moveSpeeds[ability.spell] = run
       end
@@ -5901,6 +7197,18 @@ function N.QuestLines(ids)
   return out
 end
 
+-- Whether the player, on level `cont`, is inside the dungeon or raid whose way in stop `d` is (the stop on its
+-- continent within ENTRANCE_STOP_YD of one of its entrances).
+N.ENTRANCE_STOP_YD = 30
+function N.EnteredStopInstance(d, cont)
+  local info = cont and cont ~= d.cont and ns.Instances and ns.Instances[cont]
+  if not info then return false end
+  for _, e in ipairs(info.entrances or {}) do
+    if e[1] == d.cont and (e[2] - d.x) ^ 2 + (e[3] - d.y) ^ 2 <= N.ENTRANCE_STOP_YD ^ 2 then return true end
+  end
+  return false
+end
+
 -- Other addons told of each stop reached (API 14, OnArrive, asked 2026-10-05 for a companion's arrival
 -- effects): owner -> fn(info), info = { x, y, cont, name, last (the trip's last stop), kind ("stop", "boss") }.
 N.arriveHooks = {}
@@ -5909,7 +7217,10 @@ function N.TellArrived(d, last)
   local info = { x = d.x, y = d.y, cont = d.cont, name = d.name, last = last and true or false,
     kind = d.boss and "boss" or "stop" }
   for owner, fn in pairs(N.arriveHooks) do
-    local ok, err = pcall(fn, info)
+    -- (the tutorial's demo trip: only AzerothGPS's own arrival effect, no companion or the tips told of it)
+    if N.demoRoute and owner ~= "AzerothGPS" then fn = nil end
+    local ok, err = true, nil
+    if fn then ok, err = pcall(fn, info) end
     if not ok and ns.GPS and ns.GPS.LogError then ns.GPS.LogError("arrival hook " .. tostring(owner), err) end
   end
 end
@@ -5957,11 +7268,18 @@ local function CheckArrival(px, py, cont)
     -- (and in it, the stop's room: there. Asked 2026-11-17: "once going through the portal technically the player has
     -- arrived", the trainers in sight from its landing)
     if not at and cont == d.cont and N.roomIn and N.StopRoom(d) == N.roomIn then at = true end
+    -- (a dungeon's way in the stop, the player through it and inside: there. Item 44, Kooki3z 2026-11-24: no arrival
+    -- confetti at a dungeon; the player walked into the portal before standing at its door, and in the dungeon's own
+    -- map the stop's spot was never near)
+    local entered = not at and N.EnteredStopInstance(d, cont)
+    if entered then at = true end
     -- (a stop up or down a floor with no road of its floor near, N.StopOffGround: not by x and y alone. There once the
     -- floor followed is its own, within OFF_FLOOR_ARRIVE_YD of it, or its NPC reached: Kooki3z 2026-11-22, "Arrived"
     -- at the door under an NPC upstairs)
     local off, dz, pending, onFloor, why
-    if at then
+    if at and entered then
+      why = "entered the dungeon"
+    elseif at then
       off, dz, pending = N.StopOffGround(d)
       onFloor = N.OnStopFloor(d)
       why = onFloor and "floor" or done and "route done" or "distance"
@@ -5971,6 +7289,10 @@ local function CheckArrival(px, py, cont)
       if fz and math.abs(fz - N.StopHeight(d)) > N.OFF_FLOOR_Z then
         off, dz = N.StopHeight(d) > fz and "up" or "down", math.abs(fz - N.StopHeight(d))
       end
+      -- (no floor followed, out on the land: the ground under the player far under the stop. Kooki3z 2026-11-23,
+      -- "Thunderbluff flight master says arrived 45yd under it")
+      local under = not onFloor and not off and N.PlayerUnderStop(d, px, py)
+      if under then off, dz = "up", under end
     end
     -- (an NPC's stop a floor off with no road of its floor (its floor never followed there): only its window opening, or
     -- its floor followed after all. Kooki3z 2026-11-22, the debug lines at the Canals library: "within 3 yd" at the door
@@ -5981,7 +7303,22 @@ local function CheckArrival(px, py, cont)
     -- floor off (no NPC, or the roads not ready yet, `pending`): within OFF_FLOOR_ARRIVE_YD, or the NPC in range)
     local npcOff = off ~= nil and d.npcId ~= nil
     if at and (off or pending) and not onFloor then
-      if npcOff or (d.x - px) ^ 2 + (d.y - py) ^ 2 > N.OFF_FLOOR_ARRIVE_YD ^ 2 then at = false else why = "within 3 yd" end
+      local d2 = (d.x - px) ^ 2 + (d.y - py) ^ 2
+      if npcOff then
+        -- (right by it, NPC_BY_YD, with no floor followed known to be another: there. Kooki3z 2026-11-23, 1 yd from
+        -- Nissa Firestone on her balcony, "this should count as arrived"; the Dellis door is 2.9 yd off her spot)
+        local fz = FloorNear(d)
+        local by = N.NpcByYd(d)
+        if d2 <= by ^ 2 and not (fz and math.abs(fz - N.StopHeight(d)) > N.OFF_FLOOR_Z) then
+          why = string.format("within %d yd", by)
+        else
+          at = false
+        end
+      elseif d2 > N.OFF_FLOOR_ARRIVE_YD ^ 2 then
+        at = false
+      else
+        why = "within 3 yd"
+      end
     end
     if not at and cont == d.cont and N.NpcReached(d) then
       if d.npcMet then
@@ -6040,8 +7377,12 @@ end
 -- "Working out the route...", and now and then said another way (asked, 2026-10-01): in Murloc one time
 -- in twenty, gnome engineers at it one in five, goblin engineers another one in five (N.WORKING_FLAVORS:
 -- each its share of the times and its lines). Picked once each time a
--- route is being worked out (not every redraw: it would flicker), until there's a route. N.FUN = false:
--- always the plain one (the tests).
+-- route is being worked out (not every redraw: it would flicker), until there's a route; and (1.4.0, Kooki3z: "have the
+-- random message change every 5 seconds") another one every WORKING_SWAP_EVERY seconds, never the same one twice in a
+-- row. N.FUN = false: always the plain one (the tests).
+-- Its dots cycle meanwhile (1.4.0: "have the '...' cycle from 1 to 3 dots indicating its working"): N.WorkingDots, one,
+-- two, three, every WORKING_DOTS_EVERY seconds; the text as laid out keeps its own dots (the most it shows: its width),
+-- and the map's route panel sets only the dots between (GPSFrame's G.WorkingDotsTick).
 N.WORKING_TEXT = L["Working out the route..."]
 N.WORKING_FLAVORS = {
   { share = 0.05, lines = { "Mrglglglgl... mrrgll mrgl...", "Aaaaaughibbrgubugbugrguburgle!",
@@ -6050,23 +7391,56 @@ N.WORKING_FLAVORS = {
     L["Spinning up the Route-o-Tron 3000..."], L["Oiling the cogs of the navigation engine..."] } },
   { share = 0.2, lines = { L["Time is money, friend! Routing..."], L["Charging extra for the shortcut..."] } },
 }
+N.WORKING_SWAP_EVERY = 5
+N.WORKING_DOTS_EVERY = 0.4
 N.Random = math.random
-local working -- (the text picked while the route is being worked out)
+local working, workingAt, workingSince -- (the text picked while the route is being worked out; when; shown since)
+local function PickWorking()
+  if N.FUN == false then return N.WORKING_TEXT end
+  local roll, at = N.Random(), 0
+  for _, f in ipairs(N.WORKING_FLAVORS) do
+    at = at + f.share
+    if roll < at then return f.lines[N.Random(#f.lines)] end
+  end
+  return N.WORKING_TEXT
+end
 function N.WorkingText()
+  local now = GetTime()
   if not working then
-    working = N.WORKING_TEXT
-    if N.FUN ~= false then
-      local roll, at = N.Random(), 0
-      for _, f in ipairs(N.WORKING_FLAVORS) do
-        at = at + f.share
-        if roll < at then
-          working = f.lines[N.Random(#f.lines)]
-          break
-        end
-      end
+    working, workingAt, workingSince = PickWorking(), now, now
+  elseif N.FUN ~= false and now - workingAt >= N.WORKING_SWAP_EVERY - 0.001 then -- (GetTime's float sums)
+    local was, pick = working, nil
+    for _ = 1, 8 do
+      pick = PickWorking()
+      if pick ~= was then break end
     end
+    if pick == was then pick = was ~= N.WORKING_TEXT and N.WORKING_TEXT or N.WORKING_FLAVORS[2].lines[1] end
+    working, workingAt = pick, now
   end
   return working
+end
+-- The text picked now (nil when none is), not picked again.
+function N.WorkingShown() return working end
+-- The text picked with its dots as they are now: its trailing "..." (or the ellipses, koKR's and the Chinese) cut to
+-- one, two, three (as many as it has); text with none, as it is. The variants made once a text: no string a tick.
+local dotted = {}
+function N.WorkingDots(now)
+  local text = working
+  if not text then return nil end
+  if dotted.text ~= text then
+    local ell, base, dot, k = "\226\128\166", nil, ".", 3
+    if text:sub(-3) == "..." then
+      base = text:sub(1, -4)
+    else
+      local b = text
+      while b:sub(-3) == ell do b = b:sub(1, -4) end
+      if b ~= text then base, dot, k = b, ell, (#text - #b) / 3 end
+    end
+    dotted = { text = text }
+    for n = 1, base and k or 1 do dotted[n] = base and base .. dot:rep(n) or text end
+  end
+  local n = math.floor(((now or GetTime()) - (workingSince or 0)) / N.WORKING_DOTS_EVERY) % #dotted + 1
+  return dotted[n]
 end
 
 -- "Show it, marked" (asked 2026-10-08): a new route still being checked for a shorter way (within FRESH_SECONDS of the
@@ -6155,6 +7529,7 @@ function N.PausedHead()
   if not N.paused then return nil end
   return N.paused == "auto" and L["|cffffd100Routing paused: you're not following the route|r"]
     or N.paused == "perf" and L["|cffffd100Routing paused: it was making your game stutter|r"]
+    or N.paused == "guards" and L["|cffffd100Routing paused: no way around the guards found|r"]
     or L["|cffffd100Routing is paused|r"]
 end
 function N.PausedText()
@@ -6385,15 +7760,21 @@ function N.Status(px, py, cont)
     -- 2026-11-20: "If I picked a spot that actually isn't reachable then should've said too high or route not
     -- possible")
     if not N.warming and N.noWayCliff then return L["That spot can't be reached on foot from here (a cliff in the way)."] end
+    if not N.warming and N.noWayGrid then return L["No way found yet"] end
     return N.warming and N.WorkingText() or L["No way there found"]
   end
   if N.RedAsking() then return N.RED_ASK_TEXT end -- (not shown until kept)
-  working = nil -- (the next time: picked again)
+  -- (a stand-in while world routing's searches land, N.StandIn: no distances or turns from it, it's not the way)
+  if N.StandIn() then return N.WorkingText() end
+  working, workingAt, workingSince = nil, nil, nil -- (the next time: picked again)
   local cur, walk, mount, mounted, ability = N.Speeds()
   local head = N.FormatDistance(r.length)
-  -- (at the route's end, not arrived (a floor off, known): the floor's hint, not "0 yd" (N.RouteDone))
+  -- (at the route's end, not arrived (a floor off, known): the floor's hint, not "0 yd" (N.RouteDone). Or right under
+  -- or over the stop, within ARRIVED_YD across: with city routing the route goes on up the stairs to it (Acolyte Dellis
+  -- upstairs, 28 yd round by the stairs from under her), and "Above you" is said first, not the yards)
   local hint = N.HeightText(px, py, cont) or N.FloorText(px, py, cont)
-  if r.length < N.ZERO_YD and hint then head, hint = hint, nil end
+  local over = hint and d and d.x and d.cont == N.PlayerLevel(cont) and (d.x - px) ^ 2 + (d.y - py) ^ 2 <= ARRIVED_YD ^ 2
+  if hint and (r.length < N.ZERO_YD or over) then head, hint = hint, nil end
   local multi = #N.stops > 1
   if multi then head = string.format("|T%s:14|t 1/%d  %s", N.StopIcon(d), #N.stops, head) end
   local t, from, atDock = NextRide(r, px, py)
@@ -6423,6 +7804,8 @@ function N.Status(px, py, cont)
     line = (planned < #N.stops and not N.loop) and planned or "all"
   end
   local times = N.TimesLine(yards, ride, walk, mount, mounted, ability, swim)
+  -- (the trip's stretches still coming in: the times so far, "..." after them)
+  if multi and N.StretchesPending() then times = times .. "..." end
   if line == "all" then
     line = Format(L["All stops: %s"], times)
   elseif line ~= "" then
@@ -6590,6 +7973,7 @@ function N.Tick()
     N.CheckRedRoute(N.routeX, N.routeY, N.routeCont, GetTime())
   end
   N.CheckHostileRoute() -- (the other faction's territory on a route settled since: said once)
+  N.CheckRefused(GetTime())
 end
 
 -- Heights in an underground city: its floors' height at (x, y) on `level` (the model's
@@ -6634,7 +8018,7 @@ function N.StopZ(d)
   if h then return h end
   local l = ns.CityLevels and ns.CityLevels[d.cont]
   local h = l and l.zoff and N.CityFloor(d.cont, d.x, d.y)
-  return h and h + l.zoff or nil
+  return h and h + l.zoff or d.guessZ -- (else its guess when made, N.GuessStopZ)
 end
 
 -- The player's height in an underground city's own terms (its heights are the model's: the
@@ -6705,8 +8089,12 @@ function N.HeightHint(px, py, cont)
     end
     if (tx - px) ^ 2 + (ty - py) ^ 2 > N.FLOOR_HINT_YD ^ 2 then return nil end
     local zp = N.FollowedZ(lvl)
+    zp = zp or N.PlayerHeightNear(lvl, px, py) -- (no floor followed: the roads by the player, one floor)
     if not zp then return N.StopOffGround(d) end -- (no floor followed: up or down from the roads by it, if a floor off)
-    if math.abs(d.z - zp) < N.HEIGHT_HINT_YD then return nil end
+    -- (a stop a floor off its roads (N.StopOffGround) said from OFF_FLOOR_Z: the city grid's floor followed at Acolyte
+    -- Dellis's door is 99 against her 104.8, under HEIGHT_HINT_YD)
+    local lim = N.StopOffGround(d) and N.OFF_FLOOR_Z or N.HEIGHT_HINT_YD
+    if math.abs(d.z - zp) < lim then return nil end
     return d.z < zp and "down" or "up", math.abs(d.z - zp)
   end
   if not ns.CityLevels[lvl] then return nil end
@@ -6738,7 +8126,7 @@ function N.LandHeightHint(lvl, px, py, tx, ty, d)
   if not (tx == d.x and ty == d.y) then return nil end -- (the stop itself, not a ride's dock)
   if (tx - px) ^ 2 + (ty - py) ^ 2 > N.LAND_HINT_YD ^ 2 then return nil end
   local zs = d.z or N.GroundAt(lvl, tx, ty)
-  local zp = N.FollowedZ(lvl) or N.GroundAt(lvl, px, py)
+  local zp = N.PlayerHeightNear(lvl, px, py)
   if not (zs and zp) or math.abs(zs - zp) < N.LAND_HINT_Z then return nil end
   return zs < zp and "down" or "up", math.abs(zs - zp)
 end
@@ -6821,26 +8209,322 @@ end
 
 -- The highest drop off a ledge the player survives with health to spare: falls up to
 -- FALL_FREE yards cost nothing, then about FALL_PER_YD of their health each yard. A ghost
--- takes no fall damage; in combat (health hidden) only the free ones.
+-- takes no fall damage. In combat as out of it (Kooki3z 2026-11-23: "ignore the in combat jumping distance rule").
 N.FALL_FREE = 14
 N.FALL_PER_YD = 0.02
 N.FALL_KEEP = 0.3 -- of their health left after the fall, at least
 -- (this client hides the player's health from addons, out of combat too: out of combat it's taken as FALL_SECRET_HEALTH
 -- of the most, health coming back out of combat, so the safe jumps down a capital's ledges are routed (Kooki3z
 -- 2026-11-20 in Orgrimmar: "should be jumpable cliffside, you can safely jump down from areas in org"; 22 yd from
--- by the Hall of Legends to the Valley of Strength). In combat only the free ones.)
+-- by the Hall of Legends to the Valley of Strength). Options > Routing's Safe drop sets it: N.SafeDropSetting.)
 N.FALL_SECRET_HEALTH = 0.8
+-- Jumps avoided (Kooki3z 2026-11-23: "allow right click to avoid the jump"): a jump down or across on the route,
+-- right-clicked on the map, "Avoid This Jump" (GPSFrame's G.JumpClick): this trip finds another way, rerouting and after
+-- a /reload (saved with the stops, as a removed swim); a new trip jumps again. Each is its top: no drop or running jump
+-- whose top is within JUMP_BAN_YD of one is taken, whichever grid or road it's on (Router's road drops, the world
+-- grid's ledges and drop links, the city grid's drop and jump links, the cliff walls' ways down and the ground's cliffs:
+-- Passability.SetJumpBans). N.jumpBanStamp changes with them (WorldGrid.CostKey: the grids' walks kept by it).
+N.JUMP_BAN_YD = 10
+-- (the spell-jump planner's own bans, `auto`: a rim's whole stretch round the jump (`r`), not its spot. Kooki3z
+-- 2026-11-23 in Tanaris, a warrior's Walk on Air: 20-60 s of "Working out the route..." while the planner banned the
+-- rim spot by spot, the world grid's falls (WorldGrid.FarDrops) offering the next along it, a grid search each)
+N.JUMP_BAN_AUTO_YD = 150
+N.JUMP_BAN_AUTO_Z = 15 -- (... only along the rim: a top this near the banned one's height; asked without a height, the
+-- old reach, JUMP_BAN_YD: two cliffs one over the other 100 yd apart stay told apart)
+N.jumpBans = {}
+N.jumpBanStamp = 0
+function N.JumpBanned(cont, x, y, z)
+  local list = N.jumpBans
+  if not (list[1] and x and y) then return false end
+  for i = 1, #list do
+    local b = list[i]
+    local r = N.JUMP_BAN_YD
+    if b.r and z and b.z and math.abs(z - b.z) <= N.JUMP_BAN_AUTO_Z then r = b.r end
+    if (cont == nil or b.cont == cont) and (b.x - x) ^ 2 + (b.y - y) ^ 2 <= r * r then return true end
+  end
+  return false
+end
+-- ... any within reach of the stretch from (ax, ay) to (bx, by) (a cliff wall's section, Passability.CliffSection)
+function N.JumpBannedAlong(cont, ax, ay, bx, by)
+  local list = N.jumpBans
+  if not (list[1] and ax and bx) then return false end
+  local vx, vy = bx - ax, by - ay
+  local L2 = vx * vx + vy * vy
+  for i = 1, #list do
+    local b = list[i]
+    if cont == nil or b.cont == cont then
+      local r = N.JUMP_BAN_YD
+      local t = L2 > 0 and math.max(0, math.min(1, ((b.x - ax) * vx + (b.y - ay) * vy) / L2)) or 0
+      if (ax + vx * t - b.x) ^ 2 + (ay + vy * t - b.y) ^ 2 <= r * r then return true end
+    end
+  end
+  return false
+end
+-- (the bans in force told to the terrain's cliffs, the routes and walks worked out again)
+function N.SyncJumps()
+  N.jumpBanStamp = N.jumpBanStamp + 1
+  local P = ns.Passability
+  if P and P.SetJumpBans then P.SetJumpBans(N.jumpBans) end
+  if ns.Router and ns.Router.WallsChanged then ns.Router.WallsChanged() end
+  N.Invalidate(true, true)
+end
+-- The jump whose top is (x, y) on `cont` left out of this trip.
+function N.AvoidJump(cont, x, y)
+  if not (cont and x and y) or N.JumpBanned(cont, x, y) then return false end
+  N.jumpBans[#N.jumpBans + 1] = { cont = cont, x = x, y = y }
+  N.SaveStops()
+  N.SyncJumps()
+  if ns.GPS and ns.GPS.Redraw then ns.GPS.Redraw() end
+  return true
+end
+-- A leg's jumps avoided (item 26, Kooki3z 2026-11-24 on bbc4c8c4: "Avoid This Jump" changed nothing; its 10 yd spot
+-- ban only moved the drop a few yards along the rim). A jump's right-click avoids for the leg to its stop (the stop's
+-- `avoidJumps`, saved with it, gone with it when reached or the route is cleared): a spell jump's, the spell jumps
+-- ("spell": the leg's drops within the player's own Safe drop, N.PlainSafeDrop); a plain jump's, every jump ("all": no
+-- drop past about a step, AVOID_JUMPS_YD: the walk way). The leg's searches get it as their `maxDrop` (N.LegMaxDrop,
+-- Stretch): the world grid's falls and baked drops, the city grid's drop links and the Router's own all read that.
+N.AVOID_JUMPS_YD = 4
+function N.LegMaxDrop(d)
+  local a = d and d.avoidJumps
+  if a == "all" then return N.AVOID_JUMPS_YD end
+  if a == "spell" then return math.min(N.PlainSafeDrop(), N.SafeDrop()) end
+  return nil
+end
+-- Swimming avoided for the way to one stop (item 42c, Kooki3z 2026-11-24: right-clicking a swim avoided it for every
+-- stop in the route): the stop's `avoidSwim`, saved with it, gone with it or a cleared route; its stretch's searches get
+-- `noSwim` (the world grid's water at the avoided swim's cost). With world routing off the Router's own searches weigh
+-- water by one setting for all (Passability.avoidSwim): the trip's then, N.SkipSwim.
+function N.AvoidLegSwim(i)
+  local d = N.stops[i]
+  if not d or d.avoidSwim then return false end
+  d.avoidSwim = true
+  N.SaveStops()
+  N.Invalidate(true, true)
+  if ns.GPS and ns.GPS.Redraw then ns.GPS.Redraw() end
+  return true
+end
+-- The leg to stop `i` (its index in N.stops) avoiding `kind`'s jumps ("spell" or "all"; "all" kept over "spell").
+function N.AvoidLegJumps(i, kind)
+  local d = N.stops[i]
+  if not (d and (kind == "spell" or kind == "all")) then return false end
+  if d.avoidJumps == "all" or d.avoidJumps == kind then return false end
+  d.avoidJumps = kind
+  N.SaveStops()
+  N.Invalidate(true, true)
+  if ns.GPS and ns.GPS.Redraw then ns.GPS.Redraw() end
+  return true
+end
+-- The fall spell the trip's drops are planned with (Kooki3z 2026-11-23: "allow right click to avoid the jump using
+-- spell or item"): a jump's right-click, "Use Slow Fall" (FallSpells.RowKey); FallSpells.Look takes it while it's
+-- ready, else the one with the biggest reach. nil: back to that.
+N.fallPick = nil
+function N.PickFallSpell(name)
+  if N.fallPick == name then return false end
+  N.fallPick = name
+  N.SaveStops()
+  local FS = ns.FallSpells
+  if FS and FS.Refresh then FS.Refresh() end -- (another reach: the route worked out again, N.OptionsChanged)
+  return true
+end
+function N.ResetJumps()
+  local had = N.jumpBans and N.jumpBans[1] or N.fallPick or N.spellJumpsOff or N.jumpPlan
+  N.jumpBans, N.fallPick = {}, nil
+  N.jumpPlan, N.spellJumpsOff = nil, nil
+  if had then
+    local P = ns.Passability
+    N.jumpBanStamp = N.jumpBanStamp + 1
+    if P and P.SetJumpBans then P.SetJumpBans(N.jumpBans) end
+    local FS = ns.FallSpells
+    if FS and FS.Refresh then FS.Refresh() end
+  end
+end
+-- The trip's spell jumps, all survivable (Kooki3z 2026-11-23: "the thing to determine is how many jumps are needed for
+-- the trip and if a cooldown on the spell prevents the rest of the jumps from being survivable thus making jumping not
+-- faster"). Each route worked out (Apply) is looked at: its drops past the player's own safe drop, in order, each at
+-- the time the player gets there (the walk at their speed, rides at RIDE_FACTOR times it: a rough clock, the cooldowns
+-- being minutes), run through FallSpells.Budget. The first jump no source can take in time: left out (an automatic
+-- avoid, `auto`, not saved) and the trip worked out again; that route compared with keeping the jump and waiting there
+-- for the cooldown (this route's time and the wait): the faster kept (N.jumpPlan.decided[key] = "walk" or "wait"; a
+-- wait keeps the jump, its step "Wait 0:40 for Gliding on Air, then jump down"). No source left at all (the last
+-- Light Feather spent on an earlier jump): walked round. With waits in the trip, it's worked out once without any spell
+-- jump (N.spellJumpsOff) and kept so when that's as fast (SPELL_JUMP_GAIN): jumping that isn't faster isn't taken.
+-- Once a trip (N.trip); a new trip looks again.
+N.RIDE_FACTOR = 3
+N.SPELL_JUMP_GAIN = 2 -- seconds: jumping and waiting must win by this much over walking it
+N.SPELL_JUMP_TRIES = 3 -- jumps left out a trip, at most (on the grid each a rim's stretch, JUMP_BAN_AUTO_YD); then none
+N.jumpPlan = nil
+N.spellJumpsOff = nil
+-- (a jump's spot by JUMP_KEY_YD cells: the walk's way to the same rim shifts its top a few yards as the player moves on,
+-- and keyed to the yard each was a new jump, a new try, till the planner gave up on the spell: Tanaris 2026-11-23, a
+-- warrior walking to the rim with Walk on Air 45 s from ready flipped to the way round)
+N.JUMP_KEY_YD = 25
+local function JumpKey(cont, x, y)
+  local g = N.JUMP_KEY_YD
+  return string.format("%s:%d:%d", tostring(cont), math.floor(x / g), math.floor(y / g))
+end
+-- The drops on route r needing a fall spell: { { t, dz, cont, x, y, key }, ... } in order.
+function N.SpellJumps(r)
+  local R = ns.Router
+  local out = {}
+  if not (r and r.parts and R and R.KIND_DROP) then return out end
+  local plain = N.PlainSafeDrop()
+  local cur, walk, mount, mounted = N.Speeds()
+  local speed = math.max((cur and cur > 0.5) and cur or (mounted and mount) or walk or 7, 1)
+  local yards = 0
+  for _, part in ipairs(r.parts) do
+    local pts, kinds = part.pts, part.kinds or {}
+    for i = 1, #pts / 2 - 1 do
+      local k = kinds[i]
+      if k == R.KIND_DROP and kinds[i - 1] ~= R.KIND_DROP then
+        local x, y = pts[2 * i - 1], pts[2 * i]
+        local dz = R.DropFall and R.DropFall(pts, kinds, i) or nil -- (as the steps find it, Turns.DROP_NOTE_YD)
+        if dz and dz > plain + 0.5 then
+          local hz = part.fz or part.zs
+          out[#out + 1] = { t = yards / speed, dz = dz, cont = part.cont, x = x, y = y, key = JumpKey(part.cont, x, y),
+            z = hz and tonumber(hz[i]) or nil }
+        end
+      end
+      local seg = math.sqrt((pts[2 * i + 1] - pts[2 * i - 1]) ^ 2 + (pts[2 * i + 2] - pts[2 * i]) ^ 2)
+      local ride = k == 2 or (R.KIND_LIFT_DOWN and k == R.KIND_LIFT_DOWN) or (R.KIND_LIFT_UP and k == R.KIND_LIFT_UP)
+      yards = yards + (ride and seg / N.RIDE_FACTOR or seg)
+    end
+  end
+  return out
+end
+-- (the trip's seconds as N.TripSecs counts them)
+local function RouteSecs(r)
+  local cur, walk, mount, mounted = N.Speeds()
+  local speed = (cur and cur > 0.5) and cur or (mounted and mount) or walk
+  return N.TripSecs(r.totalYards or r.length or 0, r.totalSwim, r.totalRide, speed)
+end
+local function DropAuto(key)
+  for i = #N.jumpBans, 1, -1 do
+    if N.jumpBans[i].auto == key then table.remove(N.jumpBans, i) end
+  end
+end
+function N.CheckSpellJumps(r)
+  local FS = ns.FallSpells
+  if not (r and FS and FS.Budget) or r.pending or r.flying or #N.stops == 0 then return nil end
+  local plan = N.jumpPlan
+  if not plan or plan.trip ~= N.trip then
+    plan = { trip = N.trip, decided = {}, waits = {} }
+    N.jumpPlan = plan
+  end
+  local secs = RouteSecs(r)
+  if plan.offTest then -- (worked out without spell jumps: as fast, kept so; else back)
+    plan.offTest = nil
+    plan.offDone = true
+    if secs <= plan.withSecs + N.SPELL_JUMP_GAIN then return "off" end
+    N.spellJumpsOff = nil
+    FS.Refresh()
+    return "on"
+  end
+  if plan.pending then -- (worked out with the jump left out: walked round, or back to waiting there)
+    local pd = plan.pending
+    plan.pending = nil
+    -- (the way with the jump left out priced with its own spell jumps' waits: on a long rim it's the same rim jumped
+    -- a little further on, the same spell's cooldown to wait out, not a walk round. Counted as walking, every spot was
+    -- "walked" in turn till the planner gave up on the spell; Tanaris 2026-11-23, Walk on Air 45 s from ready)
+    if FS.Current() then
+      local js = N.SpellJumps(r)
+      if #js > 0 then
+        local k2, w2 = FS.Budget(js, N.PlainSafeDrop(), plan.waits)
+        if k2 then secs = secs + w2 end
+      end
+    end
+    if secs <= pd.alt then
+      plan.decided[pd.key] = "walk"
+    else
+      plan.decided[pd.key], plan.waits[pd.key] = "wait", true
+      DropAuto(pd.key)
+      N.SyncJumps()
+      return "wait"
+    end
+  end
+  if not FS.Current() then return nil end -- (no fall spell or item: no spell jump on any route)
+  local jumps = N.SpellJumps(r)
+  if #jumps == 0 then return nil end
+  local k, wait = FS.Budget(jumps, N.PlainSafeDrop(), plan.waits)
+  if k then
+    local j = jumps[k]
+    if plan.decided[j.key] == "walk" then return nil end -- (left out already: the ban's reach missed it)
+    plan.tries = (plan.tries or 0) + 1
+    if plan.tries > N.SPELL_JUMP_TRIES then
+      -- (still a jump no source takes in time after that: the trip without spell jumps, once; never a jump the
+      -- player can't make kept, nor another search along the rim)
+      if plan.offDone or N.spellJumpsOff then return nil end
+      plan.offDone = true
+      N.spellJumpsOff = true
+      FS.Refresh()
+      return "off"
+    end
+    if wait ~= math.huge then plan.pending = { key = j.key, alt = secs + wait } else plan.decided[j.key] = "walk" end
+    N.jumpBans[#N.jumpBans + 1] = { cont = j.cont, x = j.x, y = j.y, auto = j.key, r = N.JUMP_BAN_AUTO_YD, z = j.z }
+    N.SyncJumps()
+    return "walk"
+  end
+  -- (waits in it: is jumping faster at all? Not when every jump waited at was weighed already against the way with it
+  -- left out ("wait" decided): that's the same question, and the trip without spell jumps is the slow search, the
+  -- world grid at the plain safe drop; Tanaris 2026-11-23, a minute of "Working out the route...")
+  local weighed = true
+  for _, j in ipairs(jumps) do
+    if plan.waits[j.key] and plan.decided[j.key] ~= "wait" then weighed = false end
+  end
+  if next(plan.waits) == nil then weighed = false end
+  if (wait or 0) > 0 and not weighed and not plan.offDone and not N.spellJumpsOff then
+    plan.withSecs, plan.offTest = secs + wait, true
+    N.spellJumpsOff = true
+    FS.Refresh()
+    return "test"
+  end
+  return nil
+end
+
+-- (from the saved stops, `cdb`; nil: none)
+function N.RestoreJumps(cdb)
+  N.jumpBans = {}
+  for _, b in ipairs(cdb and type(cdb.jumpBans) == "table" and cdb.jumpBans or {}) do
+    if type(b) == "table" and type(b.cont) == "number" and type(b.x) == "number" and type(b.y) == "number" then
+      N.jumpBans[#N.jumpBans + 1] = { cont = b.cont, x = b.x, y = b.y }
+    end
+  end
+  N.fallPick = cdb and type(cdb.fallPick) == "string" and cdb.fallPick or nil
+  N.jumpBanStamp = N.jumpBanStamp + 1
+  local P = ns.Passability
+  if P and P.SetJumpBans then P.SetJumpBans(N.jumpBans) end
+end
+
+-- The safe drop the routes take: the player's own (PlainSafeDrop, the Safe drop slider), or bigger with a class spell
+-- ready for it (FallSpells.lua, option `useClassSpells`).
 function N.SafeDrop()
+  if UnitIsGhost and UnitIsGhost("player") then return math.huge end
+  return math.max(N.PlainSafeDrop(), N.FallSpellDrop() or 0)
+end
+-- The safe drop a fall spell ready gives (FallSpells.MaxDrop); nil with none. What the city grid's own cap reads
+-- (CityGrid.MaxDrop) and SafeDrop takes: one number for both grids. (The full-health option, `bigDropsFullHealth`, was
+-- removed: item 28, the Safe drop slider the one limit without a spell.)
+function N.FallSpellDrop()
+  local FS = ns.FallSpells
+  local v = FS and FS.MaxDrop() or 0
+  return v > 0 and v or nil
+end
+-- Options > Routing's Safe drop (Kooki3z 2026-11-23, `safeDropYd`, SAFE_DROP_MIN to MAX, 39 the default): the drop
+-- with no fall spell, what FALL_SECRET_HEALTH's 39 yd was; in combat the same (no stricter combat limit since 2026-11-23).
+N.SAFE_DROP_MIN, N.SAFE_DROP_MAX = 14, 60
+function N.SafeDropSetting()
+  local st = ns.settings and ns.settings.gps
+  local v = st and tonumber(st.safeDropYd) or (ns.DEFAULTS and ns.DEFAULTS.gps and ns.DEFAULTS.gps.safeDropYd) or 39
+  return math.max(N.SAFE_DROP_MIN, math.min(N.SAFE_DROP_MAX, v))
+end
+function N.PlainSafeDrop()
   if UnitIsGhost and UnitIsGhost("player") then return math.huge end
   local h = UnitHealth and UnitHealth("player")
   local m = UnitHealthMax and UnitHealthMax("player")
-  if h and ns.IsSecret and ns.IsSecret(h) then
-    local fight = UnitAffectingCombat and UnitAffectingCombat("player")
-    if fight == false then return N.FALL_FREE + math.max(0, N.FALL_SECRET_HEALTH - N.FALL_KEEP) / N.FALL_PER_YD end
-    return N.FALL_FREE
-  end
-  if not h or not m or (ns.IsSecret and (ns.IsSecret(h) or ns.IsSecret(m))) or m <= 0 then return N.FALL_FREE end
-  return N.FALL_FREE + math.max(0, h / m - N.FALL_KEEP) / N.FALL_PER_YD
+  local set = N.SafeDropSetting()
+  if not h or not m or (ns.IsSecret and (ns.IsSecret(h) or ns.IsSecret(m))) or m <= 0 then return set end
+  -- (health known: the setting at FALL_SECRET_HEALTH, scaled with the health; at 39 the old FALL_PER_YD formula)
+  local share = math.max(0, h / m - N.FALL_KEEP) / (N.FALL_SECRET_HEALTH - N.FALL_KEEP)
+  return N.FALL_FREE + (set - N.FALL_FREE) * share
 end
 
 do -- the bags or spells changed: water's speed looked at again (N.WaterChanged)

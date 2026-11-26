@@ -38,8 +38,10 @@ def _fz(part):
 def test_the_tram_stops_have_their_heights(game):
     _, ns = game
     t = _tram(ns)
-    assert t.z1 == pytest.approx(96.6, abs=0.5)  # Stormwind's way in (AreaTrigger 2173)
-    assert t.z2 == pytest.approx(508.2, abs=0.5)  # Ironforge's (AreaTrigger 2175)
+    # (the floors at the ways in, addon_data.TRAM_FLOOR_Z: Stormwind's measured there by Kooki3z 2026-11-23, the
+    # triggers' own heights (96.6, 508.2) their boxes' middles; test_tram_floor.py)
+    assert t.z1 == pytest.approx(91.8, abs=0.5)  # Stormwind's way in (AreaTrigger 2173)
+    assert t.z2 == pytest.approx(502.0, abs=0.5)  # Ironforge's (AreaTrigger 2175)
 
 
 def test_the_walk_to_the_tram_from_the_dwarven_district_stays_in_it(game):

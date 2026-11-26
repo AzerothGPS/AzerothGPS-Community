@@ -811,7 +811,9 @@ def test_a_question_on_the_map_in_the_world_map_takes_clicks(wm):
     box = G.Ask("AzerothGPSTestAsk", "Keep this route?", "Yes", "No", lua.eval("function() end"), lua.eval("function() end"))
     assert box is not None
     assert box.GetFrameStrata(box) == ns.POPUP_OVER_STRATA, box.GetFrameStrata(box)
-    assert not box.onMap
+    # (held over the map by a frame of its own over everything, not in the map's frames: item 93)
+    assert box.onMap and lua.eval("function(b) return rawequal(b:GetParent(), AGPS_NS.GPS.askHolder) end")(box)
+    assert G.askHolder.GetFrameStrata(G.askHolder) == ns.POPUP_OVER_STRATA and G.ShownUp(box)
     box.Hide(box)
 
 def test_in_a_city_the_world_map_shows_its_inside_map_as_the_gps_window_does(wm):

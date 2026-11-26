@@ -65,9 +65,10 @@ def test_a_stop_away_from_any_npc_gets_no_height():
     N = ns.Nav
     assert N.SpawnZ(1, NEERU[0] + 1, NEERU[1]) == pytest.approx(-17.3)  # (within SPAWN_YD)
     assert N.SpawnZ(1, NEERU[0] + 9, NEERU[1]) is None
-    assert _stop(lua, ns, 1, NEERU[0] + 9, NEERU[1]).z is None
-    # (out in the open land, and a level with none shipped)
-    assert _stop(lua, ns, 1, 300.0, -4700.0).z is None and N.SpawnZ(1440, 0.0, 0.0) is None
+    # (not the NPC's: the grid's floor there, Nav.GuessStopZ, 2026-11-23)
+    assert _stop(lua, ns, 1, NEERU[0] + 9, NEERU[1]).zSource != "npc"
+    # (out in the open land: the ground's, kept aside, no height; and a level with none shipped)
+    assert _stop(lua, ns, 1, -2000.0, -500.0).z is None and N.SpawnZ(1440, 0.0, 0.0) is None
 
 
 def test_the_order_heights_are_taken_in():

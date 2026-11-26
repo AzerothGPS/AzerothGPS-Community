@@ -1,11 +1,12 @@
 """The first-run setup and the first route's tips (Setup.lua, 1.3.10; Kooki3z: "A one-time popup that lets users choose
 cards for major options ... One popup for setup on initial install. Then tutorials would not be a popup, just a dialog
-panel message where route directions go, until the player does their first route"; 2026-11-19: "Setup runs once for
-everyone after the next update"): shown once to everyone (a stamp in the saved settings), a player updating's own
-settings lit; the minimap's live preview put back by Skip or closing (or a /reload meanwhile); Finish keeps the picks;
-the tutorial's offer only after the setup is closed; the cards' pictures from Media/Setup or the drawing; the tips in
-the route panel's place (on the map and detached) until the first route is done, a first install's only; no tutorial
-popup on a first install; the cards driven by a controller."""
+panel message where route directions go, until the player does their first route"; 2026-11-25: "From here on new
+install is setup page only and updates are What's New only"): shown once to a first install (a stamp in the saved
+settings), never by itself to a player updating (Run Setup Again opens it on their own settings, lit); the minimap's
+live preview put back by Skip or closing (or a /reload meanwhile); Finish keeps the picks; no tutorial popup ever (only
+Options > Help and /agps tutorial start it); the cards' pictures from Media/Setup or the drawing; the tips in the
+route panel's place (on the map and detached) until the first route is done, a first install's only; the cards driven
+by a controller."""
 
 import os
 import struct
@@ -56,7 +57,7 @@ def _redraw(lua, ns):
     ns.GPS.Update()
 
 
-# ---------------------------------------------------------------- shown once, to everyone
+# ---------------------------------------------------------------- shown once, to a first install
 
 def test_the_setup_shows_on_a_first_install_once():
     lua, ns = _start()
@@ -72,7 +73,7 @@ def test_the_setup_shows_on_a_first_install_once():
     # test_map_redraw's test_a_popup_window_has_the_map_windows_frame_and_a_small_logo), a popup lifted over the map
     assert lua.eval("AGPS_NS.popups[AzerothGPSSetup] ~= nil") and f.SetWindowTitle is not None
     assert [str(b.title._text) for b in _cards(ns)] == ["GPS minimap", "The game's minimap"]
-    assert str(f.step._text) == "Step 1 of 2" and str(f.heading._text) == "Your minimap"
+    assert str(f.step._text) == "Step 1 of 3" and str(f.heading._text) == "Your minimap"
     assert [str(b._text) for b in (f.skip, f.back, f.next)] == ["Skip", "Back", "Next"]
     lua.globals().AGPS_CLICK(f.skip)
     assert S.Shown() is False and ns.db.setup.shown == S.VERSION
@@ -88,16 +89,17 @@ def _relog(lua):
 
 
 @pytest.mark.parametrize("leave", ["finish", "skip"])
-def test_a_player_updating_sees_it_once_on_their_own_settings_and_never_again(leave):
-    # (saved settings from before the setup, no stamp: shown once, some seconds after the world is entered)
+def test_a_player_updating_never_gets_it_by_itself_and_run_by_hand_it_shows_their_own_settings(leave):
+    # (saved settings from before the setup, no stamp: not shown, 2026-11-25 "updates are What's New only")
     lua, ns = _start(saved=UPGRADE)
     S = ns.Setup
     st = ns.settings.gps
     assert st.size == 400 and st.iconSize == "large" and st.useWorldMap is True  # (their settings kept)
     assert ns.db.tips.due is None  # (no first-route tips for a player who has done routes)
-    assert S.Due() is True
+    assert S.Due() is False and ns.db.setup.fresh is None
     S.OnEnteringWorld()
-    lua.eval("AGPS_AFTER[#AGPS_AFTER]")()
+    assert lua.eval("#AGPS_AFTER") == 0 and S.MaybeShow() is False and S.window is None
+    S.Open()  # (Options > Help's Run Setup Again, /agps setup)
     f = S.window
     assert S.Shown() is True and ns.db.setup.shown == S.VERSION
     _redraw(lua, ns)
@@ -108,6 +110,8 @@ def test_a_player_updating_sees_it_once_on_their_own_settings_and_never_again(le
     assert [bool(b.lit._shown) for b in _cards(ns)] == [False, True]  # (lit to what they have)
     click(_cards(ns)[0])
     if leave == "finish":
+        click(f.next)
+        assert str(f.heading._text) == "What's new in v1.4.0"  # (item 34: What's New, the last page)
         click(f.next)
         assert st.useWorldMap is False
     else:
@@ -125,7 +129,7 @@ def test_a_player_updating_sees_it_once_on_their_own_settings_and_never_again(le
 def test_a_reload_with_the_setup_open_puts_their_settings_back_and_doesnt_show_it_again():
     lua, ns = _start(saved=UPGRADE)
     S = ns.Setup
-    S.MaybeShow()
+    S.Open()
     assert S.Shown() is True
     lua.globals().AGPS_CLICK(_cards(ns)[0])  # (the GPS minimap: applied at once)
     assert ns.settings.gps.replaceMinimap is True
@@ -134,14 +138,18 @@ def test_a_reload_with_the_setup_open_puts_their_settings_back_and_doesnt_show_i
     assert ns.db.setup.before is None and ns.Setup.Due() is False
 
 
-def test_a_later_version_of_the_setup_shows_once_more():
-    lua, ns = _start(saved=UPGRADE)
+def test_a_later_version_of_the_setup_reaches_a_first_install_only():
+    lua, ns = _start()
     S = ns.Setup
     S.Open()
     S.Close(True)
     assert S.Due() is False
     S.VERSION = S.VERSION + 1
     assert S.Due() is True
+    lua, ns = _start(saved=UPGRADE)
+    S = ns.Setup
+    S.VERSION = S.VERSION + 1
+    assert S.Due() is False  # (a player updating: What's New only)
 
 
 def test_a_first_install_in_combat_gets_the_setup_when_the_fight_ends():
@@ -218,18 +226,21 @@ def test_finish_keeps_every_pick():
     assert str(f.heading._text) == "Where the map opens" and f.back._enabled is True
     assert [str(b.title._text) for b in _cards(ns)] == ["GPS map window", "In the world map"]
     click(_cards(ns)[1])
-    # (two pages since 2026-11-19: the route directions and icon size pages taken out)
-    assert str(f.next._text) == "Finish" and str(f.step._text) == "Step 2 of 2"
+    # (two pages since 2026-11-19: the route directions and icon size pages taken out; What's New the third, item 34)
+    assert str(f.next._text) == "Next" and str(f.step._text) == "Step 2 of 3"
     click(f.back)
     assert str(f.heading._text) == "Your minimap" and _cards(ns)[0].lit._shown  # (Back shows what's picked)
     assert f.sizes[2].lit._shown
     click(f.next)
     assert _cards(ns)[1].lit._shown
+    click(f.next)
+    assert str(f.next._text) == "Done" and str(f.step._text) == "Step 3 of 3" and not _cards(ns)  # (item 64: Done)
+    assert f.whatsNew._shown
     click(f.next)  # Finish
     assert S.Shown() is False and ns.db.setup.shown == S.VERSION and ns.db.setup.done
     assert (st.replaceMinimap, st.replaceMinimapSize, st.useWorldMap) == (True, "medium", True)
     assert G.mmState.on is True
-    assert [str(p.id) for p in S.PAGES.values()] == ["minimap", "map"]
+    assert [str(p.id) for p in S.PAGES.values()] == ["minimap", "map", "whatsnew"]
     assert "Setup done." in str(lua.eval("AGPS_PRINTS[#AGPS_PRINTS]"))
 
 
@@ -328,45 +339,68 @@ def test_got_it_on_the_last_tip_and_hide_tips_stop_them():
     assert ns.db.tips.due is None and not p._shown
 
 
-def test_no_tutorial_popup_on_a_first_install_and_the_offer_stays_for_an_update():
+# ---------------------------------------------------------------- the popups at login (Kooki3z, 2026-11-25)
+
+def popups(lua):
+    """The names of our popup windows showing (ns.Window, ns.Ask)."""
+    names = lua.eval("""(function()
+      local out = {}
+      for f in pairs(AGPS_NS.popups) do
+        if f:IsShown() then out[#out + 1] = tostring(f.GetName and f:GetName() or "?") end
+      end
+      return table.concat(out, ",")
+    end)()""")
+    return sorted(n for n in str(names).split(",") if n)
+
+
+def enter_world(lua, ns):
+    """PLAYER_ENTERING_WORLD as Core.lua passes it on, then every timer it started run out."""
+    ns.Setup.asked, ns.WhatsNew.asked = None, None
+    lua.execute("AGPS_AFTER = {}")
+    lua.eval("AGPS_FIRE")("PLAYER_ENTERING_WORLD", True, False)
+    for _ in range(5):
+        fns = list(lua.eval("AGPS_AFTER").values())
+        lua.execute("AGPS_AFTER = {}")
+        for fn in fns:
+            fn()
+
+
+def test_a_first_install_gets_the_setup_alone_and_never_a_tutorial_offer():
     lua, ns = _start()
-    T, S = ns.Tutorial, ns.Setup
-    lua.execute("AGPS_NS.Tutorial.CanPrompt = function() return true end")
-    assert T.MaybePrompt() is False and T.prompt is None  # (the setup first)
-    S.MaybeShow()
-    lua.globals().AGPS_CLICK(S.window.skip)
-    lua.eval("AGPS_AFTER[#AGPS_AFTER]")()  # (the offer that waited: a moment after)
-    assert T.prompt is None
-    assert ns.db.tutorial.offered == T.Newest()  # (counted as offered: no "what's new" for these sections later)
+    T, S, W = ns.Tutorial, ns.Setup, ns.WhatsNew
+    assert T.MaybePrompt is None and T.OnEnteringWorld is None and T.prompt is None  # (the offer's code gone)
+    enter_world(lua, ns)
+    assert S.Shown() is True and W.Shown() is False and T.run is None
+    assert popups(lua) == ["AzerothGPSSetup"]
+    _close(S.window)
+    enter_world(lua, ns)  # (anything that waited for it: nothing)
+    assert popups(lua) == [] and T.run is None and W.Shown() is False
+    # the next login: nothing at all
+    lua, ns = _relog(lua)
+    enter_world(lua, ns)
+    assert popups(lua) == [] and ns.Tutorial.run is None
     # (still there to play: Options > Help and /agps tutorial)
     assert "tutorial" in [str(e.id) for e in ns.Options.helpSections.values()]
 
 
-def test_the_whats_new_offer_waits_for_the_setup_and_never_shows_with_it():
-    lua, ns = _start(saved='AzerothGPSDB = { settings = { gps = {} }, chars = {} }')
-    T, S = ns.Tutorial, ns.Setup
-    lua.execute("AGPS_NS.Tutorial.CanPrompt = function() return true end")
-    # (both at login: the setup after S.DELAY s, the offer after T.PROMPT_DELAY s)
-    S.OnEnteringWorld()
-    T.OnEnteringWorld()
-    for fn in list(lua.eval("AGPS_AFTER").values()):
-        fn()
-    assert S.Shown() is True and T.prompt is None and T.prompted is None  # (the setup first, alone)
-    T.MaybePrompt()
-    assert T.prompt is None
-    lua.execute("AGPS_AFTER = {}")
-    _close(S.window)  # (the X)
-    assert T.prompt is None  # (not at the same moment)
-    lua.eval("AGPS_AFTER[#AGPS_AFTER]")()
-    assert T.prompt._shown and ns.db.tutorial.declined == 0  # (now, alone)
-    # the setup opened by hand over the offer: the offer put away (not a Not Now) and back after
-    lua.eval("SlashCmdList.AZEROTHGPS")("setup")
-    assert S.Shown() is True and not T.prompt._shown and ns.db.tutorial.declined == 0
-    assert T.MaybePrompt() is False and not T.prompt._shown
-    lua.execute("AGPS_AFTER = {}")
-    lua.globals().AGPS_CLICK(S.window.skip)
-    lua.eval("AGPS_AFTER[#AGPS_AFTER]")()
-    assert T.prompt._shown and not S.Shown()
+@pytest.mark.parametrize("saved", [
+    UPGRADE,  # (from before the setup)
+    # (after it, the tutorial's 1.2.0 sections offered before 1.4.0 added one: the old offer's fields, unread)
+    'AzerothGPSDB = { setup = { shown = 1, done = "1.3.14" }, tutorial = { seen = {}, ask = true, declined = 0, '
+    'offered = "1.2.0", askedFor = "1.2.0" }, settings = { gps = {} }, chars = {} }',
+])
+def test_a_player_updating_gets_whats_new_alone(saved):
+    lua, ns = _start(saved=saved)
+    T, S, W = ns.Tutorial, ns.Setup, ns.WhatsNew
+    enter_world(lua, ns)
+    assert W.Shown() is True and S.Shown() is False and T.run is None
+    assert popups(lua) == ["AzerothGPSWhatsNew"]
+    _close(W.window)
+    enter_world(lua, ns)
+    assert popups(lua) == [] and T.run is None
+    lua, ns = _relog(lua)
+    enter_world(lua, ns)
+    assert popups(lua) == [] and ns.Tutorial.run is None
 
 
 # ---------------------------------------------------------------- the cards' pictures
@@ -480,7 +514,7 @@ def test_the_cards_are_picked_with_a_controller():
     assert binds["PAD1"] == "AzerothGPSSetupPad_PAD1" and binds["PADDRIGHT"] == "AzerothGPSSetupPad_PADDRIGHT"
     assert ns.Pad.bound is False  # (the map's own off meanwhile)
     # (no page of its own for the controller: 2026-11-19, "not necessary")
-    assert str(f.step._text) == "Step 1 of 2"
+    assert str(f.step._text) == "Step 1 of 3"
     assert same(S.focus, _cards(ns)[1]) and f.focus._shown  # (the card picked: the game's minimap)
     press("PADDLEFT")
     assert same(S.focus, _cards(ns)[0])
@@ -502,6 +536,7 @@ def test_the_cards_are_picked_with_a_controller():
     press("PADDRIGHT")  # (from the map window, lit as it opened)
     press("PAD1")
     assert st.useWorldMap is True and S.padBound is True
+    press("PADRSHOULDER")  # (What's New)
     press("PADRSHOULDER")  # Finish
     assert S.Shown() is False and st.useWorldMap is True and st.replaceMinimap is True
     assert not any(str(v.button).startswith("AzerothGPSSetupPad_") for v in lua.eval("AGPS_BINDS").values())

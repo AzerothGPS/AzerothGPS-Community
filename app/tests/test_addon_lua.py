@@ -2737,6 +2737,29 @@ def test_zone_hover_says_the_levels_colored_for_the_player(router):
     assert G.ZoneHoverText(1, "Somewhere New", 10) == "Somewhere New"  # no levels known
 
 
+def test_wow_forever_zones_levels_by_id_win_over_the_game(router):
+    # (item 90, Kooki3z 2026-11-25) Riverglades is 38-45 and Zephras Isle 1-12, whatever the game says: by uiMap id, so
+    # in every language, for the hover and for the "avoid zones too high" check
+    lua, ns = router
+    G, R = ns.GPS, ns.Router
+    if not ns.Maps:
+        load(lua, ns, "Data/Maps.lua")
+    saved = lua.eval("C_Map")
+    lua.execute("C_Map = { GetMapLevels = function() return 60, 60 end }")  # (the game's wrong answer)
+    try:
+        assert list(G.ZoneHoverText(2548, "Riverglades", 40))[:2] == ["Riverglades", "Level 38-45"]
+        assert list(G.ZoneHoverText(2548, "Flussauen", 40))[:2] == ["Flussauen", "Level 38-45"]  # (not by name)
+        assert list(R.ZoneLevels(2548)) == [38, 45]
+        for isle in (2521, 2665):
+            assert list(G.ZoneLevels(isle, "Zephras Isle")) == [1, 12]
+            assert list(R.ZoneLevels(isle)) == [1, 12]
+        lua.execute("UnitLevel = function() return 27 end")
+        red = R.RedZones()
+        assert red is not None and red[2548] and not red[2521] and not red[2665]
+    finally:
+        lua.globals().C_Map = saved
+
+
 def test_ruins_of_lordaeron_walk_follows_its_roads(nav_env):
     # (reported) from the Ruins' north gate to a lift: along the ruins' roads, round their
     # walls and slime, not straight across the courtyard

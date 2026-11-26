@@ -375,7 +375,7 @@ def test_the_warning_is_worked_out_in_short_slices(game):
             worst = max(worst, clock() - a)
         assert worst < FRAME_MS, f"a slice ran {worst:.0f} ms"
         towns = lua.eval("AGPS_TOWNS")
-        assert towns and towns[1][1] == "Dun Algaz"
+        assert towns and towns[1][1] == "Dun Algaz"  # (not its guards' post "Dun Algaz": Kooki3z 2026-11-25)
     finally:
         R.WARM, R.SYNC_WALKS = False, True
         cdb.faction = fac
@@ -525,9 +525,11 @@ def test_at_level_20_tarren_mill_to_the_wetlands_takes_the_road_through_arathi_a
         part = r.parts[pi]
         pts = [part.pts[i] for i in range(1, len(part.pts) + 1)]
         for i in range(0, len(pts) - 3, 2):
-            sc = P.SegmentCost(0, pts[i], pts[i + 1], pts[i + 2], pts[i + 3])
-            if sc:
-                wet += max(0.0, sc - math.dist(pts[i:i + 2], pts[i + 2:i + 4])) / (P.SWIM_COST - 1)
+            # (the yards in water, by the leg's water spans: its cost has more than the swim in it, a drop's too)
+            spans = P.WaterSpans(0, pts[i], pts[i + 1], pts[i + 2], pts[i + 3])
+            if spans:
+                L = math.dist(pts[i:i + 2], pts[i + 2:i + 4])
+                wet += sum((spans[k + 1] - spans[k]) * L for k in range(1, len(spans), 2))
     assert wet < R.SWIM_DETOUR_YD, wet
 
 
@@ -598,3 +600,112 @@ def test_a_walk_takes_zones_too_high_before_the_other_factions_towns():
     # (Searched with the zones too high priced, as before, this went through the towns until 1.3.14. Its terrain grid
     # opens the valley the road into Redridge's west runs up (gentle quads the cells' ridge filling had closed), and the
     # old pricing then walks it too, past no guards: this trip no longer tells the two apart.)
+
+
+# "Take it?" (Kooki3z, 2026-11-23, Horde level 60 in Loch Modan: the route went past the other faction's guards with no
+# question; the standing rule: only enemy ground, ask "take it?" and route through). With "Avoid the other faction's
+# towns" on and no way round found, the player is asked once a trip; yes keeps the route, no takes the safe way with a
+# ride where there's one, else says no way round was found.
+LOCH_NORTH = (-5400.0, -2700.0)
+BY_THE_DAM = (-4750.0, -3300.0)
+TAKE_IT = "Take it?"
+
+
+def _take_asks(lua):
+    return [a for a in _asks(lua) if TAKE_IT in str(a.text)]
+
+
+def test_past_the_guards_with_no_way_round_is_asked_once_and_yes_keeps_the_route(game, trip):
+    lua, ns = game
+    N = ns.Nav
+    r, _ = trip(LOCH_NORTH, BY_THE_DAM, "Horde", 60, known=[], rides=False)
+    asks = _take_asks(lua)
+    assert len(asks) == 1 and "(Alliance guards)" in str(asks[0].text), [str(a.text) for a in _asks(lua)]
+    assert N.HostileOnRoute(N.route)
+    trip.settle()
+    assert len(_take_asks(lua)) == 1  # (once: not again as the route is worked out)
+    asks[0].yes()
+    trip.settle()
+    assert N.route and N.HostileOnRoute(N.route) and N.RiskAnswer(N.dest) is True
+    assert len(_take_asks(lua)) == 1
+    N.Invalidate(True, True)  # (a reroute: the answer kept for the trip)
+    trip.settle()
+    assert len(_take_asks(lua)) == 1
+
+
+def test_no_takes_the_safe_way_or_says_none_was_found(game, trip):
+    lua, ns = game
+    N = ns.Nav
+    trip(LOCH_NORTH, BY_THE_DAM, "Horde", 60, known=[], rides=False)
+    (ask,) = _take_asks(lua)
+    ask.no()
+    trip.settle()
+    assert N.RiskAnswer(N.dest) is False and len(_take_asks(lua)) == 1
+    # (no ride here to go round by: the route as it is, and said in chat)
+    said = [m for m in trip.said() if "Enemy territory" in m]
+    assert N.route and (not N.HostileOnRoute(N.route) or any("no way round" in m for m in said)), said
+
+
+def _walk_through(lua, ns, cont, a, b, faction):
+    # (a route walking straight from `a` to `b`, as the routers give one: its question looked for at once)
+    N = ns.Nav
+    ns.CharDB().faction = faction
+    ns.settings.gps.avoidHostile = True
+    N.Clear()
+    lua.execute("AGPS_ASKS = {}")
+    N.SetStops(lua.eval(f"{{ {{ x = {b[0]}, y = {b[1]}, cont = {cont}, name = 'stop' }} }}"), False, "red")
+    n = 20
+    pts = ", ".join(f"{a[0] + (b[0] - a[0]) * k / n}, {a[1] + (b[1] - a[1]) * k / n}" for k in range(n + 1))
+    kinds = ", ".join("0" for _ in range(n))
+    lua.execute(f"AGPS_NS.Nav.route = {{ parts = {{ {{ cont = {cont}, pts = {{ {pts} }}, kinds = {{ {kinds} }} }} }}, "
+                f"length = 1 }}")
+    N.CheckHostileRoute()
+    return _take_asks(lua)
+
+
+def test_an_alliance_walk_through_bloodhoof_is_asked_about(game, trip):
+    lua, ns = game
+    asks = _walk_through(lua, ns, 1, (-2323.9, -150.0), (-2323.9, -650.0), "Alliance")
+    assert len(asks) == 1 and "Bloodhoof" in str(asks[0].text) and "(Horde guards)" in str(asks[0].text)
+    ns.Nav.Clear()
+
+
+def test_no_guards_or_a_trip_starting_in_their_town_asks_nothing(game, trip):
+    lua, ns = game
+    # (no guards on the way)
+    assert _walk_through(lua, ns, 1, (-1500.0, 200.0), (-1300.0, 400.0), "Alliance") == []
+    # (from inside Bloodhoof itself out: its town is the walk's own end, left out as the router leaves it out)
+    assert _walk_through(lua, ns, 1, (-2323.9, -395.0), (-2323.9, -900.0), "Alliance") == []
+    # (and the stop in it)
+    assert _walk_through(lua, ns, 1, (-2323.9, -900.0), (-2323.9, -395.0), "Alliance") == []
+    ns.Nav.Clear()
+
+
+def test_horde_to_the_hall_of_thanes_under_ironforge_is_asked_and_yes_routes_in(game, trip):
+    # (Kooki3z, 2026-11-23, Horde: "as horde cant route to hall of thanes". Its portal is under Ironforge; the stop's own
+    # town's guards are left out of the route's towns (the router leaves their cost out to get in at all), so the walk
+    # into the Alliance's capital went by with no question)
+    lua, ns = game
+    N, G = ns.Nav, ns.GPS
+    hall = (-4822.3, -932.4)  # (its portal, Data/Instances.lua's Transports row: where AddStopAt puts its stop)
+    r, _ = trip((-5600.0, -500.0), hall, "Horde", 60)
+    asks = _take_asks(lua)
+    assert len(asks) == 1 and "Ironforge" in str(asks[0].text) and "(Alliance guards)" in str(asks[0].text), \
+        [str(a.text) for a in _asks(lua)]
+    asks[0].yes()
+    trip.settle()
+    r = N.route
+    assert r and N.RiskAnswer(N.dest) is True and len(_take_asks(lua)) == 1
+    pts = r.parts[len(r.parts)].pts
+    n = len(list(pts.values()))
+    assert (pts[n - 1] - hall[0]) ** 2 + (pts[n] - hall[1]) ** 2 < 15 ** 2  # (routed in, to the portal)
+
+
+def test_one_question_when_the_ride_check_asks_too(game, trip):
+    # (from the Arathi Highlands to the Hall of Thanes the ride check's "Risk enemy territory?" and "Take it?" both
+    # came up: one question a trip)
+    lua, ns = game
+    trip((-1000.0, -3500.0), (-4822.3, -932.4), "Horde", 60)
+    trip.settle()
+    asks = [a for a in _asks(lua) if TAKE_IT in str(a.text) or "Risk enemy territory" in str(a.text)]
+    assert len(asks) == 1, [str(a.text) for a in asks]

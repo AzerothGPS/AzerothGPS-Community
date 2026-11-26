@@ -196,7 +196,17 @@ def build(data_dir: Path, ft: dict[int, dict] | None = None, undercity=None):
             report["kept"] += 1
     _add_server(npcs, report, ft, alliance, horde, undercity=undercity)
     _add_logged(npcs, report)
+    _add_standin(npcs, report)
     return npcs, dict(report)
+
+
+def _add_standin(npcs, report, doc=None):
+    """WoW Forever's own NPCs none of the above has, from Wowhead's pages as stand-ins (overrides/standin_npcs.json:
+    standin.py), marked `"from": "standin"`; last, so real data always wins."""
+    from . import standin
+
+    for _ in standin.add_standin(npcs, doc if doc is not None else standin.load(), log=print):
+        report["stand-in"] += 1
 
 
 def _add_logged(npcs, report, doc=None):
@@ -364,6 +374,10 @@ def lua_text(npcs: dict) -> str:
            "ns.NpcsPacked = [==[",
            body,
            "]==]"]
-    server = sorted(i for i, n in npcs.items() if n.get("from") == "server")
+    standin = sorted(i for i, n in npcs.items() if n.get("from") == "standin")
+    if standin:  # (Wowhead's WoW Forever pages, unverified: overrides/standin_npcs.json, Layers' n.standin)
+        out.append("-- Stand-ins (Wowhead's WoW Forever pages, unverified; real data replaces them by id):")
+        out.append('ns.NpcsStandIn = "' + " ".join(map(str, standin)) + '"')
+    server = sorted(i for i, n in npcs.items() if n.get("from") == "server")  # (the last line: tests read it)
     out.append("-- From the server snapshot: " + " ".join(map(str, server)))
     return "\n".join(out) + "\n"

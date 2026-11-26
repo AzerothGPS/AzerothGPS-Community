@@ -12,6 +12,10 @@ def game():
     pytest.importorskip("lupa.lua51")
     from azerothgps.gameharness import start
     lua, ns = start()
+    # (the Router's own route, by its stairs roads: the arrow's look-ahead is the case here. City routing (on by
+    # default since 1.4.0) walks Undercity's ramp down from the Cooking Trainer, no stairs on it; its stairs are
+    # test_navfeatures')
+    ns.settings.gps.cityGrid = False
     ns.Nav.FUN = False
     ns.CharDB().faction = "Horde"
     lua.execute('UnitFactionGroup = function() return "Horde", "Horde" end')

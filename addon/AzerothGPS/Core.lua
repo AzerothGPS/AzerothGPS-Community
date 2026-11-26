@@ -11,6 +11,7 @@ ns.DEFAULTS = {
     lockSize = false, -- off (the default since 1.1.1): drag the map's bottom-right corner (GPS.MakeSizeGrip), unless
     -- the map's position is locked (`locked`); on: the size only by the slider
     searchCommonNpcs = false, -- the search finds NPCs met in several places too (Layers.KnownNpcs, asked 2026-10-06)
+    searchEnemies = true, -- the search finds the enemy mobs too (Data/Mobs.lua, 1.4.0, GPSFrame's G.ShippedMobEntries)
     distanceUnits = "yards", -- distances shown in yards (the game's), "metric" or "imperial" (Nav.FormatDistance, asked 2026-10-07)
     minimapRoute = true, -- the route on the game's minimap too (asked 2026-10-06)
     minimapIcons = false, -- the map's icons shown on the game's minimap too (issue #10; off by default since 1.1.8, #31)
@@ -133,14 +134,22 @@ ns.DEFAULTS = {
     stutterPause = true, -- routing cut back, then paused, when it makes the game stutter (Nav.RouteWork)
     stopsAhead = 3, -- stops routed and drawn on the map at a time (1 to Nav.PLAN_AHEAD); the next come in as they're reached
     avoidHostile = true, -- routes keep away from the other faction's guards (their towns)
+    showAvoided = true, -- the guard zones a route goes around, drawn red on the map (item 63c)
+    worldGrid = true, -- 1.4.0's world routing: routes on the open world's walk grid (WorldGrid.lua); always on (item 74)
+    cityGrid = true, -- 1.4.0's city routing: routes inside the capitals on their walk grids (CityGrid.lua); always on
+    -- since 2026-11-23 (Kooki3z: "this will be the new default for pathing going forward")
     allowSwim = true, -- routes may swim (Passability.avoidSwim off: Nav.SyncSwim); off, they go round by land
+    useClassSpells = true, -- big drops with Slow Fall, Levitate or a racial ready (FallSpells.lua)
+    expertJumper = false, -- spell jumping, any height: cast just before landing (FallSpells.lua, under useClassSpells)
+    safeDropYd = 39, -- the drop routes take out of combat without a fall spell (Nav.PlainSafeDrop, Options' Safe drop)
     cityKeepOrder = true, -- ... except stops down in a city: in the order placed
     importKeepOrder = true, -- stops imported (Import and Share, /way lists, shared routes) in the order listed (Nav.keepOrder)
     acceptWay = true, -- TomTom /way commands (typed or pasted in chat) add route stops
     acceptMapPins = true, -- a map pin link ("[Map Pin Location]") clicked in chat adds a stop there
     acceptShared = true, -- routes other players send (asked before use)
     -- directions
-    arrow = true, -- turn-by-turn direction arrow window (TomTom style)
+    arrow = true, -- turn-by-turn direction arrow window (TomTom style): either panel on, arrowShown or dirShown
+    arrowShown = true, -- the arrow panel itself (Kooki3z 2026-11-24: the arrow and the directions text apart)
     arrowPoint = { "CENTER", "UIParent", "CENTER", 15, 267 },
     arrowSize = { 370, 97 }, -- taller: the later stops are listed too; wider (2026-10-04): "Continue straight, then
     -- slight right in 180 yd" on one line (253 units of text; the arrow's column and margins 82)
@@ -155,7 +164,10 @@ ns.DEFAULTS = {
     routeSlopeShade = true,
     charm = "none", -- hanging from the logo: "none" or a charm's key (Looks.CHARMS, or one another addon added)
     charmSwing = true, -- it swings and twists as you go (off: hangs still)
-    roadTolerance = 0, -- Options > Routing (Router.RoadFactor): below 0 the roads kept more, above 0 open ground
+    -- Options > Routing (Router.RoadFactor): below 0 the roads kept more, above 0 open ground. +3 since 1.4.0 (Kooki3z
+    -- 2026-11-22, in game with the world grid: "a +3 on routing as default makes more sense, snaps to roads good enough
+    -- and make the short cuts seem worthwhile"); a saved 0, the old default, moved to it once (InitDB, roadTolerance140)
+    roadTolerance = 3,
     arrowBg = 0, -- background opacity of the arrow's panel (the directions': dirBg, unset: this one's)
     -- (two panels since 1.1.9, asked 2026-10-30: the arrow and the directions; dirPoint and dirSize made from arrowPoint
     -- and arrowSize the first time, Arrow.FromOld)
@@ -738,10 +750,25 @@ end
 -- was, once: for db.settings at load and each profile when it's used)
 function ns.SplitDirLock(gps)
   if type(gps) == "table" and gps.dirLocked == nil then gps.dirLocked = gps.arrowLocked == true end
+  -- (the arrow and the directions text each on or off on their own, Kooki3z 2026-11-24: "Show direction arrow" was both
+  -- panels, the arrow alone hidden by Arrow side "Hide". Once, nobody's look changed: the window off, both off; "Hide",
+  -- the arrow off and its side back to the left; `arrow` from then on either panel on)
+  -- (item 28, Kooki3z 2026-11-24: "Allow big drops at full health" removed, the Safe drop slider the one limit)
+  if type(gps) == "table" then gps.bigDropsFullHealth = nil end
+  if type(gps) == "table" and not gps.arrowSplit then
+    if gps.arrow == false then
+      gps.arrowShown, gps.dirShown = false, false
+    else
+      gps.arrowShown = not (gps.arrowSide == "hide" and gps.dirShown ~= false)
+    end
+    if gps.arrowSide == "hide" then gps.arrowSide = "left" end
+    gps.arrow = gps.arrowShown ~= false or gps.dirShown ~= false
+    gps.arrowSplit = true
+  end
 end
 
 local function InitDB()
-  local fresh = AzerothGPSDB == nil -- (no saved data before this session: a first install, for the tutorial's welcome)
+  local fresh = AzerothGPSDB == nil -- (no saved data before this session: a first install, for the setup and the tips)
   AzerothGPSDB = AzerothGPSDB or {}
   local db = AzerothGPSDB
   db.version = 2
@@ -753,6 +780,13 @@ local function InitDB()
     if gps.combatAlpha == 1 then gps.combatAlpha = nil end
   end
   ns.SplitDirLock(gps)
+  -- (the grid system always on: item 74, Kooki3z 2026-11-25, its options removed. Anyone who turned Cities or World off
+  -- gets them back on; the settings stay for tests and debug, switched by code only. AGPS_TEST_KEEP_GRIDS: the test
+  -- harness's, which runs with world routing off unless a test turns it on, a reload included)
+  if gps and not _G.AGPS_TEST_KEEP_GRIDS then
+    gps.cityGrid, gps.worldGrid = true, true
+    gps.cityGridDefaultOn, gps.worldGridDefaultOn = nil, nil
+  end
   if gps and gps.frameAlways ~= nil then gps.frameAlways = nil end -- replaced by windowFrame
   if gps and gps.roundLogo ~= nil then gps.roundLogo = nil end -- (the round portrait option: removed, 2026-10-01)
   -- (Share drawn roads and walls, Share faster trips: removed, 2026-10-01; drawn roads are kept anyway,
@@ -835,6 +869,17 @@ local function InitDB()
       if type(t) == "table" and type(t.gps) == "table" then t.gps.importKeepOrder = true end
     end
   end
+  -- (1.4.0: Road tolerance +3 by default, was 0: a saved 0, the old default, moved to the new one once, in every profile;
+  -- another value the player chose stays)
+  if not db.roadTolerance140 then
+    db.roadTolerance140 = true
+    if gps and (gps.roadTolerance == 0 or gps.roadTolerance == nil) then gps.roadTolerance = ns.DEFAULTS.gps.roadTolerance end
+    for _, t in pairs(type(db.profiles) == "table" and db.profiles or {}) do
+      if type(t) == "table" and type(t.gps) == "table" and (t.gps.roadTolerance == 0 or t.gps.roadTolerance == nil) then
+        t.gps.roadTolerance = ns.DEFAULTS.gps.roadTolerance
+      end
+    end
+  end
   Merge(db.settings, ns.DEFAULTS)
   db.chars = db.chars or {}
   -- (stand-ins saved before the character's name was known, by older versions: whose can't be told, so not anyone's;
@@ -848,19 +893,19 @@ local function InitDB()
   end
   db.probes = db.probes or {}
   -- (the tutorial's record, account-wide, 1.2.0: Tutorial.lua. `seen`: the sections played through, each with the
-  -- version it was added in; `ask`: offer it after an update that adds sections; `declined`: Not Now so far)
-  if type(db.tutorial) ~= "table" then db.tutorial = { fresh = fresh or nil } end
+  -- version it was added in. The old offer's `ask`, `declined`, `offered`, `askedFor` and `fresh` may still be in
+  -- saved data from before 1.4.0: nothing reads them, the tutorial is only on request since)
+  if type(db.tutorial) ~= "table" then db.tutorial = {} end
   if type(db.tutorial.seen) ~= "table" then db.tutorial.seen = {} end
-  if db.tutorial.ask == nil then db.tutorial.ask = true end
-  -- (1.3.10, Setup.lua: the setup, once for everyone (`setup.shown` under Setup's S.VERSION; `done` from a test
-  -- build counts as shown), its live preview put back if the game was left with it open; the first route's tips a
-  -- first install's only: a player updating gets the table without `due` and never sees them)
-  if type(db.setup) ~= "table" then db.setup = {} end
+  -- (1.3.10, Setup.lua: the setup, a first install's only since 1.4.0 (`setup.fresh`, set as the table is made with no
+  -- saved data at all; `setup.shown` under Setup's S.VERSION; `done` from a test build counts as shown), its live
+  -- preview put back if the game was left with it open; the first route's tips a first install's only too: a player
+  -- updating gets the tables without `fresh` and `due` and never sees either)
+  if type(db.setup) ~= "table" then db.setup = { fresh = fresh or nil } end
   db.setup.due = nil
   if db.setup.done and not db.setup.shown then db.setup.shown = 1 end
   if ns.Setup and ns.Setup.RestoreSaved then pcall(ns.Setup.RestoreSaved, db) end
   if type(db.tips) ~= "table" then db.tips = { due = fresh or nil } end
-  if type(db.tutorial.declined) ~= "number" then db.tutorial.declined = 0 end
   ns.UnpackSaved(db) -- (the points saved packed: lists again)
   ns.db = db
   ns.settings = db.settings
@@ -1444,6 +1489,7 @@ function ns.LiftPopup(f)
     f:SetFrameStrata(ns.POPUP_OVER_STRATA)
     f.agpsLifted = true
     if f.Raise then f:Raise() end
+    if f.Layer then f.Layer() end -- (a question's buttons with it: ns.Ask)
   end
 end
 function ns.RegisterPopup(f, strata)
@@ -1464,6 +1510,7 @@ function ns.SetPopupsOver(on)
     elseif f.agpsLifted then
       f:SetFrameStrata(own)
       f.agpsLifted = nil
+      if f.Layer then f.Layer() end
     end
   end
 end
@@ -1630,15 +1677,44 @@ function ns.Ask(name, text, yes, no, onYes, onNo, opts)
       f:Hide()
       if f.onNo then f.onNo(true, checked) end -- (`true`: No clicked; unanswered, nil)
     end)
-    -- (not answered: Escape, or the time out, counts as no)
+    -- (not answered: Escape, or the time out, counts as no. Hidden only with its parent, the map it's on closed (the
+    -- game sends OnHide then too; still shown itself): still waiting, the "?" over the logo shows it. Kooki3z on
+    -- 6195a75c: the map closed over "No way around the guards", the question was let go and no "?" came)
     f:SetScript("OnHide", function()
+      if f.IsShown and f:IsShown() then return end
       if not f.answered and f.onNo then f.onNo() end
       f.answered = true
     end)
     f:SetScript("OnUpdate", function(self)
       if self.until_ and GetTime() > self.until_ then self:Hide() end
     end)
+    -- (the keys, item 93: Enter answers yes, Escape no (the one button of something told: Escape takes it); every other
+    -- key goes on to the game. Out of combat only: in it a keyboard-taking frame couldn't let the other keys through)
+    f:SetScript("OnKeyDown", function(self, key) return ns.AskKey(self, key) end)
+    -- (each part's level over the window's own, as each question is shown: item 93b, Kooki3z on e96d80ee, the question
+    -- shown again later in a session had Yes and No as plain text under its frame's art, and took no clicks)
+    function f.Layer()
+      local l = f:GetFrameLevel() or 1
+      local strata = f:GetFrameStrata()
+      if f.chrome then f.chrome:SetFrameLevel(l) end
+      for _, b in ipairs({ f.yes, f.no, f.check or false }) do
+        if b then
+          if strata and b.SetFrameStrata then b:SetFrameStrata(strata) end
+          b:SetFrameLevel(l + ns.ASK_BUTTON_LEVELS)
+          if b.EnableMouse then b:EnableMouse(true) end
+          if b.Enable then b:Enable() end
+        end
+      end
+    end
     asks[key] = f
+  end
+  -- (a parent given: the window on it, as it may be another than the last time's)
+  if opts.parent and f.GetParent and f:GetParent() ~= opts.parent and f.SetParent then f:SetParent(opts.parent) end
+  -- (its strata as asked each time, not only as first made: item 93b)
+  if opts.strata then
+    f:SetFrameStrata(opts.strata)
+    if ns.popups[f] then ns.popups[f] = opts.strata end
+    f.agpsLifted = nil
   end
   f.answered = true
   f:Hide() -- (the last question, unanswered: let go without its no)
@@ -1681,8 +1757,30 @@ function ns.Ask(name, text, yes, no, onYes, onNo, opts)
   if opts.level then f:SetFrameLevel(opts.level) end
   f:Show()
   f:Raise()
+  f.Layer()
+  ns.AskKeys(f)
   ns.lastAsk = f -- (the question up last: a controller's A and B answer it, Pad.lua)
   return f
+end
+ns.ASK_BUTTON_LEVELS = 5 -- (a question's buttons this many levels over its window: over its border's art)
+-- A question's keys on (out of combat) or off (in it).
+function ns.AskKeys(f)
+  if not f.EnableKeyboard then return end
+  local on = not (InCombatLockdown and InCombatLockdown())
+  if on and f.SetPropagateKeyboardInput then on = pcall(f.SetPropagateKeyboardInput, f, true) end
+  f:EnableKeyboard(on and true or false)
+end
+-- A key pressed with question `f` showing: Enter its Yes, Escape its No (or its one button); the rest to the game.
+function ns.AskKey(f, key)
+  local combat = InCombatLockdown and InCombatLockdown()
+  local enter = key == "ENTER" or key == "NUMPADENTER"
+  local eat = not combat and (enter or key == "ESCAPE") and true or false
+  if f.SetPropagateKeyboardInput then pcall(f.SetPropagateKeyboardInput, f, not eat) end
+  if not eat then return false end
+  local b = (enter or not (f.no and f.no:IsShown())) and f.yes or f.no
+  local click = b and b:GetScript("OnClick")
+  if click then click(b, "LeftButton") end
+  return true
 end
 
 -- In combat: the map and arrow switch to their combat opacity, or hide (options).
@@ -1790,8 +1888,8 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
     ns.OnEnteringWorld(arg1, arg2) -- (isInitialLogin, isReloadingUi)
     -- (a walk being recorded ends at a loading screen; after a /reload, recording goes on)
     if ns.started and ns.Record and ns.Record.OnEnteringWorld then pcall(ns.Record.OnEnteringWorld, arg1, arg2) end
-    if ns.started and ns.Tutorial and ns.Tutorial.OnEnteringWorld then pcall(ns.Tutorial.OnEnteringWorld, arg1, arg2) end
     if ns.started and ns.Setup and ns.Setup.OnEnteringWorld then pcall(ns.Setup.OnEnteringWorld) end
+    if ns.started and ns.WhatsNew and ns.WhatsNew.OnEnteringWorld then pcall(ns.WhatsNew.OnEnteringWorld) end
   elseif event == "PLAYER_LOGOUT" then
     if ns.Nav and ns.Nav.SaveTrack then pcall(ns.Nav.SaveTrack) end
     if ns.Record and ns.Record.OnLogout then pcall(ns.Record.OnLogout) end
@@ -1832,6 +1930,7 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
     Start("seamless map", ns.Atlas and ns.Atlas.Init)
     Start("tutorial", ns.Tutorial and ns.Tutorial.Init)
     Start("setup", ns.Setup and ns.Setup.Init)
+    Start("whatsnew", ns.WhatsNew and ns.WhatsNew.Init)
     -- (how full the saved file is, a few seconds in: the counting off the login's own frame)
     Start("saved data", function() C_Timer.After(5, function() pcall(ns.SavedNotice) end) end)
     -- (a player from before 1.2.2, the arrow locked: asked once whether to unlock it, Arrow's A.OfferUnlock)

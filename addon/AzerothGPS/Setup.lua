@@ -3,10 +3,10 @@
 -- message where route directions go, until the player does their first route").
 --
 -- THE SETUP: one window (ns.Window, its corner logo), a page a choice, each a row of big cards (a picture, a title, a
--- line); the card picked is lit. Shown once to everyone, a first install and a player updating alike (Kooki3z,
--- 2026-11-19: "Setup runs once for everyone after the next update"), some seconds after the world is entered: due
--- while the saved stamp `db.setup.shown` is under S.VERSION (raise S.VERSION to show it to everyone once more). The
--- stamp is set as it opens, so a /reload meanwhile doesn't bring it back. Any time again: Options > Help's Run Setup
+-- line); the card picked is lit. Shown once to a first install only (Kooki3z, 2026-11-25: "From here on new install
+-- is setup page only and updates are What's New only"), some seconds after the world is entered: due while
+-- `db.setup.fresh` (set by InitDB when there was no saved data at all) and the saved stamp `db.setup.shown` is under
+-- S.VERSION. The stamp is set as it opens, so a /reload meanwhile doesn't bring it back. Any time again: Options > Help's Run Setup
 -- Again, or /agps setup. It opens on the player's own settings (the cards lit to what they have) and every pick is
 -- applied at once (a live preview: the GPS map takes the minimap's corner at the size picked as it's clicked); Finish
 -- keeps them, Skip, the X and Escape put back what was there when it opened (S.before, saved in `db.setup.before`
@@ -20,15 +20,14 @@
 -- cut out of the game world with a gold glow, drawn straight on the card: no screen box behind it), shown pixel
 -- for pixel on a 1440-high screen at UI scale 1 (S.REF_PPU) and at the same size in UI units on any other.
 --
--- THE POPUPS: the setup comes first. The tutorial's offer (T.MaybePrompt: "what's new", a tutorial cut short) waits
--- while the setup is due or open (S.Holds) and is offered S.PROMPT_GAP s after it's closed; the setup opened by hand
--- over the offer puts the offer away till then. Never two at once.
+-- THE POPUPS (Kooki3z, 2026-11-25): one at login at most. A first install gets this setup, its last page What's New
+-- (WhatsNew.lua); a player updating gets What's New alone, once a version, never the setup. The tutorial is never
+-- offered by a popup (Tutorial.lua): only Options > Help and /agps tutorial start it.
 --
 -- THE TIPS: until the first route is done (a trip's last stop reached, Nav's arrive hooks), a fresh install shows a
 -- short tip at a time where the route's directions go (the map's route panel, on the map or detached: the same
 -- place) while there's no route to show, Next / Got It and Hide Tips on it. A fresh install's only (`db.tips.due`):
--- a player who has done routes never sees them. The tutorial's offer isn't popped up on that install
--- (Tutorial.lua's T.MaybePrompt); it's still in Options > Help and /agps tutorial.
+-- a player who has done routes never sees them.
 local _, ns = ...
 local L = ns.L or setmetatable({}, { __index = function(_, k) return k end })
 local Format = ns.Format or string.format
@@ -36,9 +35,8 @@ local Format = ns.Format or string.format
 local S = {}
 ns.Setup = S
 
-S.VERSION = 1 -- the setup shown once to everyone whose `db.setup.shown` is lower (raise it to show it again)
+S.VERSION = 1 -- the setup shown once to a first install whose `db.setup.shown` is lower
 S.DELAY = 6 -- seconds after the world is entered before the setup shows
-S.PROMPT_GAP = 2 -- seconds after the setup is closed before the tutorial's offer that waited for it
 S.W, S.H = 600, 380 -- the window
 S.CARD_H = 176
 S.PAD_OWNER = "AzerothGPSSetupPadOwner" -- (the controller's bindings' owner: never UIParent's)
@@ -46,7 +44,9 @@ S.PAD_KEYS = { PADDUP = "up", PADDDOWN = "down", PADDLEFT = "left", PADDRIGHT = 
   PADLSHOULDER = "lb", PADRSHOULDER = "rb" }
 S.TIP_OWNER = "AzerothGPS tips" -- (Nav.arriveHooks)
 -- The settings the setup can change: taken as it opens, put back by Skip / closing.
-S.KEYS = { "replaceMinimap", "replaceMinimapSize", "useWorldMap" }
+S.KEYS = { "replaceMinimap", "replaceMinimapSize", "useWorldMap",
+  -- (and the What's New page's, WhatsNew.lua: item 34, a first install's last page)
+  "useClassSpells", "expertJumper", "safeDropYd" }
 S.SIZES = { { "small", L["Small"] }, { "medium", L["Medium"] }, { "large", L["Large"] } }
 
 local function GPS() return ns.settings.gps end
@@ -78,6 +78,10 @@ function S.BuildPages()
         text = L["The GPS map shows inside the game's world map (M)."],
         -- (as Options' own: not with the game's controller UI on, GPSFrame's G.WorldMapWanted)
         enabled = function() return not (ns.GPS and ns.GPS.ControllerUI and ns.GPS.ControllerUI()) end } } },
+    -- (item 34: the last page, What's New's picture and 1.4.0's new options live, WhatsNew.lua; Kooki3z: "new
+    -- installs get the welcome only, and the What's New content becomes the welcome's last page")
+    { id = "whatsnew", title = string.format(L["What's new in v%s"], ns.WhatsNew and ns.WhatsNew.VERSION or ""),
+      whatsNew = true, cards = {}, when = function() return ns.WhatsNew ~= nil end },
   }
 end
 -- The pages shown this time (a page's `when()` false: left out).
@@ -288,9 +292,34 @@ function S.ShowPage(i)
   local page = pages[i]
   f.step:SetText(Format(L["Step %d of %d"], i, #pages))
   f.heading:SetText(page.title)
+  -- (the last step's button says Done, set first; every other page's widgets hidden before this one's are laid out:
+  -- item 64, Kooki3z on 1173b42f, step 3 of 3 with step 2's cards and the focus box over it and "Next")
+  f.back:SetEnabled(i > 1)
+  f.next:Label(i == #pages and L["Done"] or L["Next"])
+  f.focus:Hide()
+  for _, b in ipairs(f.cards) do b:Hide() end
+  -- (What's New's page: its content in place of the cards, WhatsNew.lua; built under a guard, an error logged and the
+  -- rest of the page still laid out)
+  if page.whatsNew and ns.WhatsNew then
+    local ok, err = pcall(function()
+      f.whatsNew = f.whatsNew or ns.WhatsNew.Build(f, 18, f.top - 50, S.W - 36)
+      f.whatsNew:Show()
+      ns.WhatsNew.Refresh()
+      -- (Reset Defaults at the window's bottom right, over Back and Next, clear of the controller's hint)
+      local r = f.whatsNew.reset
+      r:ClearAllPoints()
+      r:SetPoint("BOTTOMRIGHT", f, "BOTTOMRIGHT", -16, 14 + 22 + 8)
+      -- (its window as tall as the content, Reset Defaults and the buttons under it: item 37)
+      f:SetHeight(math.max(S.H, -f.top + 50 + f.whatsNew.height + 16 + 22 + 8 + 22 + 14))
+    end)
+    if not ok and ns.GPS and ns.GPS.LogError then ns.GPS.LogError("setup what's new", err) end
+  elseif f.whatsNew then
+    f.whatsNew:Hide()
+    f:SetHeight(S.H)
+  end
   local n = #page.cards
   local x0, gap = 18, 12
-  local w = math.floor((S.W - 2 * x0 - (n - 1) * gap) / n)
+  local w = n > 0 and math.floor((S.W - 2 * x0 - (n - 1) * gap) / n) or 0
   for ci = 1, math.max(n, #f.cards) do
     local b = f.cards[ci]
     if ci <= n then
@@ -339,8 +368,6 @@ function S.ShowPage(i)
     if prev then b:SetPoint("LEFT", prev, "RIGHT", 6, 0) else b:SetPoint("LEFT", f.sizeLabel, "RIGHT", 12, 0) end
     prev = b
   end
-  f.back:SetEnabled(i > 1)
-  f.next:Label(i == #pages and L["Finish"] or L["Next"])
   S.Refresh()
   S.FocusFirst()
 end
@@ -412,14 +439,8 @@ function S.Open()
     db.setup.shown = math.max(tonumber(db.setup.shown) or 0, S.VERSION) -- (not by itself again, a /reload or not)
     db.setup.before = S.before -- (put back at the next login if it's never closed: S.RestoreSaved)
   end
-  -- (the tutorial's offer showing: put away till the setup is closed, never two popups at once)
-  local T = ns.Tutorial
-  if T and T.prompt and T.prompt:IsShown() then
-    T.answered = true
-    T.prompt:Hide()
-    T.prompted = nil
-    T.afterSetup = true
-  end
+  -- (What's New is its last page: never shown again on its own, WhatsNew.lua)
+  if db and ns.WhatsNew then db.whatsNewSeen = ns.WhatsNew.VERSION end
   S.pages = S.Pages()
   S.open = true
   local f = S.Window()
@@ -441,7 +462,12 @@ function S.Close(keep)
   S.open = false
   if not keep and S.before then
     local st = GPS()
-    for k, was in pairs(S.before) do st[k] = was.v end
+    local W = ns.WhatsNew
+    for k, was in pairs(S.before) do
+      local changed = st[k] ~= was.v
+      st[k] = was.v
+      if changed and W and W.Applied then W.Applied(k) end -- (the grids on or off again, rerouted: WhatsNew.lua)
+    end
   end
   S.before = nil
   local db = DB()
@@ -454,14 +480,6 @@ function S.Close(keep)
   if S.window and S.window:IsShown() then S.window:Hide() end
   S.PadApply()
   if keep then ns.Print(L["Setup done. Options > Help runs it again any time."]) end
-  -- (the tutorial's offer that waited for the setup: now, a moment after)
-  local T = ns.Tutorial
-  if T and T.afterSetup then
-    T.afterSetup = nil
-    if C_Timer and C_Timer.After then
-      C_Timer.After(S.PROMPT_GAP, function() if T.MaybePrompt then pcall(T.MaybePrompt) end end)
-    end
-  end
   return true
 end
 -- At login (InitDB), before anything is applied: a setup left open by a /reload or a crash has its live preview
@@ -489,16 +507,12 @@ function S.Go(dir)
 end
 function S.Shown() return (S.open and S.window and S.window:IsShown()) and true or false end
 
--- Once for everyone (the stamp under S.VERSION), some seconds after the world is entered, out of combat (else when
--- the fight ends).
+-- Once, a first install's only (`fresh`; the stamp under S.VERSION), some seconds after the world is entered, out of
+-- combat (else when the fight ends). A player updating never gets it by itself (What's New instead).
 function S.Due()
   local db = DB()
   local su = db and db.setup
-  return (su and (tonumber(su.shown) or 0) < S.VERSION) and true or false
-end
--- The setup due or open: the tutorial's offer waits (T.MaybePrompt).
-function S.Holds()
-  return (S.open or S.Due()) and true or false
+  return (su and su.fresh and (tonumber(su.shown) or 0) < S.VERSION) and true or false
 end
 function S.MaybeShow()
   if not S.Due() or S.open then return false end

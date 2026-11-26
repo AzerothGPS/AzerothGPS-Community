@@ -7,8 +7,9 @@ ns.Geo = Geo
 
 Geo.TILE = 1600 / 3 -- yards per terrain tile; 64x64 tiles per continent
 
--- A simulated player for route testing (asked 2026-10-06; set only by private dev tools, never by
--- AzerothGPS, never saved: a /reload or logout ends it). While set, `Geo.override` = { x, y, cont (as UnitPosition
+-- A simulated player for route testing (asked 2026-10-06; set by private dev tools, and by AzerothGPS only for the
+-- tutorial's spell-jump demo while its step shows (Tutorial.lua's T.JumpDemoStart); never saved: a /reload or logout
+-- ends it). While set, `Geo.override` = { x, y, cont (as UnitPosition
 -- gives it: an underground city's base continent, a dungeon's MapID), level (an underground city's level, or nil),
 -- facing, moving, indoors } stands in for where the player is: the map, the arrow, routing, directions and arrivals
 -- go by it. What learns from where the player really stands (herbs and ore, NPCs, the trips shared, pins' notes,

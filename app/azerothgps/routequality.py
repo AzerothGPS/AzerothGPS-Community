@@ -77,6 +77,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import random
 import re
 import subprocess
@@ -516,6 +517,17 @@ def weigh_trips(count: int, seed: int, replace: dict | None = None, log=print,
     ns.Nav.FUN = False
     N = ns.Nav
     ns.settings.gps.fastestOrder = False
+    # (1.4.0's city routing, being tested: AGPS_CITY_GRID=1 weighs the trips with its option on; a version without it
+    # has no such setting and routes as ever)
+    if os.environ.get("AGPS_CITY_GRID") == "1":
+        ns.settings.gps.cityGrid = True
+    # (1.4.0's world routing, being tested: AGPS_WORLD_GRID=1, likewise; the capitals' grids with it)
+    if os.environ.get("AGPS_WORLD_GRID") == "1":
+        ns.settings.gps.worldGrid = True
+    # (Road tolerance pinned for both versions, AGPS_RQ_ROAD_TOL: a default changed between them (1.4.0's +3) is then
+    # left out of the comparison)
+    if os.environ.get("AGPS_RQ_ROAD_TOL"):
+        ns.settings.gps.roadTolerance = float(os.environ["AGPS_RQ_ROAD_TOL"])
     out = []
     for k in range(count):
         cont = rnd.choice((0, 1))

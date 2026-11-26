@@ -20,6 +20,12 @@ def test_near_the_stop_it_says_how_far_above_or_below_it_is(game):
       AGPS_GPH = AGPS_NS.Ground.PointHeight
       AGPS_NS.Ground.PointHeight = function(_, x, y) return AGPS_GROUND(x, y) end
       AGPS_GROUND = function(x) if x > 2280 then return 40 end return 10 end
+      -- (open land: no road with a height by the player; by Brill's buildings their inside roads tell the floor,
+      -- Nav.PlayerHeightNear)
+      AGPS_HN = AGPS_NS.Router.HeightsNear
+      AGPS_NS.Router.HeightsNear = function() return {} end
+      AGPS_IB = AGPS_NS.Nav.InBuilding
+      AGPS_NS.Nav.InBuilding = function() return nil end
     """)
     saved_dest, saved_route = N.dest, N.route
     try:
@@ -47,4 +53,5 @@ def test_near_the_stop_it_says_how_far_above_or_below_it_is(game):
         assert way == "up" and yd == pytest.approx(50)
     finally:
         N.dest, N.route = saved_dest, saved_route
-        lua.execute("AGPS_NS.Ground.PointHeight = AGPS_GPH")
+        lua.execute("AGPS_NS.Ground.PointHeight = AGPS_GPH AGPS_NS.Router.HeightsNear = AGPS_HN "
+                    "AGPS_NS.Nav.InBuilding = AGPS_IB")

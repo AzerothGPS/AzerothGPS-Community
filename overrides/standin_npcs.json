@@ -1,0 +1,4206 @@
+{
+ "_note": "Stand-in NPCs from Wowhead's WoW Forever pages (unverified; agps standin-npcs, app/azerothgps/standin.py). Real data (the dump, the server snapshot, NPCs logged in game) replaces each one by its id.",
+ "npcs": {
+  "40833": {
+   "name": "Tiala Whitemane",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=40833",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5135.3,
+     "y": -3312.3,
+     "z": 1643.0,
+     "pct": [
+      68.8,
+      50.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "41861": {
+   "name": "Fayran Elthas",
+   "sub": "Flight Master",
+   "svc": "gqf",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=41861",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5285.8,
+     "y": -3305.3,
+     "z": 1661.1,
+     "pct": [
+      68.6,
+      44.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "43408": {
+   "name": "Aili Greenwillow",
+   "sub": "Stable Master",
+   "svc": "gs",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=43408",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5151.5,
+     "y": -3371.3,
+     "z": 1630.9,
+     "pct": [
+      70.5,
+      49.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "43411": {
+   "name": "Lenedil Moonwing",
+   "sub": "General Goods",
+   "svc": "gv",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=43411",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5133.0,
+     "y": -3381.7,
+     "z": 1630.1,
+     "pct": [
+      70.8,
+      50.6
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "243815": {
+   "name": "Sebelia",
+   "sub": "Innkeeper",
+   "svc": "gqvi",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=243815",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5112.2,
+     "y": -3381.7,
+     "z": 1632.4,
+     "pct": [
+      70.8,
+      51.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "243855": {
+   "name": "Toron Rockhoof",
+   "sub": "Blacksmithing Supplies",
+   "svc": "gqvr",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=243855",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5204.7,
+     "y": -3319.2,
+     "z": 1644.8,
+     "pct": [
+      69.0,
+      47.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "244425": {
+   "name": "Barkskin Matriarch",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=244425",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 4906.2,
+     "y": -1891.9,
+     "z": 1323.4,
+     "pct": [
+      27.9,
+      60.4
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "244511": {
+   "name": "Zet'gan",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "H",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=244511",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5040.4,
+     "y": -1402.2,
+     "z": 1337.8,
+     "pct": [
+      13.8,
+      54.6
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "244512": {
+   "name": "Ortak Lomgok",
+   "sub": "Innkeeper",
+   "svc": "gqvi",
+   "trainer": "",
+   "side": "H",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=244512",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5082.1,
+     "y": -1374.4,
+     "z": 1344.4,
+     "pct": [
+      13.0,
+      52.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "244517": {
+   "name": "Sefira Everbright",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=244517",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5042.7,
+     "y": -1461.2,
+     "z": 1336.6,
+     "pct": [
+      15.5,
+      54.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "248366": {
+   "name": "Fraxinus",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=248366",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 4350.7,
+     "y": -2780.9,
+     "z": 1104.7,
+     "pct": [
+      53.5,
+      84.4
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "248367": {
+   "name": "Hyacinth",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=248367",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 4355.3,
+     "y": -2798.3,
+     "z": 1102.4,
+     "pct": [
+      54.0,
+      84.2
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "248419": {
+   "name": "Mirt",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=248419",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5082.1,
+     "y": -1471.6,
+     "z": 1341.9,
+     "pct": [
+      15.8,
+      52.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "249052": {
+   "name": "Witherbeard",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=249052",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5563.5,
+     "y": -2444.1,
+     "z": 1477.2,
+     "pct": [
+      43.8,
+      32.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "249234": {
+   "name": "Johun \"Punchy\" Dillas",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=249234",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5450.1,
+     "y": -2440.6,
+     "z": 1466.5,
+     "pct": [
+      43.7,
+      36.9
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "249235": {
+   "name": "Kaylaena Springwhisper",
+   "sub": "Cenarion Circle",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=249235",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 4869.1,
+     "y": -3010.1,
+     "z": 1190.6,
+     "pct": [
+      60.1,
+      62.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "249549": {
+   "name": "Fenwick Togglespring",
+   "sub": "Aspiring Rocketglider",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=249549",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 4545.1,
+     "y": -1798.1,
+     "z": 1256.0,
+     "pct": [
+      25.2,
+      76.0
+     ],
+     "zFrom": "shipped grid"
+    }
+   ]
+  },
+  "249968": {
+   "name": "Hnaz Blunderflame",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=249968",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5142.2,
+     "y": -1461.2,
+     "z": 1343.9,
+     "pct": [
+      15.5,
+      50.2
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "252691": {
+   "name": "Adarien",
+   "sub": "Innkeeper",
+   "svc": "gvi",
+   "trainer": "",
+   "side": "B",
+   "zone": "Shen'dralas",
+   "uiMap": 2652,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=252691",
+   "spawns": [
+    {
+     "level": 1,
+     "x": -2852.6,
+     "y": 1153.8,
+     "z": 98.6,
+     "pct": [
+      42.5,
+      69.7
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "253136": {
+   "name": "Orgrul",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "H",
+   "zone": "Shen'dralas",
+   "uiMap": 2652,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=253136",
+   "spawns": [
+    {
+     "level": 1,
+     "x": -2072.2,
+     "y": 1293.1,
+     "z": 81.5,
+     "pct": [
+      35.7,
+      12.6
+     ],
+     "zFrom": "shipped grid"
+    }
+   ]
+  },
+  "253177": {
+   "name": "Nerlokh",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "H",
+   "zone": "Shen'dralas",
+   "uiMap": 2652,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=253177",
+   "spawns": [
+    {
+     "level": 1,
+     "x": -2204.8,
+     "y": 1596.5,
+     "z": 63.4,
+     "pct": [
+      20.9,
+      22.3
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "253471": {
+   "name": "Mordent Evenshade",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Shen'dralas",
+   "uiMap": 2652,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=253471",
+   "spawns": [
+    {
+     "level": 1,
+     "x": -2535.5,
+     "y": 1307.5,
+     "z": 153.6,
+     "pct": [
+      35.0,
+      46.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "253851": {
+   "name": "Hagiak",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Shen'dralas",
+   "uiMap": 2652,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=253851",
+   "spawns": [
+    {
+     "level": 1,
+     "x": -2636.6,
+     "y": 813.5,
+     "z": 76.0,
+     "pct": [
+      59.1,
+      53.9
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "254131": {
+   "name": "Skylord Omnuron",
+   "sub": "Druid of the Talon",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=254131",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 4827.5,
+     "y": -2805.2,
+     "z": 1448.3,
+     "pct": [
+      54.2,
+      63.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "254578": {
+   "name": "Mithera",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Shen'dralas",
+   "uiMap": 2652,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=254578",
+   "spawns": [
+    {
+     "level": 1,
+     "x": -2935.9,
+     "y": 934.4,
+     "z": 133.0,
+     "pct": [
+      53.2,
+      75.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "254644": {
+   "name": "Personal Survival Pack",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=254644",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 4579.8,
+     "y": -1808.5,
+     "z": 1145.5,
+     "pct": [
+      25.5,
+      74.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "254674": {
+   "name": "Woodwyrd",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Shen'dralas",
+   "uiMap": 2652,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=254674",
+   "spawns": [
+    {
+     "level": 1,
+     "x": -2879.9,
+     "y": 602.3,
+     "z": 120.6,
+     "pct": [
+      69.4,
+      71.7
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "254717": {
+   "name": "Vindael",
+   "sub": "Blacksmith",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Shen'dralas",
+   "uiMap": 2652,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=254717",
+   "spawns": [
+    {
+     "level": 1,
+     "x": -2974.2,
+     "y": 1161.9,
+     "z": 104.5,
+     "pct": [
+      42.1,
+      78.6
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "254915": {
+   "name": "Thisalee Crow",
+   "sub": "Druid of the Talon",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=254915",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5151.5,
+     "y": -3319.2,
+     "z": 1640.5,
+     "pct": [
+      69.0,
+      49.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "255009": {
+   "name": "Veteran of the Third War",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=255009",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5019.6,
+     "y": -1735.6,
+     "z": 1323.9,
+     "pct": [
+      23.4,
+      55.5
+     ],
+     "zFrom": "grid"
+    },
+    {
+     "level": 1,
+     "x": 4795.1,
+     "y": -1839.8,
+     "z": 1277.9,
+     "pct": [
+      26.4,
+      65.2
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "255038": {
+   "name": "Veteran of the Third War",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=255038",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5227.9,
+     "y": -1228.5,
+     "z": 1371.8,
+     "pct": [
+      8.8,
+      46.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "255151": {
+   "name": "Rhylin Stonethorn",
+   "sub": "",
+   "svc": "gqv",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=255151",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5119.1,
+     "y": -3374.8,
+     "z": 1630.1,
+     "pct": [
+      70.6,
+      51.2
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "255486": {
+   "name": "Historian Biraxas",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Shen'dralas",
+   "uiMap": 2652,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=255486",
+   "spawns": [
+    {
+     "level": 1,
+     "x": -2971.5,
+     "y": 1088.2,
+     "z": 118.1,
+     "pct": [
+      45.7,
+      78.4
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "255683": {
+   "name": "Shalla'kal",
+   "sub": "Wild Demigod",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=255683",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5137.6,
+     "y": -2016.9,
+     "z": 1368.2,
+     "pct": [
+      31.5,
+      50.4
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "255693": {
+   "name": "Kala'th",
+   "sub": "Wild Demigod",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=255693",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5304.3,
+     "y": -1912.7,
+     "z": 1347.8,
+     "pct": [
+      28.5,
+      43.2
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "255701": {
+   "name": "Maralus",
+   "sub": "Trade Goods",
+   "svc": "gv",
+   "trainer": "",
+   "side": "B",
+   "zone": "Shen'dralas",
+   "uiMap": 2652,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=255701",
+   "spawns": [
+    {
+     "level": 1,
+     "x": -2974.2,
+     "y": 1145.6,
+     "z": 80.3,
+     "pct": [
+      42.9,
+      78.6
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "255703": {
+   "name": "Naria",
+   "sub": "Food Vendor",
+   "svc": "gv",
+   "trainer": "",
+   "side": "B",
+   "zone": "Shen'dralas",
+   "uiMap": 2652,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=255703",
+   "spawns": [
+    {
+     "level": 1,
+     "x": -2890.8,
+     "y": 969.2,
+     "z": 148.0,
+     "pct": [
+      51.5,
+      72.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "255704": {
+   "name": "Arondel",
+   "sub": "Drink Vendor",
+   "svc": "gv",
+   "trainer": "",
+   "side": "B",
+   "zone": "Shen'dralas",
+   "uiMap": 2652,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=255704",
+   "spawns": [
+    {
+     "level": 1,
+     "x": -2890.8,
+     "y": 969.2,
+     "z": 148.0,
+     "pct": [
+      51.5,
+      72.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "255705": {
+   "name": "Kerelle",
+   "sub": "Spirit Spirits",
+   "svc": "gv",
+   "trainer": "",
+   "side": "B",
+   "zone": "Shen'dralas",
+   "uiMap": 2652,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=255705",
+   "spawns": [
+    {
+     "level": 1,
+     "x": -2904.5,
+     "y": 967.2,
+     "z": 150.2,
+     "pct": [
+      51.6,
+      73.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "255721": {
+   "name": "Jarael",
+   "sub": "Leatherworking",
+   "svc": "gt",
+   "trainer": "Leatherworking",
+   "side": "B",
+   "zone": "Shen'dralas",
+   "uiMap": 2652,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=255721",
+   "spawns": [
+    {
+     "level": 1,
+     "x": -2960.5,
+     "y": 1151.7,
+     "z": 151.7,
+     "pct": [
+      42.6,
+      77.6
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "255724": {
+   "name": "Melanori",
+   "sub": "Tailoring",
+   "svc": "gt",
+   "trainer": "Tailoring",
+   "side": "B",
+   "zone": "Shen'dralas",
+   "uiMap": 2652,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=255724",
+   "spawns": [
+    {
+     "level": 1,
+     "x": -2963.3,
+     "y": 1133.2,
+     "z": 93.6,
+     "pct": [
+      43.5,
+      77.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "255829": {
+   "name": "Clugfist",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "H",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=255829",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -6945.2,
+     "y": -5019.9,
+     "z": 78.8,
+     "pct": [
+      64.5,
+      14.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "255894": {
+   "name": "Innkeeper Zizplink",
+   "sub": "Innkeeper",
+   "svc": "gqvi",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=255894",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8212.7,
+     "y": -5713.5,
+     "z": 7.1,
+     "pct": [
+      78.8,
+      54.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "255895": {
+   "name": "Grizzek",
+   "sub": "General Goods",
+   "svc": "gv",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=255895",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8186.8,
+     "y": -5606.8,
+     "z": 4.3,
+     "pct": [
+      76.6,
+      53.2
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "255897": {
+   "name": "Friz Frazzlespark",
+   "sub": "Specialty Goods",
+   "svc": "gqv",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=255897",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8173.9,
+     "y": -5635.9,
+     "z": 3.4,
+     "pct": [
+      77.2,
+      52.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "255993": {
+   "name": "Grakna",
+   "sub": "Wind Rider Master",
+   "svc": "gf",
+   "trainer": "",
+   "side": "H",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=255993",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -7921.7,
+     "y": -4777.4,
+     "z": 22.3,
+     "pct": [
+      59.5,
+      45.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "256222": {
+   "name": "Ketharas",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=256222",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 4415.5,
+     "y": -3465.1,
+     "z": 1010.0,
+     "pct": [
+      73.2,
+      81.6
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "256410": {
+   "name": "Reginald Holmsby",
+   "sub": "Stablemaster",
+   "svc": "gs",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=256410",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -9124.5,
+     "y": -4132.4,
+     "z": 25.7,
+     "pct": [
+      46.2,
+      82.2
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "256418": {
+   "name": "Krom'rosh",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "H",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=256418",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -7937.8,
+     "y": -4772.6,
+     "z": 23.8,
+     "pct": [
+      59.4,
+      45.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "256438": {
+   "name": "Halligan Turner",
+   "sub": "Foreman",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=256438",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8506.9,
+     "y": -3885.0,
+     "z": 13.6,
+     "pct": [
+      41.1,
+      63.1
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "256626": {
+   "name": "Fennar Mossmane",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=256626",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 4494.2,
+     "y": -1624.4,
+     "z": 1389.6,
+     "pct": [
+      20.2,
+      78.2
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "256627": {
+   "name": "Elder Mistpaw",
+   "sub": "The Wise",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=256627",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 4475.6,
+     "y": -1669.6,
+     "z": 1385.0,
+     "pct": [
+      21.5,
+      79.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "256655": {
+   "name": "Gorg",
+   "sub": "Cook",
+   "svc": "gqv",
+   "trainer": "",
+   "side": "H",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=256655",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -7905.5,
+     "y": -4733.8,
+     "z": 22.0,
+     "pct": [
+      58.6,
+      44.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "256657": {
+   "name": "Kreza Darkthorn",
+   "sub": "Weaponsmith & Armorcrafter",
+   "svc": "gqvr",
+   "trainer": "",
+   "side": "H",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=256657",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -7954.0,
+     "y": -4792.0,
+     "z": 25.8,
+     "pct": [
+      59.8,
+      46.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "256658": {
+   "name": "Gur'dok",
+   "sub": "Journeyman Blacksmith",
+   "svc": "gt",
+   "trainer": "Blacksmithing",
+   "side": "H",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=256658",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -7960.5,
+     "y": -4801.7,
+     "z": 26.0,
+     "pct": [
+      60.0,
+      46.2
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "256673": {
+   "name": "Grik",
+   "sub": "Stable Master",
+   "svc": "gs",
+   "trainer": "",
+   "side": "H",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=256673",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -7921.7,
+     "y": -4714.4,
+     "z": 24.0,
+     "pct": [
+      58.2,
+      45.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "256675": {
+   "name": "Innkeeper Toka",
+   "sub": "Innkeeper",
+   "svc": "gvi",
+   "trainer": "",
+   "side": "H",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=256675",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -7921.7,
+     "y": -4704.7,
+     "z": 25.5,
+     "pct": [
+      58.0,
+      45.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "256710": {
+   "name": "Tran'gul",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "H",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=256710",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -7889.3,
+     "y": -4777.4,
+     "z": 20.5,
+     "pct": [
+      59.5,
+      44.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "256728": {
+   "name": "Na'zok",
+   "sub": "",
+   "svc": "gqv",
+   "trainer": "",
+   "side": "H",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=256728",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -7372.0,
+     "y": -5310.9,
+     "z": 60.0,
+     "pct": [
+      70.5,
+      28.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "256831": {
+   "name": "Apprentice Claire",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=256831",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8002.5,
+     "y": -4200.3,
+     "z": 25.5,
+     "pct": [
+      47.6,
+      47.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "256978": {
+   "name": "Brerufa",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=256978",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 4649.2,
+     "y": -1638.3,
+     "z": 1292.1,
+     "pct": [
+      20.6,
+      71.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "257058": {
+   "name": "Gobam",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "H",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=257058",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -6993.7,
+     "y": -5146.0,
+     "z": 85.7,
+     "pct": [
+      67.1,
+      16.3
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "257062": {
+   "name": "Jezap Jinglesprocket",
+   "sub": "Fight Promoter",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=257062",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -7158.6,
+     "y": -5073.3,
+     "z": 77.2,
+     "pct": [
+      65.6,
+      21.4
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "257087": {
+   "name": "Gretchen Mayberry",
+   "sub": "Gryphon Master",
+   "svc": "gf",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=257087",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -9101.8,
+     "y": -4830.8,
+     "z": 24.0,
+     "pct": [
+      60.6,
+      81.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "257250": {
+   "name": "Marshal Ryan",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=257250",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -7785.9,
+     "y": -3176.9,
+     "z": 183.9,
+     "pct": [
+      26.5,
+      40.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "257292": {
+   "name": "Brakkit",
+   "sub": "Banker",
+   "svc": "gb",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=257292",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8219.1,
+     "y": -5616.5,
+     "z": 6.3,
+     "pct": [
+      76.8,
+      54.2
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "257294": {
+   "name": "Lizi Pinchwhistle",
+   "sub": "Banker",
+   "svc": "gb",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=257294",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8219.1,
+     "y": -5616.5,
+     "z": 6.3,
+     "pct": [
+      76.8,
+      54.2
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "257558": {
+   "name": "Demar Brant",
+   "sub": "Knight Commander",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=257558",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -9082.4,
+     "y": -5116.9,
+     "z": 37.1,
+     "pct": [
+      66.5,
+      80.9
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "257591": {
+   "name": "Ashe Amberhall",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=257591",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -9085.7,
+     "y": -5121.8,
+     "z": 36.8,
+     "pct": [
+      66.6,
+      81.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "257595": {
+   "name": "Barracks Master Harlan",
+   "sub": "Innkeeper",
+   "svc": "gvi",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=257595",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -9182.7,
+     "y": -5024.8,
+     "z": 38.2,
+     "pct": [
+      64.6,
+      84.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "257753": {
+   "name": "Curious Crow",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=257753",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 4322.9,
+     "y": -2596.9,
+     "z": 1119.2,
+     "pct": [
+      48.2,
+      85.6
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "258023": {
+   "name": "Sergeant Riftan",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=258023",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8067.2,
+     "y": -3370.9,
+     "z": 166.3,
+     "pct": [
+      30.5,
+      49.5
+     ],
+     "zFrom": "grid"
+    },
+    {
+     "level": 0,
+     "x": -7954.0,
+     "y": -3385.5,
+     "z": 163.2,
+     "pct": [
+      30.8,
+      46.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "258031": {
+   "name": "Neza Bloodsnout",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "H",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=258031",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8012.2,
+     "y": -4825.9,
+     "z": 23.2,
+     "pct": [
+      60.5,
+      47.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "258048": {
+   "name": "Jom-jom",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "H",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=258048",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -7077.8,
+     "y": -5116.9,
+     "z": 81.1,
+     "pct": [
+      66.5,
+      18.9
+     ],
+     "zFrom": "grid"
+    },
+    {
+     "level": 0,
+     "x": -7475.5,
+     "y": -5228.5,
+     "z": 61.2,
+     "pct": [
+      68.8,
+      31.2
+     ],
+     "zFrom": "grid"
+    },
+    {
+     "level": 0,
+     "x": -7517.5,
+     "y": -5437.0,
+     "z": 58.5,
+     "pct": [
+      73.1,
+      32.5
+     ],
+     "zFrom": "grid"
+    },
+    {
+     "level": 0,
+     "x": -7326.7,
+     "y": -5529.2,
+     "z": 72.9,
+     "pct": [
+      75.0,
+      26.6
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "258317": {
+   "name": "Benjy Wheeler",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=258317",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8827.0,
+     "y": -4549.5,
+     "z": 28.5,
+     "pct": [
+      54.8,
+      73.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "258380": {
+   "name": "Caitir Flinthew",
+   "sub": "Innkeeper",
+   "svc": "gvi",
+   "trainer": "",
+   "side": "A",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=258380",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5135.3,
+     "y": -1464.7,
+     "z": 1343.9,
+     "pct": [
+      15.6,
+      50.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "258570": {
+   "name": "Da'grosh",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "H",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=258570",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -7695.3,
+     "y": -3511.6,
+     "z": 180.1,
+     "pct": [
+      33.4,
+      38.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "258697": {
+   "name": "Farmer Elbrim",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=258697",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -7840.8,
+     "y": -4442.8,
+     "z": 52.5,
+     "pct": [
+      52.6,
+      42.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "258935": {
+   "name": "Curly",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=258935",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8762.3,
+     "y": -4122.7,
+     "z": 15.2,
+     "pct": [
+      46.0,
+      71.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "258963": {
+   "name": "Hurley",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=258963",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8545.7,
+     "y": -3889.9,
+     "z": 12.8,
+     "pct": [
+      41.2,
+      64.3
+     ],
+     "zFrom": "grid"
+    },
+    {
+     "level": 0,
+     "x": -8671.8,
+     "y": -3952.9,
+     "z": 13.4,
+     "pct": [
+      42.5,
+      68.2
+     ],
+     "zFrom": "grid"
+    },
+    {
+     "level": 0,
+     "x": -8762.3,
+     "y": -4122.7,
+     "z": 15.2,
+     "pct": [
+      46.0,
+      71.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "259049": {
+   "name": "Robbie Holmsby",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=259049",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -9134.2,
+     "y": -3996.6,
+     "z": 37.3,
+     "pct": [
+      43.4,
+      82.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "259050": {
+   "name": "Eleanor Holmsby",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=259050",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -9130.9,
+     "y": -3996.6,
+     "z": 37.5,
+     "pct": [
+      43.4,
+      82.4
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "259057": {
+   "name": "Dunston Willis",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=259057",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -7051.9,
+     "y": -5131.5,
+     "z": 84.6,
+     "pct": [
+      66.8,
+      18.1
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "259158": {
+   "name": "Fuzzle",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=259158",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8028.4,
+     "y": -4093.6,
+     "z": 23.9,
+     "pct": [
+      45.4,
+      48.3
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "259250": {
+   "name": "Alphonse Dumas",
+   "sub": "Journeyman Blacksmith",
+   "svc": "gqt",
+   "trainer": "Blacksmithing",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=259250",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -9118.0,
+     "y": -5015.1,
+     "z": 40.5,
+     "pct": [
+      64.4,
+      82.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "259254": {
+   "name": "Lost Horse",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=259254",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8620.1,
+     "y": -4501.0,
+     "z": 12.0,
+     "pct": [
+      53.8,
+      66.6
+     ],
+     "zFrom": "grid"
+    },
+    {
+     "level": 0,
+     "x": -8785.0,
+     "y": -4559.2,
+     "z": 30.9,
+     "pct": [
+      55.0,
+      71.7
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "259287": {
+   "name": "Melanie Sable",
+   "sub": "Expert Enchanter",
+   "svc": "gqt",
+   "trainer": "Enchanting",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=259287",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -9156.8,
+     "y": -5102.4,
+     "z": 42.9,
+     "pct": [
+      66.2,
+      83.2
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "259352": {
+   "name": "Watcher Cornelius",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=259352",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8503.7,
+     "y": -4767.7,
+     "z": 28.0,
+     "pct": [
+      59.3,
+      63.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "259353": {
+   "name": "Cedric Dalton",
+   "sub": "Watch Captain",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=259353",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8875.5,
+     "y": -3807.4,
+     "z": 48.7,
+     "pct": [
+      39.5,
+      74.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "259695": {
+   "name": "Renalard",
+   "sub": "Wild God",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=259695",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5165.4,
+     "y": -3006.7,
+     "z": 1571.3,
+     "pct": [
+      60.0,
+      49.2
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "259766": {
+   "name": "Mika Darby",
+   "sub": "Blacksmithing Supplies",
+   "svc": "gvr",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=259766",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8148.0,
+     "y": -5665.0,
+     "z": 3.9,
+     "pct": [
+      77.8,
+      52.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "259859": {
+   "name": "Wheatley",
+   "sub": "Stable Master",
+   "svc": "gqs",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=259859",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -9215.0,
+     "y": -4971.4,
+     "z": 38.0,
+     "pct": [
+      63.5,
+      85.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "259860": {
+   "name": "Martha Wellsworth",
+   "sub": "General Goods",
+   "svc": "gv",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=259860",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -9182.7,
+     "y": -5005.4,
+     "z": 37.2,
+     "pct": [
+      64.2,
+      84.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "259861": {
+   "name": "Paige Armstrong",
+   "sub": "Weaponsmith & Armorcrafter",
+   "svc": "gvr",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=259861",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -9118.0,
+     "y": -5005.4,
+     "z": 38.4,
+     "pct": [
+      64.2,
+      82.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "259863": {
+   "name": "Cassandra Wheeler",
+   "sub": "Food & Drink",
+   "svc": "gqv",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=259863",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -9143.9,
+     "y": -5019.9,
+     "z": 36.7,
+     "pct": [
+      64.5,
+      82.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "259961": {
+   "name": "Wharfmaster Whizzbuzz",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=259961",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8167.4,
+     "y": -5742.6,
+     "z": 4.4,
+     "pct": [
+      79.4,
+      52.6
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "259962": {
+   "name": "Fimbo Greasemitz",
+   "sub": "",
+   "svc": "gqv",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=259962",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8219.1,
+     "y": -5723.2,
+     "z": 7.0,
+     "pct": [
+      79.0,
+      54.2
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "259988": {
+   "name": "Gorgegut",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "H",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=259988",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -7300.9,
+     "y": -5262.4,
+     "z": 60.5,
+     "pct": [
+      69.5,
+      25.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "260026": {
+   "name": "Scout Bolain",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=260026",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8658.9,
+     "y": -3036.3,
+     "z": 201.0,
+     "pct": [
+      23.6,
+      67.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "260070": {
+   "name": "Bertrand Ironbrow",
+   "sub": "Foreman",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=260070",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -9069.5,
+     "y": -4966.6,
+     "z": 42.3,
+     "pct": [
+      63.4,
+      80.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "260080": {
+   "name": "Ember Bladewhisper",
+   "sub": "Weapons Trainer",
+   "svc": "gqt",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=260080",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -9037.2,
+     "y": -5092.7,
+     "z": 40.5,
+     "pct": [
+      66.0,
+      79.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "260231": {
+   "name": "Argo Brinewhistle",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=260231",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8164.2,
+     "y": -5762.0,
+     "z": 4.0,
+     "pct": [
+      79.8,
+      52.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "260343": {
+   "name": "Maka",
+   "sub": "General Goods",
+   "svc": "gv",
+   "trainer": "",
+   "side": "H",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=260343",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -7947.5,
+     "y": -4714.4,
+     "z": 24.1,
+     "pct": [
+      58.2,
+      45.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "260391": {
+   "name": "Captain Haynes",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=260391",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -7747.1,
+     "y": -6314.9,
+     "z": 1.7,
+     "pct": [
+      91.2,
+      39.6
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "260487": {
+   "name": "Gritta Chumwater",
+   "sub": "Fisherman",
+   "svc": "gv",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=260487",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8245.0,
+     "y": -5694.1,
+     "z": 3.9,
+     "pct": [
+      78.4,
+      55.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "260525": {
+   "name": "Tallow Sparksocket",
+   "sub": "Stable Master",
+   "svc": "gs",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=260525",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8209.4,
+     "y": -5698.9,
+     "z": 6.4,
+     "pct": [
+      78.5,
+      53.9
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "260540": {
+   "name": "Jasper Geartoggle",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=260540",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8164.2,
+     "y": -5577.7,
+     "z": 4.1,
+     "pct": [
+      76.0,
+      52.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "260543": {
+   "name": "Mizzy",
+   "sub": "Banker",
+   "svc": "gb",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=260543",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8212.7,
+     "y": -5606.8,
+     "z": 6.2,
+     "pct": [
+      76.6,
+      54.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "260558": {
+   "name": "Krix",
+   "sub": "Superior Fisherman",
+   "svc": "gv",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=260558",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8238.5,
+     "y": -5732.9,
+     "z": 5.9,
+     "pct": [
+      79.2,
+      54.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "260559": {
+   "name": "Gilliwigs",
+   "sub": "Trade Goods",
+   "svc": "gv",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=260559",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8228.8,
+     "y": -5737.7,
+     "z": 5.7,
+     "pct": [
+      79.3,
+      54.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "260560": {
+   "name": "Krikshank",
+   "sub": "Poison Vendor",
+   "svc": "gv",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=260560",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8115.7,
+     "y": -5616.5,
+     "z": 5.7,
+     "pct": [
+      76.8,
+      51.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "260562": {
+   "name": "Melbin Powderfuse",
+   "sub": "Master Goblin Engineer",
+   "svc": "gt",
+   "trainer": "Engineering",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=260562",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8109.2,
+     "y": -5655.3,
+     "z": 3.7,
+     "pct": [
+      77.6,
+      50.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "260565": {
+   "name": "Kor'gar",
+   "sub": "Engineering Supplies",
+   "svc": "gv",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=260565",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8109.2,
+     "y": -5655.3,
+     "z": 3.7,
+     "pct": [
+      77.6,
+      50.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "260566": {
+   "name": "Fizzix Boomshot",
+   "sub": "Gunsmith",
+   "svc": "gvr",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=260566",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8196.5,
+     "y": -5698.9,
+     "z": 5.8,
+     "pct": [
+      78.5,
+      53.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "260570": {
+   "name": "Stitch Pinwizzle",
+   "sub": "Tailoring Supplies",
+   "svc": "gv",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=260570",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8131.8,
+     "y": -5635.9,
+     "z": 5.0,
+     "pct": [
+      77.2,
+      51.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "260626": {
+   "name": "Bluebell",
+   "sub": "Flight Mistress",
+   "svc": "gf",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=260626",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 4392.3,
+     "y": -2833.0,
+     "z": 1108.9,
+     "pct": [
+      55.0,
+      82.6
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "260825": {
+   "name": "Phoebe Highfeather",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=260825",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 4827.5,
+     "y": -2812.2,
+     "z": 1448.3,
+     "pct": [
+      54.4,
+      63.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "260931": {
+   "name": "Clubtoe",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "H",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=260931",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -7983.1,
+     "y": -4282.7,
+     "z": 25.9,
+     "pct": [
+      49.3,
+      46.9
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "260993": {
+   "name": "Crag'rog",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "H",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=260993",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -7659.8,
+     "y": -3220.6,
+     "z": 181.3,
+     "pct": [
+      27.4,
+      36.9
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "261208": {
+   "name": "Twilight Brute",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "H",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=261208",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8083.3,
+     "y": -4176.0,
+     "z": 29.4,
+     "pct": [
+      47.1,
+      50.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "261313": {
+   "name": "Naluk",
+   "sub": "Butcher",
+   "svc": "gv",
+   "trainer": "",
+   "side": "H",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=261313",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -7947.5,
+     "y": -4695.0,
+     "z": 23.9,
+     "pct": [
+      57.8,
+      45.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "262031": {
+   "name": "Sister Rowland",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=262031",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -9156.8,
+     "y": -4889.0,
+     "z": 56.6,
+     "pct": [
+      61.8,
+      83.2
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "262399": {
+   "name": "Gelinda Coppergleam",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=262399",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8697.7,
+     "y": -3356.4,
+     "z": 168.9,
+     "pct": [
+      30.2,
+      69.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "263089": {
+   "name": "Tessa Dawnbright",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=263089",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -9124.5,
+     "y": -4986.0,
+     "z": 38.4,
+     "pct": [
+      63.8,
+      82.2
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "263120": {
+   "name": "Gray Dawnbright",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=263120",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8219.1,
+     "y": -5713.5,
+     "z": 6.5,
+     "pct": [
+      78.8,
+      54.2
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "263190": {
+   "name": "Tan'jani",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "H",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=263190",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -7928.1,
+     "y": -4714.4,
+     "z": 24.4,
+     "pct": [
+      58.2,
+      45.2
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "263230": {
+   "name": "Dorb",
+   "sub": "Rare Goods",
+   "svc": "gv",
+   "trainer": "",
+   "side": "H",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=263230",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -7016.3,
+     "y": -4986.0,
+     "z": 90.4,
+     "pct": [
+      63.8,
+      17.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "263316": {
+   "name": "Picked Carcass",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=263316",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8367.9,
+     "y": -4874.4,
+     "z": 24.9,
+     "pct": [
+      61.5,
+      58.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "263326": {
+   "name": "Madam Swyndle",
+   "sub": "Agent of the Black Market",
+   "svc": "gv",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=263326",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8141.5,
+     "y": -5684.4,
+     "z": 3.1,
+     "pct": [
+      78.2,
+      51.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "263367": {
+   "name": "Sleebo Fizzlespout",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=263367",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8034.8,
+     "y": -5199.4,
+     "z": 41.3,
+     "pct": [
+      68.2,
+      48.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "263384": {
+   "name": "Mister Graphed",
+   "sub": "Agent of the Black Market",
+   "svc": "gv",
+   "trainer": "",
+   "side": "B",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=263384",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8141.5,
+     "y": -5684.4,
+     "z": 3.1,
+     "pct": [
+      78.2,
+      51.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "263406": {
+   "name": "Elaena Moonwhisper",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=263406",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5554.2,
+     "y": -2440.6,
+     "z": 1475.8,
+     "pct": [
+      43.7,
+      32.4
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "263440": {
+   "name": "Hamur",
+   "sub": "",
+   "svc": "gqv",
+   "trainer": "",
+   "side": "H",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=263440",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -7165.1,
+     "y": -5150.9,
+     "z": 79.9,
+     "pct": [
+      67.2,
+      21.6
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "263613": {
+   "name": "Brother Lowley",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=263613",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -9021.0,
+     "y": -5063.6,
+     "z": 41.6,
+     "pct": [
+      65.4,
+      79.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "263757": {
+   "name": "Felflick",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=263757",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 4517.3,
+     "y": -2638.5,
+     "z": 1124.0,
+     "pct": [
+      49.4,
+      77.2
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "264089": {
+   "name": "Eluneth",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=264089",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 4873.8,
+     "y": -1568.9,
+     "z": 1330.1,
+     "pct": [
+      18.6,
+      61.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "264521": {
+   "name": "Daythor Brellan",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=264521",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5098.3,
+     "y": -1461.2,
+     "z": 1340.9,
+     "pct": [
+      15.5,
+      52.1
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "264795": {
+   "name": "Marn Euhorn",
+   "sub": "Cenarion Circle",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=264795",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5225.6,
+     "y": -3301.9,
+     "z": 1649.2,
+     "pct": [
+      68.5,
+      46.6
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "264797": {
+   "name": "Aisarra Nightmeadow",
+   "sub": "Keeper of Knowledge",
+   "svc": "gv",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=264797",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5119.1,
+     "y": -3388.7,
+     "z": 1630.1,
+     "pct": [
+      71.0,
+      51.2
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "265375": {
+   "name": "Veteran of the Third War",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=265375",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5123.7,
+     "y": -1878.0,
+     "z": 1362.4,
+     "pct": [
+      27.5,
+      51.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "265586": {
+   "name": "Thylaen",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=265586",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 4350.7,
+     "y": -2836.5,
+     "z": 1095.6,
+     "pct": [
+      55.1,
+      84.4
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "265788": {
+   "name": "Kal'tinzan",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "H",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=265788",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5077.4,
+     "y": -1395.2,
+     "z": 1341.9,
+     "pct": [
+      13.6,
+      53.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "265866": {
+   "name": "Trigg Ironhand",
+   "sub": "Repairs",
+   "svc": "gqvr",
+   "trainer": "",
+   "side": "A",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=265866",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5133.0,
+     "y": -1461.2,
+     "z": 1344.2,
+     "pct": [
+      15.5,
+      50.6
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "265883": {
+   "name": "Chagrak Hammerstrike",
+   "sub": "Repairs",
+   "svc": "gvr",
+   "trainer": "",
+   "side": "H",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=265883",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5089.0,
+     "y": -1395.2,
+     "z": 1342.6,
+     "pct": [
+      13.6,
+      52.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "266802": {
+   "name": "Thark Gorax",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "H",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=266802",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 4672.4,
+     "y": -3701.2,
+     "z": 952.1,
+     "pct": [
+      80.0,
+      70.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "266803": {
+   "name": "Quintus Wainworth",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "A",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=266803",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 4670.1,
+     "y": -3694.3,
+     "z": 953.4,
+     "pct": [
+      79.8,
+      70.6
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "266901": {
+   "name": "Pexmit",
+   "sub": "Someone's Minion",
+   "svc": "gv",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=266901",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 4440.9,
+     "y": -2548.2,
+     "z": 1123.1,
+     "pct": [
+      46.8,
+      80.5
+     ],
+     "zFrom": "grid"
+    },
+    {
+     "level": 1,
+     "x": 5528.8,
+     "y": -2596.9,
+     "z": 1482.2,
+     "pct": [
+      48.2,
+      33.5
+     ],
+     "zFrom": "grid"
+    },
+    {
+     "level": 1,
+     "x": 5383.0,
+     "y": -2631.6,
+     "z": 1486.1,
+     "pct": [
+      49.2,
+      39.8
+     ],
+     "zFrom": "grid"
+    },
+    {
+     "level": 1,
+     "x": 5285.8,
+     "y": -2874.7,
+     "z": 1528.9,
+     "pct": [
+      56.2,
+      44.0
+     ],
+     "zFrom": "grid"
+    },
+    {
+     "level": 1,
+     "x": 5517.2,
+     "y": -2965.0,
+     "z": 1538.8,
+     "pct": [
+      58.8,
+      34.0
+     ],
+     "zFrom": "grid"
+    },
+    {
+     "level": 1,
+     "x": 5336.7,
+     "y": -2965.0,
+     "z": 1539.5,
+     "pct": [
+      58.8,
+      41.8
+     ],
+     "zFrom": "grid"
+    },
+    {
+     "level": 1,
+     "x": 5165.4,
+     "y": -2992.8,
+     "z": 1571.6,
+     "pct": [
+      59.6,
+      49.2
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "267097": {
+   "name": "Maerion Thaelemaches",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=267097",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5531.1,
+     "y": -2780.9,
+     "z": 1500.4,
+     "pct": [
+      53.5,
+      33.4
+     ],
+     "zFrom": "grid"
+    },
+    {
+     "level": 1,
+     "x": 5707.0,
+     "y": -3117.8,
+     "z": 1578.4,
+     "pct": [
+      63.2,
+      25.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "267109": {
+   "name": "Galvinquam Leafsyre",
+   "sub": "Cenarion Circle",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=267109",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5045.0,
+     "y": -2065.5,
+     "z": 1368.2,
+     "pct": [
+      32.9,
+      54.4
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "267113": {
+   "name": "Marrosis",
+   "sub": "Wild God",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=267113",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5142.2,
+     "y": -1860.6,
+     "z": 1377.5,
+     "pct": [
+      27.0,
+      50.2
+     ],
+     "zFrom": "shipped grid"
+    }
+   ]
+  },
+  "267121": {
+   "name": "Yashiro",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=267121",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5584.3,
+     "y": -2728.8,
+     "z": 1497.3,
+     "pct": [
+      52.0,
+      31.1
+     ],
+     "zFrom": "grid"
+    },
+    {
+     "level": 1,
+     "x": 5586.6,
+     "y": -3020.6,
+     "z": 1545.8,
+     "pct": [
+      60.4,
+      31.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "267158": {
+   "name": "Jereman",
+   "sub": "Wild God",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=267158",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5255.7,
+     "y": -2364.2,
+     "z": 1431.0,
+     "pct": [
+      41.5,
+      45.3
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "268168": {
+   "name": "Lisbael Highfeather",
+   "sub": "",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=268168",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 5100.6,
+     "y": -2381.5,
+     "z": 1422.6,
+     "pct": [
+      42.0,
+      52.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "268663": {
+   "name": "Penny Pinderton",
+   "sub": "Fruit Vendor",
+   "svc": "gv",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=268663",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -9085.7,
+     "y": -4898.7,
+     "z": 25.5,
+     "pct": [
+      62.0,
+      81.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "270570": {
+   "name": "Justine Kai",
+   "sub": "Quartermaster",
+   "svc": "gv",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=270570",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -9072.7,
+     "y": -4995.7,
+     "z": 40.6,
+     "pct": [
+      64.0,
+      80.6
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "271005": {
+   "name": "Burt Lazlo",
+   "sub": "Bartender",
+   "svc": "gv",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=271005",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -9189.1,
+     "y": -5019.9,
+     "z": 38.0,
+     "pct": [
+      64.5,
+      84.2
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "271006": {
+   "name": "Christina Von Stavern",
+   "sub": "Waitress",
+   "svc": "gv",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=271006",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -9189.1,
+     "y": -5024.8,
+     "z": 38.0,
+     "pct": [
+      64.6,
+      84.2
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "272435": {
+   "name": "Goren Grayfellow",
+   "sub": "Armorer",
+   "svc": "gvr",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=272435",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -8924.0,
+     "y": -3725.0,
+     "z": 50.7,
+     "pct": [
+      37.8,
+      76.0
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "272437": {
+   "name": "Marla Bell",
+   "sub": "Reagent Vendor",
+   "svc": "gv",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=272437",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -9240.9,
+     "y": -4908.4,
+     "z": 61.6,
+     "pct": [
+      62.2,
+      85.8
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "272646": {
+   "name": "Miranda Turner",
+   "sub": "Cooking Supplier",
+   "svc": "gv",
+   "trainer": "",
+   "side": "A",
+   "zone": "Riverglades",
+   "uiMap": 2548,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=272646",
+   "spawns": [
+    {
+     "level": 0,
+     "x": -9134.2,
+     "y": -4971.4,
+     "z": 39.1,
+     "pct": [
+      63.5,
+      82.5
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  },
+  "278305": {
+   "name": "Velician",
+   "sub": "Wild God",
+   "svc": "gq",
+   "trainer": "",
+   "side": "B",
+   "zone": "Mount Hyjal",
+   "uiMap": 2482,
+   "source": "wowhead-standin",
+   "verified": false,
+   "url": "https://www.wowhead.com/forever/npc=278305",
+   "spawns": [
+    {
+     "level": 1,
+     "x": 4489.5,
+     "y": -2190.5,
+     "z": 1171.3,
+     "pct": [
+      36.5,
+      78.4
+     ],
+     "zFrom": "grid"
+    }
+   ]
+  }
+ }
+}

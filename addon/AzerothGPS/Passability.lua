@@ -220,6 +220,8 @@ local function NearLine(line, x, y, r)
   return false
 end
 
+P.InLoop, P.NearLine = InLoop, NearLine -- (the world grid's erase strokes, WorldGrid.lua)
+
 -- A wall's floor (drawn where floors lie over each other: Record's `z`, `indoors`; a shipped one's
 -- `z`, `indoors`): { z, indoors }, or nil.
 local function WallFloor(w)
@@ -263,12 +265,14 @@ end
 -- toward the low side, and the drop) or nil (a plain wall) for its section from point p to p + 1.
 P.CLIFF_STEP = 2
 P.CLIFF_DROP_MAX = 14
--- ... and the drop is the player's safe one, as the routes': RouteOne's maxDrop (Nav.SafeDrop: 39 yd out of combat
--- with the health hidden, 14 in it), set by P.SetDropMax; else the free one, Router.TRACK_DROP_MAX. Kooki3z 2026-11-20,
+-- ... and the drop is the player's safe one, as the routes': RouteOne's maxDrop (Nav.SafeDrop: Options' Safe drop,
+-- 39 yd by default, in combat too), set by P.SetDropMax; else the free one, Router.TRACK_DROP_MAX. Kooki3z 2026-11-20,
 -- Stonetalon Mountains: a ledge dropped off one way but never climbed, and routes may drop as far as the safe drop.
 -- The same limit for the map's ground's cliffs (CliffAlong) and the walks' first and last steps.
 P.dropMax = nil
 local cliffMemo, cliffMemoN -- (CliffAlong's, below: by the points, for this limit)
+local cliffRuns = {} -- (and its runs down, P.CliffRuns)
+local fallMemo, fallMemoN = {}, 0 -- (FallAlong's, below)
 local function DropMax()
   return P.dropMax or ns.Router and ns.Router.TRACK_DROP_MAX or P.CLIFF_DROP_MAX
 end
@@ -280,8 +284,25 @@ function P.SetDropMax(v)
   P.dropMax = v
   wallsBuilt, wallInputs = false, wallInputs + 1
   if P.ClearSegMemo then P.ClearSegMemo() end
-  cliffMemo, cliffMemoN = {}, 0
+  cliffMemo, cliffMemoN, cliffRuns = {}, 0, {}
+  fallMemo, fallMemoN = {}, 0
 end
+-- Jumps avoided on the trip (Nav.AvoidJump: their tops): no cliff wall's way down within Nav.JUMP_BAN_YD of one, and no
+-- leg down the ground's cliffs there (CliffAlong); set by Nav.SyncJumps, the cliff walls and the legs worked out again.
+P.jumpBans = nil
+P.JUMP_FALL_MIN = 4 -- yards: a run of the ground's steep samples falling this much near an avoided jump's top is one
+function P.SetJumpBans(list)
+  P.jumpBans = (list and list[1]) and list or nil
+  wallsBuilt, wallInputs = false, wallInputs + 1
+  if P.ClearSegMemo then P.ClearSegMemo() end
+  cliffMemo, cliffMemoN = {}, 0
+  fallMemo, fallMemoN = {}, 0
+end
+local function JumpBanned(cont, x, y)
+  local N = P.jumpBans and ns.Nav
+  return N and N.JumpBanned and N.JumpBanned(cont, x, y) or false
+end
+P.JumpBanned = JumpBanned
 function P.CliffSides(w, p)
   local cl, cr = w.cl, w.cr
   if w.kind ~= "cliff" or type(cl) ~= "table" or type(cr) ~= "table" then return nil end
@@ -297,6 +318,8 @@ function P.CliffSection(w, p)
   local max = DropMax()
   if math.abs(dz) > max then return nil end
   local ax, ay, bx, by = w[2 * p - 1], w[2 * p], w[2 * p + 1], w[2 * p + 2]
+  -- (an avoided jump's top within reach of the section: a wall, both ways)
+  if P.jumpBans and ns.Nav and ns.Nav.JumpBannedAlong and ns.Nav.JumpBannedAlong(w.cont, ax, ay, bx, by) then return nil end
   local ex, ey = bx - ax, by - ay
   local L = math.sqrt(ex * ex + ey * ey)
   if L <= 0 then return nil end
@@ -461,6 +484,8 @@ local function Drawn(cont)
   return false
 end
 
+P.DrawnWalls = Drawn -- (the world grid: its shipped walls are cut at its bake, the player's own checked as it searches)
+
 local hpaBlocks, hpaDirty = {}, {} -- (the search by blocks, below: blocks decoded, and those worked out here)
 local wallDirty, banDirty = {}, {} -- (those of the player's walls, and of the banned water: hpaDirty is both)
 local function MergeDirty()
@@ -527,6 +552,7 @@ local function EnsureWalls()
 end
 function P.RefreshWalls()
   wallsBuilt, wallInputs = false, wallInputs + 1
+  fallMemo, fallMemoN = {}, 0
   EnsureWalls()
 end
 
@@ -596,8 +622,11 @@ function P.WallFloors(cont)
 end
 
 -- Whether the leg (x1, y1)-(x2, y2) crosses a wall (`ok`: as WallHit's).
-function P.CrossesWall(cont, x1, y1, x2, y2, ok)
+-- The model walls too (P.CrossesModelWall), unless `noModel`: the Router's roads cut by walls at load, which never cross
+-- one (`agps world-grid model-walls` opens each road's way through), so the outlines aren't decoded for every road.
+function P.CrossesWall(cont, x1, y1, x2, y2, ok, noModel)
   EnsureWalls()
+  if not noModel and P.CrossesModelWall(cont, x1, y1, x2, y2) then return true end
   local segs = wallSegs[cont]
   if not segs then return false end
   local B = P.WALL_BUCKET
@@ -618,6 +647,142 @@ function P.CrossesWall(cont, x1, y1, x2, y2, ok)
           end
         end
       end
+    end
+  end
+  return false
+end
+
+-- The thin tall walls from the client's model collision (Data/ModelWalls.lua, app/azerothgps/modelwalls.py): palisades,
+-- fences, barricades, railings, the whole map. Item 78 again (Kooki3z 2026-11-25, the 1.4.0 build): Red Cloud Mesa's
+-- palisade was fixed twice by cutting the world grid's links at a few heights over their floors, and each time the route
+-- jumped through the next stretch of it (a far drop's top past the rim, a baked drop link, a walk off the edge). Each
+-- wall's outline in plan view is a hard barrier for every route piece crossing it, whatever its kind or heights: the
+-- world grid's links and far drops (WorldGrid.Search; the bake dropped its steps across one) and P.CrossesWall's callers
+-- but the Router's terrain ways (SegmentCost: its cells don't know them). A piece touching an outline counts as
+-- crossing it (a line through a corner point exactly).
+-- The data (a few thousand outlines) is kept as its strings until a route comes near (ns.ModelWalls[cont]: `w` the
+-- outlines, each "x,y,dx,dy,..." in half yards, `r` [rx * 4096 + ry] = the outlines over that MODEL_REGION square):
+-- a square's outlines are decoded the first time a piece is checked over it, into flat lists by MODEL_BUCKET yards
+-- (`idx`, each bucket ax, ay, bx, by, ax, ...), kept for the session.
+P.MODEL_BUCKET = 16
+P.MODEL_REGION = 512
+local modelState = {} -- [cont] = { idx = { [bucket] = { ax, ay, bx, by, ... } }, done = { [region] = true }, w = {} }
+-- An outline's points from its string: { x, y, x, y, ... } (world yards).
+local function DecodeOutline(s)
+  local out, x, y, n = {}, nil, nil, 0
+  for tok in string.gmatch(s, "[^,]+") do
+    local v = tonumber(tok)
+    n = n + 1
+    if n == 1 then x = v elseif n == 2 then y = v else
+      if n % 2 == 1 then x = x + v else y = y + v end
+    end
+    if n >= 2 and n % 2 == 0 then
+      out[#out + 1] = x * 0.5
+      out[#out + 1] = y * 0.5
+    end
+  end
+  return out
+end
+P.DecodeModelOutline = DecodeOutline
+local function ModelState(cont)
+  local st = modelState[cont]
+  if st == nil then
+    local d = ns.ModelWalls and ns.ModelWalls[cont]
+    st = d and { idx = {}, done = {}, w = {}, d = d } or false
+    modelState[cont] = st
+  end
+  return st or nil
+end
+-- (outline k's segments into the buckets, once)
+local function IndexOutline(st, k)
+  if st.w[k] then return end
+  st.w[k] = true
+  local p = DecodeOutline(st.d.w[k])
+  local B, idx = P.MODEL_BUCKET, st.idx
+  local floor, min, max = math.floor, math.min, math.max
+  for i = 1, #p - 3, 2 do
+    local ax, ay, bx, by = p[i], p[i + 1], p[i + 2], p[i + 3]
+    for kx = floor(min(ax, bx) / B), floor(max(ax, bx) / B) do
+      for ky = floor(min(ay, by) / B), floor(max(ay, by) / B) do
+        local key = kx * 65536 + ky
+        local list = idx[key]
+        if not list then
+          list = {}
+          idx[key] = list
+        end
+        local n = #list
+        list[n + 1], list[n + 2], list[n + 3], list[n + 4] = ax, ay, bx, by
+      end
+    end
+  end
+end
+-- (the outlines over the box decoded)
+local function EnsureRegions(st, x0, y0, x1, y1)
+  local R, floor = P.MODEL_REGION, math.floor
+  for rx = floor(x0 / R), floor(x1 / R) do
+    for ry = floor(y0 / R), floor(y1 / R) do
+      local key = rx * 4096 + ry
+      if not st.done[key] then
+        st.done[key] = true
+        local ks = st.d.r[key]
+        if ks then
+          for _, k in ipairs(ks) do IndexOutline(st, k) end
+        end
+      end
+    end
+  end
+end
+-- Whether `cont` has model walls.
+function P.HasModelWalls(cont)
+  return ModelState(cont) ~= nil
+end
+-- Every model wall outline on `cont`, decoded: { { x, y, x, y, ... }, ... } (the bake, the tests).
+function P.ModelWallOutlines(cont)
+  local d = ns.ModelWalls and ns.ModelWalls[cont]
+  local out = {}
+  for k, s in ipairs(d and d.w or {}) do out[k] = DecodeOutline(s) end
+  return out
+end
+-- Whether the piece (x1, y1)-(x2, y2) crosses (or touches) a model wall's outline on `cont`.
+function P.CrossesModelWall(cont, x1, y1, x2, y2)
+  local st = ModelState(cont)
+  if not st then return false end
+  local floor, min, max = math.floor, math.min, math.max
+  EnsureRegions(st, min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
+  local B, idx = P.MODEL_BUCKET, st.idx
+  local dx, dy = x2 - x1, y2 - y1
+  for kx = floor(min(x1, x2) / B), floor(max(x1, x2) / B) do
+    for ky = floor(min(y1, y2) / B), floor(max(y1, y2) / B) do
+      local list = idx[kx * 65536 + ky]
+      if list then
+        for i = 1, #list, 4 do
+          local ax, ay, bx, by = list[i], list[i + 1], list[i + 2], list[i + 3]
+          local d1 = dx * (ay - y1) - dy * (ax - x1)
+          local d2 = dx * (by - y1) - dy * (bx - x1)
+          if (d1 <= 0 and d2 >= 0) or (d1 >= 0 and d2 <= 0) then
+            local ex, ey = bx - ax, by - ay
+            local d3 = ex * (y1 - ay) - ey * (x1 - ax)
+            local d4 = ex * (y2 - ay) - ey * (x2 - ax)
+            if ((d3 <= 0 and d4 >= 0) or (d3 >= 0 and d4 <= 0)) and not (d1 == 0 and d2 == 0) then return true end
+          end
+        end
+      end
+    end
+  end
+  return false
+end
+-- Whether any piece of the flat point list `pts` ({ {x, y, ...}, ... } when `nested`, else x, y, x, y, ...) crosses a
+-- model wall.
+function P.PtsCrossModelWall(cont, pts, nested)
+  if not ModelState(cont) then return false end
+  if nested then
+    for i = 1, #pts - 1 do
+      local a, b = pts[i], pts[i + 1]
+      if P.CrossesModelWall(cont, a[1], a[2], b[1], b[2]) then return true end
+    end
+  else
+    for i = 1, #pts - 3, 2 do
+      if P.CrossesModelWall(cont, pts[i], pts[i + 1], pts[i + 2], pts[i + 3]) then return true end
     end
   end
   return false
@@ -778,6 +943,7 @@ end
 -- (... and nil where it isn't the ground walked: water (the grid's 1, or the map's water over the ground: its floor,
 -- swum over; the deep sea far out the grid closes too), a city's or a cave's own grid (their floors, not the land's). Not a bridge's model: its outline over the gorge is its sides' too (Freewind
 -- Post's bridge reaches over the mesa's edge), and the bridges are raised roads, reached by their ends)
+P.GroundZ = GroundZ -- (Router.MarkDeckDrops: the ground under a bridge's side)
 local function WalkedZ(cont, g, x, y, near)
   if g then
     local c, r = ToCell(g, x, y)
@@ -815,6 +981,7 @@ function P.CliffAlong(cont, x1, y1, x2, y2)
   local g = ns.Terrain and ns.Terrain[cont]
   local dx, dy = x2 - x1, y2 - y1
   local len = math.sqrt(dx * dx + dy * dy)
+  local runs
   if len > 0 and not (g and g.slack) and ns.Ground and ns.Ground.At then
     local n = math.max(1, math.ceil(len / P.CLIFF_SAMPLE))
     local rise = P.CLIFF_SLOPE * len / n
@@ -822,7 +989,9 @@ function P.CliffAlong(cont, x1, y1, x2, y2)
     local near = OverlayNear(cont, x1, y1, x2, y2)
     local co, isMain = coroutine.running()
     local canYield = co ~= nil and not isMain
-    local up, down, prev = 0, 0, nil
+    local up, down, prev, from = 0, 0, nil, 0
+    local bans = P.jumpBans ~= nil
+    local topX, topY
     for i = 0, n do
       if canYield then
         local k = P.cliffSamples + 1
@@ -833,24 +1002,186 @@ function P.CliffAlong(cont, x1, y1, x2, y2)
         P.cliffSamples = k
       end
       local z = WalkedZ(cont, g, x1 + dx * i / n, y1 + dy * i / n, near)
+      local was = down
       if z and prev and z - prev > rise then
         up, down = up + z - prev, 0
       elseif z and prev and prev - z > rise then
+        if down == 0 then
+          from = (i - 1) / n
+          topX, topY = x1 + dx * (i - 1) / n, y1 + dy * (i - 1) / n
+        end
         up, down = 0, down + prev - z
       else
         up, down = 0, 0
       end
-      if up > P.CLIFF_CLIMB_MAX or down > drop then
+      -- (each run down kept: the open world's drop rules, P.DropsAlong)
+      if was > 0 and down == 0 then
+        runs = runs or {}
+        runs[#runs + 1] = { from, was }
+      end
+      if up > P.CLIFF_CLIMB_MAX or down > drop
+          or (bans and down >= P.JUMP_FALL_MIN and JumpBanned(cont, topX, topY)) then
         v = true
         break
       end
       prev = z
     end
+    if down > 0 and not v then
+      runs = runs or {}
+      runs[#runs + 1] = { from, down }
+    end
   end
   if memo ~= cliffMemo then return v end -- (the limit changed while it paused: not kept under the new one)
-  if cliffMemoN >= CLIFF_MEMO_MAX then cliffMemo, cliffMemoN = {}, 0 end
+  if cliffMemoN >= CLIFF_MEMO_MAX then cliffMemo, cliffMemoN, cliffRuns = {}, 0, {} end
   cliffMemo[key], cliffMemoN = v, cliffMemoN + 1
+  if runs then cliffRuns[key] = runs end
   return v
+end
+-- The runs down CliffAlong found along a leg (asked first): { { t, dz }, ... } or nil.
+function P.CliffRuns(cont, x1, y1, x2, y2)
+  return cliffRuns[cont .. ":" .. x1 .. ":" .. y1 .. ":" .. x2 .. ":" .. y2]
+end
+
+-- The biggest drop the straight leg from (x1, y1) to (x2, y2) goes down, walked that way: where it starts and ends
+-- along it (0..1) and how far it falls, or nil: a cliff wall crossed down its way (its `dz`; a yard either side of it)
+-- or a run of the ground's steep samples falling (CliffAlong's rule). For the routes' big drops (Router.MarkBigDrops,
+-- FallSpells.lua). Remembered by the points, as CliffAlong.
+function P.FallAlong(cont, x1, y1, x2, y2)
+  local key = cont .. ":" .. x1 .. ":" .. y1 .. ":" .. x2 .. ":" .. y2
+  local v = fallMemo[key]
+  if v ~= nil then
+    if not v then return nil end
+    return v[1], v[2], v[3]
+  end
+  local dx, dy = x2 - x1, y2 - y1
+  local len = math.sqrt(dx * dx + dy * dy)
+  local best
+  if len > 0 then
+    -- (cliff walls crossed down)
+    EnsureWalls()
+    local segs = wallSegs[cont]
+    if segs then
+      local B, seen = P.WALL_BUCKET, {}
+      for kx = math.floor(math.min(x1, x2) / B), math.floor(math.max(x1, x2) / B) do
+        for ky = math.floor(math.min(y1, y2) / B), math.floor(math.max(y1, y2) / B) do
+          for _, s in ipairs(segs[kx * 65536 + ky] or {}) do
+            if not seen[s] and s.down and s.dz and dx * s.down[1] + dy * s.down[2] > 0 then
+              seen[s] = true
+              local ex, ey = s[3] - s[1], s[4] - s[2]
+              local den = dx * ey - dy * ex
+              if math.abs(den) > 1e-9 then
+                local t = ((s[1] - x1) * ey - (s[2] - y1) * ex) / den
+                local u = ((s[1] - x1) * dy - (s[2] - y1) * dx) / den
+                local dz = math.abs(s.dz)
+                if t >= 0 and t <= 1 and u >= 0 and u <= 1 and (not best or dz > best[3]) then
+                  local e = 1 / len
+                  best = { math.max(0, t - e), math.min(1, t + e), dz }
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+    -- (the ground's steep runs down)
+    local g = ns.Terrain and ns.Terrain[cont]
+    if not (g and g.slack) and ns.Ground and ns.Ground.At then
+      local n = math.max(1, math.ceil(len / P.CLIFF_SAMPLE))
+      local rise = P.CLIFF_SLOPE * len / n
+      local near = OverlayNear(cont, x1, y1, x2, y2)
+      local down, start, prev = 0, nil, nil
+      local co, isMain = coroutine.running()
+      local canYield = co ~= nil and not isMain
+      for i = 0, n do
+        if canYield then -- (in the background: paused as CliffAlong's)
+          local k = P.cliffSamples + 1
+          if k >= P.CLIFF_YIELD_EVERY or (k % 8 == 0 and SliceOver()) then
+            k = 0
+            coroutine.yield()
+          end
+          P.cliffSamples = k
+        end
+        local z = WalkedZ(cont, g, x1 + dx * i / n, y1 + dy * i / n, near)
+        if z and prev and prev - z > rise then
+          if down == 0 then start = i - 1 end
+          down = down + prev - z
+          if not best or down > best[3] then best = { start / n, i / n, down } end
+        else
+          down = 0
+        end
+        prev = z
+      end
+    end
+  end
+  if fallMemoN >= CLIFF_MEMO_MAX then fallMemo, fallMemoN = {}, 0 end
+  fallMemo[key], fallMemoN = best or false, fallMemoN + 1
+  if not best then return nil end
+  return best[1], best[2], best[3]
+end
+
+-- Every drop the straight leg from (x1, y1) to (x2, y2) goes down, walked that way, in order along it: { { t, dz }, ... }
+-- (0..1 along it, how far): the cliff walls crossed down their way and the ground's runs of steep samples falling
+-- (FallAlong's, each run its own). For the open world's drop rules (Router.DropExtra): a step down, a fall worth it, a
+-- chain of them down a slope.
+function P.DropsAlong(cont, x1, y1, x2, y2)
+  local dx, dy = x2 - x1, y2 - y1
+  local len = math.sqrt(dx * dx + dy * dy)
+  local out = {}
+  if len <= 0 then return out end
+  EnsureWalls()
+  local segs = wallSegs[cont]
+  if segs then
+    local B, seen = P.WALL_BUCKET, {}
+    for kx = math.floor(math.min(x1, x2) / B), math.floor(math.max(x1, x2) / B) do
+      for ky = math.floor(math.min(y1, y2) / B), math.floor(math.max(y1, y2) / B) do
+        for _, s in ipairs(segs[kx * 65536 + ky] or {}) do
+          if not seen[s] and s.down and s.dz and dx * s.down[1] + dy * s.down[2] > 0 then
+            seen[s] = true
+            local ex, ey = s[3] - s[1], s[4] - s[2]
+            local den = dx * ey - dy * ex
+            if math.abs(den) > 1e-9 then
+              local t = ((s[1] - x1) * ey - (s[2] - y1) * ex) / den
+              local u = ((s[1] - x1) * dy - (s[2] - y1) * dx) / den
+              if t >= 0 and t <= 1 and u >= 0 and u <= 1 then out[#out + 1] = { t, math.abs(s.dz) } end
+            end
+          end
+        end
+      end
+    end
+  end
+  -- (the ground's runs down: CliffAlong's, sampled once for both)
+  if not P.CliffAlong(cont, x1, y1, x2, y2) then
+    for _, r in ipairs(P.CliffRuns(cont, x1, y1, x2, y2) or {}) do out[#out + 1] = { r[1], r[2] } end
+  end
+  table.sort(out, function(a, b) return a[1] < b[1] end)
+  -- (one drop seen twice, the wall's and the ground's at it (its heights the wall's): within DROP_SAME_YD, the bigger)
+  local merged = {}
+  for _, d in ipairs(out) do
+    local last = merged[#merged]
+    if last and (d[1] - last[1]) * len <= P.DROP_SAME_YD then
+      if d[2] > last[2] then last[2] = d[2] end
+    else
+      merged[#merged + 1] = { d[1], d[2] }
+    end
+  end
+  return merged
+end
+P.DROP_SAME_YD = 6
+
+-- A straight leg's drops' extra cost by the open world's rules (Router.DropExtra): nil when one isn't taken (a chain).
+local function DropsCost(cont, x1, y1, x2, y2)
+  local Rt = ns.Router
+  if not (Rt and Rt.DropExtra) then return 0 end
+  local len = math.sqrt((x2 - x1) ^ 2 + (y2 - y1) ^ 2)
+  local extra, lastT = 0, nil
+  for _, d in ipairs(P.DropsAlong(cont, x1, y1, x2, y2)) do
+    local chained = lastT ~= nil and Rt.ChainDrop(d[2]) and (d[1] - lastT) * len <= Rt.CHAIN_YD
+    local e = Rt.DropExtra(d[2], chained, 0)
+    if not e then return nil end
+    extra = extra + e
+    if Rt.ChainDrop(d[2]) then lastT = d[1] end
+  end
+  return extra
 end
 
 -- The ground's height at grid g's cell (c, r)'s middle for the walks' cliff check (WalkedZ), false where it has none;
@@ -858,7 +1189,8 @@ end
 local cellZ, cellZN = {}, 0
 -- (the ground's heights read again: the tests' own ground)
 function P.ClearCliffMemo()
-  cliffMemo, cliffMemoN, cellZ, cellZN = {}, 0, {}, 0
+  cliffMemo, cliffMemoN, cellZ, cellZN, cliffRuns = {}, 0, {}, 0, {}
+  fallMemo, fallMemoN = {}, 0
 end
 local function CellZ(cont, g, c, r)
   local t = cellZ[g]
@@ -926,7 +1258,10 @@ local function SteepRunDown(cont, g, x1, y1, dx, dy, len, t0, t1, near)
 end
 
 local function SegmentCostRaw(cont, x1, y1, x2, y2, endSlack)
-  if P.CrossesWall(cont, x1, y1, x2, y2) then return nil end -- (a wall: never, not even near its ends)
+  -- (a wall: never, not even near its ends. Not the model walls, P.CrossesModelWall: the terrain grid's cells and its
+  -- prepared blocks don't know them, so its searches would go through and the pieces be refused: the road graph's joins
+  -- and the Hinterlands' trips from the west were lost, item 78. The world grid and the spell jumps keep to them)
+  if P.CrossesWall(cont, x1, y1, x2, y2, nil, true) then return nil end
   local g = ns.Terrain and ns.Terrain[cont]
   local dx, dy = x2 - x1, y2 - y1
   local len = math.sqrt(dx * dx + dy * dy)
@@ -989,7 +1324,9 @@ local function SegmentCostRaw(cont, x1, y1, x2, y2, endSlack)
     if v == 1 then water = water + 1 end
   end
   if P.CliffAlong(cont, x1, y1, x2, y2) then return nil end -- (open ground, but up or down a cliff: CliffAlong)
-  return len + len * (water / (n + 1)) * (P.SwimCost() - 1) + steepRuns * P.STEEP_RUN_COST
+  local drops = DropsCost(cont, x1, y1, x2, y2) -- (its drops by the open world's rules: a chain is walked round)
+  if not drops then return nil end
+  return len + len * (water / (n + 1)) * (P.SwimCost() - 1) + steepRuns * P.STEEP_RUN_COST + drops
 end
 
 -- Every caller's checks remembered, the exact points and end slack the key (no rounding: routes stay the
@@ -1001,6 +1338,7 @@ local segMemo, segMemoN = {}, 0
 function P.ClearSegMemo() segMemo, segMemoN = {}, 0 end
 function P.SegmentCost(cont, x1, y1, x2, y2, endSlack)
   local key = cont .. ":" .. x1 .. ":" .. y1 .. ":" .. x2 .. ":" .. y2 .. ":" .. (endSlack or "d")
+    .. (ns.Router and ns.Router.ExpertJumper and ns.Router.ExpertJumper() and ":x" or "")
   local c = segMemo[key]
   if c == nil then
     c = SegmentCostRaw(cont, x1, y1, x2, y2, endSlack) or false
@@ -1179,6 +1517,22 @@ function P.SetSwimBans(bans)
   wetMemo, wetMemoN = {}, 0
   if P.ClearSegMemo then P.ClearSegMemo() end
   return true
+end
+-- Whether world (x, y) on `cont` is in water banned now (P.SetSwimBans; the world grid's swims there are closed).
+function P.SwimBanned(cont, x, y)
+  local g = ns.Terrain and ns.Terrain[cont]
+  local br = g and banRows[g]
+  if not br then return false end
+  local c, r = ToCell(g, x, y)
+  local l = br[r]
+  for i = 1, l and #l - 1 or 0, 2 do
+    if c >= l[i] and c <= l[i + 1] then return true end
+  end
+  return false
+end
+function P.AnySwimBans(cont)
+  local g = ns.Terrain and ns.Terrain[cont]
+  return g ~= nil and banRows[g] ~= nil and next(banRows[g]) ~= nil
 end
 -- Whether world (x, y) on `cont` is in the water of `ban` (P.SwimSection's), banned or not. (By row, made once a ban:
 -- not on the ban itself, which is saved.)
@@ -1815,7 +2169,10 @@ local function Search(cont, x1, y1, x2, y2, road1, road2, priceRed)
     if not b then return false end
     local dz = math.abs(b - a)
     if dz <= ((c ~= fc and r ~= fr) and rise * SQ2 or rise) then return false end
-    return not (dz <= drop and ((fc == c1 and fr == r1) or (c == c2 and r == r2)))
+    -- (the fall-free drop out of the start's cell or into the stop's only where the player is: not at a road's end. A
+    -- walk between two road pieces near Thousand Needles' Great Lift dropped 12 yd off a cliff at each end, and with
+    -- Road tolerance +3 the route took it, 2026-11-23)
+    return not (dz <= drop and ((fc == c1 and fr == r1 and not road1) or (c == c2 and r == r2 and not road2)))
   end
   local memo = {} -- (by row: Row)
   -- step multiplier into (c, r) (from (fc, fr), when it's a move: the cliffs), or nil where it can't go

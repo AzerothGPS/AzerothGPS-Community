@@ -88,10 +88,17 @@ def test_the_door_below_an_npc_upstairs_is_not_arrived(clean):
     x, y, _ = DELLIS_XYZ
     text = _status(lua, ns, x + 7, y - 2)  # (at the door, 7 yd off: within the old 10 yd circle)
     assert ARRIVED not in text and N.dest is not None
-    # (the way on said: into the building and up its stairs, and how far up)
+    # (the street's floor followed in through the door: the way on said, into the building and up its stairs, and how
+    # far up. With the city grid on, the street's floor is followed already (CityGrid.TrackFloor: 99 at the door, the
+    # acolyte at 105): the hint at once; with no floor known it says nothing, Nav.PlayerHeightNear)
+    if N.FollowedZ(0) is None:
+        assert N.IntoBuildingText(x + 7, y - 2, 0) is None and N.HeightHint(x + 7, y - 2, 0) is None
+    else:
+        assert "Go into the building, then up the stairs" in N.IntoBuildingText(x + 7, y - 2, 0)
+    lua.execute("AGPS_T = 3000")
+    N.AnchorFloor(0, x + 7, y - 2, 100.0)
     assert "Go into the building, then up the stairs" in N.IntoBuildingText(x + 7, y - 2, 0)
-    assert N.HeightHint(x + 7, y - 2, 0)[0] == "up"
-    assert "Above you" in N.HeightText(x + 7, y - 2, 0)
+    # (4.8 yd up: under the "Above you" line's HEIGHT_HINT_YD, the stairs line says it)
     # (its Target button shows meanwhile)
     b = _button(lua, ns, 2000)
     assert b._shown and "/targetexact Acolyte Dellis" in b._attr["macrotext"]
@@ -148,7 +155,7 @@ def test_right_by_a_stop_a_floor_off_with_no_npc_arrives_by_an_npc_it_does_not(c
     assert ARRIVED not in _status(lua, ns, x + 7, y)
     assert ARRIVED in _status(lua, ns, x + N.OFF_FLOOR_ARRIVE_YD - 1, y)  # (no NPC to talk to: 3 yd)
     _stop(lua, ns, DELLIS, DELLIS_XYZ, "Acolyte Dellis")
-    assert ARRIVED not in _status(lua, ns, x + N.OFF_FLOOR_ARRIVE_YD - 1, y)
+    assert ARRIVED not in _status(lua, ns, x + N.OFF_FLOOR_ARRIVE_YD - 0.5, y)  # (2.5 yd: past NPC_BY_YD)
 
 
 def test_the_door_right_under_her_is_not_arrived_even_once_the_floor_goes_stale(clean):
@@ -262,9 +269,11 @@ def test_roads_not_ready_yet_is_not_arrived(clean):
         x, y, _ = DELLIS_XYZ
         assert N.StopOffGround(N.dest)[2] is True
         assert ARRIVED not in _status(lua, ns, x + 7, y - 2) and N.dest is not None
-        gx, gy, _ = GILROY_XYZ  # (a ground floor NPC too: not until the roads tell)
+        gx, gy, _ = GILROY_XYZ  # (a ground floor NPC too: not until a floor's known; city routing on (1.4.0's
+        # default), the city grid's floor followed tells it without the roads: there, on his floor)
         _stop(lua, ns, GILROY, GILROY_XYZ, "Adair Gilroy")
-        assert ARRIVED not in _status(lua, ns, gx + 8, gy)
+        text = _status(lua, ns, gx + 8, gy)
+        assert (ARRIVED in text) == ns.CityGrid.On(), text
     finally:
         lua.execute("AGPS_NS.Router.HeightsNear = AGPS_OLD_HN")
     _stop(lua, ns, GILROY, GILROY_XYZ, "Adair Gilroy")
@@ -350,7 +359,9 @@ def test_with_arrival_reasons_on_each_arrival_says_why_once(clean):
         assert ARRIVED in _status(lua, ns, x + 8, y)
         _status(lua, ns, x + 8, y)
         said = list(lua.eval("AGPS_SAID").values())
-        assert len(said) == 1 and said[0].startswith("arrived Adair Gilroy (distance): 8.0 yd, stop z 98.4, off no")
+        # (by the city grid's floor followed with city routing on, 1.4.0's default: "floor"; else by "distance")
+        assert len(said) == 1 and (said[0].startswith("arrived Adair Gilroy (distance): 8.0 yd, stop z 98.4, off no")
+                                   or said[0].startswith("arrived Adair Gilroy (floor): 8.0 yd, stop z 98.4, off no")), said
         assert "roads 98" in said[0] or "roads 100" in said[0] or "roads " in said[0]
         lua.execute("AGPS_SAID = {}")
         _stop(lua, ns, DELLIS, DELLIS_XYZ, "Acolyte Dellis")
@@ -388,6 +399,77 @@ def test_targeted_in_range_from_the_floor_below_is_not_arrived(clean):
     assert ARRIVED in (N.Status(x + 4, y, 0) or "")
 
 
+
+def test_by_nissa_on_her_balcony_no_hint_from_the_mountain_over_ironforge(clean):
+    # (Kooki3z, 2026-11-23, 2 yd from Nissa Firestone on her balcony: "Below you, 251 yd down" and "Go into the building,
+    # then up the stairs": the ground over Ironforge (760) taken for the player's height, no floor followed)
+    lua, ns = clean
+    N = ns.Nav
+    x, y, z = -4876.6, -1149.1, 512.5
+    N.SetStops(lua.eval(f"""{{ {{ x = {x}, y = {y}, z = {z}, cont = 0, name = 'Ironforge First Aid Trainer',
+      npcId = 5150, npcName = 'Nissa Firestone' }} }}"""), False, "red")
+    px, py = x + 2, y
+    _at(lua, px, py)
+    assert N.FollowedZ(0) is None and N.PlayerHeightNear(0, px, py) is None
+    assert N.HeightHint(px, py, 0) is None
+    assert N.IntoBuildingText(px, py, 0) is None
+    text = N.Status(px, py, 0) or ""
+    assert "251" not in text and "Below you" not in text and "Go into the building" not in text, text
+
+
+def test_right_by_an_npc_a_floor_off_with_no_other_floor_known_arrives(clean):
+    # (Kooki3z, 2026-11-23, 1 yd from Nissa Firestone on her balcony, no floor followed: "this should count as arrived")
+    lua, ns = clean
+    N = ns.Nav
+    x, y, z = -4876.6, -1149.1, 512.5
+    N.SetStops(lua.eval(f"""{{ {{ x = {x}, y = {y}, z = {z}, cont = 0, name = 'Ironforge First Aid Trainer',
+      npcId = 5150, npcName = 'Nissa Firestone' }} }}"""), False, "red")
+    assert ARRIVED not in _status(lua, ns, x + 2.5, y)  # (2.5 yd: not yet)
+    assert ARRIVED in _status(lua, ns, x + 1, y)
+
+
+def test_the_door_under_dellis_stays_not_arrived_floor_known_or_stale(clean):
+    # (2.9 yd from her spot: over 2 yd, and with the street's floor followed (99 against her 104.8) another floor)
+    lua, ns = clean
+    N = ns.Nav
+    _stop(lua, ns, DELLIS, DELLIS_XYZ, "Acolyte Dellis")
+    x, y, _ = DELLIS_XYZ
+    px, py = x + 2.9, y
+    _at(lua, px, py)
+    lua.execute("AGPS_T = 4000")
+    N.AnchorFloor(0, px, py, 99.0)
+    assert ARRIVED not in (N.Status(px, py, 0) or "")
+    lua.execute("AGPS_T = 4010")
+    assert N.FollowedZ(0) is None and ARRIVED not in (N.Status(px, py, 0) or "")
+    # (and 1.5 yd off her spot with the street's floor still followed: another floor known, not there)
+    lua.execute("AGPS_T = 4020")
+    N.AnchorFloor(0, x + 1.5, y, 99.0)
+    assert ARRIVED not in (N.Status(x + 1.5, y, 0) or "")
+
+
+def test_bankers_and_auctioneers_arrive_from_across_their_counter(clean):
+    # (Kooki3z, 2026-11-23: "except for auctioneers and bankers, they are sometimes further away like in orgrimmar")
+    lua, ns = clean
+    N = ns.Nav
+    for npc, name, (x, y, z) in ((3309, "Karus", (1627.3, -4376.1, 11.8)),
+                                 (8673, "Auctioneer Thathung", (1687.3, -4464.7, 20.1))):
+        N.SetStops(lua.eval(f"""{{ {{ x = {x}, y = {y}, z = {z}, cont = 1, name = '{name}', npcId = {npc},
+          npcName = '{name}' }} }}"""), False, "red")
+        lua.execute(f"AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = {x + 6}, {y}, 1")
+        assert ARRIVED in (N.Status(x + 6, y, 1) or ""), name  # (from the customer side: as any stop, 10 yd)
+    # (one a floor off with no road of its floor (a banker's id at the Canals library's upstairs spot): from 5 yd, no
+    # other floor known, there; a stocky NPC's 2 yd would not be; with another floor followed, not there)
+    dx, dy, dz = DELLIS_XYZ
+    assert N.NpcByYd(lua.eval("{ npcId = 3309 }")) == N.NPC_COUNTER_YD
+    assert N.NpcByYd(lua.eval(f"{{ npcId = {DELLIS} }}")) == N.NPC_BY_YD
+    N.SetStops(lua.eval(f"""{{ {{ x = {dx}, y = {dy}, z = {dz}, cont = 0, name = 'Banker', npcId = 3309,
+      npcName = 'Karus' }} }}"""), False, "red")
+    assert ARRIVED in _status(lua, ns, dx + 5, dy)
+    N.SetStops(lua.eval(f"""{{ {{ x = {dx}, y = {dy}, z = {dz}, cont = 0, name = 'Banker', npcId = 3309,
+      npcName = 'Karus' }} }}"""), False, "red")
+    lua.execute("AGPS_T = 5000")
+    N.AnchorFloor(0, dx + 5, dy, 99.0)
+    assert ARRIVED not in (N.Status(dx + 5, dy, 0) or "")
 def test_at_the_routes_end_a_floor_off_shows_the_floor_not_0_yd(clean):
     # (Kooki3z 2026-11-23: "if player gets to the entrance or anything and it says 0 yds 0 s then we arrived (assuming
     # floor is correct)": at the route's end on a floor known to be another, not arrived, and the floor said, not "0 yd")

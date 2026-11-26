@@ -28,6 +28,7 @@ Data\Minimap.lua
 Data\Coast.lua
 Data\Maps.lua
 Data\Roads.lua
+Data\ModelWalls.lua
 Data\Interiors.lua
 Data\Pois.lua
 Data\Terrain.lua
@@ -41,6 +42,10 @@ Data\Cities.lua
 Data\Caves.lua
 Data\Capitals.lua
 Data\Indoors.lua
+Data\CityGrid.lua
+Data\WorldGrid0.lua
+Data\WorldGrid1.lua
+Data\WorldGrid2991.lua
 Data\Instances.lua
 Data\Transit.lua
 Data\DungeonMaps.lua
@@ -53,6 +58,7 @@ Data\Pins.lua
 Data\GuideFloors.lua
 Data\NpcFloors.lua
 Data\Npcs.lua
+Data\Mobs.lua
 Data\VendorItems.lua
 Data\QuestNpcs.lua
 Data\NpcNames\deDE.lua
@@ -77,6 +83,8 @@ Passability.lua
 Router.lua
 Nav.lua
 Turns.lua
+CityGrid.lua
+WorldGrid.lua
 MapText.lua
 Import.lua
 RestedXP.lua
@@ -92,6 +100,7 @@ Arrow.lua
 Looks.lua
 Taxi.lua
 Teleports.lua
+FallSpells.lua
 Record.lua
 Ground.lua
 Pins.lua
@@ -105,6 +114,8 @@ Config.lua
 Api.lua
 Tutorial.lua
 Setup.lua
+WhatsNew.lua
+Faq.lua
 
 # The seamless map (issues #49, #57, #60, #61): its data and engine, run only when it's on (Atlas/Atlas.lua)
 Atlas\Data\BakedZones.lua

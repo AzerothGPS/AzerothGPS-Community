@@ -53,7 +53,7 @@ def test_the_data_file_is_one_packed_string_of_the_shipped_vendors_lists():
     assert set(vendors) <= shipped_npc_ids()
     # loaded after Data/Npcs.lua, read only by Layers' L.VendorItems
     toc = (ADDON_DIR / "AzerothGPS.toc").read_text(encoding="utf-8").splitlines()
-    assert toc.index("Data\\VendorItems.lua") == toc.index("Data\\Npcs.lua") + 1
+    assert toc.index("Data\\VendorItems.lua") > toc.index("Data\\Npcs.lua")  # (Mobs.lua may sit between, 1.4.0)
     readers = sorted(f.name for f in ADDON_DIR.rglob("*.lua")
                      if "VendorItemsPacked" in f.read_text(encoding="utf-8", errors="replace"))
     assert readers == ["Layers.lua", "VendorItems.lua"]

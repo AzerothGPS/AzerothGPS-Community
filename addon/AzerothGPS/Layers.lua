@@ -2190,6 +2190,43 @@ function Lay.AttachNpc(stop, name, noHeight)
   end
   return stop
 end
+-- The shipped flight master nearest (x, y) on `level`'s continent within FLIGHT_NPC_YD (a taxi node is a few yards off
+-- its NPC: Thunder Bluff's 3.6 yd off Tal): { id, name, cont, x, y, z } or nil.
+Lay.FLIGHT_NPC_YD = 15
+function Lay.FlightMasterNear(level, x, y)
+  if not (level and x and y) then return nil end
+  local base = Geo.Base(level)
+  local best, bd
+  for _, n in ipairs((Lay.ShippedNpcs())) do
+    if n.svc and n.svc:find("f", 1, true) then
+      local sp = n.spawns
+      for i = 1, #sp - 3, 4 do
+        local d2 = (sp[i + 1] - x) ^ 2 + (sp[i + 2] - y) ^ 2
+        if d2 <= Lay.FLIGHT_NPC_YD ^ 2 and Geo.Base(sp[i]) == base and (not bd or d2 < bd) then
+          best, bd = { id = n.id, name = ns.NpcName and ns.NpcName(n.id, n.name) or n.name, cont = sp[i],
+            x = sp[i + 1], y = sp[i + 2], z = sp[i + 3] }, d2
+        end
+      end
+    end
+  end
+  return best
+end
+-- NPC `id`'s shipped spawn nearest (x, y) on `level`'s continent within FLIGHT_NPC_YD: { cont, x, y, z } or nil.
+function Lay.NpcSpawnNear(id, level, x, y)
+  local _, byId = Lay.ShippedNpcs()
+  local n = id and byId[id]
+  if not (n and level and x and y) then return nil end
+  local base = Geo.Base(level)
+  local best, bd
+  local sp = n.spawns
+  for i = 1, #sp - 3, 4 do
+    local d2 = (sp[i + 1] - x) ^ 2 + (sp[i + 2] - y) ^ 2
+    if d2 <= Lay.FLIGHT_NPC_YD ^ 2 and Geo.Base(sp[i]) == base and (not bd or d2 < bd) then
+      best, bd = { cont = sp[i], x = sp[i + 1], y = sp[i + 2], z = sp[i + 3] }, d2
+    end
+  end
+  return best
+end
 -- A city place's NPC (Kooki3z, 2026-11-22: "Locations that have a single trainer like the first aid trainer in
 -- ironforge, have routing go to the NPC. If it has more than 1 just pick one of them"): the places (Data/CityPlaces.lua,
 -- TownPlaces) are the guards' map spots, near the NPC but not at it, and often on another floor. By the place's kind
@@ -2481,6 +2518,9 @@ function Lay.ShippedNpcs()
   local packed = ns.NpcsPacked
   if Lay.shippedFrom == packed and Lay.shippedNpcs then return Lay.shippedNpcs, Lay.shippedById, Lay.shippedByName end
   local out, byId, byName = {}, {}, {}
+  -- (stand-ins: WoW Forever's own NPCs from Wowhead's pages, unverified, till logged in game: standin.py)
+  local standin = {}
+  for sid in tostring(ns.NpcsStandIn or ""):gmatch("%d+") do standin[tonumber(sid)] = true end
   if type(packed) == "string" then
     for line in packed:gmatch("[^\n]+") do
       local id, name, title, svc, trainer, side, spawns =
@@ -2494,7 +2534,7 @@ function Lay.ShippedNpcs()
         end
         if sp[1] then
           local n = { id = id, name = name, title = title ~= "" and title or nil, svc = svc,
-            trainer = trainer ~= "" and trainer or nil, side = side, spawns = sp }
+            trainer = trainer ~= "" and trainer or nil, side = side, spawns = sp, standin = standin[id] or nil }
           out[#out + 1], byId[id] = n, n
           local key = name:lower()
           byName[key] = byName[key] or {}
@@ -2589,6 +2629,55 @@ function Lay.NearestSpawn(n, x, y, cont)
     end
   end
   return sp[bi], sp[bi + 1], sp[bi + 2], sp[bi + 3]
+end
+-- Every enemy mob, shipped (Data/Mobs.lua, `agps mobs`; 1.4.0, Kooki3z 2026-11-22: "add all enemy mobs to the search
+-- function, only showing the closest one in the list"): read from its one string at the first search, never at login,
+-- and only each line's head (id, name, levels, side): a mob's spawns are read when the search finds it (L.MobSpawns).
+-- Each { id, name, lo, hi (its levels), side (the enemy of "A", "H" or "B": both), packed (its spawns' text) }. Read
+-- again when the string changes (the tests' own).
+function Lay.ShippedMobs()
+  local packed = ns.MobsPacked
+  if Lay.mobsFrom == packed and Lay.shippedMobs then return Lay.shippedMobs end
+  local out = {}
+  if type(packed) == "string" then
+    for id, name, lo, hi, side, spawns in packed:gmatch("(%d+)|([^|\n]+)|(%d+)|(%d+)|(%a)|([^\n]*)") do
+      out[#out + 1] = { id = tonumber(id), name = name, lo = tonumber(lo), hi = tonumber(hi), side = side,
+        packed = spawns }
+    end
+  end
+  Lay.mobsFrom, Lay.shippedMobs = packed, out
+  return out
+end
+-- Mob `m`'s spawns (L.ShippedMobs), as a shipped NPC's: { level, x, y, z, ... }. Read from its text the first time
+-- (`level x y z dx dy dz ...` a level, split by ";"), then kept.
+function Lay.MobSpawns(m)
+  if m.spawns then return m.spawns end
+  local sp = {}
+  for group in (m.packed or ""):gmatch("[^;]+") do
+    local k, lv, x, y, z = 0
+    for txt in group:gmatch("%-?%d+") do
+      local v = tonumber(txt)
+      k = k + 1
+      if k == 1 then
+        lv = v
+      elseif k == 2 then
+        x = v
+      elseif k == 3 then
+        y = v
+      elseif k == 4 then
+        z = v
+      else
+        local j = (k - 5) % 3
+        if j == 0 then x = x + v elseif j == 1 then y = y + v else z = z + v end
+      end
+      if k >= 4 and (k - 4) % 3 == 0 then
+        local n = #sp
+        sp[n + 1], sp[n + 2], sp[n + 3], sp[n + 4] = lv, x, y, z
+      end
+    end
+  end
+  m.spawns = sp
+  return sp
 end
 -- The floor (z) learned for NPC record `n` (talked to: L.NoteNpc) at a spot within LEARNED_Z_YD of (x, y) on level
 -- `level`, or nil: the search's stop at a shipped NPC takes the learned floor first (where the player was followed

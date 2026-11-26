@@ -2,39 +2,87 @@
 
 Each version's section is its release notes (GitHub and CurseForge).
 
-## 1.3.15 (in progress)
+## 1.4.0 (in progress)
 
 ### New
 
-- Search: NPCs that were missing, like the junior profession trainers in Northshire and the PvP quartermasters in Stormwind.
-- Roads: new roads in Ironforge, down to the Hall of Thanes' way in.
-- Roads: new roads in Burning Steppes.
-- Roads: a new road in Tanaris.
-- Roads: new roads in Feralas.
-- Roads: a new road in The Barrens, from the Great Lift to Razorfen Downs.
-- Roads: new roads in The Hinterlands.
-- Roads: a road fixed in Stonetalon Mountains.
+- Grid routing: routes walk the map's own ground in the open world and inside the six capitals (every floor, stairs, ramps and bridges), not just the roads. Always on.
+- Spell jumping: with Slow Fall, Levitate, Walk on Air, Gliding on Air, a parachute cloak or another fall item ready, routes jump down cliffs too high to survive without it; the step says when to cast and a button beside the directions casts it (Options > Routing: Use class spells).
+- Spell jumping: routes walk to a cliff's edge and jump whenever your fall spell or Safe drop covers the drop, and only take as many spell jumps as your cooldowns and reagents allow.
+- Options > Routing: Expert jumper, under Use class spells: jump down any ledge and cast your fall spell just before you land.
+- Options > Routing: Safe drop sets how far routes drop without a fall spell, in combat too; only drops of 25 yd or more say "Jump down here".
+- Jumps on the route are drawn as a coil on the map, the world map and the minimap; right-click one to avoid spell jumps (or all jumps) on the way to that stop.
+- Inside buildings and caves, the route fades the further its floor is from yours (down to half), so a route winding floors below isn't mistaken for your floor.
+- A stop inside a cave or mine is reached through its mouth along the cave's own path, and its inside map stays shown at any zoom until you get there.
+- Routes into buildings outside the capitals go in through the door, and say the stairs up and down.
 - Dungeons and raids: every entrance knows its height, so the walk there ends on the right floor (Blackrock Mountain, caves).
+- When there's no way on foot, the directions say "No way found yet" instead of drawing a straight line through walls.
+- The other faction's guard areas near you or your route are shown in red, route or not (Options > Routing: Show enemy areas).
+- Search: enemy mobs by name, each at its camp nearest you; orange or red ones show their levels (Options: Include enemies).
+- Search: NPCs that were missing, like the junior profession trainers in Northshire and the PvP quartermasters in Stormwind.
+- Roads: new roads in Ironforge (down to the Hall of Thanes' way in), Burning Steppes, Tanaris, Feralas, The Barrens (from the Great Lift to Razorfen Downs) and The Hinterlands; a road fixed in Stonetalon Mountains.
+- The direction arrow and the directions text turn on and off on their own (Options > Directions).
+- What's New window: the new routing and jumping options in one place (Options > Help, /agps whatsnew).
+- FAQ window: answers to common questions (Options > Help, /agps faq).
+- Tutorial: the spell jumping step shows a live example on your map, with the cast button to try (nothing is cast).
+- A "?" by the minimap's logo when a question is waiting and the map is closed; click it to answer.
+- The map's ground data comes as region add-ons, listed under AzerothGPS in the AddOn List; keep them enabled.
+- /agps debug speeds: your run and swim speeds as routing uses them, and a reset.
 
 ### Changed
 
+- Long walks round cliffs and ridges are worked out much faster, and settle on their best way sooner.
+- Trips with a flight path you know no longer wait for the whole walk to be worked out first.
+- Road tolerance is now "Roads or shortcuts", its ends labeled "Stick to roads" and "Cut across"; it steers grid routes too.
+- Saying "No" to "Take it?" now finds a way round the other faction's guards, however long; with no way round, it says so within seconds and asks whether to go past them.
+- A spell jump far ahead reads like any other step, with its distance; "Jump, then cast" only near the edge.
+- AzerothGPS uses much less memory on long sessions of cross-zone routes.
 - Options > Help and Copy Map Data no longer mention the road tools: report map problems through the report form; roads you drew still guide your routes.
+- The tutorial is now only in Options > Help; no more popups offering it.
 - The Deeprun Tram's icons are round and drawn to scale like the map's other icons.
 - Stranglethorn's arena is labeled Gurubashi Arena only (no separate Battle Ring).
 
 ### Fixed
 
-- Horde routes no longer take the Dalaran skycutter to Zephras Isle (Dalaran's guards are hostile to the Horde); they use Camp Gev'rek's.
-- Options: hovering the grayed world map option (controller UI on) shows its tooltip and why it's gray.
-- A city's class trainer place (Undercity Mage Trainer) routes to that class's trainer, not a portal trainer nearby.
-- The Target button now marks the NPC with the stop's route marker too; it only targeted it.
-- A new stop's marker no longer shows as a gray cog for a moment.
-- Setting a route, the map zooms out to show it only once the route is drawn, not while it's still being worked out.
+- Routes no longer stay on "Working out the route..." for minutes on long or cross-zone trips.
+- Routes no longer pass through fences, palisades and thin walls, or jump off a ledge through one (Red Cloud Mesa).
+- Routes no longer drop through the rock into Orgrimmar's Cleft of Shadow with Expert jumper on, and a drop is never called stairs.
+- A cliff that needs your fall spell is a spell jump with its cast step from the start, not a walk down that turns into a jump near the edge.
+- In Maraudon and other caves with passages over passages, the route follows the floor you're on.
+- With "Avoid the other faction's towns" on, a route that can't go round their guards (or into their capital) asks "Take it?" once a trip.
+- A flight master picked on the map is its NPC's stop, and a stop high over the ground you're on is no longer "Arrived" from under it.
+- Right next to an NPC up a floor now counts as arrived (bankers and auctioneers from across their counter), and the height hint no longer guesses from the land over a city.
+- Blackrock Mountain: the route keeps to your floor to Blackrock Spire's and Blackrock Depths' doors, and starts on the ring over the lava when you're on it.
+- A dungeon's or raid's entrance stop (Blackrock Depths) is its door at its height: no more "Arrived" on the ground above it; the route goes in.
 - A stop inside a dungeon or raid routes to its entrance: the distance and time are to the portal, not the walk inside.
 - Clicking a dungeon or raid with no map yet (Nightmare Grove) does nothing; its tooltip says the map is coming soon.
-- A dungeon's or raid's entrance stop (Blackrock Depths) is its door at its height: no more "Arrived" on the ground above it; the route goes in.
-- Blackrock Mountain's halls: the route keeps to your floor to Blackrock Spire's and Blackrock Depths' doors, no U-turns.
 - At the end of a route ("0 yd") you've arrived; a floor off, it says which way instead of "0 yd".
+- Routes no longer swim along a river or beside a bridge when walking the bank is the way.
+- Routes no longer walk out to a dock or zeppelin tower and back without taking the ride.
+- A Horde trip near Alliance towns no longer settles on a hearthstone-and-zeppelin detour when a walk exists.
+- Horde routes no longer take the Dalaran skycutter to Zephras Isle (Dalaran's guards are hostile to the Horde); they use Camp Gev'rek's.
+- The hearthstone step names the place you're bound to, and the route goes on from there.
+- A city's class trainer place (Undercity Mage Trainer) routes to that class's trainer, not a portal trainer nearby.
+- Through the other faction's guards only the route's color turns red: jumps stay coils and swims stay wavy.
+- The direction arrow no longer flickers when you walk a few yards beside the route.
+- Setting a route, the map zooms out to show it only once the route is drawn, not while it's still being worked out.
+- A new stop's marker no longer shows as a gray cog for a moment.
+- The Target button now marks the NPC with the stop's route marker too; it only targeted it.
+- World map mode: your map style stays on every zone at every zoom; the game's own map art no longer shows through it, blurry or with black holes.
+- Yes and No on AzerothGPS's questions (a zone too high, "Take it?", "Keep this route?") always work, in the map window and the world map; Enter answers Yes, Escape No.
+- With the GPS map as the minimap, a question shows on the map, not in the middle of the screen; with the map closed, the "?" over the logo waits for you.
+- The welcome setup's last page shows only its own options, with a gold frame and a Done button.
+- Options: hovering the grayed world map option (controller UI on) shows its tooltip and why it's gray.
+
+### Known issues
+
+- A few caves say "No way found yet" from outside their entrance, and a few routes enter a cave by a different opening.
+- Ironforge: routes near the High Seat can lead into the tunnel under the Great Forge on the way to the Hall of Thanes.
+- Orgrimmar's Hunter's Hall: its trainers can show as far below you, so the Target button doesn't appear.
+- The directions text can switch often between "Join the road" and "Leave the road" messages.
+- Routes don't go round elite mobs yet.
+- On a controller, jumps and swims can't be avoided yet (that still needs a right-click).
+- Some long routes in Dun Morogh past the guards keep working in the background after the route shows.
 
 ## 1.3.14
 

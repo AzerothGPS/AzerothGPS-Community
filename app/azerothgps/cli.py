@@ -264,6 +264,16 @@ def cmd_trip_sweep(args) -> int:
     return 0
 
 
+def cmd_underground_sweep(args) -> int:
+    from .undergroundsweep import sweep, write_report
+
+    result = sweep(jobs=args.jobs, only=args.only, limit=args.limit)
+    out = write_report(result, Path(args.out) if args.out else DATA / "debug" / "underground-sweep")
+    print(f"{result['failed_trips']} of {result['trips']} trips failed ({result['failed_destinations']} of "
+          f"{result['destinations']} destinations): {result['counts']}; details: {out}")
+    return 0
+
+
 def cmd_gen_addon_data(args) -> int:
     from .addon_data import generate
 
@@ -600,6 +610,141 @@ def _dev_addon() -> Path | None:
     return ADDON_DIR.parents[2].joinpath(*DEV_ADDON)
 
 
+def cmd_height_unknown(args) -> int:
+    """The shipped destinations with no height source in range (Nav.StopZ): data/height_unknown.json."""
+    from . import heightunknown
+    stops = heightunknown.sweep(log=print)
+    print(f"wrote {heightunknown.write(stops)}")
+    return 0
+
+
+def cmd_city_grid(args) -> int:
+    """The capitals' layered walk grids (citygrid.py, 1.4.0's city routing): bake, compare cell sizes, write, check."""
+    from . import citygrid
+
+    if args.check:
+        out = citygrid.check(args.only, log=print) + citygrid.check_gates(args.only, log=print)
+        bad = [r for r in out if not r["ok"]]
+        print(f"{len(out) - len(bad)} of {len(out)} city trips fine: data/debug/citygrid/check.json, gates.json")
+        return 0
+    cells = [float(c) for c in args.cells.split(",")] if args.cells else None
+    citygrid.run(args.only, cells=cells, write=args.write)
+    return 0
+
+
+def cmd_world_grid(args) -> int:
+    """The open world's layered walk grid (worldmesh.py, worldgrid.py, worldbake.py; 1.4.0's world routing, being
+    tested): `mesh` builds every map tile's Recast mesh, `grid` each tile's cells, then the bake (`--write`:
+    Data/WorldGrid<cont>.lua); `zones`: the sample zones against today's walls; `check`: the 10,000-route test."""
+    import json as _json
+
+    from . import worldbake, worldgrid, worldmesh, worldzones
+
+    conts = [int(c) for c in args.cont.split(",")] if args.cont else [0, 1, 2991]
+    if args.what == "alt":
+        # (item 33: the landmark distance fields from the shipped region folders, each folder's Alt.lua with --write)
+        from . import worldalt
+        import os as _os
+        from pathlib import Path as _P
+        root = _P(_os.environ.get("AGPS_WG_ADDONS_DIR") or worldbake.addons_root())
+        stats = []
+        for c in conts:
+            res = worldalt.bake(c, args.landmarks, far_set=args.far)
+            size = worldalt.write(c, res, root) if args.write else None
+            stats.append({"cont": c, "landmarks": res["landmarks"], "regions": len(res["regions"]), "bytes": size})
+        (DATA / "debug" / "worldgrid").mkdir(parents=True, exist_ok=True)
+        (DATA / "debug" / "worldgrid" / "alt.json").write_text(_json.dumps(stats, indent=1), encoding="utf-8")
+        print(_json.dumps(stats))
+        return 0
+    if args.what == "mesh":
+        cd = _client(args)
+        jobs = [(c, tx, ty) for c in conts for tx, ty in worldmesh.tiles(cd, c)]
+        out = worldmesh.build(jobs, args.wow_path, args.product, workers=args.workers)
+        print(f"{sum(r['ok'] for r in out)} of {len(out)} tiles built into {worldmesh.mesh_dir()}")
+        return 0 if all(r["ok"] for r in out) else 1
+    if args.what == "models":
+        # (item 72: every tile's building and prop collision triangles, for the grid's wall cut; needs the client)
+        cd = _client(args)
+        jobs = [(c, tx, ty) for c in conts for tx, ty in worldmesh.tiles(cd, c)]
+        out = worldmesh.build_models(jobs, args.wow_path, args.product, workers=args.workers)
+        print(f"{sum(r['ok'] for r in out)} of {len(out)} tiles' model triangles into {worldmesh.mesh_dir()}")
+        return 0 if all(r["ok"] for r in out) else 1
+    if args.what == "model-walls":
+        # (item 78: the thin tall walls' footprints from the models' triangles, Data/ModelWalls.lua with --write)
+        from . import modelwalls
+        walls = modelwalls.build(conts, workers=args.workers)
+        (DATA / "debug" / "worldgrid").mkdir(parents=True, exist_ok=True)
+        modelwalls.save_json(walls, DATA / "debug" / "worldgrid" / "model_walls.json")
+        if args.write:
+            print(f"written {modelwalls.write(walls)}")
+        return 0
+    if args.what == "grid":
+        jobs = []
+        for p in sorted(worldmesh.mesh_dir().glob("*.bin")):
+            c, tx, ty = map(int, p.stem.split("_"))
+            if c in conts:
+                jobs.append((c, tx, ty, args.per))
+        if args.regions:
+            # (only the tiles a region bake assembles: the regions' and a ring of 2 round them)
+            regions = [tuple(int(v) for v in r.split(":")) for r in args.regions.split(",")]
+            keep = set()
+            for c in conts:
+                have = {(j[1], j[2]) for j in jobs if j[0] == c}
+                keep |= {(c,) + t for t in worldbake.region_window(regions, have)[1]}
+            jobs = [j for j in jobs if j[:3] in keep]
+        if args.changed:
+            n = len(jobs)
+            jobs = [j for j in jobs if not worldgrid.tile_current(*j)]
+            print(f"{n - len(jobs)} of {n} tiles' grids already made from these meshes by this code: "
+                  f"{len(jobs)} to build")
+        out = worldgrid.build_tiles(jobs, workers=args.workers)
+        cuts = sorted(((r.get("wall_cuts", 0), r["tile"]) for r in out if r.get("ok")), reverse=True)
+        (DATA / "debug" / "worldgrid").mkdir(parents=True, exist_ok=True)
+        (DATA / "debug" / "worldgrid" / "wall_cuts.json").write_text(_json.dumps(
+            {"total": sum(c for c, _ in cuts), "tiles": [[c, t] for c, t in cuts if c]}, indent=0), encoding="utf-8")
+        print(f"links cut at models' walls: {sum(c for c, _ in cuts)} in {sum(1 for c, _ in cuts if c)} tiles")
+        return 0 if all(r["ok"] for r in out) else 1
+    if args.what == "tocs":
+        # (every region folder's toc written again from region_toc, its data untouched: no bake)
+        print(f"{len(worldbake.write_region_tocs())} region tocs written")
+        return 0
+    if args.what == "zones":
+        worldzones.zones(per_tile=args.per)
+        return 0
+    if args.what == "check":
+        from . import worldtest
+        worldtest.run(n=args.trips, workers=args.workers)
+        return 0
+    if args.what == "coverage":
+        from pathlib import Path as _P
+
+        from . import worldcoverage
+        res = worldcoverage.sweep(jobs=args.jobs, only=args.only, conts=conts)
+        if worldmesh.mesh_dir().exists() and any(worldmesh.mesh_dir().glob("*.bin")):
+            worldcoverage.diagnose(res)
+        out = _P(args.out) if args.out else DATA / "debug" / "worldgrid" / "coverage"
+        p = worldcoverage.write_report(res, out)
+        print(f"{res['stops']} stops, {res['failed']} the grids can't reach ({res['exceptions']} reviewed): {p}")
+        return 0
+    if args.regions:
+        # (only these regions' folders baked again: a change there, small enough for any PC)
+        regions = [tuple(int(v) for v in r.split(":")) for r in args.regions.split(",")]
+        for c in conts:
+            worldbake.bake_regions(c, regions, args.per, write=args.write)
+        return 0
+    rows = [worldbake.bake(c, args.per, write=args.write) for c in conts]
+    (DATA / "debug" / "worldgrid").mkdir(parents=True, exist_ok=True)
+    (DATA / "debug" / "worldgrid" / f"bake_{args.per}.json").write_text(_json.dumps(rows, indent=1), encoding="utf-8")
+    return 0
+
+
+def cmd_lifts(args) -> int:
+    """The open world's elevators and lifts in the CMaNGOS dump (lifts.py): the inventory."""
+    from . import lifts
+    lifts.run()
+    return 0
+
+
 def cmd_city_roads(args) -> int:
     """A capital's roads straightened and thinned over its navmesh (cityroads.py, issue #829)."""
     from . import cityroads
@@ -610,6 +755,23 @@ def cmd_city_roads(args) -> int:
         (DATA / "debug" / "cityroads" / f"{args.city.lower().replace(' ', '_')}_check.json").write_text(
             json.dumps(out, indent=1), encoding="utf-8")
     print(f"{len(res.flags)} roads the mesh can't walk: data/debug/cityroads/ (for recording in game)")
+    return 0
+
+
+def cmd_nav_features(args) -> int:
+    """The navmeshes' floors, stairs, bridges, lifts and jumps (navfeatures.py): each city's as city-grid's bake finds
+    them (data/debug/navfeatures/<city>.json, for Route Studio), or the interiors trial (--interiors)."""
+    from . import citygrid, navfeatures
+
+    if args.interiors:
+        navfeatures.interiors(_client(args))
+        return 0
+    for city in citygrid.CITIES:
+        if args.only and not any(o.lower() in city.name.lower() for o in args.only):
+            continue
+        g = citygrid.build(city)
+        if g.features is not None:
+            print(f"{city.name}: {g.features.counts()}")
     return 0
 
 
@@ -641,6 +803,11 @@ def cmd_navmesh(args) -> int:
         from . import navcompare
 
         return 0 if navcompare.run(only=args.only) else 1
+    if args.what == "tris":  # (the collision triangles and liquids navfeatures checks its links against)
+        from . import navfeatures
+
+        navfeatures.save_tris(_client(args), args.only)
+        return 0
     if not RM.tool().exists():
         print(f"no {RM.tool()}: agps navmesh build-tool first")
         return 1
@@ -969,6 +1136,43 @@ def cmd_npcs(args) -> int:
     return 0
 
 
+def cmd_standin_npcs(args) -> int:
+    """WoW Forever's own NPCs from Wowhead's pages as stand-ins (overrides/standin_npcs.json, Data/Npcs.lua)."""
+    from . import npcspots, standin
+    from .cityplaces import map_bounds
+
+    path = Path(args.overrides) if args.overrides else standin.FILE
+    doc = standin.load(path)
+    if args.js:
+        print(standin.STANDIN_SCRAPE_JS)
+        return 0
+    if args.import_file:
+        rows = json.loads(Path(args.import_file).read_text(encoding="utf-8"))
+        got = standin.from_scrape(rows, map_bounds())
+        doc["npcs"].update({str(k): v for k, v in got.items()})
+        print(f"{len(got)} stand-in NPC(s) from {len(rows)} scraped; {len(doc['npcs'])} in all")
+    if args.import_file or args.snap:
+        print(f"{standin.snap_to_shipped_grid(doc)} spawn(s) put on the shipped world grid's floor")
+    lua_path = Path(args.npcs_lua) if args.npcs_lua else npcspots.NPCS_LUA
+    _, npcs = npcspots.parse_lua(lua_path.read_text(encoding="utf-8"))
+    for i in [i for i, n in npcs.items() if n.get("from") == "standin"]:
+        del npcs[i]  # (written again from the file: one taken off it goes)
+    added = standin.add_standin(npcs, doc, log=print)
+    print(f"{len(added)} stand-in NPC(s) in Data/Npcs.lua")
+    if args.list:
+        Path(args.list).write_text(standin.list_md(doc, set(added)), encoding="utf-8", newline="\n")
+        print(f"wrote {args.list}")
+    if args.write:
+        from .npcs import lua_text
+
+        standin.save(doc, path)
+        lua_path.write_text(lua_text(npcs), encoding="utf-8", newline="\n")
+        print(f"wrote {path} and {lua_path}")
+    else:
+        print("(nothing written: --write)")
+    return 0
+
+
 def cmd_quest_npcs(args) -> int:
     """Who takes each quest in, the shipped NPCs only (Data/QuestNpcs.lua)."""
     from .paths import data_dir
@@ -1147,6 +1351,16 @@ def _install_into(addons: Path, dev: bool) -> int:
     if old.is_dir():
         shutil.rmtree(old)  # replaced by AzerothGPS
         print(f"removed old {old}")
+    # (the world grid's load-on-demand region folders, AzerothGPS_WG*: copied whole, those no longer in the addon removed)
+    regions = sorted(p for p in ADDON_DIR.parent.glob("AzerothGPS_WG*") if p.is_dir())
+    names = {p.name for p in regions}
+    for p in regions:
+        shutil.copytree(p, addons / p.name, dirs_exist_ok=True)
+    for p in addons.glob("AzerothGPS_WG*"):
+        if p.is_dir() and p.name not in names:
+            shutil.rmtree(p, ignore_errors=True)
+    if regions:
+        print(f"copied {len(regions)} world grid region folders (new folders: log out and back in the first time)")
     print(f"copied addon to {dst} -- /reload in game to pick up changes")
     if dev:
         # the developer tools (a checkout next to this repo, _dev_addon()): never shipped, and only where private_client
@@ -1380,6 +1594,13 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--replay", help="an earlier report.json: its flagged trips run again (into replay.json)")
     sp.set_defaults(fn=cmd_trip_sweep)
 
+    sp = sub.add_parser("underground-sweep", help="routes to NPCs and dungeons below the ground: no drop through a floor, in by the real way")
+    sp.add_argument("--jobs", type=int, default=1, help="processes, each a share of the destinations")
+    sp.add_argument("--only", help="destinations whose name has this")
+    sp.add_argument("--limit", type=int, help="the first this many destinations")
+    sp.add_argument("--out", help="the report's folder (default data/debug/underground-sweep)")
+    sp.set_defaults(fn=cmd_underground_sweep)
+
     sp = sub.add_parser("gen-addon-data", help="write addon/AzerothGPS/Data/*.lua from the client")
     client_args(sp)
     sp.set_defaults(fn=cmd_gen_addon_data)
@@ -1477,13 +1698,61 @@ def main(argv: list[str] | None = None) -> int:
     sp = sub.add_parser("navmesh", help="the capitals' and Undercity's Recast meshes for the dev tools' route comparison "
                                         "(never shipped)")
     client_args(sp)
-    sp.add_argument("what", choices=["build-tool", "build", "compare"],
+    sp.add_argument("what", choices=["build-tool", "build", "compare", "tris"],
                     help="build-tool: compile navbuild.exe; build: the meshes; compare: the roads against them "
-                         "(data/debug/navcompare/)")
+                         "(data/debug/navcompare/); tris: the meshes' collision triangles and liquids for city-grid's "
+                         "navfeatures (data/navmesh/<name>_tris.npz)")
     sp.add_argument("--only", nargs="+", help="only build the cities whose name contains one of these (the others' "
                                               "meshes already built are kept in NavMeshData.lua)")
     sp.add_argument("--rebuild", action="store_true", help="build the meshes again (else the ones in data/navmesh/)")
     sp.set_defaults(fn=cmd_navmesh)
+    sp = sub.add_parser("height-unknown", help="the shipped destinations with no height in range (NPC spawns, places, "
+                                               "points of interest, dungeon entrances): data/height_unknown.json")
+    sp.set_defaults(fn=cmd_height_unknown)
+    sp = sub.add_parser("city-grid", help="the capitals' layered walk grids from their navmeshes (1.4.0's city "
+                                          "routing; --write: Data/CityGrid.lua; --check: routes on it)")
+    sp.add_argument("--only", nargs="+", help="only cities whose name contains one of these (not with --write)")
+    sp.add_argument("--cells", help="cell sizes to compare, yards, by commas (2,3,4): sizes into data/debug/citygrid/")
+    sp.add_argument("--write", action="store_true", help="write Data/CityGrid.lua")
+    sp.add_argument("--check", action="store_true", help="route between the cities' places on the grid, as the addon "
+                                                         "does (the option on), against its own routing")
+    sp.set_defaults(fn=cmd_city_grid)
+    sp = sub.add_parser("world-grid", help="the open world's layered walk grid from our own navmeshes (1.4.0's world "
+                                          "routing, being tested; --write: Data/WorldGrid<cont>.lua)")
+    sp.add_argument("what", nargs="?", default="bake", choices=["mesh", "models", "model-walls", "grid", "bake", "zones", "check",
+                                                            "coverage", "tocs", "alt"],
+                    help="mesh: every map tile's Recast mesh; model-walls: the thin tall walls' footprints from the "
+                         "models (Data/ModelWalls.lua with --write); grid: each tile's cells; bake (the default): the "
+                         "continents' grids; zones: the sample zones against today's walls; check: the route test; "
+                         "coverage: every shipped stop walked to on the grids alone, each one they can't reach with its "
+                         "cause (worldcoverage.py); tocs: every region folder's toc written again (no bake)")
+    sp.add_argument("--cont", help="continents by commas (0,1,2991)")
+    sp.add_argument("--per", type=int, default=64, help="cells a map tile's side (64: 8.33 yd, the shipped; 128: 4.17)")
+    sp.add_argument("--workers", type=int, default=7)
+    sp.add_argument("--trips", type=int, default=10000, help="check: trips")
+    sp.add_argument("--landmarks", type=int, default=12, help="alt: landmarks per continent")
+    sp.add_argument("--far", action="store_true", help="alt: also the far set (every fall; measured no gain, off)")
+    sp.add_argument("--write", action="store_true", help="write Data/WorldGrid<cont>.lua")
+    sp.add_argument("--regions", help="bake: only these regions' folders, rx:ry by commas (with --cont; "
+                    "worldbake.bake_regions); grid: only their tiles and a ring of 2 round them")
+    sp.add_argument("--changed", action="store_true", help="grid: only the tiles whose mesh, water or grid code "
+                    "changed since their grid was made (worldgrid.tile_stamp)")
+    sp.add_argument("--jobs", type=int, default=1, help="coverage: processes")
+    sp.add_argument("--only", help="coverage: only stops whose name contains this")
+    sp.add_argument("--out", help="coverage: the report's folder (default data/debug/worldgrid/coverage)")
+    sp.add_argument("--wow-path", default=str(DEFAULT_WOW))
+    sp.add_argument("--product", default=PRODUCT)
+    sp.set_defaults(fn=cmd_world_grid)
+    sp = sub.add_parser("lifts", help="the open world's elevators and lifts in the CMaNGOS dump: the inventory")
+    sp.set_defaults(fn=cmd_lifts)
+    sp = sub.add_parser("nav-features", help="floors, stairs, bridges, lifts and jumps found in our Recast meshes "
+                                             "(navfeatures.py, dev only): the cities' (as city-grid bakes them) into "
+                                             "data/debug/navfeatures/; --interiors: buildings outside the capitals against "
+                                             "Data/Indoors.lua")
+    client_args(sp)
+    sp.add_argument("--only", nargs="+", help="only cities whose name contains one of these")
+    sp.add_argument("--interiors", action="store_true", help="the interiors trial (needs the client): navfeatures.INTERIORS")
+    sp.set_defaults(fn=cmd_nav_features)
     sp = sub.add_parser("city-roads", help="a capital's roads without the spiderweb: straightened and thinned over its "
                                            "navmesh (data/navmesh/); report, pictures and flags in data/debug/cityroads/")
     sp.add_argument("--city", default="Orgrimmar", help="the city (cityroads.CITIES: Orgrimmar so far)")
@@ -1626,6 +1895,19 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--logged", help=argparse.SUPPRESS)
     sp.add_argument("--npcs-lua", help=argparse.SUPPRESS)
     sp.set_defaults(fn=cmd_npc_spots)
+
+    sp = sub.add_parser("standin-npcs", help="WoW Forever's own NPCs from Wowhead's pages as stand-ins "
+                        "(overrides/standin_npcs.json, Data/Npcs.lua)")
+    sp.add_argument("--import", dest="import_file", metavar="SCRAPE_JSON",
+                    help="a scrape to take in (standin.STANDIN_SCRAPE_JS's JSON list)")
+    sp.add_argument("--js", action="store_true", help="print the browser-console scrape script")
+    sp.add_argument("--snap", action="store_true", help="put spawns with no floor on the shipped world grid's (done "
+                    "on --import too)")
+    sp.add_argument("--list", metavar="MD", help="write the stand-ins as a Markdown list to check in game")
+    sp.add_argument("--write", action="store_true", help="write the overrides and Data/Npcs.lua")
+    sp.add_argument("--overrides", help=argparse.SUPPRESS)
+    sp.add_argument("--npcs-lua", help=argparse.SUPPRESS)
+    sp.set_defaults(fn=cmd_standin_npcs)
 
     sp = sub.add_parser("vendors", help="what each shipped vendor sells, for the search (Data/VendorItems.lua)")
     sp.add_argument("--write", action="store_true")

@@ -151,11 +151,11 @@ def test_gelman_stonehand_is_a_floor_up_and_not_arrived_under_him(clean):
         assert d.npcId == GELMAN, made
         # (under him: the street's floor followed, within 3 yd, targeted in range: not there)
         lua.execute("AGPS_T = 500")
-        N.AnchorFloor(0, x + 2, y, 96.0)
-        assert ARRIVED not in (N.Status(x + 2, y, 0) or ""), made
+        N.AnchorFloor(0, x + 2.5, y, 96.0)
+        assert ARRIVED not in (N.Status(x + 2.5, y, 0) or ""), made
         assert _button(lua, ns, 501)._shown
         lua.execute(f"AGPS_GUIDS = {{ target = '{guid(GELMAN)}' }} AGPS_NEAR = true")
-        assert ARRIVED not in (N.Status(x + 2, y, 0) or ""), made
+        assert ARRIVED not in (N.Status(x + 2.5, y, 0) or ""), made
         # (his floor followed: there)
         lua.execute("AGPS_T = 502")
         N.AnchorFloor(0, x + 2, y, z)
@@ -184,8 +184,8 @@ def test_a_way_at_an_npc_carries_it_and_is_not_arrived_under_him(clean):
     N.SetStops(lua.eval("function(s) return { s } end")(_way(lua, ns, x + 2, y + 1, "Gelman Stonehand")), False, "red")
     assert N.dest.npcId == GELMAN
     lua.execute("AGPS_T = 600")
-    N.AnchorFloor(0, x + 1, y, 96.0)
-    assert ARRIVED not in (N.Status(x + 1, y, 0) or "")
+    N.AnchorFloor(0, x + 2.5, y, 96.0)
+    assert ARRIVED not in (N.Status(x + 2.5, y, 0) or "")
     assert _button(lua, ns, 601)._shown
 
 
@@ -310,9 +310,9 @@ def test_ironforges_first_aid_trainer_on_her_balcony_is_a_floor_up_not_under_the
     # (her spot is off the city's own cells: no floor followed there; the floor under her known from before or not,
     # she's a floor off: 9.8 yd away and right under her, not there; her window: there)
     assert ARRIVED not in (N.Status(x + 9.8, y, 0) or "") and N.dest is not None
-    assert ARRIVED not in (N.Status(x + 2, y, 0) or "")
+    assert ARRIVED not in (N.Status(x + 2.5, y, 0) or "")
     N.OnNpcWindow(5150)
-    assert ARRIVED in (N.Status(x + 2, y, 0) or "")
+    assert ARRIVED in (N.Status(x + 2.5, y, 0) or "")
 
 
 def test_an_npc_up_on_open_land_is_still_judged_by_the_ground(clean):

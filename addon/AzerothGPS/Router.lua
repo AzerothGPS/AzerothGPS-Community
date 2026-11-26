@@ -22,7 +22,7 @@ R.OFFROAD_PENALTY = 1.25 -- road mode: off-road yards cost this much more than r
 R.ROAD_TOLERANCE_MIN, R.ROAD_TOLERANCE_MAX = -10, 10
 function R.RoadFactor(f)
   local st = ns.settings and ns.settings.gps
-  local t = st and tonumber(st.roadTolerance) or 0
+  local t = st and tonumber(st.roadTolerance) or (ns.DEFAULTS and ns.DEFAULTS.gps and ns.DEFAULTS.gps.roadTolerance) or 0
   if t == 0 then return f end
   t = math.max(R.ROAD_TOLERANCE_MIN, math.min(R.ROAD_TOLERANCE_MAX, t))
   local s = t > 0 and 1 - t / R.ROAD_TOLERANCE_MAX or 1 + 4 * t / R.ROAD_TOLERANCE_MIN
@@ -30,6 +30,7 @@ function R.RoadFactor(f)
 end
 R.KIND_ROAD, R.KIND_OFFROAD = 0, 1
 R.KIND_DROP = 4 -- off a ledge onto the floor below (Nav's own kinds are 2 and 3)
+R.KIND_JUMP = 8 -- a running jump across a gap at one height (the city grid's, navfeatures.py: "Jump across here")
 -- a lift (Thunder Bluff's: a road from its top to its foot, Data/Capitals.lua's source 5, its length
 -- the wait and the ride), down it or up it: "Take the lift up" (Turns), as Undercity's lifts are rides
 R.SOURCE_LIFT, R.KIND_LIFT_DOWN, R.KIND_LIFT_UP = 5, 5, 6
@@ -52,6 +53,37 @@ function R.LiftKind(g, ei, forward)
   return forward and R.KIND_LIFT_DOWN or R.KIND_LIFT_UP
 end
 R.DROP_COST = 30 -- yards a drop counts extra: taken only when it saves real distance
+-- Drops in the open world (Kooki3z 2026-11-23, approved rules; the world grid's and the Router's alike, mounted or on
+-- foot): a step down STEP_DOWN_YD or less is walked off like a step, always; one past it up to the free fall (no
+-- damage, Nav.FALL_FREE) only where it saves DROP_SAVE_YD of walking; two such in a row down the same slope (within
+-- CHAIN_YD of the last one's landing) a chain, walked instead, unless the player's an Expert jumper (option
+-- expertJumper); a bigger one by the fall spells' and the safe drop's rules, as before (the searches' maxDrop and
+-- costs), in combat as out of it.
+R.STEP_DOWN_YD = 6
+R.DROP_SAVE_YD = 60
+R.CHAIN_YD = 40
+R.CHAIN_COST = 300 -- yards a chain's next drop costs: walked round, unless there's no way round worth the name
+function R.ExpertJumper()
+  local st = ns.settings and ns.settings.gps
+  return st ~= nil and st.expertJumper == true
+end
+-- A drop of `fall` yards' extra cost in the open world; `chained`: another past STEP_DOWN_YD
+-- up to the free fall just before it, down the same slope.
+-- `big`: what one past the free fall costs (the search's own as before: the roads' and the world grid's DROP_COST, a
+-- straight leg's none).
+function R.DropExtra(fall, chained, big)
+  if not fall or fall <= R.STEP_DOWN_YD then return 0 end
+  local free = (ns.Nav and ns.Nav.FALL_FREE) or 14
+  if fall <= free then
+    if chained and not R.ExpertJumper() then return R.CHAIN_COST end -- (walked round when there's any way round)
+    return R.DROP_SAVE_YD
+  end
+  return big or R.DROP_COST
+end
+-- Whether a drop of `fall` yards counts toward a chain (R.DropExtra's `chained`).
+function R.ChainDrop(fall)
+  return fall ~= nil and fall > R.STEP_DOWN_YD and fall <= ((ns.Nav and ns.Nav.FALL_FREE) or 14)
+end
 R.OFFROAD_LINKS = 24 -- offroad mode: straight links tried from start/destination to road nodes
 R.OFFROAD_LINK_MAX = 3000 -- yards
 R.OFFROAD_TIE = 1.02 -- offroad mode: open ground costs a hair more, so roads win ties
@@ -235,6 +267,102 @@ R.RAISED_KINDS = { bridge = true, floor = true }
 R.TRACK_DROP_MAX = 14
 R.TRACK_DROP_REACH = 6
 R.TRACK_DROP_STEP = 4
+
+-- How far each drop in the routes falls (FallSpells.lua: a drop bigger than the player's own safe drop needs a spell,
+-- said in its step): by the drop's top, the point its first piece starts at (to 0.1 yd), noted where the route's drop
+-- pieces are made (a road's drop, a city grid's link, a cliff's split, R.MarkBigDrops). Started over past DROP_NOTES.
+R.DROP_NOTES = 5000
+-- (kept in two generations, by DROP_CELL squares: past DROP_NOTES the newer becomes the older and a new one starts, so a
+-- note is kept for at least DROP_NOTES more; one looked up from the older is noted again in the newer. A route kept or
+-- reused from a memo (the grids' walks, LegRoute) doesn't note its drops again: one wipe of every note, after the
+-- background's many searches, lost the drops of the route shown, its steps no longer said to cast, and spell jumping's
+-- weighing (SpellJumpOwn) dropped the jump for the long walk round, Kooki3z 2026-11-23 standing on Tanaris's rim)
+R.DROP_CELL = 8
+local notesNew, notesOld, dropNoteN = {}, {}, 0
+local function NoteCell(x, y) return math.floor(x / R.DROP_CELL) * 65536 + math.floor(y / R.DROP_CELL) end
+local function PutNote(x, y, dz)
+  local k = NoteCell(x, y)
+  local b = notesNew[k]
+  if not b then
+    b = {}
+    notesNew[k] = b
+  end
+  for _, e in ipairs(b) do
+    if math.abs(e[1] - x) < 0.05 and math.abs(e[2] - y) < 0.05 then
+      e[3] = dz
+      return
+    end
+  end
+  b[#b + 1] = { x, y, dz }
+  dropNoteN = dropNoteN + 1
+end
+function R.NoteDrop(x, y, dz)
+  if not (x and y and dz) then return end
+  if dropNoteN >= R.DROP_NOTES then notesOld, notesNew, dropNoteN = notesNew, {}, 0 end
+  PutNote(x, y, dz)
+end
+-- The nearest noted drop within `yd` of (x, y) in notes `t`: dz, its distance squared, its point.
+local function Nearest(t, x, y, yd)
+  local best, bd, bx, by = nil, yd * yd, nil, nil
+  local r = math.ceil(yd / R.DROP_CELL)
+  local cx, cy = math.floor(x / R.DROP_CELL), math.floor(y / R.DROP_CELL)
+  for i = cx - r, cx + r do
+    for j = cy - r, cy + r do
+      for _, e in ipairs(t[i * 65536 + j] or {}) do
+        local d = (e[1] - x) ^ 2 + (e[2] - y) ^ 2
+        if d <= bd then best, bd, bx, by = e[3], d, e[1], e[2] end
+      end
+    end
+  end
+  return best, bd, bx, by
+end
+-- ... the nearest noted within `yd` (the route trimmed to the player standing on the drop's top: its first point
+-- theirs; a point a few yards off where it was noted)
+function R.DropNear(x, y, yd)
+  if not (x and y) then return nil end
+  local a, ad = Nearest(notesNew, x, y, yd)
+  local b, bd, bx, by = Nearest(notesOld, x, y, yd)
+  if b and (not a or bd < ad) then
+    if dropNoteN >= R.DROP_NOTES then notesOld, notesNew, dropNoteN = notesNew, {}, 0 end
+    PutNote(bx, by, b) -- (in use: kept)
+    return b
+  end
+  return a
+end
+-- A drop called out as a jump (Kooki3z 2026-11-23: "saying jump here really should be like 25 yd or more"): its
+-- step ("Jump down here"), the map's and the minimap's coil, only for a fall of JUMP_CALLOUT_YD or more, or one that
+-- needs a fall spell (past Nav.PlainSafeDrop), or one whose fall isn't known; a smaller one is just part of the walk
+-- (routed the same). `i`: a piece of the drop in pts/kinds (its top found back along it). A running jump always.
+R.JUMP_CALLOUT_YD = 25
+-- A drop's fall: the biggest noted along its whole run of KIND_DROP pieces (`i` any piece of it; each piece's top within
+-- `yd`, default 8 as the steps find it, Turns.DROP_NOTE_YD), not only its first piece's; and the run's first piece.
+-- (Item 88, Kooki3z 2026-11-25, a mage by the Dun Algaz pass: the world grid's way off a cliff's rim is a step down of a
+-- few yards, then the fall itself, two drop pieces in a row. Read at the run's top alone, the 4 yd step, the 190 yd fall
+-- that only Slow Fall makes was a plain walk: drawn dotted, no cast step, till the player stood past the step.)
+function R.DropFall(pts, kinds, i, yd)
+  if not (pts and kinds and i) or kinds[i] ~= R.KIND_DROP then return nil, i end
+  local j = i
+  while j > 1 and kinds[j - 1] == R.KIND_DROP do j = j - 1 end
+  local best
+  local k = j
+  while kinds[k] == R.KIND_DROP and pts[2 * k] do
+    local dz = R.DropNear(pts[2 * k - 1], pts[2 * k], yd or 8)
+    if dz and (not best or dz > best) then best = dz end
+    k = k + 1
+  end
+  return best, j
+end
+function R.JumpCalledOut(pts, kinds, i)
+  if not (pts and kinds) or kinds[i] ~= R.KIND_DROP then return true end
+  local dz = R.DropFall(pts, kinds, i)
+  if not dz or dz >= R.JUMP_CALLOUT_YD then return true end
+  local N = ns.Nav
+  return N and N.PlainSafeDrop and dz > N.PlainSafeDrop() + 0.5 or false
+end
+-- The yards a drop whose first piece starts at (x, y) falls, or nil (not known).
+function R.DropAt(x, y)
+  return R.DropNear(x, y, 0.1)
+end
 
 -- A track's pieces: its stairs stretch (`stairs` = { i, j }, its points) a stairs piece of its own (a ramp's, `skind` =
 -- "ramp": a ramp piece, walked as a road), the rest as the track is; each a copy with `part` (0, 1, ..) when split. A
@@ -1547,7 +1675,9 @@ R.BRIDGE_SAMPLE_YD = 250 -- ... about that many, a node per square these yards w
 -- (between two nodes with floors on a continent, `nz`: a capital's, a building's, a drawn road's with its heights, only
 -- when about as near in height as a walk that long can climb: LAYER_Z and this a yard. Stormwind's Wizard's Sanctum,
 -- 2026-11-17: the trainers' room under the city, 76 yd down, was linked to the tower's stairs and the street over it)
-R.BRIDGE_FLOOR_SLOPE = 1
+R.BRIDGE_FLOOR_SLOPE = 0.3 -- (1 before 2026-11-23: Ironforge's way down to the Hall of Thanes winds, its turns over each
+-- other, and links 40 yd down 56 across and 101 down 145 across cut through the rock between them; the Alliance, no
+-- guards to weigh, took them)
 local function FloorsNear(nz, a, b, d2)
   local za, zb = nz and nz[a], nz and nz[b]
   return not (za and zb) or math.abs(za - zb) <= R.LAYER_Z + math.sqrt(d2) * R.BRIDGE_FLOOR_SLOPE
@@ -2159,7 +2289,13 @@ end
 -- never a drop or a lift. The data's build joins drawn roads to the land's roads only, not to the caves'
 -- and capitals' merged in here (Dun Algaz's, drawn between two cave mouths' roads, was a piece of its
 -- own, 2026-10-01). `nodes`, `edges` are changed in place; `caveOf`, `dropOf` by edge. Returns the joins.
-function R.JoinDrawnEnds(nodes, edges, caveOf, dropOf, mouth, attachedOf)
+-- `cont`: never a join across a drawn wall (Passability.CrossesWall: item 78b, Kooki3z on 1e503bf8 by Cragpool Lake's
+-- barricade: the road through it taken out (#996) left two ends 20 yd apart, joined again straight through his wall).
+function R.JoinDrawnEnds(nodes, edges, caveOf, dropOf, mouth, attachedOf, cont)
+  local P = ns.Passability
+  local function walled(j, x, y)
+    return cont and P and P.CrossesWall and P.CrossesWall(cont, nodes[j * 2 - 1], nodes[j * 2], x, y) or false
+  end
   local deg, own = {}, {}
   for ei, e in ipairs(edges) do
     Breathe(ei, 2000)
@@ -2200,7 +2336,7 @@ function R.JoinDrawnEnds(nodes, edges, caveOf, dropOf, mouth, attachedOf)
       local mx, my = nodes[m * 2 - 1], nodes[m * 2]
       each(mx, mx, my, my, function(j)
         local d2 = (nodes[j * 2 - 1] - mx) ^ 2 + (nodes[j * 2] - my) ^ 2
-        if d2 <= snap * snap and (not best[j] or d2 < best[j][1]) then best[j] = { d2, m } end
+        if d2 <= snap * snap and (not best[j] or d2 < best[j][1]) and not walled(j, mx, my) then best[j] = { d2, m } end
       end)
     end
   end
@@ -2212,8 +2348,10 @@ function R.JoinDrawnEnds(nodes, edges, caveOf, dropOf, mouth, attachedOf)
       local bb = EdgeBox(ed)
       each(bb[1], bb[2], bb[3], bb[4], function(j)
         if own[j] ~= ed and ed[1] ~= j and ed[2] ~= j then
-          local d2 = Closest(ed, nodes[j * 2 - 1], nodes[j * 2])
-          if d2 and d2 <= snap * snap and (not best[j] or d2 < best[j][1]) then best[j] = { d2, ed } end
+          local d2, _, qx, qy = Closest(ed, nodes[j * 2 - 1], nodes[j * 2])
+          if d2 and d2 <= snap * snap and (not best[j] or d2 < best[j][1]) and not walled(j, qx, qy) then
+            best[j] = { d2, ed }
+          end
         end
       end)
     end
@@ -2436,7 +2574,7 @@ function BuildGraph(cont)
     end
     nodes, edges = n2, e2
   end
-  if not roads.z then R.JoinDrawnEnds(nodes, edges, caveOf, dropOf, noBridge, attachOf) end -- (not a level with heights: by floor there)
+  if not roads.z then R.JoinDrawnEnds(nodes, edges, caveOf, dropOf, noBridge, attachOf, cont) end -- (not a level with heights: by floor there)
   local keep ={ roads = roads, overlays = overlays, nOverlays = overlays and #overlays or 0,
     nodes = {}, edges = {}, dropOf = {}, caveOf = {}, noBridge = noBridge, nodeZ = nodeZ, indoorOf = indoorOf }
   -- (a pause every KEEP_BREATHE: a copy's growing table is moved and the garbage collector's share comes with it,
@@ -2524,7 +2662,7 @@ function BuildGraph(cont)
       for i = 5, indoorOf[ed] and 0 or #ed - 3, 2 do -- (a building's inside: never cut, indoorOf)
         wchecks = wchecks + 1
         Breathe(wchecks, 150)
-        if P.CrossesWall(cont, ed[i], ed[i + 1], ed[i + 2], ed[i + 3], onWallFloor) then crossed = true break end
+        if P.CrossesWall(cont, ed[i], ed[i + 1], ed[i + 2], ed[i + 3], onWallFloor, true) then crossed = true break end
       end
       if not crossed then
         kept[#kept + 1] = ed
@@ -2792,14 +2930,20 @@ end
 local walks, walkCount = {}, 0
 local failed = {} -- rough spots where walks failed: "cont:x:y:x2:y2" at WALK_FAIL_YD
 local walkJobs, walkQueued = {}, {} -- background searches (coroutines), queued by key
+local lowJob -- (R.Pump: a `low` background job is running)
 R.WALK_FAIL_YD = 25 -- a walk that failed isn't retried from within this distance
 -- Tests: search right away instead of in the background.
 R.SYNC_WALKS = false
 R.MAX_WALK_JOBS = 8
 R.STALE_START_YD = 15 -- queued searches from where the player was, further than this: dropped
 R.WALK_REUSE_YD = 30 -- a walk found from where the player was, this close: joined straight from here
+R.WALK_REUSE_SHARE, R.WALK_REUSE_MAX_YD = 0.1, 200 -- (a long walk's: this share of what's left of it, at most this)
 R.PENDING_BLOCKED_YD = 40 -- while a walk around is searched: blocked for no more than this in a straight
 R.PENDING_BLOCKED_COST = 2 -- line, it's taken to be about straight (each blocked yard costing this many)
+-- (and on a long leg, this share of its line: a dune's steep sides here and there in Tanaris' sands, 104 yd of 2k, and
+-- the stand-in went by Gadgetzan and Steamwheedle Port's roads, 7.9k yd, for the seconds the walk was searched;
+-- Kooki3z 2026-11-23. Only while the walk is searched: a found walk is the leg's as before)
+R.PENDING_BLOCKED_SHARE = 0.06
 
 -- The road edges routing uses on `cont` (shipped roads plus recorded ones), and the graph
 -- they belong to (a new one after Reset, e.g. when a recording is saved).
@@ -3025,8 +3169,17 @@ function R.ZoneYards(cont, x1, y1, x2, y2, out)
   return out
 end
 
--- A zone's levels: the game's (C_Map.GetMapLevels), else the map's table (GPSFrame's).
+-- WoW Forever's own zones' levels by uiMap id (Kooki3z 2026-11-25): these win over the game's answer, which is
+-- wrong or missing for them (and, keyed by id, they hold in every language). Zephras Isle has two maps (2521, 2665).
+R.ZONE_LEVELS_BY_ID = {
+  [2548] = { 38, 45 }, -- Riverglades
+  [2521] = { 1, 12 }, [2665] = { 1, 12 }, -- Zephras Isle
+}
+
+-- A zone's levels: the id-keyed overrides, the game's (C_Map.GetMapLevels), else the map's table (GPSFrame's).
 function R.ZoneLevels(id)
+  local o = id and R.ZONE_LEVELS_BY_ID[id]
+  if o then return o[1], o[2] end
   if C_Map and C_Map.GetMapLevels then
     local ok, lo, hi = pcall(C_Map.GetMapLevels, id)
     if ok and lo and hi and lo > 0 then return lo, hi end
@@ -3062,7 +3215,16 @@ function R.RedZones()
 end
 
 function R.Reset()
+  local dropped = walkJobs
   graphs, walks, walkCount, failed, walkJobs, walkQueued = {}, {}, 0, {}, {}, {}
+  -- (a background job dropped unfinished is told so, R.Background's `dropped`: the grids' searches kept their own count
+  -- and list of jobs, and one dropped here stayed in them for good. The world grid then never searched that stop again
+  -- (another asked for it waited on the lost one) and the trip settled on the Router's own: from north of Booty Bay up
+  -- Stranglethorn round by the Mosh'Ogg hills, 4.0k yd for 2.6k, the guards changing (HostileChanged) mid-search;
+  -- Kooki3z 2026-11-23)
+  for _, j in ipairs(dropped or {}) do
+    if j.dropped then pcall(j.dropped) end
+  end
   warmed, warming = {}, {}
   R.ClearSegMemo()
 end
@@ -3110,7 +3272,14 @@ local byTarget = {} -- walks found, by where they go: [cont:x:y] = { [walk key] 
 -- off the roads and their straight checks start over, so the next route goes round them at once; the road network
 -- (the roads the walls cut, the links between them) waits for the tools to be turned off (Record.Apply, R.Reset).
 function R.WallsChanged()
+  local dropped = walkJobs
   walks, walkCount, failed, walkJobs, walkQueued, byTarget = {}, 0, {}, {}, {}, {}
+  -- (the background jobs dropped told so, as R.Reset does: the world grid's searches stayed in its own list and count,
+  -- and every walk to that stop then waited on one that would never land. Kooki3z 2026-11-23 in Tanaris, "Working out
+  -- the route..." for over a minute: the spell-jump planner's ban to weigh the walk round (a jump ban is a wall here))
+  for _, j in ipairs(dropped or {}) do
+    if j.dropped then pcall(j.dropped) end
+  end
   -- (the road nodes' straight links off the roads too: priced by SegmentCost, the walls and the swim cost in them;
   -- their background job just dropped with the others, so none is waited on)
   for _, g in pairs(graphs) do
@@ -3138,10 +3307,16 @@ end
 -- finished (the route should then be recomputed to use it), and whether any of those was
 -- a leg between fixed points (then the legs between stops need recomputing too).
 local pumpBuilt = false
-function R.Pump(deadline, now)
+-- `keepOn`, `plain`: the slice's bigger deadline only while keepOn() holds, then `plain` (a reroute's: GPS.PumpSearches;
+-- the searches after it in the queue get the 1 ms they would have had, not the reroute's slice).
+function R.Pump(deadline, now, keepOn, plain)
   local finished, fixed = false, false
   pumpBuilt = false
   while walkJobs[1] and now() < deadline do
+    if keepOn and not keepOn() then
+      deadline, keepOn = math.min(deadline, plain or deadline), nil
+      if now() >= deadline then break end
+    end
     -- (a route worked out again for a hop searches its walks `low`: after the others, 2026-11-14. First in line, a
     -- dozen searches that find nothing held up the walks the route itself waited on, and off Teldrassil the plan
     -- settled on walking down the tree's side before the teleporter's walks came in)
@@ -3154,7 +3329,11 @@ function R.Pump(deadline, now)
     local j = walkJobs[ji]
     if R.CLOCK_PAUSES then slice.stop, slice.now = deadline, now end
     local wasBuilding = building[j.co]
+    j.started = true
+    local wasLow = lowJob
+    lowJob = j.low and j.bg or nil
     local ok, c, path = coroutine.resume(j.co)
+    lowJob = wasLow
     slice.stop, slice.now = nil, nil
     if wasBuilding or building[j.co] then pumpBuilt = true end
     if not ok or coroutine.status(j.co) == "dead" then
@@ -3162,6 +3341,7 @@ function R.Pump(deadline, now)
       walkQueued[j.key] = nil
       if j.bg then
         if ok and j.done then j.done(c) end
+        if not ok and j.dropped then pcall(j.dropped) end -- (its search failed: as dropped, R.Reset)
       elseif j.warm then
         warming[j.cont] = nil
       elseif j.links then -- (offroad links a route wanted: recalculate)
@@ -3177,6 +3357,30 @@ function R.Pump(deadline, now)
 end
 
 function R.HasWork() return walkJobs[1] ~= nil end
+-- A queued job put behind the others (`low`: run only when nothing else is waiting): a search waited on too long
+-- (WorldGrid.WaitedTooLong, item 56) no longer takes every slice from the walks the route can settle on meanwhile.
+-- Returns whether it was queued.
+function R.Demote(key)
+  for _, j in ipairs(walkJobs) do
+    if j.key == key then
+      j.low = true
+      return true
+    end
+  end
+  return false
+end
+-- The queue as it stands (debugging, `/agps worldgrid stats`'s and the tests'): { key, started, low, bg } each, in order.
+function R.JobList()
+  local out = {}
+  for i, j in ipairs(walkJobs) do
+    out[i] = { key = tostring(j.key), started = j.started or false, low = j.low or false, bg = j.bg or false,
+      status = j.co and coroutine.status(j.co) or "-" }
+  end
+  return out
+end
+-- Whether the background job `key` (R.Background's) is queued or running: Nav.Rerouting's (it asked for this before it
+-- existed, so a reroute off the route never got the bigger slices its comment promised; found 2026-11-23)
+function R.Queued(key) return walkQueued[key] == true end
 -- Whether the last R.Pump built a road network in any of its jobs (the warm-up's or one a route's job needed): not
 -- counted by the stutter watch, Nav.RouteWork (issue #841: built for a search after a .go, it paused routing).
 function R.PumpBuilt() return pumpBuilt end
@@ -3194,12 +3398,23 @@ end
 -- `first`: ahead of the searches and the other jobs (after a road network being built), and that key's job already
 -- queued moved there: a reroute off the route, the player waiting on it (it ran in the frame, a hitch every time).
 R.ROUTE_BREATHE = 10
+-- The stop the route goes to next (Nav.Compute's: R.SetFocus(cont, x, y)): a walk from the player to it is searched
+-- before every other walk and job (Walk; WorldGrid.lua's search for it too: R.IsFocus). Tanaris 2026-11-23: the
+-- planner's walks to docks and flight masters ran first, one to Theramore for seconds, and the route stayed the
+-- stand-in by the roads while the player rode on.
+R.focus = nil
+function R.SetFocus(cont, x, y)
+  R.focus = cont and x and y and string.format("%d:%.0f:%.0f", cont, x, y) or nil
+end
+function R.IsFocus(cont, x, y)
+  return R.focus ~= nil and R.focus == string.format("%d:%.0f:%.0f", cont, x, y)
+end
 local function FrontAt()
   local at = 1
   while walkJobs[at] and walkJobs[at].warm do at = at + 1 end
   return at
 end
-function R.Background(key, fn, done, first)
+function R.Background(key, fn, done, first, low, dropped)
   if walkQueued[key] then
     for i, j in ipairs(first and walkJobs or {}) do
       if j.key == key then
@@ -3216,9 +3431,44 @@ function R.Background(key, fn, done, first)
     return true
   end
   walkQueued[key] = true
-  local job = { key = key, bg = true, done = done, co = coroutine.create(fn) }
-  if first then table.insert(walkJobs, FrontAt(), job) else walkJobs[#walkJobs + 1] = job end
+  local job = { key = key, bg = true, done = done, co = coroutine.create(fn), low = low or nil, first = first or nil, dropped = dropped }
+  if first then
+    -- (after the jobs already started: a search begun runs on, a newer one doesn't push it back each time the player
+    -- moves; Mulgore 2026-11-23, two searches for one leg sharing the slices)
+    local at = FrontAt()
+    while walkJobs[at] and walkJobs[at].started do at = at + 1 end
+    table.insert(walkJobs, at, job)
+  else
+    walkJobs[#walkJobs + 1] = job
+  end
   return true
+end
+-- Every queued background job dropped (each told so, `dropped`) but the road networks' builds and the memory cycle's: a
+-- new trip's (Nav.SetStops) never waits behind the last one's searches. Item 82h, Kooki3z on b84cff45: a 550 yd trip in
+-- the Barrens on "Working out the route..." for minutes, a job of an earlier route holding the queue; set elsewhere
+-- and back, it settled at once. `keep(key)`: jobs kept besides; `also(key)`: others dropped too (Nav.DropRideChecks: the
+-- ride checks, their marks cleared there). Returns how many were dropped.
+function R.DropBackground(keep, also)
+  local kept, n = {}, 0
+  for _, j in ipairs(walkJobs) do
+    -- (only those safe to drop: told so (`dropped`: the grids' searches), or the trip's own plan and rejoin, whose
+    -- answers an old trip's version ignores. Others keep a mark of their own while queued (the ride check's: dropped
+    -- unanswered, "Keep this route?" waited on it for good, test_map_redraw's tram)
+    local key = tostring(j.key)
+    local safe = j.dropped ~= nil or key:find("^route:") or key:find("^rejoin:") or key:find("^worldgrid:")
+      or (also and also(j.key))
+    if j.warm or key == "worldgrid-gc" or not safe or (keep and keep(j.key)) then
+      kept[#kept + 1] = j
+    else
+      walkQueued[j.key] = nil
+      n = n + 1
+      if j.dropped then pcall(j.dropped) end
+    end
+  end
+  walkJobs = kept
+  R.stats = R.stats or {}
+  R.stats.dropped = (R.stats.dropped or 0) + n
+  return n
 end
 -- Building a road network in the background: it gets more of each frame than searches do.
 function R.Warming() return walkJobs[1] ~= nil and walkJobs[1].warm or false end
@@ -3262,7 +3512,11 @@ local function Reuse(cont, x1, y1, tkey)
         if L2 > 0 then t = math.max(0, math.min(1, ((x1 - ax) * vx + (y1 - ay) * vy) / L2)) end
         local qx, qy = ax + vx * t, ay + vy * t
         local d = math.sqrt((qx - x1) ^ 2 + (qy - y1) ^ 2)
-        if d <= R.WALK_REUSE_YD then
+        -- (a long walk's, further: WALK_REUSE_SHARE of what's left of it, up to WALK_REUSE_MAX_YD. Mounted, the player
+        -- was past WALK_REUSE_YD of where a long walk's search started before it was done, every time: the next search
+        -- started from there, and the stand-in by the roads stayed for good; Tanaris' sands to Uldum, 2026-11-23)
+        local reach = math.min(R.WALK_REUSE_MAX_YD, math.max(R.WALK_REUSE_YD, R.WALK_REUSE_SHARE * remain[i + 2]))
+        if d <= reach then
           local join = P.SegmentCost(cont, x1, y1, qx, qy)
           local c = join and join + (1 - t) * piece[i] + remain[i + 2]
           if c and (not bestC or c < bestC) then
@@ -3311,7 +3565,7 @@ local function Walk(cont, x1, y1, x2, y2, transient, road1, road2, low, fresh)
         local far2 = R.STALE_START_YD * R.STALE_START_YD
         for i = #walkJobs, 2, -1 do
           local j = walkJobs[i]
-          if j.transient and transient and ((j.x1 - x1) ^ 2 + (j.y1 - y1) ^ 2 > far2 or j.cont ~= cont) then
+          if j.transient and transient and not j.started and ((j.x1 - x1) ^ 2 + (j.y1 - y1) ^ 2 > far2 or j.cont ~= cont) then
             walkQueued[j.key] = nil
             table.remove(walkJobs, i)
           end
@@ -3319,15 +3573,31 @@ local function Walk(cont, x1, y1, x2, y2, transient, road1, road2, low, fresh)
         for i = 2, #walkJobs do
           if walkJobs[i].transient then
             nTransient = nTransient + 1
-            oldest = oldest or i
+            if not walkJobs[i].started then oldest = oldest or i end
           end
         end
         if transient and nTransient >= R.MAX_WALK_JOBS and oldest then
           walkQueued[table.remove(walkJobs, oldest).key] = nil
         end
         walkQueued[key] = true
-        walkJobs[#walkJobs + 1] = { key = key, rough = rough, tkey = tkey, transient = transient, cont = cont, x1 = x1, y1 = y1,
-          low = low or nil, co =coroutine.create(function() return ns.Passability.FindPath(cont, x1, y1, x2, y2, road1, road2) end) }
+        local job = { key = key, rough = rough, tkey = tkey, transient = transient, cont = cont, x1 = x1, y1 = y1,
+          low = (low or lowJob) and true or nil, co =coroutine.create(function() return ns.Passability.FindPath(cont, x1, y1, x2, y2, road1, road2) end) }
+        -- (a walk from where the player is, the route's own, ahead of the walks between fixed points and the other
+        -- background jobs, after those already started and the other walks from the player: else, queued behind
+        -- the plan's walks between docks and flight masters, it went stale as the player moved on before its turn
+        -- and was queued again at the back, and the stand-in by the roads stayed; Tanaris' sands to Uldum, mounted,
+        -- 2026-11-23)
+        local at = #walkJobs + 1
+        if transient and not job.low and R.focus == tkey then
+          at = FrontAt() -- (the walk to the stop itself: first of all; R.SetFocus)
+        elseif transient and not job.low then
+          at = FrontAt()
+          for i = at, #walkJobs do
+            local j = walkJobs[i]
+            if j.started or j.first or (j.transient and not j.low) then at = i + 1 end
+          end
+        end
+        table.insert(walkJobs, at, job)
       end
       return nil, nil, true -- still searching
     end
@@ -3410,9 +3680,11 @@ end
 -- showed as a U-turn away from the stop until the search was done). Else nil.
 local function PendingCost(cont, x1, y1, x2, y2)
   local b = BlockedYards(cont, x1, y1, x2, y2)
-  if b > R.PENDING_BLOCKED_YD then return nil end
-  return Dist(x1, y1, x2, y2) + b * R.PENDING_BLOCKED_COST
+  local d = Dist(x1, y1, x2, y2)
+  if b > math.max(R.PENDING_BLOCKED_YD, R.PENDING_BLOCKED_SHARE * d) then return nil end
+  return d + b * R.PENDING_BLOCKED_COST
 end
+R.BlockedYards, R.BlockedRun = BlockedYards, BlockedRun
 
 -- Squared distance from (x, y) to segment a-b, and the parameter of the closest point.
 local function SegDist2(x, y, ax, ay, bx, by)
@@ -3925,6 +4197,53 @@ local function NearestEdgesRaw(cont, x, y, z)
   return list
 end
 
+-- The nearest roads within STOP_FLOOR_FAR of (x, y) on the floor of height z (each road's own height, else the map's
+-- ground under its point, Nav.GroundAt), nearest first, at most ENTRY_CANDIDATES (R.OnFloor's when none near is).
+function R.GroundEdges(cont, x, y, z)
+  local g = GraphQuery(cont, x, y)
+  local GA = ns.Nav and ns.Nav.GroundAt
+  if not (g and GA) then return {} end
+  local idx = SegIndex(g)
+  local bx, by = math.floor(x / SEG_BUCKET), math.floor(y / SEG_BUCKET)
+  local rings = math.ceil(R.STOP_FLOOR_FAR / SEG_BUCKET)
+  local best, seen = {}, {}
+  for kx = bx - rings, bx + rings do
+    for ky = by - rings, by + rings do
+      local bucket = idx[Key(kx, ky)]
+      for j = 1, bucket and #bucket - 2 or 0, 3 do
+        local ei, i, along = bucket[j], bucket[j + 1], bucket[j + 2]
+        if not seen[ei * 100000 + i] and not (g.attached and g.attached[ei]) and not g.cave[ei] then
+          seen[ei * 100000 + i] = true
+          local e = g.e[ei]
+          local ax, ay, cx, cy = e[i], e[i + 1], e[i + 2], e[i + 3]
+          local d2, t = SegDist2(x, y, ax, ay, cx, cy)
+          if d2 <= R.STOP_FLOOR_FAR ^ 2 and (not best[ei] or d2 < best[ei].d2) then
+            local px, py = ax + (cx - ax) * t, ay + (cy - ay) * t
+            local at = along + Dist(ax, ay, cx, cy) * t
+            -- (a road's own height; the map's ground only out on the land: in a capital or a cave it's the rock over
+            -- the floors (Ironforge's mountain, 856 over the Hall of Thanes' way in at 399), 2026-11-23)
+            local h = R.RoadFloor(g, { edge = ei, along = at })
+            if not h and not (R.CapitalAt(cont, px, py) or R.InLayeredCave(cont, px, py) or R.InCaveGrid(cont, px, py)) then
+              h = GA(cont, px, py)
+            end
+            if h and math.abs(h - z) <= R.STOP_FLOOR_Z then
+              best[ei] = { edge = ei, px = px, py = py, d2 = d2, along = at, floorOff = math.abs(h - z) }
+            end
+          end
+        end
+      end
+    end
+  end
+  local list = {}
+  for _, b in pairs(best) do
+    b.dist = math.sqrt(b.d2)
+    list[#list + 1] = b
+  end
+  table.sort(list, R.NearerEdge)
+  for i = #list, R.ENTRY_CANDIDATES + 1, -1 do list[i] = nil end
+  return list
+end
+
 -- The nearest roads to a spot are asked for again every recalculation — the stop's exact spot every
 -- time, 5 ms and more a call out in sparse country (the 2026-10-07 router profile) — so each graph's
 -- answers are remembered, the exact spot and floor the key, and handed out as fresh copies: RouteOne's
@@ -4148,12 +4467,13 @@ end
 -- Of those, the floor nearest z (FLOOR_PICK_Z of the best): a building's floors are 6 or 7 yd apart, within
 -- STOP_FLOOR_Z of each other (Brill's inn, 2026-10-06: the ground floor's road taken for a trainer upstairs).
 R.STOP_FLOOR_Z, R.STOP_FLOOR_REACH, R.FLOOR_PICK_Z = 8, 40, 2
+R.STOP_FLOOR_FAR = 400
 R.SAME_FLOOR_Z = 3 -- (two roads' floors this near in height: the same floor; a building's are 6 or 7 yd apart)
 -- `x, y`: the spot `list` is of. A road that climbs is taken at its stretch on the floor of height z, not its nearest
 -- point: a spiral stair is one road whose turns lie over each other, and its nearest point was the turn under the
 -- player's, so from partway down Darnassus's spiral to the Rogue Trainer the route left the stairs for the land's road
 -- and climbed back up to the top first (issue #40).
-function R.OnFloor(g, list, z, x, y)
+function R.OnFloor(g, list, z, x, y, cont)
   local out, near, best = {}, math.huge, math.huge
   local moved = false
   if x and y then
@@ -4175,6 +4495,24 @@ function R.OnFloor(g, list, z, x, y)
   local kept = {}
   for _, c in ipairs(out) do
     if c.floorOff <= best + R.FLOOR_PICK_Z then kept[#kept + 1] = c end
+  end
+  -- (none of the roads near on the stop's floor (`cont` given: a stop's): the land's roads, with no heights of their
+  -- own, by the ground's under them, within STOP_FLOOR_FAR. Thunder Bluff's east rim, 2026-11-23: a stop on the
+  -- Mulgore ground under it took the mesa's nearest road and walked straight off the cliff, the city's ground not the
+  -- land's for the cliff check)
+  -- (only when the nearest road's ground is off the stop's floor too: else the land's roads as they were, all of them)
+  local first = list[1]
+  local fz = first and first.px and ns.Nav and ns.Nav.GroundAt and ns.Nav.GroundAt(cont or 0, first.px, first.py)
+  if cont and not kept[1] and x and y and fz and math.abs(fz - z) > R.STOP_FLOOR_Z then
+    kept = R.GroundEdges(cont, x, y, z)
+    -- (and the near ones over it within the player's safe drop, a fall spell's: jumped down to it, Nav.SafeDrop)
+    local safe = ns.Nav and ns.Nav.SafeDrop and ns.Nav.SafeDrop()
+    local GA = ns.Nav and ns.Nav.GroundAt
+    for _, c in ipairs(safe and list or {}) do
+      local h = R.RoadFloor(g, c) or (GA and c.px and GA(cont, c.px, c.py))
+      if h and h > z and h - z <= safe and (c.dist or math.huge) <= near + R.STOP_FLOOR_REACH then kept[#kept + 1] = c end
+    end
+    table.sort(kept, R.NearerEdge)
   end
   if moved then
     table.sort(kept, R.NearerEdge)
@@ -4288,7 +4626,13 @@ function R.OffUnderground(g, list, cont)
   for _, c in ipairs(list) do
     local h = R.RoadFloor(g, c)
     local gz = h and R.GroundZ(cont, c.px, c.py)
-    if gz and h < gz - R.UNDER_GROUND_Z then any = true else out[#out + 1] = c end
+    -- (not a capital's own: Ironforge's halls are under the mountain, its top the map's ground; the tram's end there
+    -- went over the top through the Wetlands with city routing on)
+    if gz and h < gz - R.UNDER_GROUND_Z and not (R.CapitalAt and R.CapitalAt(cont, c.px, c.py)) then
+      any = true
+    else
+      out[#out + 1] = c
+    end
   end
   return (any and out[1]) and out or list
 end
@@ -4779,7 +5123,9 @@ local function Build(g, pieces)
       local kind = g.drops and g.drops[p.edge] and R.KIND_DROP or R.KIND_ROAD
       if g.e[p.edge][4] == R.SOURCE_LIFT then kind = R.LiftKind(g, p.edge, p.from <= p.to) end
       if g.e[p.edge][4] == R.SOURCE_SWIM then swum = swum + math.abs(p.to - p.from) end
-      for _, q in ipairs(EdgePoints(g.e[p.edge], p.from, p.to)) do
+      if kind == R.KIND_DROP and #flat >= 2 then R.NoteDrop(flat[#flat - 1], flat[#flat], g.drops[p.edge]) end
+      for qi, q in ipairs(EdgePoints(g.e[p.edge], p.from, p.to)) do
+        if qi == 1 and kind == R.KIND_DROP and #flat < 2 then R.NoteDrop(q[1], q[2], g.drops[p.edge]) end
         add(q[1], q[2], kind, zs and R.EdgeZ(g, p.edge, q[3]), fz and R.EdgeFloor(g, p.edge, q[3]))
         if g.raised and g.raised[p.edge] then raisedPts[#flat / 2] = true end
       end
@@ -5122,10 +5468,341 @@ local RouteBody
 -- for the Router's own; or "pending" for the Router's own marked `pending` (its walk is still worked out: the route is
 -- provisional, worked out again, never remembered as final). Called with pcall, so it must never yield: an error is the
 -- Router's own. None set (as AzerothGPS itself never does): routes are exactly as before.
+-- While the world grid works a walk leg out: the straight line, marked `pending` and `standIn` (drawn faded, "Working
+-- out the route...", no turns: Nav.StandIn). Never the Router's own route meanwhile (Kooki3z 2026-11-23: "we have to
+-- get rid of the fallback option, its fighting routing too much").
+function R.GridWaiting(cont, sx, sy, tx, ty)
+  local d = math.sqrt((tx - sx) ^ 2 + (ty - sy) ^ 2)
+  return { pts = { sx, sy, tx, ty }, kinds = { R.KIND_OFFROAD or 1 }, length = d, road = 0, pending = true,
+    standIn = true, worldGrid = true }
+end
 local legProvider
 function R.SetLegProvider(fn) legProvider = fn end
 function R.LegProvider() return legProvider end
+-- Spell jumping past what the world grid has (Kooki3z 2026-11-23, Tanaris's west rim into Un'Goro: the grid's walk
+-- went 3.4k yd round by the southern way down; the Router's own, shown while the grid's was searched, jumped the 151 yd
+-- rim with Slow Fall). The grid's drop links are baked up to WG_BAKED_DROP only; with a fall spell or item ready for
+-- more (Nav.FallSpellDrop), a grid walk much longer than the straight line (SPELL_JUMP_DETOUR) is weighed against the
+-- Router's own, whose straight legs go down cliffs of any height the spell allows (MarkBigDrops): taken when it jumps
+-- and is shorter, each drop counted DROP_COST more. nil: the grid's walk as it is.
+R.WG_BAKED_DROP = 39 -- (worldgrid.py's DROP_MAX)
+R.SPELL_JUMP_DETOUR = { 1.3, 100 } -- (times the straight line, plus yards)
+-- The drops spell jumping's ways weigh (Kooki3z 2026-11-23: "Expert jumper is only needed if the available spell
+-- wouldn't cover the fall distance and they need to cast on the way down"): any the routes' safe drop takes (Nav.SafeDrop:
+-- a ready spell's reach cast at the edge, the Safe drop slider's plain drop, an Expert jumper's any) past what the grids
+-- bake (WG_BAKED_DROP). Every way (the Router's own, the straight line, an edge's) weighs them, Expert jumper or not.
+-- Returns the smallest drop looked for and the biggest; nil: nothing past the grids' own (or a ghost's: no fall).
+function R.JumpDrops(opts)
+  local N = ns.Nav
+  if not (N and N.SafeDrop and N.PlainSafeDrop) then return nil end
+  local maxDrop = opts and opts.maxDrop or N.SafeDrop()
+  if not maxDrop or maxDrop == math.huge or maxDrop <= R.WG_BAKED_DROP + 0.5 then return nil end
+  return math.min(N.PlainSafeDrop(), R.WG_BAKED_DROP), maxDrop
+end
+-- Off a raised deck onto the land (Kooki3z 2026-11-23, on Thunder Bluff's rope bridge to Hunter Rise: "Straight, then
+-- arrive at destination in 282 yd", no jump): a walk's piece from a point with a height over the land's ground (a city
+-- grid's bridge or floor: more than DECK_DROP_MIN over Passability.GroundZ there) to a point out on the land (off the
+-- city's grid: CityGrid.CityFor none) leaves the deck's side DECK_EDGE_YD along: made a drop there (KIND_DROP, its fall
+-- noted, to the land's ground just past it), within the routes' safe drop (Nav.SafeDrop: a spell's when one is ready).
+R.DECK_DROP_MIN, R.DECK_EDGE_YD = 3, 3
+function R.MarkDeckDrops(cont, r, opts)
+  local N, P, CG = ns.Nav, ns.Passability, ns.CityGrid
+  local hs = r and (r.zs or r.fz)
+  if not (hs and r.pts and r.kinds and P and P.GroundZ and N and N.SafeDrop and CG and CG.CityFor) then return r end
+  local maxDrop = opts and opts.maxDrop or N.SafeDrop()
+  local pts, kinds = r.pts, r.kinds
+  for i = 1, #kinds do
+    local z, x1, y1, x2, y2 = hs[i], pts[2 * i - 1], pts[2 * i], pts[2 * i + 1], pts[2 * i + 2]
+    -- (a walk only: not a lift's ride, a drop already, a ride)
+    if type(z) == "number" and x2 and (kinds[i] == R.KIND_OFFROAD or kinds[i] == R.KIND_ROAD)
+        and not CG.CityFor(cont, x2, y2) then
+      local len = Dist(x1, y1, x2, y2)
+      local g0 = P.GroundZ(cont, x1, y1)
+      local g2 = P.GroundZ(cont, x2, y2) -- (the land it ends on: off a bridge's end at the deck's height, no drop)
+      if len > R.DECK_EDGE_YD + 2 and g0 and z - g0 > R.DECK_DROP_MIN and g2 and z - g2 > R.DECK_DROP_MIN then
+        local ux, uy = (x2 - x1) / len, (y2 - y1) / len
+        local ex, ey = x1 + ux * R.DECK_EDGE_YD, y1 + uy * R.DECK_EDGE_YD
+        local tx, ty = ex + ux, ey + uy
+        local gz = P.GroundZ(cont, tx, ty) or g0
+        local dz = z - gz
+        if dz > R.DECK_DROP_MIN and dz <= maxDrop + 0.5 then
+          local np, nk, nh = {}, {}, {}
+          for k = 1, 2 * i do np[k] = pts[k] end
+          for k = 1, i - 1 do nk[k] = kinds[k] end
+          for k = 1, i do nh[k] = hs[k] end
+          np[#np + 1], np[#np + 2] = ex, ey
+          nk[#nk + 1], nh[#nh + 1] = kinds[i], z
+          np[#np + 1], np[#np + 2] = tx, ty
+          nk[#nk + 1], nh[#nh + 1] = R.KIND_DROP, false
+          for k = 2 * i + 1, #pts do np[#np + 1] = pts[k] end
+          nk[#nk + 1] = R.KIND_OFFROAD
+          for k = i + 1, #kinds do nk[#nk + 1] = kinds[k] end
+          for k = i + 1, #pts / 2 do nh[#nh + 1] = k == #pts / 2 and false or hs[k] end
+          R.NoteDrop(ex, ey, dz)
+          local out = {}
+          for k, v in pairs(r) do out[k] = v end
+          out.pts, out.kinds = np, nk
+          if r.zs then out.zs = nh else out.fz = nh end
+          out.bigDrops = true
+          return out
+        end
+      end
+    end
+  end
+  return r
+end
+-- Whether route r jumps down into a cave's or a dungeon's way in from outside (Kooki3z 2026-11-23, Darkmist Cavern and
+-- the Deadmines from Moonbrook: "all cave routes should only be accessible through an entrance"): a drop whose foot is
+-- over a cave's own grid (R.InCaveGrid) while its top isn't. Spell jumping's ways (SpellJumpOwn, SpellJumpStraight,
+-- SpellJumpVia) are never such a route.
+function R.JumpsIntoCave(cont, r)
+  local pts, kinds = r and r.pts, r and r.kinds
+  if not (pts and kinds) then return false end
+  for i = 1, #kinds do
+    if kinds[i] == R.KIND_DROP and pts[2 * i + 2] then
+      local fx, fy = pts[2 * i + 1], pts[2 * i + 2]
+      if R.InCaveGrid(cont, fx, fy) then
+        local j = i
+        while j > 1 and kinds[j - 1] == R.KIND_DROP do j = j - 1 end
+        if not R.InCaveGrid(cont, pts[2 * j - 1], pts[2 * j]) then return true end
+      end
+    end
+  end
+  return false
+end
+-- Spell jumping's straight way (Kooki3z 2026-11-23: Tanaris's rim by the Noxious Lair to below Ironstone Plateau, "shouldn't
+-- this be the fastest with a slow fall?"; Freewind Post's mesa off its north-west edge to the canyon road): an Expert
+-- jumper with a fall spell ready may go off any ledge, so the straight line to the stop, where it never climbs a cliff
+-- (Passability.CliffAlong, its drop limit the spell's) nor crosses a wall, its drops marked (MarkBigDrops), is weighed
+-- against the way found (the grid's or the Router's own) when that's a long way round (SPELL_JUMP_DETOUR): taken when
+-- it's shorter, each drop DROP_COST more. nil: no straight way.
+function R.SpellJumpStraight(cont, sx, sy, tx, ty, opts, best)
+  local P = ns.Passability
+  if not (P and P.CliffAlong and best and best.length) then return nil end
+  local low, maxDrop = R.JumpDrops(opts)
+  if not low then return nil end
+  local straight = Dist(sx, sy, tx, ty)
+  if straight < 1 or best.length <= straight * R.SPELL_JUMP_DETOUR[1] + R.SPELL_JUMP_DETOUR[2] then return nil end
+  if P.CrossesWall and P.CrossesWall(cont, sx, sy, tx, ty) then return nil end
+  if P.SetDropMax then P.SetDropMax(math.max(maxDrop, R.TRACK_DROP_MAX)) end
+  if P.CliffAlong(cont, sx, sy, tx, ty) then return nil end -- (a cliff to climb on the way: not straight)
+  local g = Graph(cont)
+  local r = g and Straight(g, sx, sy, tx, ty)
+  if not r then return nil end
+  r = R.MarkBigDrops(cont, r, opts, low)
+  if R.JumpsIntoCave(cont, r) then return nil end
+  local drops = 0
+  for i = 1, #(r.kinds or {}) do
+    if r.kinds[i] == R.KIND_DROP and r.kinds[i - 1] ~= R.KIND_DROP then drops = drops + 1 end
+  end
+  if drops == 0 or (r.length or math.huge) + drops * R.DROP_COST >= best.length then return nil end
+  r.spellJumpOwn, r.spellJumpStraight = true, true
+  return r
+end
+-- Spell jumping by way of a cliff's edge (Kooki3z 2026-11-23, the southern Barrens to below Dustwallow's ridge: "there is
+-- no way blue is faster than green here with slow fall"; the straight line climbs the Barrens' hills, so
+-- SpellJumpStraight can't take it): edges near the stop, looked for along a fan of lines out from the stop toward the
+-- start (SPELL_JUMP_VIA_FAN degrees either side, every SPELL_JUMP_VIA_STEP yards up to SPELL_JUMP_VIA_REACH), each line's
+-- farthest point from which the straight way to the stop only goes down past the player's own safe drop
+-- (Passability.FallAlong, never a cliff to climb nor a wall); the nearest few by the straight line through them
+-- (SPELL_JUMP_VIA_TRIES) routed to from the start as any leg (R.Route), then the jump straight down to the stop: the
+-- fastest of those, when shorter than the way found, each drop DROP_COST more. For any drop past the grids' within the
+-- safe drop (R.JumpDrops: a spell's from the edge, the plain Safe drop's, an Expert jumper's any), only when the way
+-- found is a long way round. On a leg SPELL_JUMP_VIA_FAR or shorter, the lines go on past SPELL_JUMP_VIA_REACH, every
+-- SPELL_JUMP_VIA_FAR_STEP yards, all the way to the start, for a start far back from the edge (Kooki3z 2026-11-23: Tanaris's rim 700 yd from the stop in
+-- Un'Goro, "i get spell jump if i get closer to the edge"; a longer leg's, a ride check's across the continent, as
+-- before: routing to tops far out there took seconds each). (A landing in a cave's inside is the world grid's to rule out:
+-- its links, rebaked.)
+R.SPELL_JUMP_VIA_FAN, R.SPELL_JUMP_VIA_DIRS = 60, 9
+R.SPELL_JUMP_VIA_STEP, R.SPELL_JUMP_VIA_REACH = 30, 500
+R.SPELL_JUMP_VIA_FAR_STEP, R.SPELL_JUMP_VIA_FAR = 60, 1500
+R.SPELL_JUMP_VIA_TRIES = 3
+-- (the walks to the edges are searched with opts.inVia: no edge's way looked for within them. A flag in the options,
+-- not a pcall round them: in the background those walks pause (coroutine.yield), and Lua 5.1 can't pause inside a
+-- pcall. Every search of the trip errored ("attempt to yield across metamethod/C-call boundary"), was dropped and asked
+-- again, and never landed: the trip's route stayed the faded stand-in. Kooki3z 2026-11-23, Tanaris's rim far back)
+function R.SpellJumpVia(cont, sx, sy, tx, ty, opts, best)
+  local P = ns.Passability
+  if (opts and opts.inVia) or not (P and P.FallAlong and P.CliffAlong and best and best.length) then return nil end
+  local low, maxDrop = R.JumpDrops(opts)
+  if not low then return nil end
+  local straight = Dist(sx, sy, tx, ty)
+  if straight < 1 or best.length <= straight * R.SPELL_JUMP_DETOUR[1] + R.SPELL_JUMP_DETOUR[2] then return nil end
+  if P.SetDropMax then P.SetDropMax(math.max(maxDrop, R.TRACK_DROP_MAX)) end
+  local g = Graph(cont)
+  if not g then return nil end
+  -- (each line's farthest top whose way straight down to the stop is a jump)
+  local tops = {}
+  local base = math.atan2(sy - ty, sx - tx)
+  local reach = straight <= R.SPELL_JUMP_VIA_FAR and straight or R.SPELL_JUMP_VIA_REACH
+  for d = 0, R.SPELL_JUMP_VIA_DIRS - 1 do
+    local a = base + math.rad(-R.SPELL_JUMP_VIA_FAN + 2 * R.SPELL_JUMP_VIA_FAN * d / math.max(1, R.SPELL_JUMP_VIA_DIRS - 1))
+    local ux, uy = math.cos(a), math.sin(a)
+    local top
+    local r = 0
+    while true do
+      r = r + (r < R.SPELL_JUMP_VIA_REACH and R.SPELL_JUMP_VIA_STEP or R.SPELL_JUMP_VIA_FAR_STEP)
+      if r > reach then break end
+      local qx, qy = tx + ux * r, ty + uy * r
+      local _, _, dz = P.FallAlong(cont, qx, qy, tx, ty)
+      if dz and dz > low + 0.5 and dz <= maxDrop + 0.5 and not P.CliffAlong(cont, qx, qy, tx, ty)
+          and not (P.CrossesWall and P.CrossesWall(cont, qx, qy, tx, ty)) then
+        top = { qx, qy }
+      end
+    end
+    if top then
+      top.est = Dist(sx, sy, top[1], top[2]) + Dist(top[1], top[2], tx, ty)
+      tops[#tops + 1] = top
+    end
+  end
+  if #tops == 0 then return nil end
+  table.sort(tops, function(p, q) return p.est < q.est end)
+  local pick, pickCost
+  local o = {}
+  for k, v in pairs(opts or {}) do o[k] = v end
+  o.tz = nil -- (the edge's own height: the land's)
+  o.inVia = true
+  -- (a walk to an edge still searched in the background, `pending`: weighed as it stands, and the answer provisional,
+  -- worked out again when the search lands. Kooki3z 2026-11-23: the grid's 3.6k yd walk round settled as final while
+  -- the walks to Tanaris's rim were searched)
+  local waiting = false
+  do
+    for i = 1, math.min(#tops, R.SPELL_JUMP_VIA_TRIES) do
+      local q = tops[i]
+      local a = R.Route(cont, sx, sy, q[1], q[2], o)
+      if a and a.pending then waiting = true end
+      if a and a.pts and a.kinds and not a.unconnected then
+        local b = R.MarkBigDrops(cont, Straight(g, q[1], q[2], tx, ty), opts, low)
+        if R.JumpsIntoCave(cont, b) then b = { kinds = {}, pts = {} } end -- (into a cave from over it: none)
+        local drops = 0
+        for j = 1, #b.kinds do
+          if b.kinds[j] == R.KIND_DROP and b.kinds[j - 1] ~= R.KIND_DROP then drops = drops + 1 end
+        end
+        local cost = (a.length or 0) + (b.length or 0) + drops * R.DROP_COST
+        if drops > 0 and cost < best.length and (not pickCost or cost < pickCost) then
+          local pts, kinds = {}, {}
+          for j = 1, #a.pts do pts[j] = a.pts[j] end
+          for j = 1, #a.kinds do kinds[j] = a.kinds[j] end
+          for j = 3, #b.pts do pts[#pts + 1] = b.pts[j] end
+          for j = 1, #b.kinds do kinds[#kinds + 1] = b.kinds[j] end
+          local r = { pts = pts, kinds = kinds, length = (a.length or 0) + (b.length or 0), road = a.road or 0,
+            blocked = a.blocked, spellJumpOwn = true, spellJumpVia = true, pending = a.pending or nil }
+          local hs = a.zs or a.fz
+          if hs then
+            local h = {}
+            for j = 1, #hs do h[j] = hs[j] end
+            for _ = 2, #b.pts / 2 do h[#h + 1] = false end
+            if a.zs then r.zs = h else r.fz = h end
+          end
+          pick, pickCost = r, cost
+        end
+      end
+    end
+  end
+  if waiting and not (pick and pick.pending) then
+    local r = pick
+    if not r then
+      r = {}
+      for k, v in pairs(best) do r[k] = v end
+    end
+    r.pending = true
+    return r
+  end
+  return pick
+end
+-- (the points of the spell jumping routes handed out: Nav's planning weighs them as walked, not their cliff faces)
+R.spellJumpPts = setmetatable({}, { __mode = "k" })
+function R.SpellJumpOwn(cont, sx, sy, tx, ty, opts, got)
+  local pick = R.SpellJumpOwnOnly(cont, sx, sy, tx, ty, opts, got)
+  pick = R.SpellJumpStraight(cont, sx, sy, tx, ty, opts, pick or got) or pick
+  pick = R.SpellJumpVia(cont, sx, sy, tx, ty, opts, pick or got) or pick
+  if pick and pick.pts then R.spellJumpPts[pick.pts] = true end
+  return pick
+end
+-- Whether route r goes down a cliff deeper than the routes' safe drop without a jump there: a walked piece off-road whose
+-- fall (Passability.FallAlong) is past it, or through a cliff wall too deep to be a way down, left unmarked by MarkBigDrops (Kooki3z 2026-11-23: for a player who isn't
+-- an Expert jumper, a cliff past the ready spell's reach from the edge, or past Safe drop with no spell, is walked round,
+-- never gone down through its face).
+function R.UnmarkedFall(cont, r, opts)
+  local N, P = ns.Nav, ns.Passability
+  if not (r and r.pts and r.kinds and N and N.SafeDrop and P and P.FallAlong) then return false end
+  local maxDrop = opts and opts.maxDrop or N.SafeDrop()
+  local pts = r.pts
+  for i = 1, #r.kinds do
+    if r.kinds[i] == R.KIND_OFFROAD and pts[2 * i + 2] then
+      local x1, y1, x2, y2 = pts[2 * i - 1], pts[2 * i], pts[2 * i + 1], pts[2 * i + 2]
+      local _, _, dz = P.FallAlong(cont, x1, y1, x2, y2)
+      if dz and dz > maxDrop + 0.5 then return true end
+      -- (a cliff wall past the drop limit, Passability.SetDropMax, is no way down at all: a wall. Not the model walls:
+      -- the terrain grid's ways don't know them, and a walk past a fence's end judged a fall lost the Hinterlands' trips
+      -- from the west, item 78; the world grid keeps to them)
+      if P.CrossesWall and P.CrossesWall(cont, x1, y1, x2, y2, nil, true) then return true end
+    end
+  end
+  return false
+end
+function R.SpellJumpOwnOnly(cont, sx, sy, tx, ty, opts, got)
+  if not (got and got.length and R.JumpDrops(opts)) then return nil end
+  local straight = Dist(sx, sy, tx, ty)
+  if got.length <= straight * R.SPELL_JUMP_DETOUR[1] + R.SPELL_JUMP_DETOUR[2] then return nil end
+  local own = R.RouteOwn(cont, sx, sy, tx, ty, opts)
+  if not (own and own.pts and own.kinds) or R.JumpsIntoCave(cont, own) then return nil end
+  -- (through ground the terrain grid closes, own.blocked: the steep cliff face itself, its drops within the safe drop
+  -- marked, R.JumpDrops: a spell's reach from the edge, any for an Expert jumper. Taken only going down by more than
+  -- the grid's drops: a way off the rim, not across)
+  local drops, fall = 0, 0
+  for i = 1, #own.kinds do
+    if own.kinds[i] == R.KIND_DROP and own.kinds[i - 1] ~= R.KIND_DROP then
+      drops = drops + 1
+      fall = fall + (R.DropFall(own.pts, own.kinds, i) or 0)
+    end
+  end
+  if own.blocked then
+    if not (fall > R.WG_BAKED_DROP) or R.UnmarkedFall(cont, own, opts) then return nil end
+  end
+  if drops == 0 or (own.length or math.huge) + drops * R.DROP_COST >= got.length then return nil end
+  -- (its walk still searched in the background, own.pending: shown as it is, provisional, and worked out again when the
+  -- search lands; never the grid's long walk meanwhile. Kooki3z 2026-11-23: the faded jump off the rim, then the 3.35k
+  -- yd walk round settled for half a minute, as the grid's answer landed while the Router's own was still searched)
+  own.spellJumpOwn = true
+  return own
+end
 function R.Route(cont, sx, sy, tx, ty, opts)
+  -- (1.4.0's world routing, being tested: the open world's walk grid, WorldGrid.lua; only while its option is on)
+  local WG = ns.WorldGrid
+  if WG and WG.On() and not R.preview then
+    -- (the grid's walk, its "Working out the route..." line, or no way: never the Router's own instead, Kooki3z
+    -- 2026-11-23. Its falls off cliffs are the grid's own, WorldGrid.FarDrops: no spell jump of the Router's own)
+    local got = WG.Leg(cont, sx, sy, tx, ty, opts or {})
+    if got == "pending" or (type(got) == "table" and got.pending) then return R.GridWaiting(cont, sx, sy, tx, ty) end
+    if type(got) == "table" then return got end
+  end
+  -- (1.4.0's city routing, being tested: the city's walk grid inside the six capitals, CityGrid.lua;
+  -- only while its option is on. Not in a pcall: its search pauses in the background, as the Router's own)
+  local CG = ns.CityGrid
+  if CG and CG.On() and not R.preview then
+    local got = CG.Leg(cont, sx, sy, tx, ty, opts or {})
+    -- (with world routing on, the capitals too: the city grid's walk, its line while it works, or no way, never the
+    -- Router's own instead; the coordinator 2026-11-24, Kooki3z's rule everywhere. The Cleft of Shadow: the city grid
+    -- declined a start it had no floor for, and the Router's own straight walk through the rock stood in)
+    local grids = WG and WG.On()
+    if got == "pending" then
+      if grids then return R.GridWaiting(cont, sx, sy, tx, ty) end
+      local r = R.RouteOwn(cont, sx, sy, tx, ty, opts)
+      if r then r.pending = true end
+      return r
+    end
+    -- (off a deck's side onto the land: a jump; and spell jumping weighed as the open world's, Kooki3z 2026-11-23 on
+    -- Thunder Bluff's rim and its rope bridge)
+    if type(got) == "table" then
+      got = R.MarkDeckDrops(cont, got, opts)
+      if grids then return got end
+      return R.SpellJumpOwn(cont, sx, sy, tx, ty, opts, got) or got
+    end
+    if grids and WG.NoWay and (CG.CityFor(cont, sx, sy) or CG.CityFor(cont, tx, ty)) then
+      return WG.NoWay(cont, sx, sy, tx, ty, "no way on the city grid")
+    end
+  end
   if legProvider and not R.preview then -- (a walk previewed, R.SetPreview: the Router's own roads, which have it)
     local ok, got = pcall(legProvider, cont, sx, sy, tx, ty, opts or {})
     if ok and type(got) == "table" and type(got.pts) == "table" and #got.pts >= 4 and type(got.kinds) == "table" then
@@ -5137,7 +5814,15 @@ function R.Route(cont, sx, sy, tx, ty, opts)
       return r
     end
   end
-  return R.RouteOwn(cont, sx, sy, tx, ty, opts)
+  local own = R.RouteOwn(cont, sx, sy, tx, ty, opts)
+  if own and not own.pending and not R.preview then
+    local sj = R.SpellJumpStraight(cont, sx, sy, tx, ty, opts, own) or R.SpellJumpVia(cont, sx, sy, tx, ty, opts, own)
+    if sj then
+      R.spellJumpPts[sj.pts] = true
+      return sj
+    end
+  end
+  return own
 end
 -- A trip to or from inside an attached building (Data/Indoors.lua's `attach` entries: indoors.py's phase 7, asked
 -- 2026-11-21: "if routing to an NPC in the building you just get a dotted line to it through walls"): its joins aren't
@@ -5376,7 +6061,64 @@ function R.RouteOwn(cont, sx, sy, tx, ty, opts)
   local r = R.AttachTrip(cont, sx, sy, tx, ty, opts) or RouteBody(cont, sx, sy, tx, ty, opts)
   if r.unconnected and not r.pending then r = R.ToCaveWayIn(cont, sx, sy, tx, ty, opts) or r end
   r = R.BendRoundGuards(cont, R.Smooth(cont, r), sx, sy, tx, ty)
-  return R.GuardsOverHighZones(cont, r, sx, sy, tx, ty, opts)
+  -- (a cliff a straight leg crosses down: marked past the grids' drops, R.JumpDrops, within the Safe drop with no spell
+  -- too; else past the player's own safe drop, a spell's)
+  return R.MarkBigDrops(cont, R.GuardsOverHighZones(cont, r, sx, sy, tx, ty, opts), opts, R.JumpDrops(opts))
+end
+
+-- A straight leg off-road down a cliff bigger than the player's own safe drop (taken with a spell for it, FallSpells:
+-- the routes' safe drop, Nav.SafeDrop, is bigger then): that stretch made a drop (KIND_DROP, its
+-- height noted), so its step says to cast the spell first and the arrow holds there as at any jump (Turns, Nav.JumpHold).
+-- The cliff's top and foot from Passability.FallAlong. Nothing to do while the safe drop is the player's own.
+R.MARK_DROPS_DEPTH = 4
+-- `low`: the smallest drop marked (spell jumping's, R.JumpDrops: the plain ones past the grids' too); else the player's
+-- own safe drop.
+function R.MarkBigDrops(cont, r, opts, low)
+  local N, P = ns.Nav, ns.Passability
+  if not (r and r.pts and r.kinds and #r.pts >= 4 and N and N.PlainSafeDrop and P and P.FallAlong) then return r end
+  local plain = low or N.PlainSafeDrop()
+  local maxDrop = opts and opts.maxDrop or N.SafeDrop()
+  if maxDrop <= plain + 0.5 then return r end
+  local pts, kinds, hs = r.pts, r.kinds, r.zs or r.fz
+  local out, outK, outH, changed = { pts[1], pts[2] }, {}, hs and { hs[1] } or nil, false
+  local function Put(x, y, kind, h)
+    out[#out + 1], out[#out + 2] = x, y
+    outK[#outK + 1] = kind
+    if outH then outH[#outH + 1] = h end
+  end
+  -- (each drop on a leg, not only its biggest: the biggest split off, then the stretches before and after it looked at
+  -- the same way, MARK_DROPS_DEPTH deep: a trip down cliffs in a row, each its own jump and cast, spell jumping)
+  local function Split(x1, y1, x2, y2, h2, depth)
+    local t0, t1, dz = P.FallAlong(cont, x1, y1, x2, y2)
+    if not (dz and dz > plain + 0.5 and dz <= maxDrop + 0.5) then
+      Put(x2, y2, R.KIND_OFFROAD, h2)
+      return
+    end
+    local ax, ay = x1 + (x2 - x1) * t0, y1 + (y2 - y1) * t0
+    local bx, by = x1 + (x2 - x1) * t1, y1 + (y2 - y1) * t1
+    if t0 > 0 then
+      if depth > 1 then Split(x1, y1, ax, ay, false, depth - 1) else Put(ax, ay, R.KIND_OFFROAD, false) end
+    end
+    Put(bx, by, R.KIND_DROP, false)
+    R.NoteDrop(ax, ay, dz)
+    changed = true
+    if t1 < 1 then
+      if depth > 1 then Split(bx, by, x2, y2, h2, depth - 1) else Put(x2, y2, R.KIND_OFFROAD, h2) end
+    end
+  end
+  for i = 1, #pts / 2 - 1 do
+    local x1, y1, x2, y2 = pts[2 * i - 1], pts[2 * i], pts[2 * i + 1], pts[2 * i + 2]
+    if kinds[i] == R.KIND_OFFROAD then
+      Split(x1, y1, x2, y2, outH and hs[i + 1], R.MARK_DROPS_DEPTH)
+    else
+      Put(x2, y2, kinds[i], outH and hs[i + 1])
+    end
+  end
+  if not changed then return r end
+  r.pts, r.kinds = out, outK
+  if r.zs then r.zs = outH elseif r.fz then r.fz = outH end
+  r.bigDrops = true
+  return r
 end
 
 -- The other faction's guards before zones too high (asked 2026-11-14: "if there is any other route with avoid enemy
@@ -5755,6 +6497,8 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
   local maxDrop = opts and opts.maxDrop or (ns.Nav and ns.Nav.SafeDrop and ns.Nav.SafeDrop()) or 0
   -- (and the cliffs' ways down the same: the cliff walls', the map's ground's; Passability.SetDropMax)
   if ns.Passability and ns.Passability.SetDropMax then ns.Passability.SetDropMax(math.max(maxDrop, R.TRACK_DROP_MAX)) end
+  -- (the jumps avoided on this trip, Nav.AvoidJump: no road drop from within reach of one's top)
+  local JumpBanned = ns.Nav and ns.Nav.jumpBans and ns.Nav.jumpBans[1] and ns.Nav.JumpBanned or nil
   local grid = ns.Terrain and ns.Terrain[cont]
   local cityPenalty = grid and grid.slack and R.CITY_BLOCKED_PENALTY
   -- (a blocked leg or link: a city's walls are real, and so are its ruins' up top)
@@ -5990,7 +6734,7 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
   -- a capital's stop with a height (a city place's: its NPC's): onto the roads on its floor, not the
   -- nearest, on a balcony or a walk over it (Ironforge's Priest trainer under the Hall of Mysteries'
   -- balcony: up its stairs and down, 2026-10-01)
-  if not layered and g.nz and opts and opts.tz then ts = R.OnFloor(g, ts, opts.tz, tx, ty) end
+  if not layered and g.nz and opts and opts.tz then ts = R.OnFloor(g, ts, opts.tz, tx, ty, cont) end
   -- (and the player's own floor in a building, followed along its roads: Nav.TrackCityZ; asked 2026-10-06, Brill's
   -- inn: from upstairs the route started on the ground floor's road under them)
   if not layered and g.nz and opts and opts.z then ss = R.OnFloor(g, ss, opts.z, sx, sy) end
@@ -6132,12 +6876,15 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
     end
     if c or must then h = h + SwimDetour(path, x1, y1, x2, y2) end
     h = h + extra
+    -- (Road tolerance is the open world's: in a capital a leg off its streets costs as at 0, so the way into a shop
+    -- keeps to its own walk up to the NPC; Pithwick's in Ironforge was cut 13.6 yd across at +3, 2026-11-23)
+    local rf = (R.CapitalAt(cont, x1, y1) or R.CapitalAt(cont, x2, y2)) and R.OFFROAD_PENALTY or R.RoadFactor(R.OFFROAD_PENALTY)
     if offroad then
       if c then return (c + h) * R.OFFROAD_TIE, pieces end
-      if must then return (d * blockedPenalty(x1, y1, x2, y2) + h) * R.RoadFactor(R.OFFROAD_PENALTY) + hopCost, pieces end
+      if must then return (d * blockedPenalty(x1, y1, x2, y2) + h) * rf + hopCost, pieces end
       return nil
     end
-    return ((c or d * blockedPenalty(x1, y1, x2, y2)) + h) * R.RoadFactor(R.OFFROAD_PENALTY) + hopCost, pieces
+    return ((c or d * blockedPenalty(x1, y1, x2, y2)) + h) * rf + hopCost, pieces
   end
   -- (a leg that's a hop, HOP_COST: blocked straight and no walk round it)
   local function IsHop(leg) return leg and #leg == 1 and leg[1].hop and true or false end
@@ -6314,7 +7061,7 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
     local cost, leg = Leg(sx, sy, c.px, c.py, true, walk, sz, layered and R.EdgeZ(g, c.edge, c.along))
     if onRoad and c.dist and c.dist > R.ON_ROAD_YD then
       local hc = walkAll and IsHop(leg) and R.HOP_COST or 0 -- (a hop's HOP_COST as it is)
-      cost = (cost - hc) * R.RoadFactor(R.LEAVE_ROAD_FACTOR) + hc
+      cost = (cost - hc) * (R.CapitalAt(cont, sx, sy) and R.LEAVE_ROAD_FACTOR or R.RoadFactor(R.LEAVE_ROAD_FACTOR)) + hc
     end
     starts[#starts + 1] = { edge = c.edge, along = c.along, cost = cost, leg = leg }
     relax(START, e[1], cost + part(c.edge, c.along), Join(leg, { { kind = ROAD, edge = c.edge, from = c.along, to = 0 } }))
@@ -6482,7 +7229,8 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
         local se = g.adjE[ai]
         local aei = se >= 0 and se or -se
         local drop = g.drops and g.drops[aei]
-        if not drop or drop <= maxDrop then -- (a drop only when the fall is safe, and worth it)
+        if not drop or (drop <= maxDrop -- (a drop only when the fall is safe, and worth it; not one avoided)
+            and not (JumpBanned and JumpBanned(cont, g.n[n * 2 - 1], g.n[n * 2]))) then
           local alen = g.adjLen[ai]
           local acost = g.adjCost[ai]
           local ec = (exempt or (g.light and g.light[aei])) and alen * RoadRatio(aei) or (acost ~= 0 and acost) or alen
@@ -6491,7 +7239,14 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
             local bc = R.BentRoadCost(g, cont, aei)
             if bc and bc < ec then ec = bc end
           end
-          relax(n, g.adjTo[ai], ec + alen * EdgeDanger(aei) + (drop and R.DROP_COST or 0), se)
+          -- (its drop by the open world's rules, R.DropExtra: a chain when the road walked onto this node was one too)
+          local extra = 0
+          if drop then
+            local by = cameBy[n]
+            local prevDrop = type(by) == "number" and g.drops[by >= 0 and by or -by] or nil
+            extra = R.DropExtra(drop, R.ChainDrop(prevDrop) and R.ChainDrop(drop))
+          end
+          if extra then relax(n, g.adjTo[ai], ec + alen * EdgeDanger(aei) + extra, se) end
         end
       end
       -- across a gap to another piece of the road network (walked around obstacles below)
@@ -6506,7 +7261,8 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
           -- capital, where what's closed between two roads is a wall or a level up or down)
           if not b.open and g.caveNode and (g.caveNode[n] or g.caveNode[m]) then b.shut = true end
           if not b.open and (R.CapitalAt(cont, x, y) or R.CapitalAt(cont, mx, my)) then b.shut = true end
-          if not b.open and Pass and Pass.CrossesWall and Pass.CrossesWall(cont, x, y, mx, my) then b.shut = true end
+          -- (not the model walls: the walk round, the terrain grid's, doesn't know them, item 78)
+          if not b.open and Pass and Pass.CrossesWall and Pass.CrossesWall(cont, x, y, mx, my, nil, true) then b.shut = true end
           -- (kept without the road factor: Road tolerance may change it)
           -- (an extra far link only: on every link it made six of 200 sample trips weigh worse, 2026-11-10)
           -- (blocked for a few yards only, a rock or a hut on the line: about straight, as a leg waiting for its walk
@@ -6519,7 +7275,10 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
           -- the line crosses (a wall, a city's edge: the walk keeps to its ways); none, shut)
           local walked
           if b.deadEnd and not c and Pass and Pass.FindPath and not layered then
-            local wc, _, searching = Walk(cont, x, y, mx, my)
+            -- (both its ends road points: no fall-free drop off a cliff at either, as the player's own start or stop may
+            -- have; Passability.FindPath's road1/road2. By the Great Lift a loose end's walk dropped 12 yd off a cliff
+            -- at each end, and with Road tolerance +3 the route took it, 2026-11-23)
+            local wc, _, searching = Walk(cont, x, y, mx, my, nil, true, true)
             if searching then
               pending = true
               walked = false
