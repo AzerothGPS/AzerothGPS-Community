@@ -105,15 +105,29 @@ def test_with_walks_in_the_background_the_route_goes_up_the_gap_meanwhile():
     N.FlightsChanged()
     lua.execute("AGPS_MAP = 1454; AGPS_POS = { 1676, -4313, 1 }")
     N.SetStops(lua.eval("{ { x = 1952, y = 1017, cont = 2991 } }"), False, "red")
-    shown = []
-    for i in range(400):
+    # (frames until the background searches go quiet, not a fixed count: on a loaded CI runner each frame's slice of
+    # search (wall-clock, GPSFrame.PumpBudget) does less, and 400 frames weren't always enough. The steps read as the
+    # frame draws them, right after G.Update: read after the pump, a search just landed (Nav.SearchDone) left them
+    # empty until the next frame's update, and the 400th frame was such a one on CI, run 45764259051)
+    # (the first frames' plans skipped, as before: the very first is made before any walk is in)
+    shown, busy, quiet = [], [], 0
+    for i in range(20000):
         lua.execute("AGPS_T = (AGPS_T or 1000) + 0.05")
         G.Update()
+        steps = N.StepsText(99)
         G.PumpSearches()
+        quiet = 0 if R.HasWork() else quiet + 1
         if i >= 5:
-            shown.append(N.StepsText(99))
+            shown.append(steps)
+            busy.append(quiet == 0)
+        if quiet >= 40:
+            break
+    assert quiet >= 40, "the background searches never went quiet"
     assert "Thunder Bluff" in shown[-1] and "Camp Gev'rek" in shown[-1], shown[-1]
-    assert sum("Walk" in s for s in shown) > 350  # (a plan up within the first frames)
+    # (a plan up meanwhile: shown while the walks were still searched, and every frame from then on)
+    first = next(i for i, s in enumerate(shown) if "Walk" in s)
+    assert any(busy[first:]), "the plan only came once the background searches were done"
+    assert all("Walk" in s for s in shown[first:]), "a frame without the plan"
     for steps in shown:
         assert "Camp Taurajo" not in steps, steps  # (round the Barrens, before the walk was in)
         walks = [float(m.replace("k", "")) * (1000 if "k" in m else 1)

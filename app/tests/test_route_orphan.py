@@ -94,28 +94,51 @@ def test_a_new_trip_never_waits_behind_the_last_one_s_searches():
     dropped = (R.stats.dropped or 0) if R.stats else 0
     N.SetStops(lua.eval("{ { x = -569.8, y = -2291.7, cont = 1, name = 'near' } }"), False, "red")
     assert (R.stats.dropped or 0) > dropped
-    got = _frames(lua, ns, 40, lambda: N.route is not None and not N.route.pending)  # (2 s of frames)
+    # (3 s of frames: it was minutes. 2 s held only while the background's slices ran past their 4 ms; kept to them
+    # (item 108) the same work lands in 35-56 frames here, the same Lua instructions)
+    got = _frames(lua, ns, 60, lambda: N.route is not None and not N.route.pending)
     assert got is not None, chr(10).join(str(x) for x in N.WaitReport().values())
 
 
-def test_a_region_loads_in_one_go_never_paused_half_loaded():
+def test_a_region_paused_half_loaded_is_carried_on_never_taken_for_none():
     # (item 82h: WorldGrid.LoadRegion marked the region, then paused (Router.Breathe) before taking its tiles: a search
     # in the pause took them for none for good, and a job dropped in it (a new trip's) left the region tileless for the
-    # session; every walk there was then no way, remembered. Loaded in a job, it never yields now)
+    # session; every walk there was then no way, remembered. Item 108: its road links (1,500 a region, 27-34 ms in one
+    # slice) are parsed in slices now, the region unmarked till all of it is put in place at once; whoever reaches it
+    # meanwhile carries the load on, the folder loaded once)
     lua, ns = _game()
     WG, R = ns.WorldGrid, ns.Router
     c = WG.Cont(1)
     was = R.Breathe
-    R.Breathe = lua.eval("function() coroutine.yield() end")  # (every pause yields, as a slice running out does)
+    R.Breathe = lua.eval("function() if coroutine.running() then coroutine.yield() end end")  # (every pause in a job yields)
     try:
         got = lua.eval("""function(c)
+          local WG = AGPS_NS.WorldGrid
           local rk
           for k in pairs(c.d.regions) do if c.regions[k] == nil then rk = k break end end
           local rx, ry = rk:match("(%d+):(%d+)")
-          local t = coroutine.create(function() return AGPS_NS.WorldGrid.LoadRegion(c, tonumber(rx), tonumber(ry)) end)
+          rx, ry = tonumber(rx), tonumber(ry)
+          local host = (C_AddOns and C_AddOns.LoadAddOn) and C_AddOns or _G
+          local loads, la = 0, host.LoadAddOn
+          host.LoadAddOn = function(...) loads = loads + 1 return la(...) end
+          local links0 = #c.links
+          local t = coroutine.create(function() return WG.LoadRegion(c, rx, ry) end)
           coroutine.resume(t)
-          return coroutine.status(t), c.regions[rk]
+          local paused, marked = coroutine.status(t), c.regions[rk]
+          -- (a tile of it asked for meanwhile, out of the job: the load carried on to its end, the tile there)
+          local key
+          for k in pairs(c.loading[rk].e.t) do key = k break end
+          local tile = WG.Tile(c, key)
+          local after = c.regions[rk]
+          -- (the paused job resumed, or never: nothing taken twice)
+          local n1 = #c.links
+          while coroutine.status(t) ~= "dead" do coroutine.resume(t) end
+          host.LoadAddOn = la
+          return paused, marked == nil, tile and true or false, after, n1 > links0, #c.links == n1, loads,
+            c.loading[rk] == nil, c.none[key] == nil
         end""")(c)
-        assert str(got[0]) == "dead" and got[1] is True  # (no pause half way: loaded)
+        assert str(got[0]) == "suspended" and got[1]  # (paused half way: not marked)
+        assert got[2] and got[3] is True and got[4]  # (carried on: the tile and the links there)
+        assert got[5] and got[6] == 1 and got[7] and got[8]  # (nothing twice, the folder loaded once, never none)
     finally:
         R.Breathe = was

@@ -81,8 +81,8 @@ See "Cell sizes" below for the full comparison.
 ## 2. The search (`CityGrid.lua`)
 
 - **Where:** a leg with both ends in one city's grid (a capital's own cells, `Router.CapitalAt`; Undercity's level
-  10001; Darnassus: any spot over a floor of its grid, `whole = true`, as the Cenarion Enclave's treetops are outside
-  the capital's cells). A leg with one end in the city: the Router's own route outside, cut where it first comes into
+  10001; Darnassus and Ironforge: any spot over a floor of its grid within the capital's rectangle, `whole = true`, as
+  the Cenarion Enclave's treetops and Ironforge's shops and rooms off its halls are outside the capital's cells). A leg with one end in the city: the Router's own route outside, cut where it first comes into
   the city's grid (walked every 2 yd), the grid's walk from there (the gates' roads join as before; the join's height
   the grid floor's, not the road's). Legs elsewhere, legs between two
   cities, and anything the grid can't walk (Stormwind's Wizard's Sanctum up its portal): the Router's own, unchanged.

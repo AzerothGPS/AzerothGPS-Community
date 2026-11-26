@@ -2966,12 +2966,144 @@ function HostileSide()
   local seen = co and sideOf[co]
   if seen then return seen[1] end
   local st = ns.settings and ns.settings.gps
-  local side
-  if not (st and st.avoidHostile == false) then side = ns.Nav and ns.Nav.Faction and ns.Nav.Faction() or nil end
+  local f = ns.Nav and ns.Nav.Faction and ns.Nav.Faction() or nil
+  local side = R.EnemyKey(not (st and st.avoidHostile == false), f, f and R.EliteMin() or nil)
   if co then sideOf[co] = { side } end
   return side
 end
 R.HostileSide = HostileSide
+
+-- Elite enemy areas (item 91, Kooki3z 2026-11-26: "avoid elite enemy areas"; Data/Elites.lua, mobs.py's elite_areas):
+-- option "Avoid elite enemy areas" (`avoidElites`, on by default) and its offset (`eliteOffset`, ELITE_OFFSET_MIN to
+-- MAX, ELITE_OFFSET_DEFAULT): an area is avoided when its elites' top level is at or above the player's level plus the
+-- offset (a level 45 at -10: 35 and up; Razorfen Downs' quilboar, 33-36, are, and at level 60 they aren't). Avoided the
+-- guards' way, through their code (the same detours, "Take it?", the ride check, a stop inside one still reached): the
+-- areas avoided are circles added to the guards' list, under a key of their own in place of the faction's
+-- (R.EnemyKey: "A+35", or "~A+35" with the guards not avoided; ns.Hostile[cont][key], made on first use, InstallElites).
+-- Each such list has `guardN` (its first guardN numbers are the guards') and `area` ([i] = the elite area of circle i,
+-- its index in ns.EliteAreas[cont]); the key's level is the lowest top level among the areas at or above the
+-- player's (R.EliteMin), so it changes only when the areas avoided do.
+R.ELITE_OFFSET_MIN, R.ELITE_OFFSET_MAX, R.ELITE_OFFSET_DEFAULT = -20, 5, -10
+local eliteLevels, eliteLevelsFor
+local function EliteLevels()
+  local areas = ns.EliteAreas
+  if eliteLevelsFor ~= areas then
+    local seen, out = {}, {}
+    for _, list in pairs(areas or {}) do
+      for _, a in ipairs(list) do
+        if not seen[a[2]] then
+          seen[a[2]] = true
+          out[#out + 1] = a[2]
+        end
+      end
+    end
+    table.sort(out)
+    eliteLevels, eliteLevelsFor = out, areas
+  end
+  return eliteLevels
+end
+-- The option's offset, whole levels within its range.
+function R.EliteOffset()
+  local st = ns.settings and ns.settings.gps
+  local v = st and tonumber(st.eliteOffset) or R.ELITE_OFFSET_DEFAULT
+  return math.max(R.ELITE_OFFSET_MIN, math.min(R.ELITE_OFFSET_MAX, math.floor(v + 0.5)))
+end
+-- The level from which elite areas are avoided now (the lowest top level of an area at or above the player's level
+-- plus the offset), or nil: the option off, the level unknown, or none that high.
+function R.EliteMin()
+  local st = ns.settings and ns.settings.gps
+  if (st and st.avoidElites == false) or not ns.EliteAreas then return nil end
+  local ok, lvl = pcall(UnitLevel or error, "player")
+  if not ok or type(lvl) ~= "number" or (ns.IsSecret and ns.IsSecret(lvl)) or lvl <= 0 then return nil end
+  local t = lvl + R.EliteOffset()
+  for _, l in ipairs(EliteLevels()) do
+    if l >= t then return l end
+  end
+  return nil
+end
+-- Every elite area's circles merged into the lists (InstallElites): continent `cont`, the guards' list `base` (nil:
+-- none), the player's faction `f`, the areas from top level `lv` that are enemies of `f` (theirs or both sides').
+local function EliteList(cont, base, f, lv)
+  local out, area = {}, {}
+  local n = 0
+  for i = 1, base and #base or 0 do out[i] = base[i] end
+  n = #out
+  out.guardN, out.area, out.base, out.areas = n, area, base, ns.EliteAreas and ns.EliteAreas[cont]
+  for ai, a in ipairs(out.areas or {}) do
+    if a[2] >= lv and (a[3] == f or a[3] == "B") then
+      local c = a[4]
+      for j = 1, #c - 2, 3 do
+        out[n + 1], out[n + 2], out[n + 3] = c[j], c[j + 1], c[j + 2]
+        area[n + 1] = ai
+        n = n + 3
+      end
+    end
+  end
+  return out
+end
+-- The merged lists made on demand: each continent with elite areas gets a table in ns.Hostile (none yet: an empty one)
+-- whose missing keys of R.EnemyKey's form are the guards' list (unless "~") and the areas avoided. Again when ns.Hostile,
+-- a continent's table, its guards or the areas are new (the tests' own).
+local function InstallElites()
+  local E = ns.EliteAreas
+  if not E then return end
+  ns.Hostile = ns.Hostile or {}
+  local H = ns.Hostile
+  for cont in pairs(E) do
+    local t = H[cont]
+    if not t then
+      t = {}
+      H[cont] = t
+    end
+    local m = getmetatable(t)
+    if not (m and m.agpsElite == cont) then
+      -- (made once and kept in the table, a plain lookup after: HostileAt looks its list up at every sample; dropped
+      -- with the guards' own caches, R.HostileChanged)
+      setmetatable(t, { agpsElite = cont, __index = function(tt, key)
+        if type(key) ~= "string" then return nil end
+        local g, f, lv = key:match("^(~?)([AH])%+(%d+)$")
+        if not f then return nil end
+        local list = EliteList(cont, g == "" and rawget(tt, f) or nil, f, tonumber(lv))
+        rawset(tt, key, list)
+        return list
+      end })
+    end
+  end
+end
+-- The merged lists made so far dropped (the guards or the areas changed).
+function R.DropEliteLists()
+  for _, t in pairs(ns.Hostile or {}) do
+    if type(t) == "table" and getmetatable(t) and getmetatable(t).agpsElite then
+      for key in pairs(t) do
+        if type(key) == "string" and key:find("+", 1, true) then t[key] = nil end
+      end
+    end
+  end
+end
+-- The key of the enemy circles: the other faction's guards for faction `f` (`guards`), and the elite areas from level
+-- `emin` (R.EliteMin); nil when neither (or no faction known).
+function R.EnemyKey(guards, f, emin)
+  if not f then return nil end
+  if not emin then return guards and f or nil end
+  InstallElites()
+  return (guards and "" or "~") .. f .. "+" .. emin
+end
+-- The player's faction of a key (R.EnemyKey's), "A" or "H", and whether its guards count.
+function R.KeyFaction(key)
+  if type(key) ~= "string" then return nil end
+  local g, f = key:match("^(~?)([AH])")
+  return f, g == ""
+end
+-- The elite area circle `i` of key `side`'s list on continent `cont` is in (its index in ns.EliteAreas[cont]), or nil.
+function R.EliteAreaOf(cont, side, i)
+  local list = side and ns.Hostile and ns.Hostile[cont] and ns.Hostile[cont][side]
+  return list and list.area and list.area[i] or nil
+end
+-- (the lighter ones, R.HOSTILE_LIGHT: by the key's faction, none with the guards not avoided)
+setmetatable(R.HOSTILE_LIGHT, { __index = function(t, key)
+  local f, guards = R.KeyFaction(key)
+  return f and guards and rawget(t, f) or nil
+end })
 local HB = 100 -- bucket size (yards)
 local hostileIdx = {}
 local function HostileBuckets(cont, side)
@@ -3002,12 +3134,19 @@ end
 -- Alliance's, from Tarren Mill came back as a straight walk over the hills, the road into it being "past their
 -- guards"), as the zones a route starts and ends in don't count as too high (LEVEL_FACTOR).
 R.TOWN_GAP = 60 -- yards
+-- An elite area (item 91) a start or stop is in: within ELITE_NEAR of its elites' reach. More than a town's: a camp's
+-- elites stand apart and wander, and the ride check walks from the player's spot rounded to Nav.RIDE_CHECK_ROUND (50 yd
+-- squares): rounded 17 yd out of Dire Maul's elites at level 20, its walk out through them counted 140 yd "past
+-- enemies" in every plan (Nav.HOSTILE_RIDE_YD 100), and the plan with Freewind's walk the long way round was never
+-- replaced by Brackenwall's flight, 1,763 s for 899 (route quality, 2026-11-26).
+R.ELITE_NEAR = 60
 R.TOWN_NEAR = 20 -- yards: a start or stop this near a town's guards is in it (60 till 2026-11-14: a stop 45 yd past
 -- Southshore's guards, west of it, counted as in the town, and the walk there from the south went through it, asked)
 local hostileTowns = {}
 -- The guards changed (ns.Hostile): their buckets and towns built again, and the graphs (their roads' costs).
 function R.HostileChanged()
   hostileIdx, hostileTowns = {}, {}
+  R.DropEliteLists() -- (the elite areas' lists, made from the guards')
   if R.Reset then R.Reset() end
 end
 function R.HostileTowns(cont, side)
@@ -3030,14 +3169,24 @@ function R.HostileTowns(cont, side)
   for i = 1, #list - 2, 3 do parent[i] = i end
   local gap = R.TOWN_GAP
   local tn = 0 -- (i steps by 3: i % 300 never hit 0, and this never paused; 2026-10-07)
-  for i = 1, #list - 2, 3 do
+  -- (the elite areas, R.EnemyKey's lists: each area one town, its first circle the root, never joined to the guards')
+  local guardN = list.guardN or #list
+  if list.area then
+    local first = {}
+    for i = guardN + 1, #list - 2, 3 do
+      local a = list.area[i]
+      first[a] = first[a] or i
+      parent[i] = first[a]
+    end
+  end
+  for i = 1, guardN - 2, 3 do
     tn = tn + 1
     Breathe(tn, 100) -- (in a background job: a pause every 100 guards)
     local x, y, r = list[i], list[i + 1], list[i + 2]
     for kx = math.floor((x - r - gap) / HB), math.floor((x + r + gap) / HB) do
       for ky = math.floor((y - r - gap) / HB), math.floor((y + r + gap) / HB) do
         for _, j in ipairs(idx[kx * 65536 + ky] or EMPTY) do
-          if j > i and (list[j] - x) ^ 2 + (list[j + 1] - y) ^ 2 <= (r + list[j + 2] + gap) ^ 2 then -- (each pair once)
+          if j > i and j <= guardN and (list[j] - x) ^ 2 + (list[j + 1] - y) ^ 2 <= (r + list[j + 2] + gap) ^ 2 then -- (each pair once)
             local a, b = find(i), find(j)
             if a ~= b then parent[a] = b end
           end
@@ -3054,14 +3203,30 @@ function R.HostileTownsNear(cont, side, ...)
   local list = side and ns.Hostile and ns.Hostile[cont] and ns.Hostile[cont][side]
   if not list then return nil end
   local town, out, pts = R.HostileTowns(cont, side), nil, { ... }
-  local near = R.TOWN_NEAR
+  local near, guardN = R.TOWN_NEAR, list.guardN or #list
   for p = 1, #pts - 1, 2 do
     local x, y = pts[p], pts[p + 1]
     for i = 1, #list - 2, 3 do
-      if (list[i] - x) ^ 2 + (list[i + 1] - y) ^ 2 <= (list[i + 2] + near) ^ 2 then
+      local d = i > guardN and R.ELITE_NEAR or near -- (an elite area's circle, item 91: ELITE_NEAR)
+      if (list[i] - x) ^ 2 + (list[i + 1] - y) ^ 2 <= (list[i + 2] + d) ^ 2 then
         out = out or {}
         out[town[i]] = true
       end
+    end
+  end
+  return out
+end
+-- Of R.HostileTownsNear's, the elite areas only (item 91), or nil: for the terrain search (Passability.FindPath), which
+-- leaves the elite area a walk starts or ends in out as the legs do, the guards' towns there priced as before.
+function R.EliteTownsNear(cont, side, ...)
+  local near = R.HostileTownsNear(cont, side, ...)
+  local list = near and ns.Hostile[cont][side]
+  if not (list and list.area) then return nil end
+  local out
+  for t in pairs(near) do
+    if list.area[t] then
+      out = out or {}
+      out[t] = true
     end
   end
   return out
@@ -4083,9 +4248,10 @@ function R.HeightsNear(cont, x, y, r)
             if z then
               local hz = g.z or g.nz
               local za, zb = hz[e[1]], hz[e[2]]
-              -- (`stair`: a stairs road, source 6: Nav.TrackCityZ lets the floor go when lost on one)
+              -- (`stair`: a stairs road, source 6: Nav.TrackCityZ lets the floor go when lost on one; `lift`: a lift's
+              -- road, item 106's evidence that the floor may change with no walk, Nav.AtLift)
               out[#out + 1] = { z = z, d = math.sqrt(d2), flat = not (za and zb) or math.abs(za - zb) <= R.FLAT_Z,
-                stair = e[4] == R.SOURCE_STAIR, edge = ei }
+                stair = e[4] == R.SOURCE_STAIR, lift = e[4] == R.SOURCE_LIFT or nil, edge = ei }
             end
           end
         end
@@ -4269,6 +4435,35 @@ function R.NearestEdges(cont, x, y, z)
   local out = {}
   for i, b in ipairs(hit) do
     out[i] = { edge = b.edge, px = b.px, py = b.py, d2 = b.d2, along = b.along, dist = b.dist }
+  end
+  return out
+end
+
+-- The open land's roads within `yd` of (x, y), for the world grid's merges onto roads (WorldGrid.SnapPiece): { e, ei }
+-- each, nearest first, `e` the edge's own table (read only: its points flat from e[5]). None in a cave, indoors, on a
+-- drop, a lift, stairs or a swim, an attached building's, one with its floors' heights (a capital's, a building's: the
+-- tower's ramp at Orgrimmar's wind riders), nor while the continent's roads aren't built (never built
+-- here: in a grid search's job that was one slice of 0.6 to 21 s, the frame budget tests; the warm-up builds them after
+-- login. The tests' SYNC_WALKS: built at once).
+function R.RoadLinesNear(cont, x, y, yd)
+  local g = graphs[cont]
+  if g == nil and R.SYNC_WALKS then g = GraphQuery(cont, x, y) end
+  local out = {}
+  if not g or (g.side ~= HostileSide() and not R.SYNC_WALKS) then return out end
+  local hz = g.z or g.nz -- (a road with floors' heights, a capital's or a building's: not open land's)
+  -- (the search itself, not R.NearestEdges' memo: SnapRun asks at spots every SNAP_SAMPLE_YD along each run, hardly
+  -- ever the same twice, and each answer kept there held every edge within reach; the memo's 500 of them held about
+  -- 15 MB, the memory test's session 104 -> 120 MB kept, and pushed out the spots asked again and again)
+  for _, b in ipairs(NearestEdgesRaw(cont, x, y)) do
+    if b.dist > yd then break end
+    local ei = b.edge
+    local e = g.e[ei]
+    local src = e and e[4]
+    if e and not (g.cave and g.cave[ei]) and not (g.drops and g.drops[ei]) and not (g.attached and g.attached[ei])
+        and not (g.indoor and g.indoor[ei]) and not (g.kind and g.kind[ei]) and src ~= R.SOURCE_LIFT
+        and src ~= R.SOURCE_STAIR and src ~= R.SOURCE_SWIM and not (hz and (hz[e[1]] or hz[e[2]])) then
+      out[#out + 1] = { e = e, ei = ei }
+    end
   end
   return out
 end
@@ -5413,7 +5608,7 @@ function R.ThroughDoors(cont, r, sx, sy, tx, ty, opts)
   if not i or not j or i >= j then return nil end
   local o = {}
   for k, v in pairs(opts) do o[k] = v end
-  if bs then o.z, o.transient, o.indoors, o.swimming = nil, nil, nil, nil end -- (from outside the building: not the player's spot)
+  if bs then o.z, o.transient, o.indoors, o.swimming, o.zs = nil, nil, nil, nil, nil end -- (from outside the building: not the player's spot)
   if bt then o.tz = nil end
   return R.Respliced(cont, r, i, j, o)
 end
@@ -6042,7 +6237,7 @@ function R.AttachTrip(cont, sx, sy, tx, ty, opts)
       if c then ex, ey = g.n[2 * c[1] - 1], g.n[2 * c[1]] end
       local o = {}
       for k, v in pairs(opts) do o[k] = v end
-      if a then o.z, o.indoors, o.transient, o.swimming = nil, nil, nil, nil end
+      if a then o.z, o.indoors, o.transient, o.swimming, o.zs = nil, nil, nil, nil, nil end
       if c then o.tz = nil end
       local mid = RouteBody(cont, fx, fy, ex, ey, o)
       if mid and mid.pts and #mid.pts >= 2 and not mid.noWay and not mid.unconnected then
@@ -6422,7 +6617,7 @@ function R.OutOfCapital(cont, r, sx, sy, tx, ty, opts)
   if not i or not j or i >= j then return nil end
   local o = {}
   for k, v in pairs(opts or {}) do o[k] = v end
-  if cs then o.z, o.transient, o.indoors, o.swimming = nil, nil, nil, nil end -- (from outside the city: not the player's spot)
+  if cs then o.z, o.transient, o.indoors, o.swimming, o.zs = nil, nil, nil, nil, nil end -- (from outside the city: not the player's spot)
   if ct then o.tz = nil end
   return R.Respliced(cont, r, i, j, o)
 end

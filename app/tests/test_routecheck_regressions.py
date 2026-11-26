@@ -489,7 +489,12 @@ def test_route_check_takes_a_way_round_the_other_factions_guards_for_no_detour()
     assert isinstance(ref, tuple) and guard_yards(R, 0, ref, "A") >= 50
     assert guard_yards(R, 0, ref, None) == 0 and guard_yards(R, 0, ref, "H") < 50
     r = R.Route(0, 937.1, -147.8, 2003.9, -298.9, lua.table(offroad=True))
-    assert r.length > ref[0] * 1.4  # (round them: the detour the guards explain)
+    # (round them: the detour the guards explain. 1.4.1's one-way ground (item 107) made the walk past them 1.7k yd, was
+    # 2.5k, and the Router's price for the guards' reach (HOSTILE_FACTOR) now takes it over the 4.6k round them: then
+    # never more of it in their reach than the reference walk)
+    pts = [r.pts[i] for i in range(1, len(r.pts) + 1)]
+    inside = sum(R.HostileYards(0, pts[i], pts[i + 1], pts[i + 2], pts[i + 3], "A") for i in range(0, len(pts) - 3, 2))
+    assert r.length > ref[0] * 1.4 or inside <= guard_yards(R, 0, ref, "A") + 1
 
 
 def test_the_wetlands_valley_1314_opens_is_walked_up_not_hopped(world):

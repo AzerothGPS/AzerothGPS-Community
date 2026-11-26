@@ -13,6 +13,8 @@
 -- A is its Yes, B its No. A legend of these on the map. The player's own "Show/Hide AzerothGPS" key opens the map; once,
 -- with a pad first active, the player is offered a pad button for it (and any time with /agps pad). Drawing a farming
 -- area: A marks a corner at the reticle, X takes the last one off, Y finishes (A on the first corner too), B cancels.
+-- The route's jumps and swims (item 96, 1.4.1): LB + A picks them one at a time (the view on each, a ring and its
+-- tooltip); the D-pad or LB + A again the next, X (or A) the right-click's avoid, Y takes the last avoid back, B done.
 local _, ns = ...
 local L = ns.L
 local Pad = {}
@@ -62,6 +64,9 @@ Pad.ACTIONS = {
   -- (asked 2026-11-16: "Need a way to open options page with a controller"; Options then moves with the pad itself,
   -- PadOptions.lua)
   { "options", "PADRSTICK", L["Options"] },
+  -- (item 96, Kooki3z for 1.4.1: "controller support for the right-click avoids on jumps and swims"; a route's own
+  -- control, so LB with a face button as Clear Route and Quest Route are: Pad.StartPick)
+  { "avoids", "PADLSHOULDER+PAD1", L["Pick a jump or swim on the route"] },
 }
 -- Pairs (asked 2026-11-16: "need to support 2 selections like LT + A"): a binding is a key, or a modifier and a key
 -- ("PADLTRIGGER+PAD1"). The modifier is read from the pad's state as the key is pressed (C_GamePad; nothing of the
@@ -151,7 +156,7 @@ Pad.PAN_STEP = 80 -- UI units a macro's pan moves the view, once a press
 Pad.MACROS = {
   select = "/agps pad select", yes = "/agps pad yes", remove = "/agps pad remove", back = "/agps pad back",
   clear = "/agps clear", questRoute = "/agps questroute", pause = "/agps pause", click = "/agps pad click", viewControls = "/agps pad viewcontrols", recenter = "/agps pad recenter", toggle = "/agps toggle", menu = "/agps menu",
-  options = "/agps options",
+  options = "/agps options", avoids = "/agps pad avoids",
   zoomIn = "/agps zoom in", zoomOut = "/agps zoom out",
   panUp = "/agps pan up", panDown = "/agps pan down", panLeft = "/agps pan left", panRight = "/agps pan right",
 }
@@ -344,6 +349,7 @@ function Pad.Apply()
   else
     pcall(ClearOverrideBindings, o)
     Pad.held = {}
+    if Pad.pick then Pad.EndPick(true) end
   end
   Pad.bound = want
   Pad.ShowMarks(want)
@@ -355,6 +361,7 @@ function Pad.Clear()
   if ns.Setup and ns.Setup.PadClear then ns.Setup.PadClear() end
   if owner and not Locked() then pcall(ClearOverrideBindings, owner) end
   Pad.bound, Pad.held, Pad.holds = false, {}, {}
+  if Pad.pick then Pad.EndPick(true) end
   if Pad.WatchHolds then Pad.WatchHolds() end
   Pad.ShowMarks(false)
 end
@@ -368,6 +375,7 @@ function Pad.SawInput(used)
   if used == Pad.used then return end
   Pad.used = used
   if not used and Pad.focus then Pad.SetFocus(nil) end -- (the map menu's ring and its tooltip: the mouse's now)
+  if not used and Pad.pick then Pad.EndPick(true) end -- (picking a jump or swim: the mouse's right-click now)
   Pad.ShowMarks(Pad.bound)
   if ns.PadKeys then ns.PadKeys.Refresh() end -- (the search's legend and keyboard: the controller's only)
   if Pad.Opt and Pad.Opt.UpdateLook then Pad.Opt.UpdateLook() end -- (Options' look too)
@@ -441,6 +449,14 @@ function Pad.BoxLines(icons)
     out[#out + 1] = Pad.PanLabel(icons) .. ": " .. L["Pan"]
     return out
   end
+  if Pad.Picking() then -- (picking a jump or swim: its own controls, Pad.PickRun)
+    out[#out + 1] = Pad.PanLabel(icons) .. ": " .. L["Next/Previous"]
+    add("remove", L["Avoid"])
+    add("menu", L["Undo"])
+    add("back", L["Done"])
+    if Pad.Key("zoomOut") or Pad.Key("zoomIn") then out[#out + 1] = K("zoomOut") .. "/" .. K("zoomIn") .. ": " .. L["Zoom"] end
+    return out
+  end
   -- (Remove, Map Menu and Clear Route off it, View Controls last: asked 2026-11-16 with the box struck through)
   add("select", L["Set Stop"])
   add("back", L["Back"])
@@ -448,6 +464,7 @@ function Pad.BoxLines(icons)
   out[#out + 1] = Pad.PanLabel(icons) .. ": " .. L["Pan"]
   add("recenter", L["Recenter"])
   add("click", L["Select"]) -- (on the map's controls too, once it has a button: asked 2026-11-16)
+  add("avoids", L["Jumps and Swims"]) -- (item 96: the route's jumps and swims, Pad.StartPick)
   if Pad.Key("yes") ~= Pad.Key("select") or Pad.IsHold("yes") ~= Pad.IsHold("select") then add("yes", L["Yes"]) end
   add("viewControls", L["View Controls"])
   return out
@@ -696,6 +713,18 @@ function Pad.HintTargets()
     add(g.questWays.owner, "back")
     return out
   end
+  -- (picking a jump or swim: X's icon over its ring, A's over the avoid's question once asked; Pad.PickRun)
+  if Pad.Picking() then
+    local ja = g and g.jumpAsk
+    if ja and ja:IsShown() then
+      add(ja.buttons and ja.buttons[1], Pad.Key("yes") and "yes" or "select")
+    elseif g and g.removeAsk and g.removeAsk:IsShown() then
+      add(g.removeAsk, Pad.Key("yes") and "yes" or "select")
+    else
+      add(Pad.pickMark, Pad.Key("remove") and "remove" or "select")
+    end
+    return out
+  end
   add(g and g.mapButton, "menu")
   -- (routing paused: Pause/Unpause's button over the glowing Resume Routing buttons, the quick bar's and the minimap
   -- square's while it's kept beside the map; asked 2026-11-18 for 1.3.9, "when map is open and controller in use and
@@ -716,6 +745,8 @@ function Pad.HintTargets()
     -- (a group or Quick Find open: Back's icon over the button that opened it, where Back goes; asked 2026-11-16, "we
     -- should fade the button to go back when in a map menu sub menu")
     add(Pad.MenuParent(), "back")
+  elseif g and g.jumpAsk and g.jumpAsk:IsShown() then -- (a jump's Avoid asked, its right-click: A's icon over it)
+    add(g.jumpAsk.buttons and g.jumpAsk.buttons[1], Pad.Key("yes") and "yes" or "select")
   elseif g and g.removeAsk and g.removeAsk:IsShown() then
     -- (a stop's Remove? up: the confirm's icon over it, not X over the stop; asked 2026-11-16, "when Remove? is up, we
     -- should fade the select icon instead to signify a confirm")
@@ -825,7 +856,8 @@ Pad.DIAGRAM = { w = 200, h = 186, row0 = 14, step = 22, scales = { 1, 1.5, 2, 2.
 Pad.SHORT = { select = L["Set Stop"], yes = L["Yes"], remove = L["Remove"], back = L["Back"], clear = L["Clear Route"],
   zoomIn = L["Zoom in"], zoomOut = L["Zoom out"], panUp = L["Pan up"], panDown = L["Pan down"], panLeft = L["Pan left"],
   panRight = L["Pan right"], recenter = L["Recenter"], toggle = L["Show/Hide GPS"], menu = L["Map Menu"],
-  options = L["Options"], questRoute = L["Quest Route"], pause = L["Pause/Unpause"], click = L["Select"], viewControls = L["View Controls"] }
+  options = L["Options"], questRoute = L["Quest Route"], pause = L["Pause/Unpause"], click = L["Select"], viewControls = L["View Controls"],
+  avoids = L["Jumps and Swims"] }
 -- What `key` does on the map now: its label (its icon, then each control on it: "Set Stop", "Clear Route (hold)", a
 -- pair's "[LT]+ Zoom in") and the tooltip's lines (each in full: "LT + A: Clear Route"), or nil when it does nothing.
 -- Options > Controller's label for pad button `key`: its controls pressed, then " : " and the held ones, each after a
@@ -908,6 +940,10 @@ function Pad.LegendText(icons)
   if Pad.MenuOpen() then
     return string.format(L["%s: Press   %s: Back   %s: Move   %s: Close Menu"], K("select"), K("back"),
       Pad.Key("panUp") == "PADDUP" and dpad or (K("panUp") .. "/" .. K("panDown")), K("menu"))
+  end
+  if Pad.Picking() then
+    return (ns.Format or string.format)(L["%s: Next   %s: Avoid   %s: Undo   %s: Done   %s: Zoom"], Pad.PanLabel(icons),
+      K("remove"), K("menu"), K("back"), K("zoomOut") .. "/" .. K("zoomIn"))
   end
   if Pad.Drawing() then
     return (ns.Format or string.format)(L["%s: Add Corner   %s: Undo Corner   %s: Finish Area   %s: Cancel   %s: Zoom   %s: Pan"],
@@ -1161,6 +1197,11 @@ function Pad.Run(acts, down)
     local r = Pad.DrawRun(has)
     if r ~= nil then return r end
   end
+  -- (picking a jump or swim: its own controls, Pad.PickRun; the zoom as ever)
+  if down and Pad.Picking() and not Pad.MenuOpen() then
+    local r = Pad.PickRun(has)
+    if r ~= nil then return r end
+  end
   -- (searching with the controller: the search's own controls first, its keyboard's too, PadKeys.lua; over the map
   -- menu's, which stays open behind a search opened from it. Kooki3z 2026-11-20: "A fading on highlighted letter,
   -- D-Pad also closes keyboard and navigates the list")
@@ -1188,15 +1229,20 @@ function Pad.Run(acts, down)
   if held or not down then return nil end
   local g = G()
   if not g then return end
+  if has.avoids then return Pad.StartPick() end
+  -- (a jump's Avoid asked by its right-click: A takes it, B lets it go, as a stop's Remove?)
+  local jumpAsk = g.jumpAsk and g.jumpAsk:IsShown() and g.jumpAsk.buttons and g.jumpAsk.buttons[1]
   if has.yes then
     local q = Pad.Question()
     if q then return Click(q.yes) end
+    if jumpAsk then return Click(jumpAsk) end
     -- (a stop's "Remove?" is a yes too, wherever the crosshair is; asked 2026-11-16: "if player removes a stop and
     -- doesn't move crosshair to the remove? button but presses the "Yes on a question" key consider that still a yes")
     if g.removeAsk and g.removeAsk:IsShown() then return Click(g.removeAsk) end
   end
   if has.select then
     if g.removeAsk and g.removeAsk:IsShown() then return Click(g.removeAsk) end
+    if jumpAsk then return Click(jumpAsk) end
     -- (the tutorial's spell-jump demo: its look-alike cast button, A as its click; Tutorial.lua)
     local demo = g.DemoUseShown and g.DemoUseShown()
     if demo then return Click(demo) end
@@ -1218,6 +1264,7 @@ function Pad.Run(acts, down)
     local q = Pad.Question()
     if q then return Click(q.no) end
     if g.removeAsk and g.removeAsk:IsShown() then g.removeAsk:Hide() return true end
+    if jumpAsk then g.jumpAsk:Hide() return true end
     local menu = (g.mapMenu and g.mapMenu:IsShown()) or (g.searchPanel and g.searchPanel:IsShown())
     if menu then g.CloseMapMenus() return true end
     if g.quickFindOpen and g.SetQuickFindOpen then g.SetQuickFindOpen(false) return true end
@@ -1312,7 +1359,7 @@ function Pad.HoverTick(dt)
   Pad.hoverWait = (Pad.hoverWait or 0) - (dt or 0)
   if Pad.hoverWait > 0 then return end
   Pad.hoverWait = Pad.HOVER_EVERY
-  local want = Pad.bound and Pad.used and not Pad.MenuOpen() and (Pad.StopAt() or Pad.IconAt()) or nil
+  local want = Pad.bound and Pad.used and not Pad.MenuOpen() and not Pad.pick and (Pad.StopAt() or Pad.IconAt()) or nil
   Pad.SetHovered(want)
 end
 function Pad.SetHovered(b)
@@ -1354,6 +1401,7 @@ function Pad.Tick(dt)
   if not Pad.bound or not dt or dt <= 0 then return end
   local g = G()
   Pad.HoverTick(dt)
+  Pad.PickTick(dt)
   Pad.MoveTick()
   local PK = ns.PadKeys
   if PK then PK.Refresh() end -- (the search's legend and keyboard: shown while the controller has the search)
@@ -1385,6 +1433,324 @@ function Pad.Tick(dt)
   if zOut and not zIn then g.WheelZoom(Pad.ZOOM_TIMES ^ dt) end -- (out: more yards in view)
   if zIn and not zOut then g.WheelZoom(Pad.ZOOM_TIMES ^ -dt) end
   if (dx ~= 0 or dy ~= 0 or zIn or zOut) and g.Redraw then g.Redraw() end
+end
+
+-- The route's jumps and swims with the pad (item 96, Kooki3z for 1.4.1: "controller support for the right-click avoids
+-- on jumps and swims ... cycling through the route's jumps/swims ... a highlight on the selected one with its tooltip,
+-- and a button ... for the same action as right-click ... and undo"). Picking (the "avoids" control, LB + A): the view's
+-- middle on each in turn (G.PadLookAt), a ring of our own round it and its tooltip, as the mouse's hover shows (the
+-- avoid's line naming the pad's button); the D-pad (right/down the next, left/up the one before) or the control again
+-- moves along them in the route's order; X (Remove's button) or A asks the right-click's question there (G.AskJump:
+-- "Avoid Spell Jumps" / "Avoid Jumps" for the stop; a swim's "Remove?": avoid swimming for the stop), A takes it, B
+-- lets it go; Y (the map menu's button) takes the last avoid back (Nav.UndoAvoid); B again, done. The triggers zoom
+-- about it; the left stick press is done picking and follows the player. The legend and box name these meanwhile.
+-- Nothing of Blizzard's: our map, our ring, the tooltip owned by our frame.
+Pad.PICK_RING = 34 -- (UI units: the ring round the one picked)
+Pad.PICK_SAME_YD = 15 -- (the route worked out again: the one picked kept when one of its kind is this near its spot)
+Pad.pick = nil -- { list, at, cur = { kind, cont, x, y }, sig, t, tipFor }
+function Pad.Picking() return (Pad.pick ~= nil and Pad.bound) and true or false end
+-- a flat point list's spot halfway along it
+local function Halfway(pts)
+  local total = 0
+  for k = 1, #pts - 3, 2 do total = total + math.sqrt((pts[k + 2] - pts[k]) ^ 2 + (pts[k + 3] - pts[k + 1]) ^ 2) end
+  local half, run = total / 2, 0
+  for k = 1, #pts - 3, 2 do
+    local d = math.sqrt((pts[k + 2] - pts[k]) ^ 2 + (pts[k + 3] - pts[k + 1]) ^ 2)
+    if d > 0 and run + d >= half then
+      local t = (half - run) / d
+      return pts[k] + (pts[k + 2] - pts[k]) * t, pts[k + 1] + (pts[k + 3] - pts[k + 1]) * t
+    end
+    run = run + d
+  end
+  return pts[1], pts[2]
+end
+-- The route's jumps (a run of drop or jump pieces: one) and swims (Nav.SwimSpans, on through the pieces while in the
+-- water: one), in the route's order: { kind = "jump" | "swim", part, i (its first piece), t1, t2 (a swim's on it),
+-- cont, x, y (halfway along it), stop }.
+function Pad.AvoidItems()
+  local N, R = ns.Nav, ns.Router
+  local route = N and N.route
+  local out = {}
+  if not (route and route.parts and R) then return out end
+  for p = 1, #route.parts do
+    local part = route.parts[p]
+    local pts, kinds = part.pts, part.kinds
+    local n = pts and kinds and (#pts / 2 - 1) or 0
+    local swim
+    local i = 1
+    while i <= n do
+      local k = kinds[i]
+      if k == R.KIND_DROP or k == R.KIND_JUMP then
+        swim = nil
+        local j = i
+        while j < n and kinds[j + 1] == k do j = j + 1 end
+        local seg = {}
+        for q = i, j + 1 do seg[#seg + 1], seg[#seg + 2] = pts[2 * q - 1], pts[2 * q] end
+        local x, y = Halfway(seg)
+        out[#out + 1] = { kind = "jump", part = part, i = i, cont = part.cont, x = x, y = y, stop = part.stop or 1 }
+        i = j + 1
+      else
+        local sp = N.SwimSpans and N.SwimSpans(part, i)
+        if sp then
+          local x1, y1, x2, y2 = pts[2 * i - 1], pts[2 * i], pts[2 * i + 1], pts[2 * i + 2]
+          for s = 1, #sp - 1, 2 do
+            local t1, t2 = sp[s], sp[s + 1]
+            local bx, by = x1 + (x2 - x1) * t2, y1 + (y2 - y1) * t2
+            if swim and swim.open and t1 <= 1e-6 then -- (on from the piece before)
+              swim.pts[#swim.pts + 1], swim.pts[#swim.pts + 2] = bx, by
+            else
+              swim = { kind = "swim", part = part, i = i, t1 = t1, t2 = t2, cont = part.cont, stop = part.stop or 1,
+                pts = { x1 + (x2 - x1) * t1, y1 + (y2 - y1) * t1, bx, by } }
+              out[#out + 1] = swim
+            end
+            swim.open = t2 >= 1 - 1e-6
+          end
+        else
+          swim = nil
+        end
+        i = i + 1
+      end
+    end
+  end
+  for _, it in ipairs(out) do
+    if it.pts then
+      it.x, it.y = Halfway(it.pts)
+      it.pts, it.open = nil, nil
+    end
+  end
+  return out
+end
+-- the route as it is now, to tell when it was worked out again (or walked along: its first part cut)
+local function RouteSig()
+  local r = ns.Nav and ns.Nav.route
+  local parts = r and r.parts
+  if not parts then return "" end
+  return tostring(r) .. tostring(parts[1]) .. #parts
+end
+function Pad.PickItem()
+  local p = Pad.pick
+  return p and p.at and p.list[p.at] or nil
+end
+-- the ring round the one picked: at the map's middle, where the view puts it
+function Pad.PickMark()
+  local m = Pad.pickMark
+  if m then return m end
+  local g = G()
+  local canvas = g and g.Canvas and g.Canvas()
+  if not canvas then return nil end
+  m = CreateFrame("Frame", nil, canvas)
+  m:SetPoint("CENTER", canvas, "CENTER", 0, 0)
+  m:SetFrameLevel((canvas:GetFrameLevel() or 1) + 49)
+  local t = m:CreateTexture(nil, "OVERLAY")
+  t:SetAllPoints()
+  t:SetBlendMode("ADD")
+  t:SetVertexColor(1, 0.82, 0.1)
+  m.tex = t
+  local u = Pad.PICK_RING
+  if g.FitFrameArt then
+    u = g.FitFrameArt(t, m, Pad.PICK_RING)
+  else
+    t:SetTexture("Interface\\AddOns\\AzerothGPS\\Media\\MapMenu")
+  end
+  m:SetSize(u, u)
+  m:Hide()
+  Pad.pickMark = m
+  return m
+end
+-- the one at `k` picked: the view's middle on it
+function Pad.PickAt(k)
+  local p = Pad.pick
+  local it = p and p.list[k]
+  if not it then return false end
+  p.at, p.cur, p.tipFor = k, { kind = it.kind, cont = it.cont, x = it.x, y = it.y }, nil
+  local g = G()
+  local mark = Pad.PickMark()
+  if mark then mark:Show() end -- (shown at once: its hint, Pad.HintTargets)
+  if g.removeAsk then g.removeAsk:Hide() end
+  if g.jumpAsk then g.jumpAsk:Hide() end
+  g.PadLookAt(it.cont, it.x, it.y)
+  if g.Redraw then g.Redraw() end
+  return true
+end
+function Pad.StartPick()
+  local g = G()
+  if not (g and Pad.bound and g.PadLookAt) or Pad.Drawing() then return false end -- (the pad's map only)
+  local list = Pad.AvoidItems()
+  local N = ns.Nav
+  if #list == 0 and not (N.CanUndoAvoid and N.CanUndoAvoid()) then
+    if ns.Print then ns.Print(L["No jumps or swims on the route."]) end
+    return false
+  end
+  Pad.SetHovered(nil)
+  Pad.pick = { list = list, sig = RouteSig(), t = 0 }
+  if #list > 0 then Pad.PickAt(1) end
+  Pad.ShowMarks(Pad.bound)
+  return true
+end
+-- Done picking (`quiet`: the marks left as they are, the caller lays them out)
+function Pad.EndPick(quiet)
+  local p = Pad.pick
+  Pad.pick = nil
+  local m = Pad.pickMark
+  if m then
+    m:Hide()
+    if GameTooltip and GameTooltip.GetOwner and GameTooltip:GetOwner() == m then GameTooltip:Hide() end
+  end
+  if p and not quiet then Pad.ShowMarks(Pad.bound) end
+  return true
+end
+-- the list made again when the route changed: the one picked kept where one of its kind is still there, else none
+-- (the next press picks the one nearest it)
+function Pad.PickRefresh()
+  local p = Pad.pick
+  if not p then return end
+  local sig = RouteSig()
+  if sig == p.sig then return end
+  p.sig = sig
+  p.list = Pad.AvoidItems()
+  p.at, p.tipFor = nil, nil
+  local cur = p.cur
+  if not cur then return end
+  local best, bd
+  for k, it in ipairs(p.list) do
+    if it.kind == cur.kind and it.cont == cur.cont then
+      local d = (it.x - cur.x) ^ 2 + (it.y - cur.y) ^ 2
+      if d <= Pad.PICK_SAME_YD ^ 2 and (not bd or d < bd) then best, bd = k, d end
+    end
+  end
+  p.at = best
+end
+-- the next one along the route (`step` 1) or the one before (-1), round at the ends; none picked: the nearest the last
+function Pad.PickStep(step)
+  local p = Pad.pick
+  if not p then return false end
+  Pad.PickRefresh()
+  local n = #p.list
+  if n == 0 then
+    if ns.Print then ns.Print(L["No jumps or swims on the route."]) end
+    return true
+  end
+  local k = 1
+  if p.at then
+    k = ((p.at - 1 + step) % n) + 1
+  elseif p.cur then
+    local bd
+    for j, it in ipairs(p.list) do
+      local d = it.cont == p.cur.cont and (it.x - p.cur.x) ^ 2 + (it.y - p.cur.y) ^ 2 or math.huge
+      if not bd or d < bd then k, bd = j, d end
+    end
+  end
+  return Pad.PickAt(k)
+end
+-- the right-click's question for the one picked, over it
+function Pad.PickAvoid()
+  Pad.PickRefresh()
+  local it = Pad.PickItem()
+  local g = G()
+  if not it then return false end
+  if it.kind == "jump" then
+    local info = g.JumpInfo({ part = it.part, i = it.i })
+    if not info then return false end
+    g.AskJump(info, 0, 0)
+    return true
+  end
+  if g.SwimSegStays({ part = it.part, i = it.i, t1 = it.t1, t2 = it.t2 }) then -- (no way round by land: it stays)
+    if ns.Print then ns.Print(L["No way round by land: this swim stays."]) end
+    return true
+  end
+  g.AskRemove({ swim = true, swimX = 0, swimY = 0, swimPart = it.part, swimI = it.i, swimT1 = it.t1, swimT2 = it.t2 })
+  return true
+end
+-- the last avoid taken back (Nav.UndoAvoid: the mouse's too)
+function Pad.PickUndo()
+  if ns.Nav.UndoAvoid and ns.Nav.UndoAvoid() then
+    if Pad.pick then Pad.pick.sig = nil end -- (looked at again as the route comes back)
+    return true
+  end
+  if ns.Print then ns.Print(L["Nothing to undo."]) end
+  return false
+end
+-- the controls while picking; nil: not its (the zoom)
+function Pad.PickRun(has)
+  local g = G()
+  local q = Pad.Question()
+  if q then
+    if has.yes then return Click(q.yes) end
+    if has.back then return Click(q.no) end
+    return true
+  end
+  local ja = g.jumpAsk and g.jumpAsk:IsShown() and g.jumpAsk
+  local ra = g.removeAsk and g.removeAsk:IsShown() and g.removeAsk
+  if ja or ra then -- (the avoid asked: A takes it, B lets it go)
+    if has.yes or has.select then return Click(ja and ja.buttons[1] or ra) end
+    if has.back then
+      (ja or ra):Hide()
+      return true
+    end
+  end
+  if has.avoids or has.panRight or has.panDown then return Pad.PickStep(1) end
+  if has.panLeft or has.panUp then return Pad.PickStep(-1) end
+  if has.remove or has.select or has.yes then return Pad.PickAvoid() end
+  if has.menu then return Pad.PickUndo() end
+  if has.back then return Pad.EndPick() end
+  if has.recenter then
+    Pad.EndPick()
+    return nil -- (and back on the player, as ever)
+  end
+  if has.click then return true end -- (LB, the pair's own button: nothing under the ring clicked)
+  return nil
+end
+-- the one picked shown: its tooltip, as the mouse's hover shows it, the avoid by the pad's button
+function Pad.PickTip(it)
+  local g = G()
+  local m = Pad.PickMark()
+  local p = Pad.pick
+  if not (m and it and p and GameTooltip) then return end
+  local key = Pad.Key("remove") and Pad.ActionIcon("remove") or Pad.ActionIcon("select")
+  local tip
+  if it.kind == "jump" then
+    tip = g.JumpTip(g.JumpInfo({ part = it.part, i = it.i }), key)
+  else
+    tip = g.SwimTip({ part = it.part, i = it.i, t1 = it.t1, t2 = it.t2 }, key)
+  end
+  GameTooltip:SetOwner(m, "ANCHOR_RIGHT")
+  GameTooltip:SetText(string.format("%s  |cff9d9d9d%d/%d|r", tip.title, p.at, #p.list), 1, 1, 1)
+  for k, l in ipairs(tip.lines) do
+    if k == #tip.lines then
+      GameTooltip:AddLine(l, 0.7, 0.7, 0.7, true)
+    else
+      GameTooltip:AddLine(l, nil, nil, nil, true)
+    end
+  end
+  GameTooltip:Show()
+  p.tipFor = it
+end
+-- every frame while picking: the list looked at again (HOVER_EVERY), the ring pulsing, the tooltip kept up (not while
+-- its question is)
+function Pad.PickTick(dt)
+  local p = Pad.pick
+  if not p then return end
+  p.t = (p.t or 0) + (dt or 0)
+  Pad.pickWait = (Pad.pickWait or 0) - (dt or 0)
+  local look = Pad.pickWait <= 0
+  if look then
+    Pad.pickWait = Pad.HOVER_EVERY
+    Pad.PickRefresh()
+  end
+  local it = Pad.PickItem()
+  local m = Pad.PickMark()
+  if not m then return end
+  m:SetShown(it ~= nil)
+  if it then m:SetAlpha(0.55 + 0.45 * math.abs(math.cos(p.t * math.pi))) end
+  local g = G()
+  local asked = (g.jumpAsk and g.jumpAsk:IsShown()) or (g.removeAsk and g.removeAsk:IsShown())
+  local own = GameTooltip and GameTooltip:IsShown() and GameTooltip:GetOwner() == m
+  if it and not asked then
+    if (own and p.tipFor ~= it) or (not own and look) then Pad.PickTip(it) end
+  elseif own then
+    GameTooltip:Hide()
+    p.tipFor = nil
+  end
 end
 
 -- The map menu with the pad (asked 2026-11-16): its button ("menu", Y) opens and closes it; open, the pan controls move

@@ -91,6 +91,7 @@ WG.CORRIDOR_WIDE_YD = 600 -- ... and, none found in it, within this many
 -- preference (WG.Walk: no far road snap, open ground to open ground; the road preference alone would take 1 / road)
 WG.ROAD_DETOUR_MAX = 1.2
 WG.ROAD_PRICE_MIN = 1 / 1.5 -- (a road yard's price at the least, any Road tolerance: item 83)
+WG.ROAD_PRICE_TOP = 0.95 -- (and at "Cut across", +10: a road within about 18 degrees of the way still taken. Item 57)
 -- A route that goes past its stop and comes back: a point OVERSHOOT_YD further from the start than the stop is, and
 -- OVERSHOOT_YD or more from the stop (item 83: a road's discount never makes the way overshoot, at any tolerance)
 WG.OVERSHOOT_YD, WG.OVERSHOOT_ROUND = 80, 1.6
@@ -169,12 +170,12 @@ function WG.Cont(cont)
   -- (the regions loaded, kept apart from the decoded tiles: a folder loads once a session, WG.LoadRegion)
   local st = WG.store[cont]
   if not (st and st.d == d) then
-    st = { d = d, raw = {}, regions = {}, links = {}, out = {} }
+    st = { d = d, raw = {}, regions = {}, links = {}, out = {}, loading = {} }
     WG.store[cont] = st
   end
   c = { cont = cont, d = d, per = d.per, cell = d.cell, zq = d.zq, z0 = d.z0, road = d.road or 0.85,
     swim = d.swim or 1.5, implied = d.implied or 4, rb = d.rb or 8, raw = st.raw, regions = st.regions, none = {},
-    tiles = {}, bytes = 0, links = st.links, out = st.out }
+    tiles = {}, bytes = 0, links = st.links, out = st.out, loading = st.loading }
   WG.conts[cont] = c
   return c
 end
@@ -186,9 +187,17 @@ end
 WG.RegionOf = RegionOf
 
 -- The road links of a region's data ("ka:ia,kb:ib,yards,kind,x,y,z,...;..."): a yard of one costs the data's `road`.
-local function AddLinks(c, s)
-  -- (no pause: a region's few hundred links taken with its tiles in one go, WG.LoadRegion, item 82h)
-  for item in (s or ""):gmatch("[^;]+") do
+-- Parsed into `ld.links` from `ld.at` on, pausing in a background job (item 108: a region's 1,500 links were 27-34 ms in
+-- one slice); put in place with the region's tiles in one go (WG.LoadRegion's Commit).
+WG.LINKS_BREATHE = 100 -- (links parsed between looks at the slice)
+local function ParseLinks(ld)
+  local s = ld.e.links or ""
+  local Rt = R()
+  local n = 0
+  while ld.at <= #s do
+    local j = s:find(";", ld.at, true) or (#s + 1)
+    local item = s:sub(ld.at, j - 1)
+    ld.at = j + 1
     local ka, ia, kb, ib, rest = item:match("^(%d+):(%d+),(%d+):(%d+),(.*)$")
     if ka then
       local nums = {}
@@ -196,11 +205,19 @@ local function AddLinks(c, s)
       local L = { a = tonumber(ka) * SHIFT + tonumber(ia), b = tonumber(kb) * SHIFT + tonumber(ib), yd = nums[1],
         kind = nums[2], pts = {}, bkey = tonumber(kb) }
       for q = 3, #nums - 2, 3 do L.pts[#L.pts + 1] = { nums[q], nums[q + 1], nums[q + 2] } end
-      c.links[#c.links + 1] = L
-      local o = c.out[L.a]
-      if not o then o = {} c.out[L.a] = o end
-      o[#o + 1] = #c.links
+      ld.links[#ld.links + 1] = L
     end
+    n = n + 1
+    -- (a pause: another search reaching the region meanwhile carries the parse on from ld.at, WG.LoadRegion)
+    if Rt.Breathe and n % WG.LINKS_BREATHE == 0 then Rt.Breathe(n, WG.LINKS_BREATHE) end
+  end
+end
+local function AddLinks(c, list)
+  for _, L in ipairs(list) do
+    c.links[#c.links + 1] = L
+    local o = c.out[L.a]
+    if not o then o = {} c.out[L.a] = o end
+    o[#o + 1] = #c.links
   end
 end
 
@@ -228,37 +245,21 @@ function WG.RegionMissing(name, reason)
 end
 
 -- Loads region (rx, ry)'s folder (once; a region the data hasn't, or whose folder isn't there or is from another bake,
--- stays empty: the Router's own routes there). In a background job: a pause before and after the load.
-function WG.LoadRegion(c, rx, ry)
-  local rk = rx .. ":" .. ry
-  local got = c.regions[rk]
-  if got ~= nil then return got end
-  c.regions[rk] = false
-  if not (c.d.regions and c.d.regions[rk]) then return false end
-  -- (all in one go, no pause (Router.Breathe) between marking it and taking its tiles: paused, a search meanwhile found
-  -- it marked, no tiles yet, and took its tiles for none for good (WG.Tile's c.none); a job dropped in the pause (a new
-  -- trip's, Router.DropBackground; a reset) left the region marked with no tiles for the session. Every search there
-  -- then found no ground and the walk was no way, remembered: item 82h, Kooki3z's 550 yd trip in the Barrens)
-  local name = string.format(WG.REGION_ADDON, c.cont, rx, ry)
-  local load = (C_AddOns and C_AddOns.LoadAddOn) or LoadAddOn
-  if load then
-    local ok, loaded, reason = pcall(load, name)
-    if ok and not loaded then WG.RegionMissing(name, reason) end
-  end
-  local all = rawget(_G, "AzerothGPS_WorldGridTiles")
-  local e = type(all) == "table" and all[c.cont .. ":" .. rk] or nil
-  if type(all) == "table" then all[c.cont .. ":" .. rk] = nil end -- (held here only: dropped with the grid)
-  if type(e) ~= "table" or e.bake ~= c.d.bake or type(e.t) ~= "table" then return false end
+-- stays empty: the Router's own routes there). In a background job its road links are parsed in slices (ParseLinks).
+-- (Item 82h: a region marked loaded before its tiles were in, a pause between, was taken for none for good by a search
+-- in the pause (WG.Tile's c.none), and a job dropped in it (a new trip's, Router.DropBackground; a reset) left it with
+-- no tiles for the session: every walk there no way, remembered. So the region stays unmarked (nil) until everything
+-- is in, put in place in one go (Commit), and its load's state (`c.loading`, kept with the regions) is carried on by
+-- whichever search reaches the region next: the folder loaded once, never half taken.)
+local function Commit(c, rk, ld)
+  local e, ea = ld.e, ld.ea
   local n = 0
   for k, v in pairs(e.t) do
     c.raw[k] = v
     n = n + #v
   end
-  AddLinks(c, e.links)
+  AddLinks(c, ld.links)
   -- (the region's landmark fields, its Alt.lua: item 33; another bake's or a count unlike the continent's, none)
-  local alts = rawget(_G, "AzerothGPS_WorldGridAlt")
-  local ea = type(alts) == "table" and alts[c.cont .. ":" .. rk] or nil
-  if type(alts) == "table" then alts[c.cont .. ":" .. rk] = nil end
   if type(ea) == "table" and ea.bake == c.d.bake and type(ea.t) == "table" and type(ea.n) == "number"
       and (c.altN == nil or c.altN == ea.n) then
     c.alt, c.altN = c.alt or {}, ea.n
@@ -278,9 +279,46 @@ function WG.LoadRegion(c, rx, ry)
       for k, v in pairs(ea.x) do c.altX[k] = v end
     end
   end
+  c.loading[rk] = nil
   c.regions[rk] = true
   WG.stats.regions = WG.stats.regions + 1
   WG.stats.rawBytes = WG.stats.rawBytes + n + #(e.links or "")
+end
+function WG.LoadRegion(c, rx, ry)
+  local rk = rx .. ":" .. ry
+  local got = c.regions[rk]
+  if got ~= nil then return got end
+  if not c.loading then c.loading = {} end
+  local ld = c.loading[rk]
+  if not ld then
+    if not (c.d.regions and c.d.regions[rk]) then
+      c.regions[rk] = false
+      return false
+    end
+    local name = string.format(WG.REGION_ADDON, c.cont, rx, ry)
+    local load = (C_AddOns and C_AddOns.LoadAddOn) or LoadAddOn
+    if load then
+      local ok, loaded, reason = pcall(load, name)
+      if ok and not loaded then WG.RegionMissing(name, reason) end
+    end
+    local key = c.cont .. ":" .. rk
+    local all = rawget(_G, "AzerothGPS_WorldGridTiles")
+    local e = type(all) == "table" and all[key] or nil
+    if type(all) == "table" then all[key] = nil end -- (held here only: dropped with the grid)
+    local alts = rawget(_G, "AzerothGPS_WorldGridAlt")
+    local ea = type(alts) == "table" and alts[key] or nil
+    if type(alts) == "table" then alts[key] = nil end
+    if type(e) ~= "table" or e.bake ~= c.d.bake or type(e.t) ~= "table" then
+      c.regions[rk] = false
+      return false
+    end
+    ld = { e = e, ea = ea, links = {}, at = 1 }
+    c.loading[rk] = ld
+  end
+  ParseLinks(ld)
+  -- (put in place by another search while this one paused: nothing more to do)
+  if c.regions[rk] ~= nil then return c.regions[rk] end
+  Commit(c, rk, ld)
   return true
 end
 
@@ -300,6 +338,7 @@ local function CellKey(c, gx, gy)
 end
 WG.CellKey = CellKey
 
+local TILE_CHECK, TILE_CHECK_SURF = 100, 25 -- (a tile's decoding: tokens or cells, and surfaces, between looks at the clock)
 -- (a tile decoded: about its bytes in memory)
 local function TileBytes(t) return #t.s + #t.cells + 16 * #t.base + 400 end
 
@@ -329,6 +368,10 @@ function WG.Tile(c, key)
     return false
   end
   local Rt = R()
+  -- (and a look at the slice's clock between those pauses: on the slow client (test_frame_budget's VM clock) 500
+  -- surfaces' links were 8 ms, a tile's decoding ran 20 ms slices. Item 108)
+  local SliceOver = Rt.SliceOver
+  local function Over() if SliceOver and SliceOver() then coroutine.yield() end end
   local bar = raw:find("|", 1, true)
   local bar2 = raw:find("|", bar + 1, true)
   local bar3 = raw:find("|", bar2 + 1, true)
@@ -350,7 +393,7 @@ function WG.Tile(c, key)
         out[k] = last
         i = i + w
       end
-      if Rt.Breathe and k % 2000 == 0 then Rt.Breathe(k, 2000) end
+      if Rt.Breathe and k % 2000 == 0 then Rt.Breathe(k, 2000) elseif k % TILE_CHECK == 0 then Over() end
     end
     return out
   end
@@ -386,7 +429,7 @@ function WG.Tile(c, key)
       end
       prevCell = cur
     end
-    if Rt.Breathe and ci % 1000 == 0 then Rt.Breathe(ci, 1000) end
+    if Rt.Breathe and ci % 1000 == 0 then Rt.Breathe(ci, 1000) elseif ci % TILE_CHECK == 0 then Over() end
   end
   -- (the links: those the heights give, worldbake.implied_rows: per direction the neighbor cell's surface nearest in
   -- height, the lower on a tie, within `implied` steps and in this tile; plus the written difference, mod 8)
@@ -434,7 +477,7 @@ function WG.Tile(c, key)
         local v1, v2, v3 = floor(v / 4096) % 64, floor(v / 64) % 64, v % 64
         out[o + 6], out[o + 7], out[o + 8] = CH[v1 + 1], CH[v2 + 1], CH[v3 + 1]
         done = done + 1
-        if Rt.Breathe and done % 500 == 0 then Rt.Breathe(done, 500) end
+        if Rt.Breathe and done % 500 == 0 then Rt.Breathe(done, 500) elseif done % TILE_CHECK_SURF == 0 then Over() end
       end
     end
   end
@@ -469,6 +512,7 @@ function WG.Tile(c, key)
     if not old then break end
     oc.bytes = oc.bytes - oc.tiles[old].bytes
     oc.tiles[old] = nil
+    WG.stats.evicted = (WG.stats.evicted or 0) + 1
   end
   WG.stats.tileBytes = WG.TileBytesKept()
   if Rt.SliceOver and Rt.SliceOver() then coroutine.yield() end
@@ -479,8 +523,24 @@ end
 -- A step of the garbage collector after a tile decoded or a search done (their tables and strings let go): the game's
 -- own steps lagged behind a long route's work and the addon's memory climbed (Kooki3z 2026-11-22, past 500 MB).
 WG.GC_STEP = 256
+-- (each step taken in pieces of GC_PIECE, with a pause when the slice is over between them: one step of 512 was a 13-16
+-- ms slice, of 256 7-9 ms, past the slice's 1-5 ms. Item 108. The same work, the collector's own steps)
+WG.GC_PIECE = 32
+local function GcSteps(size)
+  local Rt = R()
+  local done = 0
+  while done < size do
+    local ok, finished = pcall(collectgarbage, "step", min(WG.GC_PIECE, size - done))
+    done = done + WG.GC_PIECE
+    if not ok then return true end -- (no collector steps here: as finished)
+    if finished then return true end
+    if done < size and Rt and Rt.SliceOver and Rt.SliceOver() then coroutine.yield() end
+  end
+  return false
+end
+WG.GcSteps = GcSteps
 function WG.GcStep()
-  if WG.GC_STEP and WG.GC_STEP > 0 then pcall(collectgarbage, "step", WG.GC_STEP) end
+  if WG.GC_STEP and WG.GC_STEP > 0 then GcSteps(WG.GC_STEP) end
   -- (the heap grown GC_GROWTH_MB since the last cycle ended: a cycle run to its end in the background, item 59)
   local ok, kb = pcall(collectgarbage, "count")
   if ok and kb then
@@ -498,8 +558,7 @@ function WG.GcCycle()
   if not (Rt and Rt.Background) or Rt.SYNC_WALKS then return false end
   return Rt.Background("worldgrid-gc", function()
     for _ = 1, 10000 do
-      local ok, done = pcall(collectgarbage, "step", WG.GC_CYCLE_STEP)
-      if not ok or done then break end
+      if GcSteps(WG.GC_CYCLE_STEP) then break end
       coroutine.yield()
     end
     local ok, kb = pcall(collectgarbage, "count")
@@ -591,9 +650,56 @@ end
 -- one nearest the shipped ground's height (Data/Heights.lua) where floors lie over each other. `swimming` (the start,
 -- Nav.Swimming: the game says the player swims): the water's surfaces there first.
 WG.CAVE_UNDER_Z = 6 -- yards: an indoors start (the game says so: opts.indoors) takes a floor this far under the ground
-local function Ends(c, x, y, z, swimming, indoors)
+-- (item 106, 1.4.1, SPF parity: on a pier or a dock, not swimming, the dry floor over the water. Menethil's and Booty
+-- Bay's docks: the deck 5-6 yd over the water's surface, the shipped ground the sea's bottom 11-30 yd under it, and the
+-- floor nearest the ground was the water's: the walk began with a swim from under the pier)
+WG.WADE_Z = 2 -- yards: a dry surface this far under the water's surface is its bottom, swum over (DrySplit)
+-- The surfaces of `list` ({ z, f }) a player who isn't swimming stands on: those neither the water's (F_SWIM) nor under
+-- it by more than WADE_Z; the rest second. With no water among them, or nothing dry, `list` itself.
+function WG.DrySplit(list)
+  local top
+  for _, f in ipairs(list) do
+    if f.f and Bit(f.f, F_SWIM) and (not top or f.z > top) then top = f.z end
+  end
+  if not top then return list, nil end
+  local dry, wet = {}, {}
+  for _, f in ipairs(list) do
+    if (f.f and Bit(f.f, F_SWIM)) or f.z < top - WG.WADE_Z then wet[#wet + 1] = f else dry[#dry + 1] = f end
+  end
+  if not dry[1] then return list, nil end
+  return dry, wet
+end
+-- Whether the cell at (x, y) has surfaces in a tile decoded already (Nav's status updates look only there: no load).
+function WG.Decoded(c, x, y)
+  local key, ci = CellKey(c, floor(x / c.cell), floor(y / c.cell))
+  local t = key and c.tiles[key]
+  return t and Count(t, ci) > 0 or false
+end
+-- The start's floor candidates in `opts` (opts.zs, Nav.GridCandidates) when (sx, sy) is the spot they were followed at
+-- (zs.x, zs.y; within ZS_YD): a walk from elsewhere in the same leg (a building's door, a city's edge) not.
+WG.ZS_YD = 3
+function WG.StartZs(opts, sx, sy)
+  local zs = opts and opts.zs
+  if not (zs and zs[1] and zs.x and Dist(sx, sy, zs.x, zs.y) <= WG.ZS_YD) then return nil end
+  return zs
+end
+-- `zs` (no height, Nav.GridCandidates: the floors the player may be on, followed and still more than one): the
+-- surfaces on each of them, at their yards alone, so the search keeps the cheapest.
+local function Ends(c, x, y, z, swimming, indoors, zs)
   local all = WG.SurfacesAt(c, x, y, z)
   local out = {}
+  if not z and zs and zs[1] then
+    for _, f in ipairs(all) do
+      for _, cz in ipairs(zs) do
+        if abs(f.z - cz) <= WG.FLOOR_Z then
+          f.cost = Dist(x, y, f.x, f.y)
+          out[#out + 1] = f
+          break
+        end
+      end
+    end
+    if out[1] then return out end
+  end
   if z then
     -- (none of the cell's own on that floor: the neighbor cells' surfaces on it first (a tower's top whose cell's
     -- middle is its roof or the shaft: Freewind Post's east lift tower, whose top cell has only the foot and a roof, and
@@ -638,6 +744,10 @@ local function Ends(c, x, y, z, swimming, indoors)
   end
   for _, f in ipairs(all) do if Bit(f.f, F_REACH) then pick[#pick + 1] = f end end
   if not pick[1] then pick = all end
+  -- (not swimming, outdoors: the dry floors over the water first, a pier's deck; the water's after the ground's pick,
+  -- dearer)
+  local wet
+  if not swimming and not indoors then pick, wet = WG.DrySplit(pick) end
   -- (no height: the ground's, Data/Heights.lua's, picks among floors over floors; else every one, as the city grid)
   local GS = ns.Ground and ns.Ground.Sample
   local gz = #pick > 1 and GS and GS(c.cont, x, y)
@@ -675,14 +785,18 @@ local function Ends(c, x, y, z, swimming, indoors)
     f.cost = Dist(x, y, f.x, f.y) + WG.OTHER_FLOOR_YD
     out[#out + 1] = f
   end
+  for _, f in ipairs(wet or {}) do
+    f.cost = Dist(x, y, f.x, f.y) + WG.OTHER_FLOOR_YD
+    out[#out + 1] = f
+  end
   return out
 end
 -- (never across a model wall: a spot by Red Cloud Mesa's palisade whose cell's surface has its point out past it on the
 -- rim took that surface, and the route's first piece went through the palisade, item 78. The surfaces across one left
 -- out; none left, the neighbor cells' on this side)
 local EndsAll = Ends
-Ends = function(c, x, y, z, swimming, indoors)
-  local out = EndsAll(c, x, y, z, swimming, indoors)
+Ends = function(c, x, y, z, swimming, indoors, zs)
+  local out = EndsAll(c, x, y, z, swimming, indoors, zs)
   local P = ns.Passability
   if not (P and P.HasModelWalls and P.HasModelWalls(c.cont)) then return out end
   local keep = {}
@@ -694,7 +808,7 @@ Ends = function(c, x, y, z, swimming, indoors)
   for d = 1, 8 do
     local qx, qy = x + DX[d] * c.cell, y + DY[d] * c.cell
     if not P.CrossesModelWall(c.cont, x, y, qx, qy) then
-      for _, f in ipairs(EndsAll(c, qx, qy, z, swimming, indoors)) do
+      for _, f in ipairs(EndsAll(c, qx, qy, z, swimming, indoors, zs)) do
         if not seen[f.id] and not P.CrossesModelWall(c.cont, x, y, f.x, f.y) then
           seen[f.id] = true
           f.cost = (f.cost or 0) + Dist(x, y, qx, qy)
@@ -769,6 +883,10 @@ function WG.Costs(c, sx, sy, tx, ty, opts)
   -- open ground. Item 83, Kooki3z at -10 in the Barrens: the road's yard a sixth of one off it took the route north round
   -- the hills past the stop and back, twice the open way, and its search flooded, the heuristic's yard that cheap)
   x.road = max(x.road, WG.ROAD_PRICE_MIN)
+  -- (never dearer than ROAD_PRICE_TOP: a small road bonus even at "Cut across" (+9 and +10; up to +8 as before), so a
+  -- road that runs the trip's way is still taken there, joined late and shallow. Item 57, Kooki3z at +10 in the Barrens:
+  -- the line ran across the open ground beside the road the whole way, joining it only at the stop)
+  x.road = min(x.road, WG.ROAD_PRICE_TOP)
   x.maxDrop = opts and opts.maxDrop or (N and N.SafeDrop and N.SafeDrop()) or 0
   x.slopeDrop = SlopeDrop(opts, x.maxDrop)
   -- (the jumps avoided on this trip, Nav.AvoidJump: no drop from within reach of one's top)
@@ -2328,6 +2446,7 @@ end
 -- cell, the 8.33 yd cells showing through)
 WG.CLEAR_YD = 1 -- a straightened line keeps this far off a cell side the grid has no link across (a wall's, a drop's)
 WG.CLEAR_STEP = 1 -- yards between the points it's checked at
+WG.CLEAR_LOOSE = 0.7 -- (cells: WG.Clear's `loose` edge surfaces, item 57)
 WG.CLEAR_Z = 3 -- yards: its height within this of the floor it's over (never across a floor change or stairs)
 WG.STRAIGHT_AHEAD = 64 -- points a straight piece is tried toward, farthest first ...
 WG.STRAIGHT_TRIES = 3000 -- ... and lines tried a route at most
@@ -2337,16 +2456,22 @@ WG.COLLINEAR_YD = 30 -- ... pieces up to this long
 -- Whether the grid walks the straight line (x0, y0, z0) to (x1, y1, z1) on one floor: every CLEAR_STEP yards over a
 -- surface of its cell within CLEAR_Z of the line's height, from cell to cell by links (none a drop), CLEAR_YD off every
 -- side of a cell with no link across it (and off a corner with no diagonal link), a floor's edge surface (its point off
--- the cell's middle) kept near its point.
-function WG.Clear(c, x0, y0, z0, x1, y1, z1)
+-- the cell's middle) kept near its point (0.45 of a cell); `loose`: within CLEAR_LOOSE of a cell (a merge's walk onto a
+-- road over open ground, WG.SnapRun: a line along a cell's side failed on flat grass, its cells' points 5 yd off it; not
+-- looser: with none, a merge's walk went into the Crossroads' inn through its wall, test_building_doors).
+function WG.Clear(c, x0, y0, z0, x1, y1, z1, loose)
   local cell = c.cell
   local L = Dist(x0, y0, x1, y1)
   local n = max(1, math.ceil(L / WG.CLEAR_STEP))
   local key, ci, t, s, gx, gy
   local clr = WG.CLEAR_YD
-  local edgeTol2 = (0.45 * cell) ^ 2
+  local edgeTol2 = ((loose and WG.CLEAR_LOOSE or 0.45) * cell) ^ 2
   local mid = 4 * 8 + 4
+  local SliceOver = R().SliceOver
   for q = 0, n do
+    -- (in a background job, a look at the slice's clock along a long line: a yard a step, hundreds of them; Straighten's
+    -- and the road merges' tries ran 12-30 ms slices on the slow client. Item 108)
+    if q % 64 == 63 and SliceOver and SliceOver() then coroutine.yield() end
     local f = q / n
     local x, y = x0 + (x1 - x0) * f, y0 + (y1 - y0) * f
     local z = (z0 and z1) and z0 + (z1 - z0) * f or nil
@@ -2424,6 +2549,7 @@ function WG.Straighten(c, pts, kinds, hs, onLink, bends, x)
     local m = max(1, math.ceil(L / 4))
     local e = 0
     for q = 0, m - 1 do
+      if q % 16 == 15 and Rt.SliceOver and Rt.SliceOver() then coroutine.yield() end -- (item 108, as WG.Clear's)
       local f = (q + 0.5) / m
       x.probe = (x.probe or 0) - 1
       e = e + Extra(x, x.probe - 1e9, ax + (bx - ax) * f, ay + (by - ay) * f) * L / m
@@ -2450,7 +2576,7 @@ function WG.Straighten(c, pts, kinds, hs, onLink, bends, x)
       for jj = far, i + 2, -1 do
         if tries >= WG.STRAIGHT_TRIES then break end
         tries = tries + 1
-        if Rt.Breathe and tries % 3 == 0 then Rt.Breathe(tries, 3) end
+        if Rt.Breathe then Rt.Breathe(tries, 3) end -- (every 3 tries, and the clock between: item 108)
         local za, zb = hs[i], hs[jj]
         local level = true
         for m = i + 1, jj - 1 do
@@ -2477,6 +2603,7 @@ function WG.Straighten(c, pts, kinds, hs, onLink, bends, x)
   local np = #P / 2
   local cx_ = x
   for m = 2, np do
+    if m % 4 == 0 and Rt.SliceOver and Rt.SliceOver() then coroutine.yield() end -- (item 108: a long route's points)
     local x, y = P[2 * m - 1], P[2 * m]
     local np2 = #P2 / 2
     local drop = false
@@ -2508,6 +2635,380 @@ function WG.Straighten(c, pts, kinds, hs, onLink, bends, x)
     end
   end
   return P2, K2, H2, L2, B2
+end
+
+---------------------------------------------------------------------------------------------------- merges
+-- (item 57, Kooki3z 2026-11-24, the Barrens at "Cut across": the road should be used wherever it goes the right way.
+-- The grid's eight directions price a road that runs at a slant to them up to 8% dearer than its yards, more than the
+-- road's bonus at the right of the slider, and its ties set where a merge falls, so the search walked the open ground
+-- beside the road, or joined it anywhere. Each run of walking and road pieces of the pulled way is tried along the roads
+-- near it, priced in straight lines: off the road a yard a yard, on it the search's road price p (Road tolerance). The
+-- cheapest way from one of the run's points onto a road and off it again to a later one (joined where the walk meets
+-- the road at the angle whose cosine is p, left where the road turns away from the way on by as much) replaces the run
+-- between them when it costs less. So the slider shapes the merge: to the left early and steep, to the right later and
+-- flatter, at +10 only a road within about 18 degrees of the way. Never a merge back against the way to the stop, a ride
+-- along the road away from it, nor a leave back.)
+WG.SNAP_MIN_YD = 40 -- a run this long or longer is tried along the roads near it ...
+WG.SNAP_NEAR_YD = 120 -- ... those this near it (looked for every SNAP_SAMPLE_YD along it)
+WG.SNAP_SAMPLE_YD = 40
+WG.SNAP_STEP_YD = 5 -- (the spots along a road a merge or a leave is tried at)
+WG.SNAP_RIDE_YD = 40 -- (a ride along the road this long at least: no "Join the road", "Leave the road" for a few yards)
+WG.SNAP_GAIN_YD = 2 -- (taken when it costs this much less than the run at least)
+WG.SNAP_TRIES = 8 -- (the best ways checked walkable, cheapest first, a run: one a road, way and point of the run)
+WG.SNAP_NUDGE_STEP = 2 -- (samples a merge or a leave is moved by when its walk isn't straight, SnapRun's NUDGE)
+WG.SNAP_LEAVE_YD = 5 -- (a walk this short onto or off the road: no direction to check)
+WG.SNAP_CLEAR_YD = 12 -- (a new piece checked walkable in steps this long, on the floor followed, and dry when a walk)
+-- The spots along edge `e` (its points flat from e[5]) every SNAP_STEP_YD or less and at its own points, within the box:
+-- xs, ys, their yards along it, and for each the index of the edge's point it is at or after.
+local function EdgeSamples(e, x0, y0, x1, y1)
+  local xs, ys, as, vi = {}, {}, {}, {}
+  local along = 0
+  local n = (#e - 4) / 2
+  local function Add(px, py, a, k)
+    if px >= x0 and px <= x1 and py >= y0 and py <= y1 then
+      local i = #xs + 1
+      xs[i], ys[i], as[i], vi[i] = px, py, a, k
+    end
+  end
+  for k = 1, n - 1 do
+    local ax, ay, bx, by = e[3 + 2 * k], e[4 + 2 * k], e[5 + 2 * k], e[6 + 2 * k]
+    local L = Dist(ax, ay, bx, by)
+    local m = max(1, math.ceil(L / WG.SNAP_STEP_YD))
+    for q = 0, m - 1 do
+      local f = q / m
+      Add(ax + (bx - ax) * f, ay + (by - ay) * f, along + L * f, k)
+    end
+    along = along + L
+  end
+  Add(e[3 + 2 * n], e[4 + 2 * n], along, n)
+  return xs, ys, as, vi
+end
+-- A surface's height at (x, y), the nearest to z, and whether it's water.
+local function SurfaceNear(c, x, y, z)
+  local ss = WG.SurfacesAt(c, x, y, z)
+  if not ss[1] then return z, false end
+  return ss[1].z, IS_SWIM[ss[1].f] or false
+end
+-- Points k0..k1 of the pulled way (pts flat, kinds, hs; a run of walking and road pieces) along a road near them, when
+-- cheaper: { i, j, pts = { { x, y, z, kind }, ... } }: the way leaves point i for the new points and comes back at
+-- point j (each new point's kind the piece's up to it; point j's piece a walk). Else nil. (tx, ty): the leg's stop.
+function WG.SnapRun(c, x, pts, kinds, hs, k0, k1, tx, ty)
+  local Rt = R()
+  local Pa = ns.Passability
+  local price = x.road
+  local ROAD, WALK = Rt.KIND_ROAD or 0, Rt.KIND_OFFROAD or 1
+  -- (the run's cost to each point, C, and on from it, D)
+  local C, VX, VY = {}, {}, {}
+  C[k0] = 0
+  local bx0, by0, bx1, by1 = huge, huge, -huge, -huge
+  for k = k0, k1 do
+    VX[k], VY[k] = pts[2 * k - 1], pts[2 * k]
+    bx0, by0, bx1, by1 = min(bx0, VX[k]), min(by0, VY[k]), max(bx1, VX[k]), max(by1, VY[k])
+    if k > k0 then
+      C[k] = C[k - 1] + Dist(VX[k - 1], VY[k - 1], VX[k], VY[k]) * (kinds[k - 1] == ROAD and price or 1)
+    end
+  end
+  local total = C[k1]
+  -- (open land's: none in or by a capital's grid, the city grid's own ways; item 57 kept to the open world)
+  local CG = ns.CityGrid
+  if CG and CG.InGrid then
+    for k = k0, k1 do if CG.InGrid(c.cont, VX[k], VY[k]) then return nil end end
+  end
+  local length = 0
+  for k = k0 + 1, k1 do length = length + Dist(VX[k - 1], VY[k - 1], VX[k], VY[k]) end
+  if length < WG.SNAP_MIN_YD or not Rt.RoadLinesNear then return nil end
+  local pad = WG.SNAP_NEAR_YD
+  bx0, by0, bx1, by1 = bx0 - pad, by0 - pad, bx1 + pad, by1 + pad
+  -- (the roads near the run)
+  local edges, seen = {}, {}
+  -- (a background job paused by the clock alone, never by a count: SnapRun's loops change no job's resumes)
+  local breathe = 0
+  local function Pause()
+    breathe = breathe + 1
+    -- (every other step: a step is a sample's roads or a 12 yd piece checked clear, a yard at a time; 8 of them were
+    -- 20-27 ms on the slow client. Item 108)
+    if breathe % 2 == 0 and Rt.SliceOver and Rt.SliceOver() then coroutine.yield() end
+  end
+  for k = k0, k1 - 1 do
+    local L = Dist(VX[k], VY[k], VX[k + 1], VY[k + 1])
+    local n = max(1, math.ceil(L / WG.SNAP_SAMPLE_YD))
+    for q = 0, (k == k1 - 1) and n or n - 1 do
+      local qx, qy = VX[k] + (VX[k + 1] - VX[k]) * q / n, VY[k] + (VY[k + 1] - VY[k]) * q / n
+      for _, r in ipairs(Rt.RoadLinesNear(c.cont, qx, qy, WG.SNAP_NEAR_YD)) do
+        if not seen[r.ei] then
+          seen[r.ei] = true
+          edges[#edges + 1] = r
+        end
+      end
+      Pause()
+    end
+  end
+  if not edges[1] then return nil end
+  local best = {}
+  for _, r in ipairs(edges) do
+    local xs, ys, as, vi = EdgeSamples(r.e, bx0, by0, bx1, by1)
+    local m = #xs
+    if m >= 2 then
+      -- (each spot's best way off the road to a point of the run, LB, to LJ: never back against the way to the stop)
+      local LB, LJ = {}, {}
+      for a = 1, m do
+        local px, py = xs[a], ys[a]
+        local lb, lj = huge, nil
+        for k = k0 + 1, k1 do
+          local vx, vy = VX[k], VY[k]
+          local d = Dist(vx, vy, px, py)
+          if d + total - C[k] < lb and (d <= WG.SNAP_LEAVE_YD or (vx - px) * (tx - px) + (vy - py) * (ty - py) >= 0) then
+            lb, lj = d + total - C[k], k
+          end
+        end
+        LB[a], LJ[a] = lb, lj
+        Pause()
+      end
+      -- (from each point i of the run: onto the road at a (never back), along it to b, off it to a later point)
+      for i = k0, k1 - 1 do
+        local vx, vy = VX[i], VY[i]
+        for dir = 1, -1, -2 do
+          local i0, i1, st = 1, m, 1
+          if dir < 0 then i0, i1, st = m, 1, -1 end
+          local pf, pa = nil, nil -- (the best merge so far: its cost less p yards along, and its spot)
+          local top = nil
+          for b = i0, i1, st do
+            Pause()
+            if pa and LJ[b] and LJ[b] > i then
+              -- (a ride toward the stop)
+              if (xs[b] - xs[pa]) * (tx - xs[pa]) + (ys[b] - ys[pa]) * (ty - ys[pa]) > 0
+                  and dir * (as[b] - as[pa]) >= WG.SNAP_RIDE_YD then
+                local tot = pf + LB[b] + dir * price * as[b]
+                if not top or tot < top.tot then top = { tot = tot, a = pa, b = b, i = i, j = LJ[b] } end
+              end
+            end
+            local px, py = xs[b], ys[b]
+            local d = Dist(vx, vy, px, py)
+            if d <= WG.SNAP_LEAVE_YD or (px - vx) * (tx - vx) + (py - vy) * (ty - vy) >= 0 then
+              local f = C[i] + d - dir * price * as[b]
+              if not pf or f < pf then pf, pa = f, b end
+            end
+          end
+          if top and top.tot < total - WG.SNAP_GAIN_YD then
+            top.e, top.dir, top.ei, top.xs, top.ys, top.vi = r.e, dir, r.ei, xs, ys, vi
+            best[#best + 1] = top
+          end
+        end
+        Pause()
+      end
+    end
+  end
+  if not best[1] then return nil end
+  table.sort(best, function(p, q)
+    if p.tot ~= q.tot then return p.tot < q.tot end
+    if p.ei ~= q.ei then return p.ei < q.ei end
+    return p.dir > q.dir
+  end)
+  local MW = Pa and Pa.HasModelWalls and Pa.HasModelWalls(c.cont) and Pa.CrossesModelWall or nil
+  -- (a piece checked as the grid walks it: in short steps on the floor followed from z0, across no wall; a walk by the
+  -- grid's links (WG.Clear) and swimming nowhere (priced as a walk), a road's own line as it is; arriving within CLEAR_Z
+  -- of z1. Its points' heights, or nil)
+  local function Walked(x0, y0, z0, x1, y1, z1, walk)
+    local L = Dist(x0, y0, x1, y1)
+    if L <= 0.05 then return {} end
+    if Pa and Pa.CrossesWall and Pa.CrossesWall(c.cont, x0, y0, x1, y1) then return nil end
+    if MW and MW(c.cont, x0, y0, x1, y1) then return nil end
+    local n = max(1, math.ceil(L / WG.SNAP_CLEAR_YD))
+    local subs = {}
+    local px, py, pz = x0, y0, z0
+    for q = 1, n do
+      local f = q / n
+      local qx, qy = x0 + (x1 - x0) * f, y0 + (y1 - y0) * f
+      Pause()
+      local qz, wet = SurfaceNear(c, qx, qy, pz)
+      if q == n then
+        if abs(qz - z1) > WG.CLEAR_Z then return nil end
+        qz = z1
+      end
+      if walk and wet then return nil end
+      if walk and not WG.Clear(c, px, py, pz, qx, qy, qz, true) then return nil end
+      subs[q] = { x = qx, y = qy, z = qz }
+      px, py, pz = qx, qy, qz
+    end
+    return subs
+  end
+  -- (the heights a piece's points need, as WG.Pull's: those its height bends at by Z_BEND or more)
+  local function Bends(x0, y0, z0, subs, kind, into)
+    local all = { { x = x0, y = y0, z = z0 } }
+    for _, s in ipairs(subs) do all[#all + 1] = s end
+    local keep = {}
+    local function Split(i0, i1)
+      local worst, wi = WG.Z_BEND, nil
+      local L = Dist(all[i0].x, all[i0].y, all[i1].x, all[i1].y)
+      for m = i0 + 1, i1 - 1 do
+        local f = L > 0 and Dist(all[i0].x, all[i0].y, all[m].x, all[m].y) / L or 0
+        local dev = abs(all[m].z - (all[i0].z + (all[i1].z - all[i0].z) * f))
+        if dev > worst then worst, wi = dev, m end
+      end
+      if wi then
+        Split(i0, wi)
+        keep[#keep + 1] = wi
+        Split(wi, i1)
+      end
+    end
+    Split(1, #all)
+    for _, m in ipairs(keep) do into[#into + 1] = { x = all[m].x, y = all[m].y, z = all[m].z, kind = kind, bend = true } end
+    local e = all[#all]
+    into[#into + 1] = { x = e.x, y = e.y, z = e.z, kind = kind }
+  end
+  -- (a straight piece's extra past guards and in zones too high, WG.Extra a yard)
+  local function Dear(x0, y0, x1, y1)
+    local L = Dist(x0, y0, x1, y1)
+    local n = max(1, math.ceil(L / 4))
+    local e = 0
+    for q = 0, n - 1 do
+      local f = (q + 0.5) / n
+      x.probe = (x.probe or 0) - 1
+      e = e + Extra(x, x.probe - 1e9, x0 + (x1 - x0) * f, y0 + (y1 - y0) * f) * L / n
+    end
+    return e
+  end
+  -- (candidate cd's way with its merge at spot a and its leave at b: its new points, or nil and the part that failed)
+  local function Way(cd, a, b)
+    local xs, ys, e, vi = cd.xs, cd.ys, cd.e, cd.vi
+    local i, j = cd.i, cd.j
+    -- (the merge, the road's own points between, the leave, then back to point j)
+    local way = { { x = xs[a], y = ys[a], kind = WALK, part = "merge" } }
+    if cd.dir > 0 then
+      for k = vi[a] + 1, vi[b] do way[#way + 1] = { x = e[3 + 2 * k], y = e[4 + 2 * k], kind = ROAD, part = "road" } end
+    else
+      for k = vi[a], vi[b] + 1, -1 do way[#way + 1] = { x = e[3 + 2 * k], y = e[4 + 2 * k], kind = ROAD, part = "road" } end
+    end
+    local last = way[#way]
+    if Dist(last.x, last.y, xs[b], ys[b]) > 0.5 then way[#way + 1] = { x = xs[b], y = ys[b], kind = ROAD, part = "road" } end
+    way[#way + 1] = { x = VX[j], y = VY[j], z = hs[j], kind = WALK, part = "leave" }
+    local out = {}
+    local px, py, pz = VX[i], VY[i], hs[i] or 0
+    for k = 1, #way do
+      local o = way[k]
+      local zz = o.z
+      if zz == nil then zz = SurfaceNear(c, o.x, o.y, pz) end
+      local subs = Walked(px, py, pz, o.x, o.y, zz, o.kind == WALK)
+      if not subs then return nil, o.part end
+      if Dist(px, py, o.x, o.y) > 0.05 then Bends(px, py, pz, subs, o.kind, out) end
+      px, py, pz = o.x, o.y, zz
+    end
+    return out
+  end
+  -- (a merge or a leave whose walk the grid doesn't take straight (a rock, a bush in the way): tried again a few spots
+  -- along the road either side, SNAP_NUDGE at most)
+  local NUDGE = { 0, 1, -1, 2, -2, 3, -3, 4, -4 }
+  for t = 1, min(#best, WG.SNAP_TRIES) do
+    local cd = best[t]
+    local m = #cd.xs
+    local a, b = cd.a, cd.b
+    local out, part = Way(cd, a, b)
+    local function Fits(sa, sb) -- (merge spot before the leave spot, both on the edge's samples)
+      return sa >= 1 and sa <= m and sb >= 1 and sb <= m and (sb - sa) * cd.dir > 0
+    end
+    for _, nd in ipairs(NUDGE) do
+      if out or not (part == "merge" or part == "leave") then break end
+      if nd ~= 0 then
+        local sa, sb = a, b
+        if part == "merge" then sa = a + nd * WG.SNAP_NUDGE_STEP else sb = b + nd * WG.SNAP_NUDGE_STEP end
+        if Fits(sa, sb) then
+          local o2, p2 = Way(cd, sa, sb)
+          if o2 then out, a, b = o2, sa, sb
+          elseif p2 ~= part then -- (the merge now walks, the leave next)
+            if p2 == "leave" then a, part = sa, p2 end
+          end
+        end
+      end
+    end
+    -- (no dearer past the other faction's guards or in zones too high than the run it replaces, as WG.Straighten)
+    if out and out[1] and x.any then
+      local before, after = 0, 0
+      for k = cd.i, cd.j - 1 do before = before + Dear(VX[k], VY[k], VX[k + 1], VY[k + 1]) end
+      local px, py = VX[cd.i], VY[cd.i]
+      for _, o in ipairs(out) do
+        after = after + Dear(px, py, o.x, o.y)
+        px, py = o.x, o.y
+      end
+      if after > before + 1 then out = nil end
+    end
+    if out and out[1] then
+      -- (point j itself is the run's own: out's last is it, its piece's kind kept)
+      local jk = out[#out].kind
+      out[#out] = nil
+      WG.stats.snaps = (WG.stats.snaps or 0) + 1
+      return { i = cd.i, j = cd.j, pts = out, jkind = jk }
+    end
+  end
+  return nil
+end
+-- The pulled way's runs of walking and road pieces along the roads near them (WG.SnapRun), at the search's road price
+-- x.road.
+function WG.SnapPieces(c, pts, kinds, hs, onLink, bends, x, tx, ty)
+  local Rt = R()
+  local WALK, ROAD = Rt.KIND_OFFROAD or 1, Rt.KIND_ROAD or 0
+  local n = #pts / 2
+  local P2, K2, H2, L2, B2 = { pts[1], pts[2] }, {}, { hs[1] }, {}, {}
+  if bends[1] then B2[1] = true end
+  local function Keep(k) -- (point k, as it was, with its piece from k - 1)
+    P2[#P2 + 1], P2[#P2 + 2] = pts[2 * k - 1], pts[2 * k]
+    H2[#H2 + 1] = hs[k]
+    K2[#K2 + 1] = kinds[k - 1]
+    if onLink[k - 1] then L2[#K2] = true end
+    if bends[k] then B2[#H2] = true end
+  end
+  local function Free(m) return (kinds[m] == WALK or kinds[m] == ROAD) and not onLink[m] end
+  local changed = false
+  local m = 1
+  while m <= n - 1 do
+    if Free(m) then
+      local m2 = m
+      while m2 + 1 <= n - 1 and Free(m2 + 1) do m2 = m2 + 1 end
+      local snap = WG.SnapRun(c, x, pts, kinds, hs, m, m2 + 1, tx, ty)
+      if snap then
+        changed = true
+        for k = m + 1, snap.i do Keep(k) end
+        for _, o in ipairs(snap.pts) do
+          P2[#P2 + 1], P2[#P2 + 2] = o.x, o.y
+          H2[#H2 + 1] = o.z
+          K2[#K2 + 1] = o.kind
+          if o.bend then B2[#H2] = true end
+        end
+        P2[#P2 + 1], P2[#P2 + 2] = pts[2 * snap.j - 1], pts[2 * snap.j]
+        H2[#H2 + 1] = hs[snap.j]
+        K2[#K2 + 1] = snap.jkind or WALK
+        if bends[snap.j] then B2[#H2] = true end
+        for k = snap.j + 1, m2 + 1 do Keep(k) end
+      else
+        for k = m + 1, m2 + 1 do Keep(k) end
+      end
+      m = m2 + 1
+    else
+      Keep(m + 1)
+      m = m + 1
+    end
+  end
+  if not changed then return pts, kinds, hs, onLink, bends end
+  return P2, K2, H2, L2, B2
+end
+
+-- Leg route r (WG.Pull's) with its merges onto roads shaped (WG.SnapPieces) at the costs' road price x.road: a new
+-- route, or r itself when none changed (none with no road preference).
+function WG.SnapRoute(c, r, x, tx, ty)
+  if not (r and r.pts and r.fz and x and x.road and x.road < 1) or r.throughGuards then return r end
+  local pts, kinds, hs, onLink, bends = WG.SnapPieces(c, r.pts, r.kinds, r.fz, r.onLink or {}, r.bends or {}, x, tx, ty)
+  if pts == r.pts then return r end
+  local ROAD = R().KIND_ROAD or 0
+  local length, roadYd = 0, 0
+  for m = 1, #kinds do
+    local d = Dist(pts[2 * m - 1], pts[2 * m], pts[2 * m + 1], pts[2 * m + 2])
+    length = length + d
+    if kinds[m] == ROAD then roadYd = roadYd + d end
+  end
+  local out = {}
+  for k, v in pairs(r) do out[k] = v end
+  out.pts, out.kinds, out.fz, out.onLink, out.bends, out.length, out.road = pts, kinds, hs, onLink, bends, length, roadYd
+  out.snapped = true
+  return out
 end
 
 ---------------------------------------------------------------------------------------------------- legs
@@ -2690,7 +3191,7 @@ local function JoinOnto(c, r, sx, sy, sz, opts)
   -- was joined straight down onto through the floor; the underground sweep, 2026-11-23: from the mountain over
   -- Ironforge, 210 yd down to Hjoldir)
   if best > 1 then
-    local st = Ends(c, sx, sy, sz, opts and opts.swimming, opts and opts.indoors)[1]
+    local st = Ends(c, sx, sy, sz, opts and opts.swimming, opts and opts.indoors, WG.StartZs(opts, sx, sy))[1]
     local crossed = st and WG.Line(c, st.id, st.key, st.ci, sx, sy, jx, jy)
     if not crossed then return nil end
     if jz then
@@ -2751,7 +3252,7 @@ local function JoinBySearch(c, r, sx, sy, sz, opts)
     end
   end
   if not next(goals) then return nil end
-  local starts = Ends(c, sx, sy, sz, opts and opts.swimming, opts and opts.indoors)
+  local starts = Ends(c, sx, sy, sz, opts and opts.swimming, opts and opts.indoors, WG.StartZs(opts, sx, sy))
   if not starts[1] then return nil end
   local x = WG.Costs(c, sx, sy, nx, ny, opts) or {}
   x.nodeCap = WG.JOIN_SEARCH_NODES
@@ -2845,6 +3346,7 @@ function WG.Refine(c, key, rf, sx, sy, tx, ty)
     WG.stats.refineCut = (WG.stats.refineCut or 0) + (x2.limitHit and 1 or 0)
     local cost2 = s2 and WG.lastCost
     local r2 = s2 and WG.Pull(c, s2, sx, sy, tx, ty, x2)
+    if r2 then r2 = WG.SnapRoute(c, r2, x2, tx, ty) end
     if r2 then r2.searchCost = cost2 end
     return r2 or false
   end, function(better)
@@ -2868,14 +3370,18 @@ end
 function WG.Walk(c, sx, sy, sz, tx, ty, tz, opts)
   local ck = CostKey(opts)
   local tkey = string.format("%d>%.0f:%.0f:%s|%s", c.cont, tx, ty, ZKey(tz), ck)
-  local key = string.format("%.0f:%.0f:%s>", sx, sy, ZKey(sz)) .. tkey
+  -- (the start's floor candidates, Nav.GridCandidates, when it has no height: another start)
+  local zs = not sz and WG.StartZs(opts, sx, sy)
+  local zsKey = zs and table.concat(zs, ",") or ""
+  local key = string.format("%.0f:%.0f:%s%s>", sx, sy, ZKey(sz), zsKey ~= "" and ("~" .. zsKey) or "") .. tkey
   local got = WG.routes[key]
   if got then return got.route or false end
   if WG.FailedNear(tkey, sx, sy, tx, ty) then return false end
   if WG.IsUnreached(c.cont, tx, ty, tz) then return false end
   local Rt = R()
-  -- (one found for the same stop from near here, still remembered: joined onto)
-  local seen = WG.targets[tkey]
+  -- (one found for the same stop from near here, still remembered: joined onto. Not from floor candidates, item 106:
+  -- the join would start on the first of them, the search keeps the cheapest)
+  local seen = not zs and WG.targets[tkey]
   if seen then
     for rk, e in pairs(seen) do
       local kept = WG.routes[rk]
@@ -2890,11 +3396,12 @@ function WG.Walk(c, sx, sy, sz, tx, ty, tz, opts)
   end
   local refine -- (a long leg's best way still to search: WG.Refine)
   local rushing -- (this search the fast one beside a slow one: set below)
-  -- (the ride check's walk, Nav's CompareRide (`opts.side`), not to one of the trip's stops: SIDE_WALK_CAP)
-  local sideWalk = opts and opts.side and not ToAStop(tx, ty) or nil
+  -- (the ride check's walk, Nav's CompareRide (`opts.side`), not to one of the trip's stops: SIDE_WALK_CAP. To a stop
+  -- too once the walk all the way is known, `opts.sideStop`: a plan's last walk from a far dock)
+  local sideWalk = opts and opts.side and (opts.sideStop or not ToAStop(tx, ty)) or nil
   local function Work()
     local route = false
-    local starts, goals = Ends(c, sx, sy, sz, opts and opts.swimming, opts and opts.indoors), {}
+    local starts, goals = Ends(c, sx, sy, sz, opts and opts.swimming, opts and opts.indoors, WG.StartZs(opts, sx, sy)), {}
     for _, e in ipairs(Ends(c, tx, ty, tz)) do goals[e.id] = e.cost end
     WG.UnderGoals(c, tx, ty, tz, goals)
     WG.NearGoals(c, tx, ty, tz, goals)
@@ -3003,7 +3510,9 @@ function WG.Walk(c, sx, sy, sz, tx, ty, tz, opts)
         -- (the long leg's weighed search found it fast; the best way searched again at HEUR: in the same go when the
         -- walks are worked out at once (the tests, the bake), else after, in the background (WG.Refine), the route
         -- shown meanwhile and swapped only for one REFINE_GAIN shorter, never flipping back and forth)
-        if x.heur and route then
+        -- (not a side walk's (`sideWalk`, the ride check's): only weighed against the walk, never walked as it is (the
+        -- trip's own legs are searched apart); its best way searched 120-135k nodes more a dock on the Dun Morogh trip)
+        if x.heur and route and not sideWalk then
           local cost1 = WG.lastCost or math.huge
           if Rt.SYNC_WALKS then
             local x2, inside2 = WG.RefineCosts(c, x, steps)
@@ -3054,6 +3563,9 @@ function WG.Walk(c, sx, sy, sz, tx, ty, tz, opts)
             route = plain
           end
         end
+        -- (its merges onto roads shaped last, once its search and the searches again are decided, at this tolerance's
+        -- road price, the plain walk's too: a road near it that runs its way taken as at any other. Item 57)
+        if route then route = WG.SnapRoute(c, route, x, tx, ty) end
       end
     end
     Remember(key, { route = route })
@@ -3268,13 +3780,49 @@ function WG.NotMeshed(cont, x, y)
   end
   return false
 end
+-- (the boxes of `cont`'s places NotMeshed can say yes in, a cell wider each way: a piece of the route clear of them all
+-- isn't sampled. Item 108: a 9.5k yd route was 1,200 samples a call, 12-15 ms, on every leg handed back)
+local function NotMeshedBoxes(cont)
+  local P, out = ns.Passability, {}
+  if not (P and P.InGridRect and ns.CityHalls and ns.CityHalls[cont]) then return out end
+  for _, key in ipairs(WG.NOT_MESHED) do
+    local o = ns.Terrain and ns.Terrain[key]
+    if o and o.tx0 and o.ty0 and o.w and o.h and o.cell then
+      for _, k in ipairs(ns.CityHalls[cont]) do
+        if k == key then
+          local x1, y1 = (32 - o.ty0) * (1600 / 3), (32 - o.tx0) * (1600 / 3)
+          local pad = o.cell + 1
+          out[#out + 1] = { x1 - o.h * o.cell - pad, x1 + pad, y1 - o.w * o.cell - pad, y1 + pad }
+        end
+      end
+    elseif o then
+      return nil -- (a grid without its box: every piece sampled, as before)
+    end
+  end
+  return out
+end
+WG.NotMeshedBoxes = NotMeshedBoxes
 function WG.ThroughNotMeshed(cont, r)
   local p = r.pts
+  local boxes = NotMeshedBoxes(cont)
+  if boxes and #boxes == 0 then return false end
   for i = 1, #p - 3, 2 do
-    local L = Dist(p[i], p[i + 1], p[i + 2], p[i + 3])
-    local n = max(1, math.ceil(L / 8))
-    for q = 0, n do
-      if WG.NotMeshed(cont, p[i] + (p[i + 2] - p[i]) * q / n, p[i + 1] + (p[i + 3] - p[i + 1]) * q / n) then return true end
+    local near = not boxes
+    if boxes then
+      local ax, ay, bx, by = p[i], p[i + 1], p[i + 2], p[i + 3]
+      for _, b in ipairs(boxes) do
+        if max(ax, bx) >= b[1] and min(ax, bx) <= b[2] and max(ay, by) >= b[3] and min(ay, by) <= b[4] then
+          near = true
+          break
+        end
+      end
+    end
+    if near then
+      local L = Dist(p[i], p[i + 1], p[i + 2], p[i + 3])
+      local n = max(1, math.ceil(L / 8))
+      for q = 0, n do
+        if WG.NotMeshed(cont, p[i] + (p[i + 2] - p[i]) * q / n, p[i + 1] + (p[i + 3] - p[i + 1]) * q / n) then return true end
+      end
     end
   end
   return false
@@ -3380,7 +3928,8 @@ function WG.CityWalk(cont, sx, sy, tx, ty, opts)
     if not (CG.SurfacesAt and CG.SurfacesAt(cc, ox, oy)[1]) then return nil end
   end
   local md = opts.maxDrop or (ns.Nav and ns.Nav.SafeDrop and ns.Nav.SafeDrop()) or nil
-  local r = CG.Walk(cc, sx, sy, opts.z, tx, ty, opts.tz, md)
+  local zs = not opts.z and CG.PlayerStart(cont, sx, sy) and CG.PlayerFloorZs and CG.PlayerFloorZs(cont, sx, sy) or nil
+  local r = CG.Walk(cc, sx, sy, opts.z, tx, ty, opts.tz, md, zs)
   if r == "pending" then return "pending" end
   if not r then return nil end
   WG.stats.city = (WG.stats.city or 0) + 1
@@ -3560,6 +4109,23 @@ end
 -- point outside before the cave's inside, R.RouteOwn along Caves.lua's roads), the grid's walk up to it, the cave's road
 -- from it to the stop. Returns the route, "pending", or nil (not such a leg, the start in the same cave, or no road
 -- into it: the grid's own walk).
+WG.CAVE_LINE_YD = 40 -- (a straight line to the stop from outside this long at most is a stop's step off a mouth's road)
+WG.CAVE_WAY_YD = 12 -- (a spot this near one of a cave's ways in, Data/Caves.lua's, is at its mouth)
+WG.CAVE_WAY_BACK_YD = 120 -- (the route's way in looked for this far back along it from the grid's edge)
+local caveWays = {}
+function WG.AtCaveWayIn(cont, key, x, y)
+  local map = caveWays[cont]
+  if not map then
+    map = {}
+    for _, cv in ipairs(ns.Caves and ns.Caves[cont] or {}) do map[cv[2]] = cv[5] end
+    caveWays[cont] = map
+  end
+  local ways = map[key] or {}
+  for k = 1, #ways - 1, 2 do
+    if Dist(x, y, ways[k], ways[k + 1]) <= WG.CAVE_WAY_YD then return true end
+  end
+  return false
+end
 function WG.CaveLeg(c, cont, sx, sy, tx, ty, opts)
   local cave = WG.InCave(cont, tx, ty, opts.tz)
   if not cave then return nil end
@@ -3576,12 +4142,57 @@ function WG.CaveLeg(c, cont, sx, sy, tx, ty, opts)
     if not z then return WG.CaveAt(cont, pts[2 * i - 1], pts[2 * i]) == cave end
     return WG.InCave(cont, pts[2 * i - 1], pts[2 * i], z, WG.CAVE_DOOR_Z) == cave
   end
-  -- (the mouth: the last point outside before the stretch inside that ends at the stop)
+  -- (another cave's or mine's grid there: Dreadmaul Rock's caves, joined under the hill)
+  local function InOther(i)
+    local z = hs and hs[i]
+    local x, y = pts[2 * i - 1], pts[2 * i]
+    local other
+    if z then other = WG.InCave(cont, x, y, z, WG.CAVE_DOOR_Z) else other = WG.CaveAt(cont, x, y) end
+    return other ~= nil and other ~= cave
+  end
+  -- (the mouth: the last point outside before the stretch inside that ends at the stop; a stretch through another
+  -- cave's grid between two of this one's is inside (the cave sweep's Dreadmaul Rock: in by its own mouth, through
+  -- the next cave's tunnel and back, the "mouth" was the tunnel's middle, 122 yd off its way in))
   local door
-  for i = n - 1, 1, -1 do
-    if not Inside(i) then door = i break end
+  local i = n - 1
+  while i >= 1 do
+    if Inside(i) then
+      i = i - 1
+    else
+      local j = i
+      while j >= 1 and not Inside(j) and InOther(j) do j = j - 1 end
+      if j >= 1 and j < i and Inside(j) then
+        i = j - 1
+      else
+        door = i
+        break
+      end
+    end
   end
   if not door or door == 1 then return nil end -- (no way in by the roads: in from the start, or none)
+  -- (none of the cave's own roads on the way in, only a straight line to the stop from a spot neither on the cave's
+  -- grid nor at one of its ways in, longer than a stop's step: the Router's own found no road into it and went through
+  -- the rock (the sweep's Mo'grosh Stronghold, 667 yd through the mountain to a stop on the ground over it; the
+  -- Dawning Wood Catacombs, 143): not such a leg, the grid's own walk to the stop)
+  local ex, ey = pts[2 * door - 1], pts[2 * door]
+  if door == n - 1 and Dist(ex, ey, tx, ty) > WG.CAVE_LINE_YD and WG.CaveAt(cont, ex, ey) ~= cave
+      and not WG.AtCaveWayIn(cont, cave, ex, ey) then
+    return nil
+  end
+  -- (the way in the route came by, a few yards back off the cave's grid: the mouth, not a spot past it that only the
+  -- grid's edge leaves outside. The sweep's Dun Algaz tunnel: its grid starts 75 yd in, and the walk was sent to that
+  -- spot at the mountain's height over it, a ledge in the rock: No way found yet)
+  if not (hs and hs[door]) and not WG.AtCaveWayIn(cont, cave, ex, ey) then
+    local back = 0
+    for j = door - 1, 2, -1 do
+      back = back + Dist(pts[2 * j - 1], pts[2 * j], pts[2 * j + 1], pts[2 * j + 2])
+      if back > WG.CAVE_WAY_BACK_YD then break end
+      if WG.AtCaveWayIn(cont, cave, pts[2 * j - 1], pts[2 * j]) then
+        door = j
+        break
+      end
+    end
+  end
   local dx, dy = pts[2 * door - 1], pts[2 * door]
   local dz = hs and hs[door] or GroundZ(cont, dx, dy)
   local walk = WG.Walk(c, sx, sy, opts.z, dx, dy, dz, opts)
@@ -3663,8 +4274,12 @@ function WG.Leg(cont, sx, sy, tx, ty, opts)
   local inside, outside
   if a then
     local sz = opts.z
-    if CG.PlayerStart(cont, sx, sy) then sz = CG.PlayerFloorZ(cont, sx, sy) or sz end
-    inside = CG.Walk(cc, sx, sy, sz, x, y, z)
+    local zs
+    if CG.PlayerStart(cont, sx, sy) then
+      sz = CG.PlayerFloorZ(cont, sx, sy) or sz
+      zs = not sz and CG.PlayerFloorZs and CG.PlayerFloorZs(cont, sx, sy) or nil
+    end
+    inside = CG.Walk(cc, sx, sy, sz, x, y, z, nil, zs)
     local o2 = opts
     if opts.swimming then -- (the start's water is the city's: the grid's walk starts out of it)
       o2 = {}

@@ -13,7 +13,7 @@ from azerothgps.paths import ADDON_DIR
 
 MOBS = ADDON_DIR / "Data" / "Mobs.lua"
 BRILL = (2254.0, 293.0, 0)
-LINE = re.compile(r"^(\d+)\|([^|]+)\|(\d+)\|(\d+)\|([AHB])\|(-?\d+( -?\d+)*(;-?\d+( -?\d+)*)*)$")
+LINE = re.compile(r"^(\d+)\|([^|]+)\|(\d+)\|(\d+)\|([AHB])\|([0-4])\|(-?\d+( -?\d+)*(;-?\d+( -?\d+)*)*)$")
 
 
 def _body():
@@ -27,17 +27,20 @@ def test_the_data_file_is_one_packed_string_of_enemy_mobs():
     lines = _body()
     assert 1500 < len(lines) < 5000
     assert MOBS.stat().st_size < 1024 * 1024  # (a couple of MB at most: read at the first search)
-    names, levels = {}, set()
+    names, levels, ranks = {}, set(), {}
     for line in lines:
         m = LINE.match(line)
         assert m, line[:120]
         assert int(m.group(3)) <= int(m.group(4)), line[:80]
         names[m.group(2)] = (int(m.group(3)), int(m.group(4)), m.group(5))
-        for lv, *_ in read_spawns(m.group(6)):
+        ranks[m.group(2)] = int(m.group(6))
+        for lv, *_ in read_spawns(m.group(7)):
             levels.add(lv)
     assert len(names) == len(lines)  # (a name once)
     assert levels == {0, 1, 2991, 10001}  # (the continents, Zephras Isle, Undercity's Apothecarium; no dungeons)
     assert names["Hogger"] == (11, 11, "B") and names["Kobold Vermin"][2] == "B"
+    # (each mob's rank, item 91: creature_template's; Razorfen Downs' quilboar outside are elites)
+    assert ranks["Kobold Vermin"] == 0 and ranks["Razorfen Battleguard"] == 1
     assert names["Prideclaw"][:2] == (5, 6)  # (Zephras Isle's)
     # not mobs: the friendly NPCs, the other faction's guards and townsfolk
     for npc in ("Innkeeper Renee", "Innkeeper Farley", "Stormwind City Guard", "Orgrimmar Grunt", "Thrall"):
@@ -65,7 +68,9 @@ def test_the_generator_packs_camps_delta_coded():
     assert text == "0 10 20 5 90 30 1;1 -5 7 -2"
     assert read_spawns(text) == [(0, 10, 20, 5), (0, 100, 50, 6), (1, -5, 7, -2)]
     lua = lua_text({"Ogre": {"id": 7, "name": "Ogre", "lo": 30, "hi": 31, "side": "B", "spawns": spawns}})
-    assert "\n7|Ogre|30|31|B|0 10 20 5 90 30 1;1 -5 7 -2\n" in lua
+    assert "\n7|Ogre|30|31|B|0|0 10 20 5 90 30 1;1 -5 7 -2\n" in lua
+    lua = lua_text({"Ogre": {"id": 7, "name": "Ogre", "lo": 30, "hi": 31, "side": "B", "rank": 1, "spawns": spawns}})
+    assert "\n7|Ogre|30|31|B|1|0 10 20 5 90 30 1;1 -5 7 -2\n" in lua
 
 
 @pytest.fixture(scope="module")

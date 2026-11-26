@@ -30,8 +30,9 @@ def load(lua, ns, *names, data=None):
     for name in names:
         src = (ADDON / name).read_text(encoding="utf-8")
         loader(src, name)("AzerothGPS", ns)
-        if name == "Data/Terrain.lua":  # (the buildings and the grids by blocks with them, as the toc loads them)
-            for extra in ("Data/Buildings.lua", "Data/TerrainHPA.lua"):
+        if name == "Data/Terrain.lua":  # (its one-way ground, the buildings and the grids by blocks with them, as the toc
+            # loads them)
+            for extra in ("Data/TerrainDown.lua", "Data/Buildings.lua", "Data/TerrainHPA.lua"):
                 loader((ADDON / extra).read_text(encoding="utf-8"), extra)("AzerothGPS", ns)
 
 

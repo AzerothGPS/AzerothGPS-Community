@@ -64,6 +64,31 @@
 -- planner weighs waiting for it against the way round. A jump no source can take in time is walked round (or waited for,
 -- whichever is faster: Nav.CheckSpellJumps).
 --
+-- Immunities (1.4.1, item 102, Kooki3z: "spells that survive the landing"; Expert jumper only, each with its own option
+-- under it, on by default): they don't slow the fall, they make the landing do no damage. The server takes no fall
+-- damage from a player immune to physical damage (CMaNGOS' Player::HandleFall: `!IsImmuneToDamage(
+-- SPELL_SCHOOL_MASK_NORMAL)`, next to feather fall and hover), and these spells' auras are that immunity (SpellEffect
+-- aura 39, school immunity, misc value 1 = physical). From this client's data (2026-11-26, SpellName, SpellEffect,
+-- SpellMisc + SpellDuration, SpellCooldowns, SpellCategories, SpellLevels, SpellAuraRestrictions):
+--   Divine Shield (paladin) 642 (level 34, 10 s), 1020 (level 50, 12 s): physical + all magic schools (126) immune.
+--   Divine Protection (paladin) 498 (level 6, 6 s), 5573 (level 18, 8 s): the same immunities, and pacified (aura 25).
+--     (458312 and 458371, also "Divine Protection", are a 50% damage cut (aura 87), no immunity: not taken.)
+--   Blessing of Protection (paladin) 1022 (level 10, 6 s), 5599 (level 24, 8 s), 10278 (level 38, 10 s): physical
+--     immunity on a friendly target (cast on the player: the button's `unit` "player"), pacified.
+--   Ice Block (mage) 11958 (and 27619, the same spell's other row): 10 s, physical + magic immune, stunned (aura 12): it
+--     can't be cast at the ledge and walked off, only in the air.
+--   Each a 5 min cooldown (category recovery 300 s); Divine Shield, Divine Protection and Ice Block share category 37
+--   (a paladin's two bubbles: one's cooldown is the other's). The paladin's three can't be cast with Forbearance (25771,
+--   60 s; SpellAuraRestrictions: Shield and Protection on the caster, Blessing of Protection on its target), which the
+--   server puts on the player with each: modeled as a shared lock (`lock`, `lockCd`), and the debuff up counts as a
+--   cooldown (`blockedBy`). Ice Block can't be cast with Tangled Causality (432069) up.
+-- An immunity cast at the ledge must still be up at the landing: the way there and the plain fall's own time (FallTime,
+-- the game's gravity) within its duration less CAST_MARGIN (RowReach: Divine Shield's 12 s covers 400 yd, Divine
+-- Protection's 6 s 83); past that, "Jump, then cast Divine Shield just before you land", its cue IMMUNE_CUE_S before the
+-- landing (or as much as its duration allows). Not taken (checked): Disengage (doesn't leap here, Kooki3z 2026-11-26);
+-- Hand of Protection isn't in this client. A few items share category 37 with physical immunity (Limited Invulnerability
+-- Potion's 3169, Light of Elune's 6724): not done yet.
+--
 -- What's ready is looked at again on the bags, the spells, a level, the cooldowns, the auras and combat (and every
 -- TICK_SECONDS for a cooldown running out): a change (the last feather used, the racial on its cooldown, the option)
 -- works the route out again (Nav.OptionsChanged), so a big drop is never kept without the spell. A buff up counts as
@@ -100,7 +125,31 @@ FS.SPELLS = {
   { item = 274616, name = "Lightheaded", duration = 45, auras = { 1307411 }, use = true, cd = 60 },
   { item = 275729, worn = true, name = "Propellerstorm", duration = 15, auras = { 1297762 }, use = true, cd = 900,
     cat = 68002, catCd = 900, endsOnLanding = true },
+  -- (immunities, the header's: Expert jumper only (FS.RowAllowed), each with its option `option`; `immune` (the fall at
+  -- the game's speed, the buff up at the landing), the highest rank first, `durations` by rank (FS.KnownId sets
+  -- `duration` to the known one's), `blockedBy` debuffs that stop the cast, `lock`/`lockCd` a lock using it starts for
+  -- every row with that lock (Forbearance), `selfCast` cast on the player, `castInAir` never at the ledge)
+  { ids = { 1020, 642 }, name = "Divine Shield", durations = { [1020] = 12, [642] = 10 }, duration = 10,
+    auras = { 1020, 642 }, immune = true, option = "jumpDivineShield", cd = 300, cat = 37, catCd = 300,
+    blockedBy = { 25771 }, lock = "forbearance", lockCd = 60, endsOnLanding = true },
+  { ids = { 5573, 498 }, name = "Divine Protection", durations = { [5573] = 8, [498] = 6 }, duration = 6,
+    auras = { 5573, 498 }, immune = true, option = "jumpDivineProtection", cd = 300, cat = 37, catCd = 300,
+    blockedBy = { 25771 }, lock = "forbearance", lockCd = 60, endsOnLanding = true },
+  { ids = { 10278, 5599, 1022 }, name = "Blessing of Protection", durations = { [10278] = 10, [5599] = 8, [1022] = 6 },
+    duration = 6, auras = { 10278, 5599, 1022 }, immune = true, option = "jumpBlessingOfProtection", cd = 300,
+    blockedBy = { 25771 }, lock = "forbearance", lockCd = 60, selfCast = true, endsOnLanding = true },
+  { ids = { 11958, 27619 }, name = "Ice Block", duration = 10, auras = { 11958, 27619 }, immune = true,
+    option = "jumpIceBlock", cd = 300, blockedBy = { 432069 }, castInAir = true, endsOnLanding = true },
 }
+FS.FORBEARANCE = 25771
+FS.IMMUNE_CUE_S = 3 -- seconds before the landing an immunity's cue comes (or less, as its duration allows)
+-- Whether row may be used now: an immunity only for an Expert jumper with its own option on (FS.Expert).
+function FS.RowAllowed(row)
+  if not row.immune then return true end
+  if not FS.Expert() then return false end
+  local st = ns.settings and ns.settings.gps
+  return not (st and st[row.option] == false)
+end
 -- A row's key (Nav.PickFallSpell's): its English name, an item's "item:<id>".
 function FS.RowKey(row)
   return row.item and ("item:" .. row.item) or row.name
@@ -185,8 +234,36 @@ local function BuffLeft(row)
   return nil
 end
 FS.BuffLeft = BuffLeft
+-- Seconds left on a debuff on the player stopping row's cast (`blockedBy`: Forbearance), 0: none.
+function FS.BlockedLeft(row)
+  if not row.blockedBy or FS.demo then return 0 end
+  local most = 0
+  for _, id in ipairs(row.blockedBy) do
+    local ok, left = pcall(function()
+      if C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID then
+        local a = C_UnitAuras.GetPlayerAuraBySpellID(id)
+        if a then
+          local e = a.expirationTime
+          if Secret(e) or not e or e == 0 then return math.huge end
+          return math.max(0, e - GetTime())
+        end
+      end
+      if UnitDebuff then
+        for i = 1, 40 do
+          local name, _, _, _, _, e, _, _, _, sid = UnitDebuff("player", i)
+          if not name then break end
+          if sid == id then return (Secret(e) or not e or e == 0) and math.huge or math.max(0, e - GetTime()) end
+        end
+      end
+      return 0
+    end)
+    if ok and left and left > most then most = left end
+  end
+  return most
+end
 
--- Seconds left on row's cooldown (an item's, its own or its category's as the game says; 0: ready).
+-- Seconds left on row's cooldown (an item's, its own or its category's as the game says; 0: ready). A debuff stopping
+-- its cast (FS.BlockedLeft) counts as its cooldown.
 function FS.RowCooldown(row)
   if row.item then
     local T = ns.Teleports
@@ -194,7 +271,7 @@ function FS.RowCooldown(row)
     return left > 1.5 and left or 0
   end
   local id = FS.KnownId(row)
-  return id and CooldownLeft(id) or 0
+  return id and math.max(CooldownLeft(id), FS.BlockedLeft(row)) or 0
 end
 -- The casts row has left (its reagent's count, a used-up item's, an item's charges; math.huge: no limit).
 function FS.UsesLeft(row)
@@ -208,10 +285,13 @@ function FS.UsesLeft(row)
   end
   return math.huge
 end
--- The id of row's spell the character has, or nil.
+-- The id of row's spell the character has, or nil. (A row with ranks, `durations`: its `duration` the known rank's.)
 function FS.KnownId(row)
   for _, id in ipairs(row.ids) do
-    if Known(id) then return id end
+    if Known(id) then
+      if row.durations and row.durations[id] then row.duration = row.durations[id] end
+      return id
+    end
   end
   return nil
 end
@@ -237,13 +317,14 @@ end
 -- Whether row's spell can be cast now (known, its reagent in the bags, off its cooldown, not in a form it can't be cast
 -- in); or its buff is up. The id (an item's row: the item's), and the buff's seconds left when it's up.
 function FS.Ready(row)
+  if not FS.RowAllowed(row) then return nil end
   if row.item then return ItemReady(row) end
   local id = FS.KnownId(row)
   if not id then return nil end
   local up = BuffLeft(row)
   if up then return id, up end
   if row.reagent and ItemCount(row.reagent) < 1 then return nil end
-  if CooldownLeft(id) > FS.WAIT_MAX then return nil end
+  if CooldownLeft(id) > FS.WAIT_MAX or FS.BlockedLeft(row) > FS.WAIT_MAX then return nil end
   if row.noForm and GetShapeshiftFormID then
     local ok, form = pcall(GetShapeshiftFormID)
     if ok and form == row.noForm then return nil end
@@ -251,9 +332,18 @@ function FS.Ready(row)
   return id
 end
 
--- The drop row's spell makes safe cast at the top: the buff's time less the margin, falling at FALL_YPS.
+-- The drop row's spell makes safe cast at the top: the buff's time less the margin, falling at FALL_YPS (an immunity:
+-- the plain fall that long, FS.FallDist; one cast only in the air, `castInAir`: none).
 function FS.RowReach(row)
-  return math.min(FS.DROP_CAP, math.max(0, row.duration - FS.CAST_MARGIN) * FS.FALL_YPS)
+  if row.castInAir then return 0 end
+  local t = math.max(0, row.duration - FS.CAST_MARGIN)
+  if row.immune then return math.min(FS.DROP_CAP, FS.FallDist(t)) end
+  return math.min(FS.DROP_CAP, t * FS.FALL_YPS)
+end
+-- Seconds the fall of `dz` yards takes under row: slowed (FALL_YPS), or an immunity's plain fall (FS.FallTime).
+function FS.RowFallTime(row, dz)
+  if row and row.immune then return FS.FallTime(dz) end
+  return (dz or 0) / FS.FALL_YPS
 end
 -- Spell jumping with no height limit (option expertJumper, under useClassSpells).
 function FS.Expert()
@@ -273,6 +363,13 @@ function FS.FallTime(d)
   local dt = 0.5 * FS.GRAVITY * tt * tt
   if d <= dt then return math.sqrt(2 * d / FS.GRAVITY) end
   return tt + (d - dt) / FS.TERMINAL_YPS
+end
+-- Yards a plain fall covers in `t` seconds (FallTime's inverse).
+function FS.FallDist(t)
+  t = math.max(0, t or 0)
+  local tt = FS.TERMINAL_YPS / FS.GRAVITY
+  if t <= tt then return 0.5 * FS.GRAVITY * t * t end
+  return 0.5 * FS.GRAVITY * tt * tt + (t - tt) * FS.TERMINAL_YPS
 end
 -- How far across the player can glide under it, running on while slowed (RUN_YPS a second of the buff).
 FS.RUN_YPS = 7
@@ -378,7 +475,9 @@ function FS.Budget(jumps, plain, waits)
   if (FS.demo or not (st and st.useClassSpells == false)) and not (N and N.spellJumpsOff) then
     for _, row in ipairs(FS.SPELLS) do
       local owned
-      if row.item then
+      if not FS.RowAllowed(row) then
+        owned = false
+      elseif row.item then
         owned = BuffLeft(row) or (row.worn and Worn(row.item)) or (not row.worn and ItemCount(row.item) > 0)
       else
         owned = FS.KnownId(row) ~= nil
@@ -388,14 +487,14 @@ function FS.Budget(jumps, plain, waits)
       end
     end
   end
-  local catAt, shift, waited = {}, 0, 0
+  local catAt, lockAt, shift, waited = {}, {}, 0, 0
   for k, j in ipairs(jumps) do
     if j.dz and j.dz > plain + 0.5 then
       local t = j.t + shift
       local best, bw
       for _, s in ipairs(srcs) do
         if s.uses > 0 and s.reach + 0.5 >= j.dz then
-          local at = math.max(s.readyAt, s.row.cat and catAt[s.row.cat] or 0)
+          local at = math.max(s.readyAt, s.row.cat and catAt[s.row.cat] or 0, s.row.lock and lockAt[s.row.lock] or 0)
           local w = math.max(0, at - t)
           local better = not best or w < bw - 0.01
           if not better and math.abs(w - bw) <= 0.01 then
@@ -419,6 +518,7 @@ function FS.Budget(jumps, plain, waits)
       best.uses = best.uses - 1
       best.readyAt = t + (best.row.cd or 0)
       if best.row.cat then catAt[best.row.cat] = t + (best.row.catCd or 0) end
+      if best.row.lock then lockAt[best.row.lock] = t + (best.row.lockCd or 0) end -- (Forbearance)
     end
   end
   return nil, waited
@@ -446,8 +546,15 @@ function FS.WatchFall()
     return
   end
   if falling then
-    local reach = FS.RowReach(arm.c.row) * FS.CUE_SHARE
-    FS.fall = { start = now, cueAt = now + FS.FallTime(arm.dz - reach), landAt = now + FS.FallTime(arm.dz), c = arm.c }
+    local row = arm.c.row
+    local landAt = now + FS.FallTime(arm.dz)
+    local cueAt
+    if row.immune then -- (an immunity: IMMUNE_CUE_S before the landing, or as much as it lasts less the margin)
+      cueAt = math.max(now, landAt - math.min(FS.IMMUNE_CUE_S, math.max(0.5, row.duration - FS.CAST_MARGIN)))
+    else
+      cueAt = now + FS.FallTime(arm.dz - FS.RowReach(row) * FS.CUE_SHARE)
+    end
+    FS.fall = { start = now, cueAt = cueAt, landAt = landAt, c = arm.c }
     FS.fallArm = nil
   end
 end
@@ -479,7 +586,7 @@ function FS.InTime(c, dist, dz, seconds)
     local cur, walk, mount, mounted = N.Speeds()
     speed = (cur and cur > 0.5) and cur or (mounted and mount) or walk or speed
   end
-  return (dist or 0) / math.max(speed, 1) + (dz or 0) / FS.FALL_YPS + FS.CAST_MARGIN <= (seconds or c.row.duration)
+  return (dist or 0) / math.max(speed, 1) + FS.RowFallTime(c.row, dz) + FS.CAST_MARGIN <= (seconds or c.row.duration)
 end
 
 FS.ARM_YD = 15 -- yards from an expert drop's top: its fall is watched for (FS.WatchFall)
@@ -545,6 +652,7 @@ local function Held(now)
   FS.castRow = FS.castRow or {}
   local t = FS.castRow
   t.item, t.spell, t[8], t[10], t.fall, t.early, t.demo = h.item, h.spell, h.name, nil, true, nil, FS.demo and true or nil
+  t.unit = h.unit
   return t
 end
 function FS.CastNow()
@@ -567,7 +675,7 @@ function FS.CastNow()
     if not (h and h.spell == t.spell and h.item == t.item) then
       local x, y = PlayerXY()
       local src = f and f.c or FS.Current()
-      FS.held = { spell = t.spell, item = t.item, name = t[8], x = x, y = y,
+      FS.held = { spell = t.spell, item = t.item, name = t[8], x = x, y = y, unit = t.unit,
         worn = src and src.row and src.row.worn or nil, row = src and src.row or nil }
     else
       if h.row and BuffLeft(h.row) then h.buffSeen = true end -- (cast: FS.Held lets go when it ends with no fall)
@@ -599,6 +707,7 @@ function FS.CastRow(c)
     t.item, t.spell = nil, c.id
   end
   t[8], t[10], t.fall, t.early = FS.Name(c), nil, true, nil
+  t.unit = c.row.selfCast and "player" or nil -- (Blessing of Protection: on the player, whatever's targeted)
   t.demo = FS.demo and true or nil -- (the tutorial's demo: GPSFrame's insecure look-alike shows, G.DemoUseButton)
   return t
 end

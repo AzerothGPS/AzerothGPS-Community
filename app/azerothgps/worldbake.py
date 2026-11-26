@@ -729,6 +729,58 @@ def stop_spots(cont: int) -> list:
     return out
 
 
+CAVE_UNDER_YD = 8.0  # yards: a cave road's node with no height of its own is on the floors this far under the ground
+CAVE_NODE_EVERY = 4  # (every this many of a cave's own road nodes inside it a spot: one joined, its piece's others are)
+
+
+def cave_spots(cont: int) -> list:
+    """The caves' and mines' spots (Data/Caves.lua) for stop_links: each way in (its patch of ground at an opening) and
+    every CAVE_NODE_EVERY'th node of the cave's own roads inside it, [(x, y, z or None, name, under)]: a node's height
+    when the data has one (a layered cave's `nz`), else None, every floor of its cell (`under`: only those CAVE_UNDER_YD
+    or more under the ground, a node inside; a way in's every one). The cave sweep's no ways (test_cave_sweep.py,
+    KNOWN_NO_WAY): a mouth on a ledge the grid's links leave only by a drop down, its slope up narrower than its
+    cells."""
+    from .gameharness import start
+    lua, ns = start()
+    rows = lua.eval(r"""
+    function(cont)
+      local WG = AGPS_NS.WorldGrid
+      local out = {}
+      local function add(x, y, z, name, under) out[#out + 1] = { x, y, z or false, name, under } end
+      for _, cv in ipairs(AGPS_NS.Caves[cont] or {}) do
+        local ways = cv[5] or {}
+        for k = 1, #ways - 1, 2 do add(ways[k], ways[k + 1], nil, cv[1] ~= "" and cv[1] or cv[2], false) end
+      end
+      local names = {}
+      for _, cv in ipairs(AGPS_NS.Caves[cont] or {}) do names[cv[2]] = cv[1] ~= "" and cv[1] or cv[2] end
+      local seen = {}
+      for _, ov in ipairs(AGPS_NS.RoadOverlays[cont] or {}) do
+        if ov.cave then
+          local n, nz = ov.n, ov.nz
+          for i = 1, #n / 2 do
+            local x, y = n[2 * i - 1], n[2 * i]
+            local cave = WG.CaveAt(cont, x, y)
+            if cave then
+              seen[cave] = (seen[cave] or 0) + 1
+              if seen[cave] % AGPS_EVERY == 1 or AGPS_EVERY == 1 then
+                add(x, y, nz and nz[i] ~= 0 and nz[i] or nil, names[cave] or cave, true)
+              end
+            end
+          end
+        end
+      end
+      return out
+    end""")
+    lua.globals().AGPS_EVERY = CAVE_NODE_EVERY
+    ns.WorldGrid.Set(True)
+    t = rows(cont)
+    out = []
+    for i in range(1, len(t) + 1):
+        r = t[i]
+        out.append((float(r[1]), float(r[2]), float(r[3]) if r[3] is not False else None, str(r[4]), bool(r[5])))
+    return out
+
+
 class _Meshes:
     """The world meshes' tiles, loaded as asked (worldmesh.load_tile): each's polys, neighbors and polys' middles."""
 
@@ -929,11 +981,23 @@ def stop_links(g: Grid, walls: list, log=print) -> int:
     n, tried, joined = 0, 0, 0
     why = defaultdict(int)  # (the stops not joined, by why)
     g.stop_apart = []
-    for x, y, z, name in stop_spots(g.cont):
+    spots = [(x, y, z, name, False) for x, y, z, name in stop_spots(g.cont)]
+    # (and the caves' ways in and inside, each floor of its cell with no height of its own: cave_spots)
+    for x, y, z, name, under in cave_spots(g.cont):
+        if z is not None:
+            spots.append((x, y, z, name, True))
+            continue
+        gz = g.ground_z(x, y) if under else None
+        for s in _surfaces(g, x, y):
+            if not under or (gz is not None and not np.isnan(gz) and float(g.z[s]) <= gz - CAVE_UNDER_YD):
+                spots.append((x, y, float(g.z[s]), name, True))
+    cave_tried = cave_joined = 0
+    for x, y, z, name, cave in spots:
         s = g.at(x, y, z, STOP_ON_Z)
         if s is None or reached(s):
             continue
         tried += 1
+        cave_tried += cave
         # (onto the nearest piece bigger than the stop's own (a town's hall onto the next, Ironforge's halls one after
         # another), till the ground players reach)
         for _step in range(STOP_STEPS):
@@ -968,8 +1032,9 @@ def stop_links(g: Grid, walls: list, log=print) -> int:
             size[p] += size[own]
             if reached(s):
                 joined += 1
+                cave_joined += cave
                 break
-        if not reached(s):
+        if not reached(s) and not cave:
             g.stop_apart.append((x, y, z, name))
     # (then each stop's floor and the floors round it the mesh walks to much shorter than the grid's way does (a town's
     # levels the grid joins only far round: Booty Bay's docks and its walkways, 1,310 yd from Auctioneer Kresky to
@@ -1042,7 +1107,8 @@ def stop_links(g: Grid, walls: list, log=print) -> int:
                 n += 1
             short += 1
     log(f"  cont {g.cont}: {tried} stops' floors apart from the reached ground, {joined} joined to it along the mesh "
-        f"({n} links; not: {dict(why)}); {short} ways shorter on the mesh to the floors round a stop")
+        f"({n} links; not: {dict(why)}; caves' spots: {cave_joined} of {cave_tried} joined); {short} ways shorter on "
+        f"the mesh to the floors round a stop")
     return n
 
 

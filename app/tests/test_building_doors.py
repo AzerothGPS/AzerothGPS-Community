@@ -24,7 +24,9 @@ def test_into_the_crossroads_inn_through_its_door(game, start):  # noqa: F811
     r = _route(lua, ns, start, INN, 96.5)
     pts = [(r.pts[i], r.pts[i + 1]) for i in range(1, len(r.pts), 2)]
     inside = [((x - INN[0]) ** 2 + (y - INN[1]) ** 2) ** 0.5 <= R_INN for x, y in pts]
-    first_in = inside.index(True)
+    # (in for good from here: a road skirting the inn's south wall passes within R_INN of its middle outside, item 57's
+    # merge onto it)
+    first_in = len(inside) - inside[::-1].index(False)
     # (the last point outside is the door's: the Router's own way's, west side; never a straight line in through the wall)
     door = pts[first_in - 1]
     assert door[0] < -425, (door, pts)  # (the west doors: the line from the flight master went in at x -421, the wall)

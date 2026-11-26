@@ -4,6 +4,44 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 ## 1.4.1 (in progress)
 
+### New
+
+- Expert jumper: paladins can land big drops with Divine Shield, Divine Protection or Blessing of Protection, and mages with Ice Block, each with its own toggle (Options > Routing).
+- Controller: LB + A picks the route's jumps and swims one by one; X avoids the one picked for that stop, Y undoes it.
+- Routes go around elite enemy areas near your level, shown in gold on the map (Options > Routing: Avoid elite enemy areas).
+- The GPS minimap square can hide its border so only the map shows (Options > Minimap: Hide the minimap square's border).
+- OpenXP Route: follows each step of your OpenXP 2.0 guide, like the other guide routes.
+- Travel: routes can ask a mage in your group for a portal (Options > Routing: Use a party mage's portals), count Frequent Flier's faster flights, use WoW Forever's own Hearthstone and learn your hearth spot when you bind; water walking has its own toggle.
+- Maps for 48 caves and tunnels and 25 buildings the game has no map for (the Terrorweb Tunnel, the Talondeep Path, the night elves' inns), drawn floor by floor from where you can walk.
+- Directions from the ground: "Take the ramp down", jumps with their height ("Jump down here (34 yd)"), "Enter the cave" off the roads, "Leave the cave, then mount up", and "Over the ridge, round to the left" for a nearby stop you can't see.
+- Height profile: a strip along the bottom of the map shows the climbs, drops and jumps to your next stop, with you as a dot (Options > Map).
+- Hover a jump on the route to see where you land, how far it drops and whether it hurts at your Safe drop.
+- Floor picker: where floors stack (Undercity, capitals, inns, towers), + and - on the map pick the floor shown, starting on yours; a stop you double-click goes on that floor (Options > Map).
+- Stuck against a wall: the directions say which way around it is open.
+- Swimming with no route: an arrow and a line point to the nearest shore you can walk up onto, with its distance.
+- Lifts: once you've ridden one, the directions say when its next car arrives ("lift arrives in 12s") in Undercity, Thunder Bluff, the Great Lift and Freewind Post.
+
+### Changed
+
+- A stop or /way point placed in rock, a wall or on a roof moves to the nearest walkable ground on its floor.
+- Roads or shortcuts now shapes how routes join a road: toward "Stick to roads" they join early, toward "Cut across" later and at a shallower angle, still using a road that runs your way.
+- Calmer directions: fewer road join/leave messages (said with the turn they belong to), and the line no longer flips back and forth as you walk.
+- Smoother frames while a long route is worked out: the background work keeps to its share of each frame (up to 5x shorter hitches on slower PCs).
+- Your floor where floors stack (Undercity, capitals, caves) is also worked out from how far you are from a nearby NPC you target or mouse over, so routes start on the right floor sooner after a login, teleport or lift.
+- Your floor is kept until you fall, swim or take a lift, and when it's unclear which floor you're on the route starts from the quickest one; on a pier or dock it starts on the deck, not the water below.
+- Going off the route, the new one starts on the floor you're on (a bridge, a ledge, a cave under a hill), and a corpse run leads to the floor you died on.
+- Walks off the roads go down short banks too steep to climb (never far enough to hurt), but never up them.
+
+### Fixed
+
+- Outdoor ramps, like the road down Red Cloud Mesa, are no longer called stairs.
+- Caves: no "Join the road" along with "Enter the cave" at a mouth, and no "Leave the cave", "Enter the cave" flicker deep inside.
+- A place a capital's guard points out goes to its NPC, with its height and the Target button (Orgrimmar's Hunter's Hall no longer says "Below you, 50 yd down").
+- Ironforge: routes into the shops and rooms off its halls (Nissa Firestone's First Aid room, the Mystic Ward's trainers) walk the city's floors to the NPC.
+- Routes past the other faction's guards (Thelsamar to Kharanos as Horde) stop working in the background once settled, instead of searching far flight and zeppelin options for minutes.
+- Caves: a stop clicked inside a cave goes on its floor, not a ledge in the rock above it, and routes go in by the cave's mouth instead of a line through the hill (Dun Algaz, Dreadmaul Rock, Mo'grosh Stronghold, Loch Modan's cave and 19 more).
+- Orgrimmar's Wind Rider tower: up or down its spiral ramp the arrow stays steady and "yd up" counts down as you climb to the flight master.
+
 ## 1.4.0
 
 ### New

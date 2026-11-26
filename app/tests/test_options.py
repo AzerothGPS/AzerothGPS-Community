@@ -63,7 +63,13 @@ NEW = ["showAvoided",  # (1.4.0: the guard zones a route goes around, drawn; ite
        "useClassSpells",  # (Kooki3z 2026-11-22: big drops with a fall spell; its full-health sibling removed, item 28)
        "expertJumper",  # (Kooki3z 2026-11-23: spell jumping off any ledge)
        "safeDropYd",  # (Kooki3z 2026-11-23: the plain drop limit, Safe drop)
-       "searchEnemies"]  # (1.4.0, Kooki3z 2026-11-22: enemy mobs in the search)
+       # (1.4.1 item 102: the immunities an Expert jumper may land with, each its own)
+       "jumpDivineShield", "jumpDivineProtection", "jumpBlessingOfProtection", "jumpIceBlock",
+       "searchEnemies",  # (1.4.0, Kooki3z 2026-11-22: enemy mobs in the search)
+       "avoidElites", "eliteOffset",  # (1.4.1, item 91: elite enemy areas avoided, from which level)
+       "replaceMinimapNoBorder",  # (1.4.1, item 103: the minimap square without its border)
+       "usePartyPortals", "useWaterWalking",  # (1.4.1, item 109: a party mage's portals; water walking turned off)
+       "heightProfile", "floorPicker"]  # (1.4.1, item 114: the route's height profile strip, the floor picker)
 # Where each setting's control is: the page a player would look on.
 HOME = {
     "General": "shown showCoords distanceUnits language quietChat searchCommonNpcs searchEnemies",
@@ -71,11 +77,11 @@ HOME = {
     "Controller": "padControl padLegend",
     # (asked 2026-11-10: "4 different map pages... maybe reduce to 2": the map itself, its icons, and its window)
     "Map": "style seamExploredOnly seamTerrainYd seamTerrainBlend seamContinentAt seamContinentBlend seamWorldAt "
-           "seamWorldBlend interiorZoomYd interiorHoldSec routeColor routeSlopeShade rotate approachZoom reopenFollow followOnMove terrainZoomOut interiors "
+           "seamWorldBlend interiorZoomYd interiorHoldSec routeColor routeSlopeShade heightProfile floorPicker rotate approachZoom reopenFollow followOnMove terrainZoomOut interiors "
            "useWorldMap escClosesMap extraWindow",
     # (2026-11-19: a Minimap page again, the GPS map in its place and the game's own)
     "Minimap": "replaceMinimap replaceMinimapSize replaceMinimapCollapseOnMove replaceMinimapCollapseOnCombat "
-               "replaceMinimapIdle replaceMinimapKeepSquare replaceMinimapRoute replaceMinimapResume "
+               "replaceMinimapIdle replaceMinimapKeepSquare replaceMinimapRoute replaceMinimapResume replaceMinimapNoBorder "
                "minimap.hide minimapRoute minimapIcons minimapShape",
     "Window": "locked size width lockSize freeSize navPanelWidth navPanelAlign navPanelDetached navPanelHideButtons "
               "navPanelAlpha navPanelWrap navPanelLocked windowFrame windowTint "
@@ -85,7 +91,7 @@ HOME = {
               "iconYdCaves iconYdHerbs iconYdOre iconYdPins",
     "Opacity": "alpha fadeMoving movingAlpha combatHideMap combatAlpha combatHideArrow arrowCombatAlpha "
                "clickThroughMoving clickThroughCombat",
-    "Routing": "useFlights flightMapRing useHearthstone useTeleports avoidHighZones avoidHostile showAvoided allowSwim useClassSpells expertJumper safeDropYd roadTolerance fastestOrder "
+    "Routing": "useFlights flightMapRing useHearthstone useTeleports usePartyPortals avoidHighZones avoidHostile avoidElites eliteOffset showAvoided allowSwim useWaterWalking useClassSpells expertJumper jumpDivineShield jumpDivineProtection jumpBlessingOfProtection jumpIceBlock safeDropYd roadTolerance fastestOrder "
                "cityKeepOrder importKeepOrder questZoneOnly questTrackedOnly questTurninsOnly questObjectivesOnly questLevelOrder questAutoReroute questPickRoute navCloseClears acceptWay acceptMapPins acceptShared",
     "Directions": "arrowShown arrowLocked arrowEase arrowPx arrowBg dirShown dirLocked dirStopsOnly arrowSnap arrowSide dirTextScale dirBg "
                   "questing targetNpcButton targetNpcMarkSolo targetNpcMarkGroup",
@@ -198,6 +204,7 @@ DEPENDENTS = [
     ("replaceMinimapSize", "replaceMinimap", False), ("replaceMinimapCollapseOnMove", "replaceMinimap", False),
     ("replaceMinimapCollapseOnCombat", "replaceMinimap", False), ("replaceMinimapIdle", "replaceMinimap", False),
     ("replaceMinimapKeepSquare", "replaceMinimap", False), ("replaceMinimapRoute", "replaceMinimap", False),
+    ("replaceMinimapNoBorder", "replaceMinimap", False),
     ("movingAlpha", "fadeMoving", False), ("combatAlpha", "combatHideMap", True),
     ("arrowCombatAlpha", "combatHideArrow", True),
     ("lockSize", "locked", True), ("freeSize", "locked", True), ("freeSize", "lockSize", True),
@@ -221,13 +228,18 @@ DEPENDENTS = [
     # (1.3.9: the detached route panel's own looks)
     ("navPanelHideButtons", "navPanelDetached", False), ("navPanelAlpha", "navPanelDetached", False),
     ("navPanelLocked", "navPanelDetached", False), ("navPanelWrap", "navPanelDetached", False),
+    # (1.4.1 item 102: the immunities under Expert jumper, itself under Use class spells)
+    ("jumpDivineShield", "expertJumper", False), ("jumpDivineProtection", "expertJumper", False),
+    ("jumpBlessingOfProtection", "expertJumper", False), ("jumpIceBlock", "expertJumper", False),
+    ("jumpDivineShield", "useClassSpells", False), ("jumpIceBlock", "useClassSpells", False),
 ]
 # (the parents' values with every dependent on)
 ALL_ON = {"replaceMinimap": True, "fadeMoving": True, "combatHideMap": False, "combatHideArrow": False,
           "locked": False, "lockSize": False, "windowFrame": True, "charm": "thunderfury", "fastestOrder": True,
           "layerQuests": True, "style": "seamless", "arrow": True, "arrowShown": True, "dirShown": True, "arrowSnap": True, "arrowSide": "left",
           "poiTaxi": True, "poiPoi": True, "layerCity": True, "layerInstances": True, "layerCaves": True,
-          "layerHerbs": True, "layerOre": True, "showCustomPins": True, "navPanelDetached": True}
+          "layerHerbs": True, "layerOre": True, "showCustomPins": True, "navPanelDetached": True,
+          "useClassSpells": True, "expertJumper": True}
 
 
 def test_a_dependent_option_is_gray_while_its_parent_is_off(game):

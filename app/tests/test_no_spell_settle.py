@@ -19,8 +19,11 @@ def test_the_way_round_settles_within_the_node_budget(game, spells):  # noqa: F8
     lua, ns = game
     st, WG = ns.settings.gps, ns.WorldGrid
     WG.routes, WG.order, WG.targets = lua.table(), lua.table(), lua.table()
-    saved = (st.safeDropYd, st.cityGrid, st.useClassSpells, st.expertJumper)
+    saved = (st.safeDropYd, st.cityGrid, st.useClassSpells, st.expertJumper, st.avoidElites)
     st.safeDropYd, st.cityGrid, st.useClassSpells, st.expertJumper = 39, True, spells, False
+    # (the elite areas off, item 91: the start is among Tanaris' level 42-46 elites, which the harness's level 14
+    # avoids, a search round them on top of the budget measured here for item 27's trip)
+    st.avoidElites = False
     lua.execute("AGPS_NS_SW = { IsPlayerSpell, GetItemCount }; IsPlayerSpell = function(id) return id == 1259416 end; "
                 "GetItemCount = function() return 0 end")
     ns.FallSpells.Refresh()
@@ -29,7 +32,7 @@ def test_the_way_round_settles_within_the_node_budget(game, spells):  # noqa: F8
         rows = _ride(lua, ns, WARRIOR_SANDS, WARRIOR_STOP, ticks=400, step=0, faction="Horde")
     finally:
         lua.execute("IsPlayerSpell, GetItemCount = AGPS_NS_SW[1], AGPS_NS_SW[2]")
-        st.safeDropYd, st.cityGrid, st.useClassSpells, st.expertJumper = saved
+        st.safeDropYd, st.cityGrid, st.useClassSpells, st.expertJumper, st.avoidElites = saved
         ns.FallSpells.Refresh()
     settled = [(t, yd) for t, yd, pending, _ in rows if yd is not None and not pending]
     assert settled and 3000 < settled[-1][1] < 3800, rows[-1]  # (the way round, by the southern way down)

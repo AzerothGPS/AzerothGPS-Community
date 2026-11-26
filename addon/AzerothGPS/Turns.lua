@@ -165,6 +165,8 @@ T.WORDS = {
   join = { L["Join the road"], L["Join the road now"], L["join the road"] },
   leave = { L["Leave the road"], L["Leave the road now"], L["leave the road"] },
   drop = { L["Jump down here"], L["Jump down here"], L["jump down"] },
+  ramp_up = { L["Take the ramp up"], L["Take the ramp up"], L["take the ramp up"] },
+  ramp_down = { L["Take the ramp down"], L["Take the ramp down"], L["take the ramp down"] },
   jump_across = { L["Jump across here"], L["Jump across here"], L["jump across"] },
   lift_up = { L["Take the lift up"], L["Take the lift up"], L["take the lift up"] },
   lift_down = { L["Take the lift down"], L["Take the lift down"], L["take the lift down"] },
@@ -185,6 +187,18 @@ local function Words(m, id)
   return m
 end
 T.Words = Words
+
+-- A drop's words with its fall where it's known (item 113a: "drop off the ledge here (12 yd)"): "Jump down here (12 yd)"
+function T.DropWords(m)
+  Words(m, "drop")
+  local N = ns.Nav
+  if m.dropYd and m.dropYd >= 1 then
+    local fall = N and N.FormatDistance and N.FormatDistance(m.dropYd, true) or Format("%d yd", math.floor(m.dropYd + 0.5))
+    m.text = Format(L["Jump down here (%s)"], fall)
+    m.now, m.mid = m.text, Format(L["jump down (%s)"], fall)
+  end
+  return m
+end
 
 function T.TurnText(angle)
   return T.WORDS[T.TurnId(angle)][1]
@@ -208,7 +222,17 @@ T.NOW_YD = 8
 T.DROP_NOW_YD = 60 -- yards: a spell jump's "Jump, then cast ..." only this near its edge (item 52); a buff cast ahead
 -- ("Cast Slow Fall, then jump down", its timing) as far as FallSpells.LOOK_AHEAD_YD
 T.DROP_NOTE_YD = 8 -- yards: a drop's noted fall (Router.DropNear) this near its top on the route is its own
+local NowText
 function T.NowText(m, fmt, short)
+  local text = NowText(m, fmt, short)
+  -- (a lift ahead, its car's next stop where it's boarded when known: "Take the lift down (lift arrives in 12s)", item
+  -- 118, Lifts.lua; else as before)
+  local LT = m and m.lift and ns.Lifts
+  local w = LT and LT.ManeuverWords and LT.ManeuverWords(m)
+  if w and text then return Format(L["%s (%s)"], text, w) end
+  return text
+end
+function NowText(m, fmt, short)
   -- (falling at a spell jump, cast in the air: "Cast Slow Fall now!" over whatever is next, FallSpells.FallCue)
   local cue = ns.FallSpells and ns.FallSpells.FallCue and ns.FallSpells.FallCue()
   if cue then return cue end
@@ -239,17 +263,42 @@ function T.NowText(m, fmt, short)
       spellName = c and FS.Name and FS.Name(c) or nil
     end
   end
+  -- (out of a cave or a building onto a long walk outdoors: "Leave the cave, then mount up", while the player isn't
+  -- mounted and can ride. Item 113c)
+  local text, mid = m.text, m.mid
+  if m.kind == "place" and not m.enter and m.mountAfter and T.CanMount() then
+    local w = T.MOUNT_WORDS[m.place]
+    if w then text, mid = w[1], w[2] end
+  end
   if d <= T.NOW_YD then
     if m.kind == "turn" or m.kind == "join" or m.kind == "leave" then return m.now or (m.text .. " now") end
-    return m.text
+    return text
   end
   -- (a maneuver made here has its words in the middle of a sentence, `mid`; one made by hand, as the English)
-  local what = m.mid or (m.kind == "drop" and "jump down" or (m.text:sub(1, 1):lower() .. m.text:sub(2)))
+  local what = mid or (m.kind == "drop" and "jump down" or (text:sub(1, 1):lower() .. text:sub(2)))
   if spellName then what = Format("%s (%s)", what, spellName) end
   -- (swimming till then: "Swim, then leave the water in 300 yd", T.Swims)
   if m.swimNow then return Format(L["Swim, then %s in %s"], what, fmt(d)) end
   if short then return Format(L["Straight, then %s in %s"], what, fmt(d)) end
   return Format(L["Continue straight, then %s in %s"], what, fmt(d))
+end
+
+T.MOUNT_WORDS = {
+  cave = { L["Leave the cave, then mount up"], L["leave the cave, then mount up"] },
+  building = { L["Leave the building, then mount up"], L["leave the building, then mount up"] },
+}
+-- Whether the player could mount now (not on one, not a ghost, and riding learned): the game's own answers, none secret
+function T.CanMount()
+  local function Ask(f, ...)
+    if not f then return nil end
+    local ok, v = pcall(f, ...)
+    if not ok or (ns.IsSecret and ns.IsSecret(v)) then return nil end
+    return v
+  end
+  if Ask(IsMounted) or Ask(UnitIsGhost, "player") or Ask(UnitOnTaxi, "player") then return false end
+  local N = ns.Nav
+  local rank = N and N.RidingRank and Ask(N.RidingRank)
+  return type(rank) == "number" and rank >= 75 or false
 end
 
 local COMPASS = { "north", "north-west", "west", "south-west", "south", "south-east", "east", "north-east" }
@@ -348,6 +397,112 @@ function T.Stairs(path, horizon)
   return kept
 end
 
+-- Ramps (1.4.1, item 113a, "directions from the ground": "up the ramp"): a steep climb or descent of the walk by its own
+-- heights (the grids' floors, `fz`, or the roads' `zs`) that isn't stairs, on something built (T.RampBuilt): a capital's
+-- inclines, a dock's or a tower's ramp. In order: { s0, s1, dir = 1 up | -1 down, rise }. A run of pieces each
+-- RAMP_PIECE_SLOPE steep or more the same way, the flatter ones between no longer than RAMP_GAP_YD (a landing, a bend),
+-- kept when it rises or falls RAMP_RISE in all at RAMP_SLOPE or steeper on the whole: a bump, a gentle road, never. A
+-- called-out drop or jump ends it (said itself); a small drop, part of the walk, doesn't. Stairs (`stairs`, T.Stairs')
+-- are never a ramp too. `horizon` as T.Stairs'. (Not the land's own slopes: a path down a hill or a mesa's side, Red
+-- Cloud Mesa's road down, 70 yd in 170, is the walk, not a maneuver; said, the replayed walk off the mesa changed its
+-- line 16 times, not 8, and the hill over the Wailing Caverns was "Take the ramp down")
+T.RAMP_PIECE_SLOPE = 0.15
+T.RAMP_SLOPE = 0.2
+T.RAMP_RISE = 10
+T.RAMP_OVER = 4 -- (yards over the land's ground: on something built ...
+T.RAMP_BUILT_SHARE = 0.6 -- ... along this share of the ramp, sampled every RAMP_SAMPLE_YD)
+T.RAMP_SAMPLE_YD = 4
+T.RAMP_BRIDGE_YD = 10
+-- Whether the stretch s0..s1 of the path is on something built: its heights RAMP_OVER or more over the land's ground
+-- (Nav.GroundAt, the map's own, else the shipped heights) along RAMP_BUILT_SHARE of it (a capital's sloping streets are
+-- its ground: Orgrimmar's said a ramp every 50 yd). Not in a cave (the ground there is the hill over it).
+function T.RampBuilt(path, s0, s1)
+  local N, GS = ns.Nav, ns.Ground and ns.Ground.Sample
+  local cont = path.cont
+  local mx, my = T.PointAt(path, (s0 + s1) / 2)
+  local WG = ns.WorldGrid
+  if WG and WG.CaveAt and WG.CaveAt(cont, mx, my) then return false end
+  local n, over = 0, 0
+  for s = s0, s1, T.RAMP_SAMPLE_YD do
+    local x, y = T.PointAt(path, s)
+    local h = T.HeightAlong(path, s)
+    local g = N and N.GroundAt and N.GroundAt(cont, x, y)
+    if not g and GS then
+      local ok, v = pcall(GS, cont, x, y)
+      g = ok and type(v) == "number" and v or nil
+    end
+    if h and g then
+      n = n + 1
+      if h - g >= T.RAMP_OVER then over = over + 1 end
+    end
+  end
+  return n > 0 and over >= T.RAMP_BUILT_SHARE * n
+end
+T.RAMP_GAP_YD = 15
+T.RAMP_MIN_START = 5 -- (yards: a ramp the walk starts on isn't said, the player's on it; a reroute there said it again)
+-- (the route's height at point i, as T.Stairs reads it: the floor, else the road's)
+local function PtHeight(path, i)
+  local f = path.fz and path.fz[i]
+  if type(f) == "number" then return f end
+  local z = path.zs and path.zs[i]
+  if type(z) == "number" then return z end
+  return nil
+end
+function T.Ramps(path, horizon, stairs, places)
+  local out = {}
+  if not (path and path.pts and path.cum) then return out end
+  local R = ns.Router
+  local cum, kinds, pts = path.cum, path.kinds, path.pts
+  local DROP, JUMP = R and R.KIND_DROP or 4, R and R.KIND_JUMP or 8
+  local function OnStairs(a, b)
+    for _, st in ipairs(stairs or {}) do
+      if a < st.s1 and b > st.s0 then return true end
+    end
+    -- (and a bridge's own arch, up to its deck and down off it: "Cross the bridge" says it)
+    for _, m in ipairs(places or {}) do
+      if m.kind == "bridge" and a < (m.stop or m.dist) + T.RAMP_BRIDGE_YD and b > m.dist - T.RAMP_BRIDGE_YD then return true end
+    end
+    return false
+  end
+  local run -- { s0, s1, dir, j0, j1 }
+  local function close()
+    if run then
+      local h0, h1 = PtHeight(path, run.j0), PtHeight(path, run.j1)
+      local len = run.s1 - run.s0
+      local rise = h0 and h1 and (h1 - h0) * run.dir or 0
+      if rise >= T.RAMP_RISE and len > 0 and rise / len >= T.RAMP_SLOPE and run.s0 >= T.RAMP_MIN_START
+          and T.RampBuilt(path, run.s0, run.s1) then
+        out[#out + 1] = { s0 = run.s0, s1 = run.s1, dir = run.dir, rise = rise }
+      end
+      run = nil
+    end
+  end
+  for j = 1, #cum - 1 do
+    if horizon and cum[j] > horizon then break end
+    local k = kinds[j]
+    local h1, h2 = PtHeight(path, j), PtHeight(path, j + 1)
+    local len = cum[j + 1] - cum[j]
+    local called = (k == JUMP) or (k == DROP and not (R and R.JumpCalledOut and not R.JumpCalledOut(pts, kinds, j)))
+    local walked = k == 0 or k == 1 or k == DROP
+    local dir
+    if walked and not called and h1 and h2 and len > 0 and math.abs(h2 - h1) / len >= T.RAMP_PIECE_SLOPE
+        and not OnStairs(cum[j], cum[j + 1]) then
+      dir = h2 > h1 and 1 or -1
+    end
+    if dir and run and run.dir == dir and cum[j] - run.s1 <= T.RAMP_GAP_YD then
+      run.s1, run.j1 = cum[j + 1], j + 1
+    elseif dir then
+      close()
+      run = { s0 = cum[j], s1 = cum[j + 1], dir = dir, j0 = j, j1 = j + 1 }
+    elseif run and (called or not walked or not (h1 and h2) or cum[j + 1] - run.s1 > T.RAMP_GAP_YD
+        or OnStairs(cum[j], cum[j + 1])) then
+      close()
+    end
+  end
+  close()
+  return out
+end
+
 -- Where the walk goes into a cave or a building and out again ("place": `enter`, `place` "cave" or "building"), and
 -- where it starts across a bridge ("bridge", `stop` where it ends), in order: { dist, kind, words }. On the roads only
 -- (Router.PlaceAt, Router.BridgeAt); `horizon` as T.Stairs'.
@@ -359,13 +514,55 @@ function T.Places(path, horizon)
   local pts, cum, kinds, cont = path.pts, path.cum, path.kinds, path.cont
   -- (each stretch of road by its middle: at a vertex a door's join and the inside's road meet; off the roads, as the
   -- road before. Where the walk starts is told by its first road, not said: a walk from down in a cave isn't "Enter")
+  -- (off the roads, by the ground (item 113a: "in through the cave mouth"): a walked piece whose floor at both ends is
+  -- under the ground over a cave's grid (WorldGrid.InCave) is in the cave, one with its ends out in the open air out of
+  -- it; a building the player starts in (the game says indoors: T.Indoors) is left where the walk first goes out of
+  -- its walls, the grid's own walk out of it having no inside road)
+  local WG = ns.WorldGrid
+  local function GridPlace(j)
+    local h1, h2 = PtHeight(path, j), PtHeight(path, j + 1)
+    if not (h1 and h2 and WG and WG.InCave and WG.CaveAt) then return nil end
+    local x1, y1, x2, y2 = pts[2 * j - 1], pts[2 * j], pts[2 * j + 1], pts[2 * j + 2]
+    if not WG.CaveAt(cont, x1, y1) and not WG.CaveAt(cont, x2, y2) then return false end
+    local c1 = WG.InCave(cont, x1, y1, h1, T.CAVE_IN_YD)
+    if c1 and c1 == WG.InCave(cont, x2, y2, h2, T.CAVE_IN_YD) then return "cave" end
+    local g1, g2 = WG.GroundZ(cont, x1, y1), WG.GroundZ(cont, x2, y2)
+    if g1 and g2 and h1 >= g1 - T.CAVE_OUT_YD and h2 >= g2 - T.CAVE_OUT_YD then return false end
+    return nil
+  end
   local was
+  local startIn -- (the building the walk starts in, when the game says the player's indoors)
+  local outdoors -- (walked out in the open air, by the ground, before any road)
+  if #cum >= 2 and WG and WG.BuildingAt and T.Indoors() then
+    startIn = WG.BuildingAt(cont, pts[1], pts[2], nil, true)
+    if startIn then was = "building" end
+  end
   for j = 1, #cum - 1 do
     if horizon and cum[j] > horizon then break end
     local place = was
     if kinds[j] == 0 then
       local p = R.PlaceAt(cont, (pts[2 * j - 1] + pts[2 * j + 1]) / 2, (pts[2 * j] + pts[2 * j + 2]) / 2)
+      -- (out in the open air before it, by the ground: a cave's road is gone into, not where the walk starts. The walk
+      -- down the Wailing Caverns' hill to the land road by its mouth said "Leave the cave". A building's first road is
+      -- still taken as where the walk starts: the world grid's walks through Bloodhoof Village's longhouse said "Go into
+      -- the building" and nothing on the way out)
+      if was == nil and outdoors and p == "cave" then was = false end
       if p ~= nil then place = p end
+    else
+      -- (off the roads: into a cave by the ground; out of one only when in one, a building's said by its roads)
+      local p = GridPlace(j)
+      if was == nil and outdoors and p == "cave" then was = false end
+      if p == "cave" or (p == false and was == "cave") then place = p end
+      if p == false then outdoors = true end
+    end
+    if startIn then
+      local b = startIn
+      if (pts[2 * j + 1] - b.x) ^ 2 + (pts[2 * j + 2] - b.y) ^ 2 <= b.r * b.r then
+        place = "building"
+      else
+        if place == "building" or place == nil then place = false end
+        startIn = nil
+      end
     end
     if was ~= nil and place ~= was then -- (straight from one into another: out of the one, into the other)
       if was then out[#out + 1] = Words({ dist = cum[j] - 0.01, kind = "place", place = was, enter = false }, "leave_" .. was) end
@@ -440,8 +637,40 @@ function T.Places(path, horizon)
     close(total)
   end
   table.sort(out, function(a, b) return a.dist < b.dist end)
+  -- (out of a place and straight back into it, or in and straight out: the lookup flicking at a seam, a cave's road
+  -- inside passing near another, said nothing. The Wailing Caverns' way in said "Leave the cave", "Enter the cave" 3 yd
+  -- apart, deep inside)
+  local drop = {}
+  for k = 1, #out - 1 do
+    local a, b = out[k], out[k + 1]
+    if a.kind == "place" and b.kind == "place" and not drop[a] and a.place == b.place and a.enter ~= b.enter
+        and b.dist - a.dist < (a.enter and T.PLACE_BLIP_YD or T.PLACE_TOUCH_YD) then
+      drop[a], drop[b] = true, true
+    end
+  end
+  local kept = {}
+  for _, m in ipairs(out) do
+    if not drop[m] then kept[#kept + 1] = m end
+  end
+  out = kept
+  -- (item 113c, "mount after the door": out of a cave or a building onto a walk outdoors MOUNT_AFTER_YD or longer, the
+  -- way out says to mount, T.NowText, while the player isn't mounted and can ride)
+  for k, m in ipairs(out) do
+    if m.kind == "place" and not m.enter then
+      local nextIn = path.total
+      for q = k + 1, #out do
+        if out[q].kind == "place" and out[q].enter then nextIn = out[q].dist break end
+      end
+      if nextIn - m.dist >= T.MOUNT_AFTER_YD then m.mountAfter = true end
+    end
+  end
   return out
 end
+T.CAVE_IN_YD = 8 -- (a walked point this far under the ground over a cave's grid is in it: WorldGrid.CAVE_UNDER_YD)
+T.CAVE_OUT_YD = 3 -- (and this near the ground, or over it, out of it: WorldGrid.CAVE_DOOR_Z)
+T.PLACE_TOUCH_YD = 25 -- (out of a place and back into it within this: neither said)
+T.PLACE_BLIP_YD = 10 -- (into a place and out again within this: neither said)
+T.MOUNT_AFTER_YD = 100
 
 -- The path's swims (Nav.SwimSpans, folded as the steps are: Nav.SwimPieces) within `horizon`: { s0, s1, ... } in yards
 -- along it.
@@ -469,12 +698,95 @@ function T.Swims(path, horizon)
   return out
 end
 
+-- Joining and leaving the road, calmer (1.4.1, Kooki3z: "clean up the message display, seems to change a lot between
+-- join road, leave road, etc"). `out`: the maneuvers by distance, each road join or leave its own ("join", "leave").
+-- A short touch, onto a road and off it again (or off and back on) within ROAD_TOUCH_YD, says neither; a join or leave
+-- within JOIN_TURN_YD of a turn is that turn's ("Turn right onto the road", said at the turn); one with no turn (the
+-- route runs on straight onto the road or off it) is said only where the stretches before and after it are both
+-- ROAD_KEEP_YD or more (a lasting change: off the road for a long walk across country). Returns the list kept.
+T.ROAD_TOUCH_YD = 100
+T.JOIN_TURN_YD = 30
+T.ROAD_KEEP_YD = 200
+T.PLACE_ROAD_YD = 15 -- (a join or leave this near going into a cave or a building, or out: the place's words say it)
+function T.FoldRoads(path, out, horizon)
+  local roads = {}
+  for _, m in ipairs(out) do
+    if m.kind == "join" or m.kind == "leave" then roads[#roads + 1] = m end
+  end
+  if #roads == 0 then return out end
+  local drop = {}
+  -- (short touches: a pair the other way round, close together)
+  local i = 1
+  while i < #roads do
+    local a, b = roads[i], roads[i + 1]
+    if a.kind ~= b.kind and b.dist - a.dist < T.ROAD_TOUCH_YD then
+      drop[a], drop[b] = true, true
+      i = i + 2
+    else
+      i = i + 1
+    end
+  end
+  -- (at a cave's mouth or a building's door, its road's start: "Enter the cave" says it, not "Join the road" too.
+  -- Item 113a: the Wailing Caverns' way in said both at the mouth)
+  for _, m in ipairs(roads) do
+    for _, u in ipairs(out) do
+      if u.kind == "place" and math.abs(u.dist - m.dist) <= T.PLACE_ROAD_YD then drop[m] = true break end
+    end
+  end
+  local left = {}
+  for _, m in ipairs(roads) do
+    if not drop[m] then left[#left + 1] = m end
+  end
+  -- (into the turn nearest it, within JOIN_TURN_YD: each turn takes one)
+  local taken = {}
+  for k, m in ipairs(left) do
+    local best, bestD
+    for _, u in ipairs(out) do
+      if u.kind == "turn" and not taken[u] then
+        local d = math.abs(u.dist - m.dist)
+        if d <= T.JOIN_TURN_YD and (not bestD or d < bestD) then best, bestD = u, d end
+      end
+    end
+    if best then
+      taken[best] = true
+      best.road = m.kind
+      Words(best, best.turn .. "+" .. m.kind)
+      drop[m] = true
+    else
+      -- (none: the stretches either side of it, to the road's next change or the walk's ends. On the road where the
+      -- walk starts, the player has been on it how long before, unknown: as long. Off it, the walk from the player to
+      -- the road isn't said bare: the arrow shows it)
+      local s0 = k > 1 and left[k - 1].dist or (m.kind == "leave" and -math.huge or 0)
+      local s1 = k < #left and left[k + 1].dist or (horizon and math.min(horizon, path.total) or path.total)
+      if k == #left and horizon and horizon < path.total then s1 = math.max(s1, m.dist + T.ROAD_KEEP_YD) end
+      if m.dist - s0 < T.ROAD_KEEP_YD or s1 - m.dist < T.ROAD_KEEP_YD then
+        drop[m] = true
+      else
+        m.road = m.kind
+      end
+    end
+  end
+  local kept = {}
+  for _, m in ipairs(out) do
+    if not drop[m] then kept[#kept + 1] = m end
+  end
+  return kept
+end
+
 -- The maneuvers ahead, nearest first: { dist, kind, text, toward, angle }.
 -- kind: "turn", "join" (onto the road), "leave" (off the road), "drop", "lift", "stairs" (up or down:
 -- `short` "Stairs up", `after` the turn just after them), "place" (into a cave or a building, or out: T.Places),
 -- "bridge", "swim" (into the water), "shore" (out of it), "board", "arrive". `swimNow`: swimming from here to it.
 -- stopLabel: how the next stop is named ("stop 1", a place name...). `horizon`: only the maneuvers within that many
 -- yards (and the arrival or boarding at the end): what the arrow and the map's panel show is the next one or two.
+-- Where a lift is boarded on the path, its point `i` (up: at the bottom), for its wait (Lifts.lua, item 118): { level,
+-- x, y, floor }.
+local function LiftAt(path, i, up)
+  local pts = path.pts
+  if not (pts and pts[2 * i]) then return nil end
+  return { level = path.cont, x = pts[2 * i - 1], y = pts[2 * i], floor = up and "bottom" or "top" }
+end
+
 function T.Maneuvers(path, stopLabel, horizon)
   local out = {}
   if not path or not path.total then return out end
@@ -505,8 +817,8 @@ function T.Maneuvers(path, stopLabel, horizon)
       local need = not onRoad and T.MIN_ANGLE or junction and T.JUNCTION_ANGLE or T.ROAD_BEND_ANGLE
       if math.abs(a) >= need then
         local s = js or group.s
-        out[#out + 1] = Words({ dist = s, kind = "turn", angle = a, toward = Toward(path, s), turn = T.TurnId(a) },
-          T.TurnId(a))
+        out[#out + 1] = Words({ dist = s, kind = "turn", angle = a, toward = Toward(path, s), turn = T.TurnId(a),
+          junction = junction or nil }, T.TurnId(a))
       end
       group = nil
     end
@@ -524,14 +836,16 @@ function T.Maneuvers(path, stopLabel, horizon)
   -- (a small drop, under Router.JUMP_CALLOUT_YD: no step, just part of the walk; Router.JumpCalledOut)
   local function called(i) return not (R and R.JumpCalledOut) or R.JumpCalledOut(pts, kinds, i) end
   if (kinds[1] == JUMP or (kinds[1] == DROP and called(1))) and #cum >= 2 then
-    out[#out + 1] = Words({ dist = 0, kind = kinds[1] == JUMP and "jump" or "drop",
+    local m = Words({ dist = 0, kind = kinds[1] == JUMP and "jump" or "drop",
       dropYd = kinds[1] == DROP and R and R.DropFall and R.DropFall(pts, kinds, 1, T.DROP_NOTE_YD) or nil },
       kinds[1] == JUMP and "jump_across" or "drop")
+    out[#out + 1] = m.kind == "drop" and T.DropWords(m) or m
   end
   if (kinds[1] == UP or kinds[1] == DOWN) and #cum >= 2 then
     local k = 1
     while kinds[k + 1] == kinds[1] and k + 1 < #cum do k = k + 1 end
-    out[#out + 1] = Words({ dist = 0, stop = cum[k + 1], kind = "lift" }, kinds[1] == UP and "lift_up" or "lift_down")
+    out[#out + 1] = Words({ dist = 0, stop = cum[k + 1], kind = "lift", lift = LiftAt(path, 1, kinds[1] == UP) },
+      kinds[1] == UP and "lift_up" or "lift_down")
   end
   for i = 2, #cum - 1 do
     local s = cum[i]
@@ -544,9 +858,8 @@ function T.Maneuvers(path, stopLabel, horizon)
       -- the walk is smoothed or rejoined: the nearest within DROP_NOTE_YD, as the map's tooltip finds it. Kooki3z
       -- 2026-11-23, Tanaris's rim into Un'Goro: the tooltip said 151 yd, the step none, so no Slow Fall button)
       -- (the biggest fall along the drop's pieces, Router.DropFall: a step off the rim, then the fall, is one drop)
-      out[#out + 1] = Words({ dist = s, kind = "drop", dropYd = R and R.DropFall and R.DropFall(pts, kinds, i,
-        T.DROP_NOTE_YD) or nil },
-        "drop")
+      out[#out + 1] = T.DropWords({ dist = s, kind = "drop", dropYd = R and R.DropFall and R.DropFall(pts, kinds, i,
+        T.DROP_NOTE_YD) or nil })
     end
     -- a running jump across a gap (a city grid's, navfeatures.py): here, said however near it is
     if kinds[i] == JUMP and kinds[i - 1] ~= JUMP then
@@ -554,7 +867,11 @@ function T.Maneuvers(path, stopLabel, horizon)
     end
     -- a lift (Thunder Bluff's): taken here, up or down
     if (kinds[i] == UP or kinds[i] == DOWN) and kinds[i - 1] ~= kinds[i] then
-      out[#out + 1] = Words({ dist = s, kind = "lift" }, kinds[i] == UP and "lift_up" or "lift_down")
+      -- (where it ends, `stop`: on it, still "Take the lift" (T.AheadFull keeps it till there))
+      local k = i
+      while kinds[k + 1] == kinds[i] and k + 1 < #cum do k = k + 1 end
+      out[#out + 1] = Words({ dist = s, stop = cum[k + 1], kind = "lift", lift = LiftAt(path, i, kinds[i] == UP) },
+        kinds[i] == UP and "lift_up" or "lift_down")
     end
     -- (a lift's ends: its own "Take the lift" says them; no turn or road's end there, Kooki3z 2026-11-22 at the Great
     -- Lift, "Leave the road in 0 yd" twice, and at Thunder Bluff's, "Make a U-turn off the road in 0 yd")
@@ -602,7 +919,29 @@ function T.Maneuvers(path, stopLabel, horizon)
       out[#out + 1] = Words({ dist = st.s0, stop = st.s1, kind = "stairs", up = up }, up and "stairs_up" or "stairs_down")
     end
   end
-  for _, m in ipairs(T.Places(path, horizon)) do out[#out + 1] = m end
+  -- ramps (item 113a): said where they start, and the bends on them not (a ramp's switchbacks are the ramp's), but a
+  -- road junction's turn, a choice of way
+  local places = T.Places(path, horizon)
+  local ramps = T.Ramps(path, horizon, stairs, places)
+  if #ramps > 0 then
+    local kept = {}
+    for _, m in ipairs(out) do
+      local on = false
+      if m.kind == "turn" and not m.junction then
+        for _, rp in ipairs(ramps) do
+          if m.dist >= rp.s0 - 3 and m.dist < rp.s1 - 1 then on = true break end
+        end
+      end
+      if not on then kept[#kept + 1] = m end
+    end
+    out = kept
+    for _, rp in ipairs(ramps) do
+      local up = rp.dir > 0
+      out[#out + 1] = Words({ dist = rp.s0, s1 = rp.s1, kind = "ramp", up = up, rise = rp.rise },
+        up and "ramp_up" or "ramp_down")
+    end
+  end
+  for _, m in ipairs(places) do out[#out + 1] = m end
   -- swims: where each starts and ends (one under way where the walk starts: swimming now, till its end)
   local swims, swimTo = T.Swims(path, horizon), nil
   for j = 1, #swims - 1, 2 do
@@ -666,33 +1005,14 @@ function T.Maneuvers(path, stopLabel, horizon)
   for j, m in ipairs(out) do
     if not skip[j] then kept[#kept + 1] = m end
   end
-  out = kept
+  out = T.FoldRoads(path, kept, horizon)
   local merged = {}
   for _, m in ipairs(out) do
-    local prev = merged[#merged]
     if m.dist > path.total - T.END_QUIET and m.kind ~= "stairs" and m.kind ~= "drop" and m.kind ~= "jump"
         and not (m.kind == "place" and m.enter) then
       -- arriving: nothing more to say (but stairs: a trainer upstairs is up them, Brill's inn, 2026-10-06; nor going
       -- into the building or the cave the stop is in; nor a jump on the way there)
-    elseif prev and m.dist - prev.dist < T.HOP_YD and (m.kind == "join" or m.kind == "leave")
-        and (prev.road == "join" or prev.road == "leave") and prev.road ~= m.kind then
-      -- a short hop onto a road and off again (or off and back on): not worth an instruction
-      if prev.kind == "turn" then
-        Words(prev, prev.turn) -- keep the turn itself
-        prev.road, prev.merged = nil, nil
-      else
-        merged[#merged] = nil
-      end
-    elseif prev and m.dist - prev.dist < 15 and not prev.merged and ((prev.kind == "turn") ~= (m.kind == "turn"))
-        and (prev.road or m.kind == "join" or m.kind == "leave") then
-      -- a turn right where the route joins/leaves a road reads as one instruction
-      local turn, road = prev.kind == "turn" and prev or m, prev.kind == "turn" and m or prev
-      local id = turn.turn .. "+" .. road.kind
-      prev.road = road.kind
-      prev.kind, prev.angle, prev.toward, prev.turn, prev.merged = "turn", turn.angle, turn.toward, turn.turn, true
-      Words(prev, id)
     else
-      if m.kind == "join" or m.kind == "leave" then m.road = m.kind end
       merged[#merged + 1] = m
     end
   end
@@ -713,8 +1033,11 @@ function T.Maneuvers(path, stopLabel, horizon)
     local t = path.ride
     local to = ns.RideEndName(t, path.from == 1 and 2 or 1)
     local board = T.BOARD[t[8]]
-    local m = { dist = path.total, kind = "board" }
-    if t.use then
+    -- (a lift's, Undercity's: its wait, Lifts.lua)
+    local m = { dist = path.total, kind = "board", lift = ns.Lifts and ns.Lifts.RideLift and ns.Lifts.RideLift(t, path.from) }
+    if t.ask then -- (a party mage's portal, Teleports.lua)
+      m.text, m.mid = Format(L["Ask %s for a portal (to %s)"], t.ask, t[10]), Format(L["ask %s for a portal (to %s)"], t.ask, t[10])
+    elseif t.use then
       m.text, m.mid = Format(L["Use %s (to %s)"], t[8], t[10]), Format(L["use %s (to %s)"], t[8], t[10])
     elseif board then
       m.text, m.mid = Format(board[1], to), Format(board[2], to)
@@ -742,11 +1065,205 @@ T.HORIZON_STEPS = 8 -- (looked as far as this many horizons for the next maneuve
 -- arrival's words take it (each label's list a copy with its own; heavy stuttering running through Orgrimmar,
 -- 2026-11-13: worked out twice at every trim).
 local aheadKept -- { route, its first part, path, maneuvers (by the first label asked), label, [label] = maneuvers }
+-- (the arrival's words by the label asked: a copy of the list with its own last one)
+local function Relabel(base, stopLabel)
+  local ms = {}
+  for i, m in ipairs(base) do ms[i] = m end
+  local last = ms[#ms]
+  if last and last.kind == "arrive" then
+    local m = {}
+    for k, v in pairs(last) do m[k] = v end
+    if stopLabel then
+      m.text, m.mid = Format(L["Arrive at %s"], stopLabel), Format(L["arrive at %s"], stopLabel)
+    else
+      m.text, m.mid = L["Arrive at your destination"], L["arrive at your destination"]
+    end
+    ms[#ms] = m
+  end
+  return ms
+end
+
+-- The maneuvers of the whole walk from where the route was worked out, not of what's left of it (1.4.1, Kooki3z: the
+-- line "seems to change a lot"): the route is trimmed as the player goes on (Nav's Follow, every couple of yards), and
+-- worked out again on each trim the bends near its new start were measured on what was left of them (T.WINDOW cut at the
+-- start), the road's changes under MIN_AHEAD left out: a turn came and went, "Turn right" became "Slight right now", a
+-- join was said and gone. Now worked out once on the route's untrimmed first part (Nav's `fullFirst`, `consumed` yards
+-- of it walked), and only moved along as the player goes on: the same maneuvers, at the same spots, until the route is
+-- worked out again. Again AHEAD_REDO_YD on (its horizon from there). Nil where the route isn't a trimmed walk of its own.
+T.AHEAD_REDO_YD = 600
+T.AHEAD_THIN_YD = 150
+local fullKept -- { route, full part, consumed when worked out, path, maneuvers, label, horizon }
+local function FullOf(route, first)
+  local full, c, cum = route.fullFirst, route.consumed, route.cum
+  if not (full and c and cum and first and first.pts and full.pts and #first.pts >= 4) then return nil end
+  if first ~= full then
+    -- (the route's first part the full one trimmed: its end the same, its start the point `consumed` along it)
+    local fp, tp = full.pts, first.pts
+    if math.abs(fp[#fp - 1] - tp[#tp - 1]) > 0.01 or math.abs(fp[#fp] - tp[#tp]) > 0.01 then return nil end
+    local len = 0
+    for i = 3, #tp - 1, 2 do len = len + Dist(tp[i - 2], tp[i - 1], tp[i], tp[i + 1]) end
+    if math.abs(cum[#cum] - c - len) > 0.5 then return nil end
+  end
+  return full, c
+end
+T.SPAN_DONE_YD = 3 -- (on stairs, a bridge or a lift: this near its end, it's done; the stairs' last yards beside the
+-- Wizard's Sanctum's portal said "Take the stairs up" in front of it)
+-- The base maneuvers moved along to `c` yards walked: those passed left out (one under way, stairs, a bridge, a lift:
+-- kept to its end), each its own copy with its distance from the player; swimming now marked anew.
+-- (the route's floor or height `s` yards along it, where it has them)
+local function HeightAt(path, s)
+  local cum = path.cum
+  local i = 1
+  while i < #cum - 1 and cum[i + 1] < s do i = i + 1 end
+  local h = path.fz or {}
+  local a, b = h[i], h[i + 1]
+  if type(a) ~= "number" or type(b) ~= "number" then
+    h = path.zs or {}
+    a, b = h[i], h[i + 1]
+  end
+  if type(a) ~= "number" or type(b) ~= "number" then return nil end
+  local len = cum[i + 1] - cum[i]
+  local t = len > 0 and math.max(0, math.min(1, (s - cum[i]) / len)) or 0
+  return a + (b - a) * t
+end
+T.HeightAlong = function(path, s) return HeightAt(path, s) end
+-- (stairs under way: only while there's still a climb to them from here, as T.Stairs says of a flight with its floors
+-- level across it; the Wizard's Sanctum's stairs' last yards, beside its portal, said "Take the stairs up" in front of it)
+local function StairsLeft(m, path, c)
+  if m.kind ~= "stairs" or m.dist >= c then return true end
+  local h0, h1 = HeightAt(path, c), HeightAt(path, m.stop)
+  return not (h0 and h1) or math.abs(h1 - h0) >= 1
+end
+local function Moved(base, path, c)
+  local swims = path.swimRuns or {}
+  local swimTo
+  for j = 1, #swims - 1, 2 do
+    if swims[j] <= c + 0.5 and swims[j + 1] > c then swimTo = swims[j + 1] end
+  end
+  local out = {}
+  for _, m in ipairs(base) do
+    if m.dist >= c - 0.5 or (m.stop and m.stop > c + T.SPAN_DONE_YD and StairsLeft(m, path, c)) then
+      local n = {}
+      for k, v in pairs(m) do n[k] = v end
+      n.dist = math.max(0, m.dist - c)
+      if m.stop then n.stop = m.stop - c end
+      n.swimNow = (swimTo and m.dist <= swimTo + 0.5) or nil
+      -- (a swim under way: no "Start swimming" for it)
+      if not (m.kind == "swim" and swimTo and m.dist <= c + 0.5) then out[#out + 1] = n end
+    end
+  end
+  return out
+end
+function T.AheadFull(route, stopLabel)
+  local full, c = FullOf(route, route.parts and route.parts[1])
+  if not full then return nil end
+  local k = fullKept
+  -- (and again when only the arrival is left within what was looked at, the walk going on past it: the turn past a
+  -- long straight is said, as below, not "arrive at Stop 1" once the turns before it are passed)
+  -- (one looked at as far as it goes and still thin: not again every yard, every AHEAD_THIN_YD)
+  if k and k[1] == route and k[2] == full and k[7] < k[4].total and c - k[3] >= (k.thin and T.AHEAD_THIN_YD or 1) then
+    local n = 0
+    for _, m in ipairs(k[5]) do if m.dist >= c - 0.5 or (m.stop and m.stop > c + T.SPAN_DONE_YD) then n = n + 1 end end
+    if n <= 1 then k = nil end
+  end
+  if not (k and k[1] == route and k[2] == full and c >= k[3] - 0.5 and c - k[3] < T.AHEAD_REDO_YD) then
+    local copy = {}
+    for key, v in pairs(route) do copy[key] = v end
+    copy.parts = { full }
+    for i = 2, #route.parts do copy.parts[i] = route.parts[i] end
+    local was = fullKept
+    local path = (was and was[1] == route and was[2] == full) and was[4] or T.Path(copy)
+    local horizon = c + T.HORIZON_YD
+    local ms = T.Maneuvers(path, stopLabel, horizon)
+    -- (nothing ahead within the horizon but the arrival: looked further, as below)
+    local function ahead(list)
+      local n = 0
+      for _, m in ipairs(list) do if m.dist >= c - 0.5 or (m.stop and m.stop > c + T.SPAN_DONE_YD) then n = n + 1 end end
+      return n
+    end
+    while ahead(ms) <= 1 and path.total > horizon and horizon - c < T.HORIZON_YD * T.HORIZON_STEPS do
+      horizon = c + (horizon - c) * 2
+      ms = T.Maneuvers(path, stopLabel, horizon)
+    end
+    path.swimRuns = path.swimRuns or T.Swims(path)
+    for _, m in ipairs(ms) do m.x, m.y = T.PointAt(path, m.dist) end -- (where it is: T.Steady)
+    k = { route, full, c, path, ms, stopLabel or "", horizon, moved = {}, thin = ahead(ms) <= 1 }
+    fullKept = k
+    T.aheadRuns = (T.aheadRuns or 0) + 1 -- (the tests count them)
+  end
+  local key = stopLabel or ""
+  local mv = k.moved[key]
+  if not (mv and mv.c == c) then
+    local base = k[5]
+    local ms = Moved(base, k[4], c)
+    if key ~= k[6] then ms = Relabel(ms, stopLabel) end
+    mv = { c = c, ms = ms }
+    k.moved[key] = mv
+  end
+  return mv.ms
+end
+
+-- No flip-flopping (1.4.1): the route is worked out again every few seconds as the player goes on (Nav, from where
+-- they are), and a maneuver the new route has just ahead of the one being shown, a few yards' kink where it starts,
+-- came and went with each. The one shown (`T.held`: its words and spot) stays first while it's still ahead on the new
+-- route (the same words within STEADY_YD of its spot), until whatever came before it has been there STEADY_SECS
+-- (`T.pending`); gone from the route, the next at once. Never held back: a jump or a drop.
+T.STEADY_SECS = 1.5
+T.STEADY_YD = 25
+local function Key(m) return m.words or m.kind end
+local function Same(m, h)
+  return Key(m) == h.key and m.x and (m.x - h.x) ^ 2 + (m.y - h.y) ^ 2 <= T.STEADY_YD * T.STEADY_YD
+end
+function T.Steady(ms, now, trip)
+  local first = ms[1]
+  if not (first and first.x) then
+    T.held, T.pending = nil, nil
+    return ms
+  end
+  local h = T.held
+  if h and h.trip ~= trip then h, T.pending = nil, nil end -- (another trip: nothing of the last one's held)
+  if h and Same(first, h) then
+    h.x, h.y, T.pending = first.x, first.y, nil
+    return ms
+  end
+  if h then
+    for i = 2, math.min(#ms, 4) do
+      local m = ms[i - 1]
+      if m.kind == "drop" or m.kind == "jump" then break end
+      if Same(ms[i], h) then
+        local p = T.pending
+        if not (p and Same(first, p)) then
+          p = { key = Key(first), x = first.x, y = first.y, since = now }
+          T.pending = p
+        end
+        if now - p.since < T.STEADY_SECS then
+          local out = {}
+          for j = i, #ms do out[#out + 1] = ms[j] end
+          return out
+        end
+        break
+      end
+    end
+  end
+  T.held, T.pending = { key = Key(first), x = first.x, y = first.y, trip = trip }, nil
+  return ms
+end
+
 function T.Ahead(route, stopLabel)
   if not route then return nil, {} end
   local key = stopLabel or ""
   local first = route.parts and route.parts[1]
-  if not (aheadKept and aheadKept[1] == route and aheadKept[2] == first) then
+  -- (a walk being followed: its maneuvers from the whole walk, T.AheadFull; the path, for the arrow's aim, what's left)
+  if route.fullFirst then
+    local ms = T.AheadFull(route, stopLabel)
+    if ms then
+      if not (aheadKept and aheadKept[1] == route and aheadKept[2] == first) then
+        aheadKept = { route, first, T.Path(route), nil, key, labels = {}, full = true }
+      end
+      return aheadKept[3], T.Steady(ms, GetTime and GetTime() or 0, route.version)
+    end
+  end
+  if not (aheadKept and aheadKept[1] == route and aheadKept[2] == first and not aheadKept.full) then
     local path = T.Path(route)
     local ms = T.Maneuvers(path, stopLabel, T.HORIZON_YD)
     -- (nothing to do within the horizon but the arrival far past it: looked further, HORIZON_STEPS times as far at most,
@@ -763,20 +1280,7 @@ function T.Ahead(route, stopLabel)
   end
   local ms = aheadKept.labels[key]
   if not ms then
-    local base = aheadKept[4]
-    ms = {}
-    for i, m in ipairs(base) do ms[i] = m end
-    local last = ms[#ms]
-    if last and last.kind == "arrive" then
-      local m = {}
-      for k, v in pairs(last) do m[k] = v end
-      if stopLabel then
-        m.text, m.mid = Format(L["Arrive at %s"], stopLabel), Format(L["arrive at %s"], stopLabel)
-      else
-        m.text, m.mid = L["Arrive at your destination"], L["arrive at your destination"]
-      end
-      ms[#ms] = m
-    end
+    ms = Relabel(aheadKept[4], stopLabel)
     aheadKept.labels[key] = ms
   end
   return aheadKept[3], ms
@@ -876,15 +1380,30 @@ function T.GridStairs(path, j, len)
   local N = ns.Nav
   local pts = path.pts
   -- (over the middle too: a building's floor is level over the ground under it all along, a bump's slope isn't)
+  local function Ground(x, y) return N and N.GroundAt and N.GroundAt(path.cont, x, y) or GS(path.cont, x, y) end
   for _, t in ipairs({ 0, 0.5, 1 }) do
     local x = pts[2 * j - 1] + (pts[2 * j + 1] - pts[2 * j - 1]) * t
     local y = pts[2 * j] + (pts[2 * j + 2] - pts[2 * j]) * t
     local z = path.fz[j] + (path.fz[j + 1] - path.fz[j]) * t
-    local g = N and N.GroundAt and N.GroundAt(path.cont, x, y) or GS(path.cont, x, y)
+    local g = Ground(x, y)
     if not g or z - g < T.GRID_STAIR_OVER then return false end
   end
+  -- (outdoor ramps aren't stairs. 1.4.1, Kooki3z: Red Cloud Mesa's road down said "Stairs down in 879 yd". Where a road
+  -- meets a grid walk, the road's heights and the grid's floor there can be yards apart: no climb, a seam. And where the
+  -- land around the piece falls or rises the same way, GRID_STAIR_HILL_YD either side, by GRID_STAIR_HILL_SHARE of the
+  -- piece's own climb or more, it's the hillside: the grid's floor along a cliff's ramp reads yards over the shipped
+  -- ground (its heights every 16.7 yd round the cliff's edge off), so "over the ground" alone took it for a building's)
+  local kinds = path.kinds
+  if (j > 1 and kinds[j - 1] ~= kinds[j]) or (kinds[j + 1] ~= nil and kinds[j + 1] ~= kinds[j]) then return false end
+  local cum = path.cum
+  local ax, ay = T.PointAt(path, cum[j] - T.GRID_STAIR_HILL_YD)
+  local bx, by = T.PointAt(path, cum[j + 1] + T.GRID_STAIR_HILL_YD)
+  local ga, gb = Ground(ax, ay), Ground(bx, by)
+  local dz = f2 - f1
+  if ga and gb and (gb - ga) * dz > 0 and math.abs(gb - ga) >= T.GRID_STAIR_HILL_SHARE * math.abs(dz) then return false end
   return true
 end
+T.GRID_STAIR_HILL_YD, T.GRID_STAIR_HILL_SHARE = 10, 0.5
 function T.InCityGrid(path, px, py)
   local CG = ns.CityGrid
   return CG and CG.On and CG.On() and CG.InGrid and CG.InGrid(path.cont, px, py) and true or false

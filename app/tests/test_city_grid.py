@@ -28,6 +28,8 @@ LAURENA = (0, -8512.4, 862.4, 109.9)  # Stormwind's cathedral
 DUNGAR = (0, -8835.8, 490.1, 109.7)  # its gryphon master
 FIREBREW = (0, -4840.7, -857.1, 502.0)  # Ironforge's inn, the Commons
 HULFDAN = (0, -4648.0, -1124.0, 502.0)  # the Forlorn Cavern
+NISSA = (0, -4876.6, -1149.1, 512.5)  # Ironforge's First Aid Trainer, in a room off the Great Forge's hall
+IF_GATE = (0, -5023.0, -829.0, None)  # Ironforge's gate, from Dun Morogh
 SAELIENNE = (1, 10127.9, 2224.8, 1328.8)  # Darnassus's inn, the Craftsmen's Terrace
 FANDRAL = (1, 10173.0, 2569.9, 1367.0)  # up the Cenarion Enclave's tree, by its spiral stairs
 IDRIANA = (1, 9939.0, 2522.0, 1318.0)  # Darnassus's bank, behind its round counter
@@ -224,6 +226,72 @@ def test_ironforge_from_the_tram_s_end_walks_the_grid(game):
     assert r.length <= own.length
 
 
+def test_ironforge_s_gate_to_nissa_firestone_s_room_walks_the_grid(game):
+    """Ironforge's capital cells are its halls and leave out the shops and rooms off them: Nissa Firestone's First Aid
+    room by the Great Forge was the Router's own, to the hall's edge and a straight line on through the wall. Ironforge's
+    grid is `whole` (CityGrid.CityFor: any floor of its grid within the capital's rectangle), so from the gate the walk
+    is the grid's into her room, ending on her floor, and no longer than the Router's own."""
+    lua, ns = game
+    CG = ns.CityGrid
+    assert not ns.Router.CapitalAt(0, NISSA[1], NISSA[2])  # (her room: not among the capital's cells)
+    assert CG.CityFor(0, NISSA[1], NISSA[2]) == "Ironforge" and CG.CityFor(0, IF_GATE[1], IF_GATE[2]) == "Ironforge"
+    r = _route(lua, ns, IF_GATE, NISSA)
+    own = _route(lua, ns, IF_GATE, NISSA, on=False)
+    assert r.cityGrid == "Ironforge" and not r.noWay and not r.pending
+    pts, fz = _list(r.pts), [z for z in _heights(r) if z is not False]
+    assert math.hypot(pts[-2] - NISSA[1], pts[-1] - NISSA[2]) < 1
+    assert abs(fz[-1] - NISSA[3]) < 2
+    assert max(fz) < 520 and min(fz) > 490  # (the halls' floor, never the mountain over them)
+    assert r.length <= own.length
+
+
+def test_every_shipped_npc_in_ironforge_s_rooms_is_in_its_grid(game):
+    """Every shipped NPC spawn (Data/Npcs.lua) within Ironforge's capital rectangle over a floor of its grid is in the
+    city for the grid (CityGrid.CityFor): 34 of them stood in shops and rooms the capital's cells leave out."""
+    lua, ns = game
+    CG, P = ns.CityGrid, ns.Passability
+    c = CG.City("Ironforge")
+    txt = (ADDON_DIR / "Data" / "Npcs.lua").read_text(encoding="utf-8")
+    seen, missed = 0, []
+    for line in txt.splitlines():
+        parts = line.split("|")
+        if len(parts) < 7:
+            continue
+        for spawn in parts[6].split(";"):
+            q = spawn.split()
+            if len(q) != 4 or q[0] != "0":
+                continue
+            x, y, z = map(float, q[1:])
+            if not P.CapitalGridAt(0, x, y):
+                continue
+            ci = CG.CellAt(c, x, y)
+            if ci is None or CG.Count(c, ci) == 0:
+                continue
+            seen += 1
+            if CG.CityFor(0, x, y) != "Ironforge":
+                missed.append((parts[1], x, y, z))
+    assert seen >= 150 and not missed, missed
+
+
+@pytest.mark.parametrize("npc", [(0, -5030.4, -1147.3, 512.1), (0, -4617.6, -906.7, 501.2), (0, -4723.9, -1056.5, 510.9)],
+                         ids=["olthran", "braenna", "eric"])
+def test_from_ironforge_s_inn_with_world_routing_on_the_rooms_off_its_halls_are_the_city_grid_s(game, npc):
+    """1.4.0 with the world grid on: the world grid's no-way handed most legs into the rooms off Ironforge's halls to the
+    city's grid (WorldGrid.CityWalk), but from the inn Olthran Craghelm was "no way" and the walks to Braenna Flintcrag
+    and Outfitter Eric ended a floor off them (504.5). With Ironforge's grid `whole` (PR #923) they're the city's legs
+    (CityGrid.Leg), each ending on the NPC's floor."""
+    lua, ns = game
+    ns.settings.gps.worldGrid = True
+    try:
+        r = _route(lua, ns, FIREBREW, npc)
+    finally:
+        ns.settings.gps.worldGrid = False
+    assert r.cityGrid == "Ironforge" and not r.noWay and not r.pending
+    pts, fz = _list(r.pts), [z for z in _heights(r) if z is not False]
+    assert math.hypot(pts[-2] - npc[1], pts[-1] - npc[2]) < 3
+    assert abs(fz[-1] - npc[3]) < 3
+
+
 def test_ironforge_by_the_tram_from_stormwind(game):
     """The whole trip: from Stormwind's tram station to Ironforge's inn it takes the tram, and the walk on from its
     end in Ironforge is the grid's (no road's kind in it)."""
@@ -304,7 +372,7 @@ def test_darnassus_s_bank_counter_and_the_temple_s_balcony(game):
 # --- the lines --------------------------------------------------------------------------------------------------------
 
 TRIPS = [(GRYSHKA, ZEVROST), (KARUS, THRALL), (GARRETT, FARANELL), (MONTAGUE, FARANELL), (DUNGAR, LAURENA),
-         (FIREBREW, HULFDAN), (PALA, KARY), (SAELIENNE, FANDRAL)]
+         (FIREBREW, HULFDAN), (IF_GATE, NISSA), (PALA, KARY), (SAELIENNE, FANDRAL)]
 
 
 @pytest.mark.parametrize("a, b", TRIPS)

@@ -39,7 +39,7 @@ F.ITEMS = {
   { L["How do I report a wrong route?"],
     L["Options > Help > Debugging: tick Debug log, do what goes wrong, then click Export Debug Log... and paste it, with what went wrong, on the website's feedback page or in the Discord. The addresses are on the Help page."] },
   { L["It was following my leveling guide, now it isn't?"],
-    L["With RestedXP, Zygor, Polestar or Questify loaded, its button on the map's menu (RestedXP Route, Zygor Route and so on) makes each step of the guide your next stop. Picking another route (a stop of your own, a search, Quest Route) or clearing the route turns it off, and the chat says so: click the guide's button again to follow it. A step with no place to go shows no stop until the next one that has, and reaching a stop doesn't finish the step: the guide checks it off."] }, -- (item 68)
+    L["With RestedXP, Zygor, Polestar, Questify, Azeroth Pilot or OpenXP loaded, its button on the map's menu (RestedXP Route, Zygor Route and so on) makes each step of the guide your next stop. Picking another route (a stop of your own, a search, Quest Route) or clearing the route turns it off, and the chat says so: click the guide's button again to follow it. A step with no place to go shows no stop until the next one that has, and reaching a stop doesn't finish the step: the guide checks it off. OpenXP 2.0 has its own button, OpenXP Route (OpenXP 1.x went with RestedXP Route): it follows the step pin OpenXP puts on the map, so keep \"Step pins\" on in OpenXP's settings (Maps)."] }, -- (item 68; OpenXP 2.0: item 111)
 }
 
 local function InCombat() return (ns.inCombat or (InCombatLockdown and InCombatLockdown())) and true or false end

@@ -32,6 +32,8 @@ ns.DEFAULTS = {
     -- and the world map keep it; GPSFrame's G.SquareHidesRoute)
     replaceMinimapResume = true, -- a glowing Resume Routing button by the square's logo while routing is paused (1.3.9,
     -- asked 2026-11-18; GPSFrame's G.PlaceMinimapResume)
+    replaceMinimapNoBorder = false, -- the square without its border, only the map (Kooki3z 2026-11-26 for 1.4.1;
+    -- GPSFrame's G.SquareHidesBorder)
     replaceMinimapSize = "small", -- its square: "small" (200), "medium" (260), "large" (320) (G.MINIMAP_SIDES)
     replaceMinimapHide = "ground", -- how the minimap's ground is hidden: "ground" (C_Minimap.SetDrawGroundTextures) or
     -- "mask" (a fully transparent mask); /agps replace ground|mask
@@ -126,6 +128,8 @@ ns.DEFAULTS = {
     dungeonRoute = true, -- entering a dungeon or raid starts its boss route (other routes held off while on)
     useHearthstone = true, -- start a route with the hearthstone (or Astral Recall) when faster
     useTeleports = true, -- ... or a class teleport (mage teleports, Teleport: Moonglade)
+    usePartyPortals = false, -- ... or a portal a mage in the group near you can open (Teleports.lua; asks another player)
+    useWaterWalking = true, -- water walking, Levitate and the like make water as fast as land (Nav.WaterFast)
     useFlights = true, -- take flights between the flight masters this character knows
     flightMapRing = true, -- a ring round the route's next flight on the flight map (Taxi.MarkTaxiMap)
     fastestOrder = true, -- routes with several stops: visit them in the fastest order
@@ -134,13 +138,17 @@ ns.DEFAULTS = {
     stutterPause = true, -- routing cut back, then paused, when it makes the game stutter (Nav.RouteWork)
     stopsAhead = 3, -- stops routed and drawn on the map at a time (1 to Nav.PLAN_AHEAD); the next come in as they're reached
     avoidHostile = true, -- routes keep away from the other faction's guards (their towns)
-    showAvoided = true, -- the guard zones a route goes around, drawn red on the map (item 63c)
+    avoidElites = true, -- routes keep away from elite enemy areas (Data/Elites.lua; item 91, Router.EliteMin)
+    eliteOffset = -10, -- ... those whose elites' top level is at least the player's plus this (Router.ELITE_OFFSET_MIN to MAX)
+    showAvoided = true, -- the guard zones a route goes around, drawn red on the map (item 63c); the elite areas gold
     worldGrid = true, -- 1.4.0's world routing: routes on the open world's walk grid (WorldGrid.lua); always on (item 74)
     cityGrid = true, -- 1.4.0's city routing: routes inside the capitals on their walk grids (CityGrid.lua); always on
     -- since 2026-11-23 (Kooki3z: "this will be the new default for pathing going forward")
     allowSwim = true, -- routes may swim (Passability.avoidSwim off: Nav.SyncSwim); off, they go round by land
     useClassSpells = true, -- big drops with Slow Fall, Levitate or a racial ready (FallSpells.lua)
     expertJumper = false, -- spell jumping, any height: cast just before landing (FallSpells.lua, under useClassSpells)
+    -- (item 102: immunities an Expert jumper may land with, each its own; FallSpells.SPELLS' `option`)
+    jumpDivineShield = true, jumpDivineProtection = true, jumpBlessingOfProtection = true, jumpIceBlock = true,
     safeDropYd = 39, -- the drop routes take out of combat without a fall spell (Nav.PlainSafeDrop, Options' Safe drop)
     cityKeepOrder = true, -- ... except stops down in a city: in the order placed
     importKeepOrder = true, -- stops imported (Import and Share, /way lists, shared routes) in the order listed (Nav.keepOrder)
@@ -162,6 +170,9 @@ ns.DEFAULTS = {
     -- the route lighter uphill, darker downhill (Kooki3z 2026-11-20: "can we use shades of lighter or darker path colors
     -- to indicate elevation or de-elevation of a route?"; GPSFrame's G.SlopeColor)
     routeSlopeShade = true,
+    -- (item 114, MapExtras.lua) the route's height profile strip on the map, and the floor picker where floors stack
+    heightProfile = true,
+    floorPicker = true,
     charm = "none", -- hanging from the logo: "none" or a charm's key (Looks.CHARMS, or one another addon added)
     charmSwing = true, -- it swings and twists as you go (off: hangs still)
     -- Options > Routing (Router.RoadFactor): below 0 the roads kept more, above 0 open ground. +3 since 1.4.0 (Kooki3z

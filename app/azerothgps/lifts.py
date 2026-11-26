@@ -217,3 +217,130 @@ def run(log=print) -> list:
     for cont, b, t, n1, n2 in rows:
         log(f"lift {n1} ({b[0]:.1f}, {b[1]:.1f}, {b[2]:.1f}) <-> {n2} ({t[0]:.1f}, {t[1]:.1f}, {t[2]:.1f}), {LIFT_SECONDS} s")
     return rows
+
+
+# ---------------------------------------------------------------------------------------------------------------------
+# Lift timing (item 118, 1.4.1): each car's loop from the client's own TransportAnimation (its keyframes by the car's
+# gameobject entry, TransportID; every SequenceID's frames merged by time, as servers read the table: the loop's length
+# its last frame's time). Where a car stops at each end and for how long: Data/LiftTimes.lua, phased in game from the
+# rides the player is seen taking (Lifts.lua). The cars spawned per the CMaNGOS dump (each car's shaft and spawn height).
+# ---------------------------------------------------------------------------------------------------------------------
+# (the cars timed: Thunder Bluff's two lifts of two cars, the Great Lift's two, Freewind Post's two, Undercity's three;
+# 644415-644423 in the client are copies of Undercity's 20649-20657, the same frames; Gnomeregan's 80023 is a dungeon's)
+TIMED_CARS = {
+    4170: "Thunder Bluff", 4171: "Thunder Bluff", 47296: "Thunder Bluff", 47297: "Thunder Bluff",
+    11898: "Thousand Needles", 11899: "Thousand Needles",
+    20649: "Undercity", 20652: "Undercity", 20655: "Undercity",
+}
+UNDERCITY_LEVEL = 10001  # (Undercity's lifts: the bottom is down in its level, the top the Ruins of Lordaeron's)
+DOCK_Z = 2.0  # yards: a car this near an end's height is stopped there (boarded, stepped off)
+TIMES_PAIR_YD = 30.0  # yards: a car this near another (not Undercity's) is the same lift's, side by side
+
+
+def car_track(rows: list) -> tuple[float, list]:
+    """A car's loop from its TransportAnimation rows: (period in seconds, [(t, dz)]) with every sequence's frames merged
+    by time (the same time twice: its first), the height offsets from its spawn."""
+    seen: dict[int, float] = {}
+    for r in sorted(rows, key=lambda r: (r["TimeIndex"], r["SequenceID"])):
+        seen.setdefault(r["TimeIndex"], r["Pos"][2])
+    track = sorted((t / 1000.0, z) for t, z in seen.items())
+    return track[-1][0], track
+
+
+def _z_at(track: list, period: float, t: float) -> float:
+    t %= period
+    pts = track + [(track[0][0] + period, track[0][1])]
+    if t < pts[0][0]:
+        t += period
+    for (t0, z0), (t1, z1) in zip(pts, pts[1:]):
+        if t0 <= t <= t1:
+            return z0 if t1 == t0 else z0 + (z1 - z0) * (t - t0) / (t1 - t0)
+    return pts[-1][1]
+
+
+def dock_window(track: list, period: float, near) -> tuple[float, float]:
+    """When in the loop the car is stopped at an end (`near(dz)`: within DOCK_Z of it): (arrives, leaves) in seconds into
+    the loop (leaves may be past the period: the window wraps). Exactly one window per end (else ValueError)."""
+    step = 0.01
+    n = int(round(period / step))
+    inside = [near(_z_at(track, period, k * step)) for k in range(n)]
+    starts = [k for k in range(n) if inside[k] and not inside[k - 1]]
+    if len(starts) != 1:
+        raise ValueError(f"{len(starts)} stops at an end in one loop")
+    k0 = starts[0]
+    k = k0
+    while inside[(k + 1) % n]:
+        k += 1
+    return round(k0 * step, 2), round((k + 1) * step, 2)
+
+
+def car_times(cd, spawns: list | None = None) -> list:
+    """Every timed car: [{entry, place, cont, x, y, lo, hi, period, bottom (arrives, leaves), top (...), station, city}]
+    (`lo`, `hi` the ends' heights; `station` the index of the lift it's one car of; `city` Undercity's level)."""
+    spawns = spawns if spawns is not None else elevators()
+    frames: dict[int, list] = {}
+    for r in cd.table("TransportAnimation"):
+        if r["TransportID"] in TIMED_CARS:
+            frames.setdefault(r["TransportID"], []).append(r)
+    out = []
+    for s in sorted((s for s in spawns if s[0] in TIMED_CARS), key=lambda s: (s[2], s[3], s[4])):
+        entry, _, cont, x, y, z = s
+        if entry not in frames:
+            raise ValueError(f"no TransportAnimation for lift car {entry}")
+        period, track = car_track(frames[entry])
+        dzs = [dz for _, dz in track]
+        lo, hi = min(dzs), max(dzs)
+        bottom = dock_window(track, period, lambda dz, lo=lo: dz <= lo + DOCK_Z)
+        top = dock_window(track, period, lambda dz, hi=hi: dz >= hi - DOCK_Z)
+        out.append({"entry": entry, "place": TIMED_CARS[entry], "cont": cont, "x": x, "y": y, "lo": z + lo,
+                    "hi": z + hi, "period": period, "bottom": bottom, "top": top,
+                    "city": UNDERCITY_LEVEL if TIMED_CARS[entry] == "Undercity" else None})
+    # (a lift's cars: Thunder Bluff's and the Thousand Needles' come in pairs side by side, Undercity's one a shaft)
+    station = 0
+    for c in out:
+        if "station" in c:
+            continue
+        station += 1
+        c["station"] = station
+        if c["city"]:
+            continue
+        for o in out:
+            if "station" not in o and o["cont"] == c["cont"] and not o["city"] \
+                    and math.dist((o["x"], o["y"]), (c["x"], c["y"])) <= TIMES_PAIR_YD:
+                o["station"] = station
+    return out
+
+
+def times_lua(cars: list, version: str = "") -> str:
+    lines = [f"-- GENERATED by `agps lifts --times` (app/azerothgps/lifts.py) from client {version}. Do not edit by hand.",
+             "-- The lifts' cars and their loops (item 118): the client's TransportAnimation by each car's gameobject entry,",
+             "-- the cars' shafts from the CMaNGOS classic dump. Each car: its shaft (cont, x, y), its ends' heights (lo, hi),",
+             "-- its loop (period, s) and when in it it's stopped at the bottom and at the top ({ arrives, leaves }, seconds",
+             "-- into the loop; leaves past the period: it wraps). `station`: the lift it's a car of (its cars side by side);",
+             "-- `city`: Undercity's level (down in it is the bottom). Phased in game from the rides seen (Lifts.lua).",
+             "local _, ns = ...",
+             "ns.LiftCars = {"]
+    for c in cars:
+        city = f", city = {c['city']}" if c["city"] else ""
+        lines.append(f'  {{ entry = {c["entry"]}, place = "{c["place"]}", station = {c["station"]}, cont = {c["cont"]}, '
+                     f'x = {c["x"]:.1f}, y = {c["y"]:.1f}, lo = {c["lo"]:.1f}, hi = {c["hi"]:.1f}, '
+                     f'period = {c["period"]:.3f}, bottom = {{ {c["bottom"][0]:.2f}, {c["bottom"][1]:.2f} }}, '
+                     f'top = {{ {c["top"][0]:.2f}, {c["top"][1]:.2f} }}{city} }},')
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+def times_path() -> Path:
+    return ADDON_DIR / "Data" / "LiftTimes.lua"
+
+
+def write_times(cd, log=print) -> Path:
+    """Data/LiftTimes.lua from the client's TransportAnimation and the dump's cars."""
+    cars = car_times(cd)
+    for c in cars:
+        log(f"  {c['place']} car {c['entry']} ({c['x']:.1f}, {c['y']:.1f}) station {c['station']}: loop "
+            f"{c['period']:.3f} s, {c['lo']:.1f}..{c['hi']:.1f}; bottom {c['bottom'][0]:.2f}-{c['bottom'][1]:.2f}, "
+            f"top {c['top'][0]:.2f}-{c['top'][1]:.2f}")
+    p = times_path()
+    p.write_text(times_lua(cars, cd.casc.version), encoding="utf-8", newline="\n")
+    return p

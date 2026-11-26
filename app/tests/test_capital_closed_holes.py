@@ -78,9 +78,23 @@ def test_pithwick_is_reached_by_kooki3zs_walk_into_his_shop(game):
     # over it; the route ended 21 yd off him before)
     lua, ns = game
     r, pts = _route(lua, ns, FORGE, HOLES["Pithwick"])
-    # (the last piece in the shop: the Router's own ends by the shop's road; the city grid's (city routing, on by
-    # default) walks a straight line across the shop's floor to him, a little longer)
-    assert math.dist(pts[-2], pts[-1]) <= (5 if r.cityGrid is None else 8)
+    # (the last piece in the shop: the Router's own ends by the shop's road. The city grid's (city routing, on by
+    # default) walks the shop's floor: since Ironforge's grid is `whole` (1.4.1, the port of #923) the whole leg is the
+    # grid's, up its step at the shop's mouth onto the floor (504.25) and straight across it to him, 9.8 yd; before,
+    # it went on by the Router's own tail, 2.3 yd. That straight line is open (Passability) and stays on the floor)
+    last = math.dist(pts[-2], pts[-1])
+    if r.cityGrid is None:
+        assert last <= 5, last
+    else:
+        assert last <= 12, last  # (the shop: about 10 yd across)
+        assert _open(lua, pts[-2], pts[-1])
+        was = ns.settings.gps.cityGrid
+        ns.settings.gps.cityGrid = False
+        try:
+            own, _ = _route(lua, ns, FORGE, HOLES["Pithwick"])
+        finally:
+            ns.settings.gps.cityGrid = was
+        assert r.length <= own.length, (r.length, own.length)  # (no longer than the Router's own way in)
     assert all(abs(r.fz[i] - 504) <= 2 for i in range(len(pts) - 2, len(pts) + 1))
 
 
