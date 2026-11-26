@@ -97,6 +97,8 @@ N.MARKER_COLOR_KEYS = { "yellow", "orange", "purple", "green", "lightblue", "blu
 local version = 0 -- bumped when the stops change (cache key for the stretches between stops)
 
 local function Copy(d)
+  -- (in rock, a wall or on a roof: on the nearest walkable ground first, once a stop; StopSnap.lua, item 116b)
+  if not d.snapped and ns.StopSnap then d = ns.StopSnap.Stop(d) end
   -- (a stop with no height of its own at an NPC's spot: that NPC's, N.SpawnZ. Not a guide's: theirs is looked up their
   -- own way, the guides' shipped waypoint heights first, RestedXP.lua's X.HeightXY; nor a corpse's)
   -- (else every stop's best guess when it's made, N.GuessStopZ: the grid's floor, the ground, a road's near; `zSource`
@@ -116,7 +118,7 @@ local function Copy(d)
     local t = N.EntrancePortalAt(d.cont, d.x, d.y)
     if t and t.z1 then z, zSource = t.z1, "portal" end
   end
-  if z == nil and zSource == nil and not (d.corpse or d.rxp or d.zygor or d.polestar or d.questify or d.apr)
+  if z == nil and zSource == nil and not (d.corpse or d.rxp or d.zygor or d.polestar or d.questify or d.apr or d.openxp)
       and N.GuessStopZ then
     z, zSource = N.GuessStopZ(d)
   end
@@ -138,11 +140,13 @@ local function Copy(d)
     polestar = d.polestar, -- (a Polestar step's: its key, Polestar.lua)
     questify = d.questify, -- (a Questify step's: its key, Questify.lua)
     apr = d.apr, -- (an Azeroth Pilot Reloaded step's: its key, AzerothPilot.lua)
+    openxp = d.openxp, -- (an OpenXP step's: its key, OpenXP.lua)
     questie = d.questie, -- (Questie's "Set TomTom Target", Import.QuestieTarget)
     npcId = d.npcId, npcName = d.npcName, -- (an NPC's from the search or its pin: its creature id and name, the Target button's)
     listed = d.listed, -- (a trip in its listed order's, N.keepOrder)
     avoidJumps = d.avoidJumps, -- (its leg's jumps avoided: "spell" or "all", N.AvoidLegJumps)
-    avoidSwim = d.avoidSwim } -- (its leg's swimming avoided, N.AvoidLegSwim)
+    avoidSwim = d.avoidSwim, -- (its leg's swimming avoided, N.AvoidLegSwim)
+    snapped = d.snapped, snapFrom = d.snapFrom } -- (on walkable ground, and where it was made when moved: StopSnap.lua)
 end
 
 -- The stops are saved per character, so /reload and relogging keep the route.
@@ -388,7 +392,7 @@ local hostileSpans = setmetatable({}, { __mode = "k" }) -- [part] = { side = , [
 -- (0 to 1 along the piece), or false. Sampled every Router.HOSTILE_STEP yards, as the router weighs them; each piece
 -- worked out once, when it's first drawn.
 function N.HostileSpans(part, i)
-  local side, R = N.Faction and N.Faction(), ns.Router
+  local side, R = N.EnemySide and N.EnemySide(), ns.Router
   if not (side and part and part.pts and R and R.HostileAt and ns.Hostile and ns.Hostile[part.cont]) then return false end
   local memo = hostileSpans[part]
   if not memo or memo.side ~= side then
@@ -480,7 +484,11 @@ function N.GridWaterSpans(part, i)
   local len = math.sqrt((x2 - x1) ^ 2 + (y2 - y1) ^ 2)
   local n = math.max(1, math.floor(len / N.GRID_SWIM_STEP + 0.5))
   local out, from
+  local R = ns.Router
   for s = 0, n - 1 do
+    -- (in a background job, a look at the slice's clock: a long straight piece is hundreds of samples; on the slow
+    -- client a route's swims were 45-80 ms in one slice. Item 108)
+    if s % 32 == 31 and R and R.SliceOver and R.SliceOver() then coroutine.yield() end
     local t = (s + 0.5) / n
     local z = fz[i] + (fz[i + 1] - fz[i]) * t
     local ss = WG.SurfacesAt(c, x1 + (x2 - x1) * t, y1 + (y2 - y1) * t, z)
@@ -711,6 +719,9 @@ local function ItemCountOf(id)
 end
 local waterHave, waterHaveAt, waterNow, waterNowAt
 function N.WaterFast()
+  -- (option `useWaterWalking`, Options > Routing, on; item 109: off, water is swum as without it)
+  local st = ns.settings and ns.settings.gps
+  if st and st.useWaterWalking == false then return nil end
   local now = GetTime()
   if waterNowAt and now - waterNowAt < 1 and now >= waterNowAt then return waterNow or nil end
   if not waterHaveAt or now - waterHaveAt >= 10 or now < waterHaveAt then
@@ -842,6 +853,7 @@ function N.SkipSwim(cont, pts)
       end
     end
   end
+  N.NoteAvoid({ what = "skipSwim", n = #N.swimBans, noSwim = N.noSwim, bans = N.swimBans }) -- (N.UndoAvoid)
   N.noSwim = true
   for _, e in ipairs(list) do
     local c, swim = e[1], e[2]
@@ -1056,7 +1068,7 @@ N.ENEMY_TILE_YD = 400
 local enemyTiles = {} -- [cont .. side] = { list = ns.Hostile's, [tile key] = { i, ... } }
 local EnemyTiles
 function N.EnemyZonesIn(cont, x0, y0, x1, y1)
-  local side = N.Faction and N.Faction()
+  local side = N.EnemySide and N.EnemySide()
   local list = side and ns.Hostile and ns.Hostile[cont] and ns.Hostile[cont][side]
   if not list then return {} end
   local tiles = EnemyTiles(cont, side, list)
@@ -1068,7 +1080,7 @@ function N.EnemyZonesIn(cont, x0, y0, x1, y1)
         if not seen[i] and x + r >= math.min(x0, x1) and x - r <= math.max(x0, x1) and y + r >= math.min(y0, y1)
             and y - r <= math.max(y0, y1) then
           seen[i] = true
-          out[#out + 1] = { x, y, r, i }
+          out[#out + 1] = { x, y, r, i, list.area and list.area[i] or nil } -- (5: an elite area's, item 91)
         end
       end
     end
@@ -1120,7 +1132,7 @@ end
 -- worked out once a route, faction and continent.
 local nearRoute = setmetatable({}, { __mode = "k" }) -- [route] = { [cont .. side] = set }
 function N.EnemyZonesNearRoute(r, cont)
-  local side = N.Faction and N.Faction()
+  local side = N.EnemySide and N.EnemySide()
   local list = side and ns.Hostile and ns.Hostile[cont] and ns.Hostile[cont][side]
   if not (list and r and r.parts) then return nil end
   local memo = nearRoute[r]
@@ -1163,7 +1175,7 @@ end
 -- The other faction's towns the route walks through: { { name, yards }, ... } most first, or nil. Not the towns at a
 -- walk's own ends (a stop in one, the player in one: R.HostileTownsNear, as the router leaves them out).
 function N.HostileOnRoute(r)
-  local side, R = N.Faction and N.Faction(), ns.Router
+  local side, R = N.EnemySide and N.EnemySide(), ns.Router
   if not (side and r and r.parts and R and R.HostileYards and R.HostileTownsNear and ns.Hostile) then return nil end
   local yards, at = {}, {}
   for _, part in ipairs(r.parts) do
@@ -1195,10 +1207,13 @@ function N.HostileOnRoute(r)
     if yd >= N.HOSTILE_WARN_YD then
       local a = at[key]
       local name = N.HostileTownName(a[1], side, a[2], a[3], a[4], a[5], a[6]) or "?"
+      -- (an elite area's, item 91: its third value true; a name both a town's and an area's is the town's)
+      local elite = R.EliteAreaOf and R.EliteAreaOf(a[1], side, a[2]) ~= nil or nil
       if seen[name] then
         seen[name][2] = seen[name][2] + yd
+        if not elite then seen[name][3] = nil end
       else
-        seen[name] = { name, yd }
+        seen[name] = { name, yd, elite }
         out[#out + 1] = seen[name]
       end
     end
@@ -1215,6 +1230,7 @@ end
 N.hostileSaid = {} -- [town's name] = said in chat this trip
 N.hostileAsking = nil -- ("Take it?" up: its question, N.CheckHostileRoute)
 local hostileChecked, hostileNames
+N.hostileElite = nil -- (the towns said were all elite areas, item 91: the elites' words)
 local hostileNoteRoute, hostileNoteHas -- (N.HostileNote: the route it was looked for on, and whether it passes guards)
 function N.CheckHostileRoute()
   local r, d = N.route, N.dest
@@ -1222,35 +1238,44 @@ function N.CheckHostileRoute()
   local R = ns.Router
   -- (avoiding them, unless the player said to risk it: N.riskOk)
   local avoiding = R and R.HostileSide and R.HostileSide() ~= nil and not (d and N.RiskAnswer(d))
-  local key = version .. ":" .. tostring(N.Faction and N.Faction()) .. ":" .. tostring(avoiding)
+  local key = version .. ":" .. tostring(N.EnemySide and N.EnemySide()) .. ":" .. tostring(avoiding)
   if hostileChecked == key then return end
-  hostileChecked, hostileNames = key, nil
+  hostileChecked, hostileNames, N.hostileElite = key, nil, nil
+  -- (the elite areas, item 91, are listed only when avoided; the guards are listed avoided or not: asked about only
+  -- with "Avoid the other faction's towns" on)
+  local _, guardsOn = R.KeyFaction(R.HostileSide())
   local function Said(towns)
     if hostileChecked ~= key then return end -- (the route changed meanwhile)
     towns = N.WithEnemyCapital(d, towns or nil)
     if not towns then return end
-    local names = {}
+    local names, askNames, ask, allElite, askElite = {}, {}, {}, true, true
     for k, t in ipairs(towns) do
       if k <= 3 then names[k] = t[1] end
+      allElite = allElite and t[3] == true
+      if t[3] or guardsOn then
+        ask[#ask + 1] = t
+        if #askNames < 3 then askNames[#askNames + 1] = t[1] end
+        askElite = askElite and t[3] == true
+      end
     end
-    hostileNames = table.concat(names, ", ")
+    hostileNames, N.hostileElite = table.concat(names, ", "), allElite
     -- (avoiding them and still through them: no way round found. Asked once a trip, "Take it?" (Kooki3z 2026-11-23,
     -- Horde in Loch Modan past Thelsamar's guards and over the Stonewrought Dam with no question; the standing rule:
     -- only enemy ground, ask "take it?" and route through). Yes: as it is; no: the safe way with a ride where the
     -- ride check finds one (N.AnswerRisk), else said in chat as before. The trip's answer, N.riskOk.trip, as the ride
     -- check's own "Risk enemy territory?": one question a trip either way)
     -- (not with the ride check's own "Risk enemy territory?" up or coming: one question)
-    if avoiding and N.RiskAnswer(d) == nil and not N.hostileAsking and not N.riskQuestion and not N.riskAsking
-        and ns.GPS and ns.GPS.ConfirmHostile then
-      local q = { key = N.RiskKey(d), towns = towns }
+    if avoiding and ask[1] and N.RiskAnswer(d) == nil and not N.hostileAsking and not N.riskQuestion
+        and not N.riskAsking and ns.GPS and ns.GPS.ConfirmHostile then
+      local q = { key = N.RiskKey(d), towns = ask }
       N.hostileAsking = q
-      local asked = ns.GPS.ConfirmHostile(names, N.Faction and N.Faction(), function()
+      local asked = ns.GPS.ConfirmHostile(askNames, N.Faction and N.Faction(), function()
         N.hostileAsking = nil
         N.AnswerRisk(q, true)
       end, function()
         N.hostileAsking = nil
         N.AnswerRisk(q, false)
-      end)
+      end, askElite)
       if not asked then N.hostileAsking = nil end
     end
     -- (and the chat line once a trip, as before)
@@ -1260,8 +1285,11 @@ function N.CheckHostileRoute()
     end
     if not new then return end -- (all said already this trip: the directions and the map still show it)
     Save()
-    if ns.Print then
-      ns.Print(Format(avoiding and L["|cffff4040Enemy territory:|r no way round it found, the route passes the other faction's guards at %s (red on the map)."]
+    if ns.Print and allElite then
+      ns.Print(Format(avoiding and L["|cffff4040Elite enemies:|r no way round them found, the route passes the elites at %s (gold on the map)."]
+        or L["|cffff4040Elite enemies:|r the route passes the elites at %s (gold on the map)."], hostileNames))
+    elseif ns.Print then
+      ns.Print(Format(avoiding and guardsOn and L["|cffff4040Enemy territory:|r no way round it found, the route passes the other faction's guards at %s (red on the map)."]
         or L["|cffff4040Enemy territory:|r the route passes the other faction's guards at %s (red on the map)."], hostileNames))
     end
   end
@@ -1287,7 +1315,13 @@ function N.RouteThroughGuards(r)
   if not r then return false end
   local v = throughGuards[r]
   if v == nil then
-    v = N.HostileOnRoute(r) ~= nil
+    -- (the ones avoided: the elite areas listed, item 91, and the guards with their option on)
+    local R = ns.Router
+    local _, guardsOn = R.KeyFaction(R.HostileSide())
+    v = false
+    for _, t in ipairs(N.HostileOnRoute(r) or {}) do
+      if t[3] or guardsOn then v = true end
+    end
     throughGuards[r] = v
   end
   return v
@@ -1321,7 +1355,7 @@ function N.GiveUpRefused()
   local d = N.dest
   if not d then return end
   local q = { key = N.RiskKey(d) }
-  local towns = hostileNames
+  local towns, elite = hostileNames, N.hostileElite
   N.DropRideChecks()
   if ns.Router and ns.Router.DropBackground then ns.Router.DropBackground() end
   N.SetPaused(true, "guards")
@@ -1336,13 +1370,19 @@ function N.GiveUpRefused()
     N.guardsAsking = nil
     if N.trip ~= trip then return end
     if not clicked then return end -- (let go unanswered: left paused, Resume Routing tries again)
-    if ns.Print then ns.Print(L["Route cleared: no way around the other faction's guards."]) end
+    if ns.Print then
+      ns.Print(elite and L["Route cleared: no way around the elite enemies."]
+        or L["Route cleared: no way around the other faction's guards."])
+    end
     N.Clear()
   end
   N.guardsAsking = q
-  local asked = ns.GPS and ns.GPS.ConfirmNoWayRound and ns.GPS.ConfirmNoWayRound(towns, Yes, No)
+  local asked = ns.GPS and ns.GPS.ConfirmNoWayRound and ns.GPS.ConfirmNoWayRound(towns, Yes, No, elite)
   if not asked then
-    if ns.Print then ns.Print(L["No way around the other faction's guards: the route goes past them."]) end
+    if ns.Print then
+      ns.Print(elite and L["No way around the elite enemies: the route goes past them."]
+        or L["No way around the other faction's guards: the route goes past them."])
+    end
     Yes()
   end
   return asked
@@ -1385,7 +1425,7 @@ function N.HostileNote()
   if not (hostileNames and N.route and N.dest) then return nil end
   local R = ns.Router
   local d = N.dest
-  local key = version .. ":" .. tostring(N.Faction and N.Faction()) .. ":"
+  local key = version .. ":" .. tostring(N.EnemySide and N.EnemySide()) .. ":"
     .. tostring(R and R.HostileSide and R.HostileSide() ~= nil and not (d and N.RiskAnswer(d)))
   if hostileChecked ~= key then return nil end
   -- (the route said it of can have been worked out again since, the stops the same: a route after a /reload that
@@ -1507,7 +1547,7 @@ function N.InsertStop(d, at, force)
   if #N.stops >= N.MAX_STOPS then return false end
   local c = Copy(d)
   -- (a guide's step at an NPC, named in its text: that NPC's, for the Target button; Layers.AttachNpc)
-  if (c.rxp or c.zygor or c.polestar or c.questify or c.apr) and ns.Layers and ns.Layers.AttachNpc then
+  if (c.rxp or c.zygor or c.polestar or c.questify or c.apr or c.openxp) and ns.Layers and ns.Layers.AttachNpc then
     ns.Layers.AttachNpc(c, c.name, true)
   end
   c.icon = c.icon or N.NextMarker(N.stops)
@@ -1773,6 +1813,7 @@ function N.Clear()
   N.paused, N.pauseWatch = nil, nil
   N.redOk, N.skipLearn, N.noWalk, N.walkKept, N.riskOk, N.riskQuestion, N.riskAsking = {}, {}, {}, {}, {}, nil, nil
   N.hostileSaid, N.noSwim, N.swimBans, N.hostileAsking = {}, nil, {}, nil
+  N.avoidUndo = {} -- (N.UndoAvoid: the last route's avoids)
   N.ResetJumps()
   if ns.Router and ns.Router.DropBackground then ns.Router.DropBackground() end -- (its searches with it: item 82h)
   N.trip = N.trip + 1
@@ -1884,6 +1925,29 @@ end
 
 N.FLIGHT_SPEED = 32 -- yd/s along the flight path
 N.FLIGHT_OVERHEAD = 15 -- s: talking to the flight master, taking off and landing
+-- Frequent Flier (item 109): WoW Forever's own hidden passive, spell 1225490, whose client data (SpellEffect, read
+-- 2026-11-26) is aura 388, the taxi's speed +20%. With it the flights' estimates are 1.2 times as fast; a recorded
+-- flight time keeps the speed it was flown at (`speed`, Taxi.lua) and is scaled by the speed now (one recorded before
+-- this, with no `speed`, is taken as it is: it was flown as the character flies).
+N.FREQUENT_FLIER, N.FREQUENT_FLIER_SPEED = 1225490, 1.2
+N.flightSpeed = { at = -math.huge, factor = 1 } -- (looked at every 5 s at most; a table: the file's locals are full)
+function N.FlightSpeedFactor()
+  local ff, now = N.flightSpeed, GetTime()
+  if now - ff.at < 5 and now >= ff.at then return ff.factor end
+  ff.at = now
+  local known = N.KnownSpell and N.KnownSpell(N.FREQUENT_FLIER) or N.AuraOn and N.AuraOn(N.FREQUENT_FLIER)
+  ff.factor = known and N.FREQUENT_FLIER_SPEED or 1
+  return ff.factor
+end
+function N.ForgetFlightSpeed() N.flightSpeed.at = -math.huge end -- (the tests)
+-- A recorded flight's seconds at the speed the character flies now.
+function N.RecordedFlightSecs(rec)
+  local secs = rec and tonumber(rec.seconds)
+  if not secs then return nil end
+  local at = tonumber(rec.speed)
+  if at and at > 0 then secs = secs * at / N.FlightSpeedFactor() end
+  return secs
+end
 
 local flightCache -- { key, masters = { [node] = { cont, x, y, name } }, trips = { [from] = { [to] = row } } }
 
@@ -1999,6 +2063,13 @@ local function Faction()
   return f == "Alliance" and "A" or f == "Horde" and "H" or nil
 end
 N.Faction = Faction
+-- The enemy circles shown and warned about (Router.EnemyKey's key): the other faction's guards, avoided or not, and the
+-- elite areas avoided now (item 91, Router.EliteMin). The faction's own key ("A", "H") when no elite area is avoided.
+function N.EnemySide()
+  local f, R = Faction(), ns.Router
+  if not (f and R and R.EnemyKey and R.EliteMin) then return f end
+  return R.EnemyKey(true, f, R.EliteMin())
+end
 
 -- Whether transport row t (a boat, a zeppelin, a lift, a dungeon's portal) is one the player's
 -- faction can take: not with either end among the other faction's guards (Data/Hostile.lua:
@@ -2062,7 +2133,9 @@ local function Flights()
   local known, count = N.KnownFlightNodes()
   if count < 1 then return nil end
   local fac = Faction()
+  local speed = N.FlightSpeedFactor() * N.FLIGHT_SPEED -- (yd/s: Frequent Flier's speed when known)
   local key = count .. (fac or "") .. ":" .. (ns.names and ns.names.taxiVer or 0) -- (and the game's names for them)
+    .. ":" .. speed
   if flightCache and flightCache.key == key then return flightCache end
   local masters = Masters()
   local adj, fresh = {}, {}
@@ -2104,14 +2177,14 @@ local function Flights()
       local a, b = an and byName[an], bn and byName[bn]
       if a and b and a ~= b and type(rec) == "table" and tonumber(rec.seconds) then
         recorded[a] = recorded[a] or {}
-        recorded[a][#recorded[a] + 1] = { b, tonumber(rec.seconds) }
+        recorded[a][#recorded[a] + 1] = { b, N.RecordedFlightSecs(rec) }
       end
     end
   end
   local function Hop(u, v, yards)
     local mu, mv = masters[u], masters[v]
     local took = mu and mv and mu[4] and mv[4] and learned[mu[4] .. " > " .. mv[4]]
-    return took and tonumber(took.seconds) or yards / N.FLIGHT_SPEED
+    return took and N.RecordedFlightSecs(took) or yards / speed
   end
   for from, first in pairs(starts) do
     -- shortest flight (yards) to every other known master
@@ -2162,7 +2235,7 @@ local function Flights()
           pts[#pts + 1], pts[#pts + 2] = masters[s][2], masters[s][3]
         end
         local took = learned[a[4] .. " > " .. b[4]]
-        local secs = (air[to] or took and tonumber(took.seconds) or yards / N.FLIGHT_SPEED) + N.FLIGHT_OVERHEAD
+        local secs = (air[to] or took and N.RecordedFlightSecs(took) or yards / speed) + N.FLIGHT_OVERHEAD
         trips[from][to] = { a[1], a[2], a[3], b[1], b[2], b[3], secs, "flight", a[4], b[4],
           fresh[from] and "new flight master" or "flight master", pts = pts, learn = fresh[from] and true or nil,
           from = from, to = to, hops = stops }
@@ -2433,6 +2506,55 @@ function N.Swimming()
   local ok, v = pcall(IsSwimming)
   if not ok or (ns.IsSecret and ns.IsSecret(v)) then return nil end
   return v and true or false
+end
+
+-- Floor evidence (item 106, 1.4.1, SPF parity; the idea from Shortest Path Forever, GPL-3, our own code): the floor
+-- trackers (N.TrackGridZ, CityGrid.TrackFloor) keep a floor the player may be on until the game gives evidence they left
+-- it: a fall seen (IsFalling), swimming started or stopped (IsSwimming), a lift's or a teleporter's end (N.AtLift), a
+-- jump across the map (a teleport, a hearth: the trackers' own JUMP_YD). Not because the grid has no way from it to the
+-- new spot: beside a street the grid's cell may have only the ground under the city. A fall is noted every status
+-- update (N.NoteFloorEvidence), so one between two samples still counts where the player lands.
+function N.Falling()
+  local o = ns.Geo.override -- (the dev tools' simulated player: as it says, when it says)
+  if o and o.falling ~= nil then return o.falling end
+  if not IsFalling then return false end
+  local ok, v = pcall(IsFalling)
+  return ok and not (ns.IsSecret and ns.IsSecret(v)) and v == true
+end
+N.fellAt = nil -- (GetTime of the last fall seen)
+function N.NoteFloorEvidence()
+  if N.Falling() then N.fellAt = GetTime() end
+end
+-- Whether a fall was seen since `since` (a tracker's last sample: one still under way then counts once more, at the
+-- landing) or is under way now.
+function N.FellSince(since)
+  if N.Falling() then
+    N.fellAt = GetTime()
+    return true
+  end
+  return N.fellAt ~= nil and since ~= nil and N.fellAt >= since
+end
+-- Whether (px, py) on `level` is at a lift or a teleporter, where the floor changes with no walk: a teleporter's end
+-- (Data/Transports.lua), a lift's road (Router.HeightsNear's `lift`) or a city grid's lift (CityGrid.LiftNear) within
+-- LIFT_EVIDENCE_YD.
+N.LIFT_EVIDENCE_YD = 10
+function N.AtLift(level, px, py)
+  if not (level and px and py) then return false end
+  local r2 = N.LIFT_EVIDENCE_YD ^ 2
+  for _, t in ipairs(ns.Transports or {}) do
+    if t[8] == "teleporter" then
+      for e = 1, 2 do
+        local c, x, y = t[e * 3 - 2], t[e * 3 - 1], t[e * 3]
+        if c == level and x and (x - px) ^ 2 + (y - py) ^ 2 <= r2 then return true end
+      end
+    end
+  end
+  local R = ns.Router
+  for _, h in ipairs(R and R.HeightsNear and R.HeightsNear(level, px, py, N.LIFT_EVIDENCE_YD) or {}) do
+    if h.lift then return true end
+  end
+  local CG = ns.CityGrid
+  return (CG and CG.LiftNear and CG.LiftNear(level, px, py, N.LIFT_EVIDENCE_YD)) and true or false
 end
 
 function N.Indoors()
@@ -3176,6 +3298,22 @@ function N.GridStackedAt(level, px, py)
   end
   return hi - lo > N.TRACK_STEP
 end
+-- The floor the height band (HeightBand.lua: range checks to NPCs standing still nearby) puts the player on among the
+-- roads near (hs), when it rules out `z` (nil: none followed yet) and the roads near in it are all one floor (within
+-- TRACK_STEP): z, flat, edge of the nearest of them. Nil when there's no band, it allows `z`, or it can't tell.
+function N.BandFloor(level, px, py, hs, z, band)
+  local HB = ns.HeightBand
+  if not (HB and hs and hs[1]) then return nil end
+  if band == nil then band = HB.Here(level, px, py) end
+  if not band or (z and HB.InBand(band, z)) then return nil end
+  local keep = HB.Keep(band, hs, "z")
+  if not keep then return nil end
+  for _, h in ipairs(keep) do
+    if math.abs(h.z - keep[1].z) > N.TRACK_STEP then return nil end
+  end
+  HB.NotePick(keep[1].z, z and "band: not the floor followed" or "band")
+  return keep[1].z, keep[1].flat, keep[1].edge
+end
 function N.TrackCityZ(level, px, py)
   -- (on a flight: not walked, nothing followed; started again where it lands. Orgrimmar, 2026-11-15: flown in over the
   -- city, the floor followed was the streets' under the wind rider, kept on landing up on the tower (no road at that
@@ -3298,11 +3436,22 @@ function N.TrackCityZ(level, px, py)
       end
     end
     if not z then z, flat, edge = track.z, track.flat, track.edge end
+    -- (item 104: the height band rules the floor followed out, the roads near in it all one floor: that one. A lift
+    -- ridden, a drop, a floor followed wrong. Not near a floor told by an NPC's window, Nav.AnchorFloor)
+    if not track.anchored then
+      local bz, bflat, bedge = N.BandFloor(level, px, py, hs, z)
+      if bz then z, flat, edge = bz, bflat, bedge end
+    end
   else
     -- (the start: a lift's bottom, the zone text's rooms, the nearest road; in a building, the floor followed when the
     -- game was last left here (a /reload upstairs), else where its roads near are all one floor: at its door)
     -- (the Deeprun Tram's ways in only on coming out of it: the keep's road runs 25 yd over Stormwind's)
     local outOfTram = N.tramAt and now >= N.tramAt and now - N.tramAt < N.TRAM_OUT_SECONDS
+    -- (item 104: the height band from range checks to NPCs standing still nearby, when there's one: a start it rules
+    -- out (a lift's foot, the floor of a /reload, the innkeeper's) isn't taken, and the roads out of it don't count)
+    local HB = ns.HeightBand
+    local band = HB and HB.Here(level, px, py)
+    local function Allowed(cz) return cz and (not band or HB.InBand(band, cz)) and cz or nil end
     for _, t in ipairs(ns.Transports or {}) do
       if t[8] ~= "tram" then
         if t[1] == level and t.z1 and (t[2] - px) ^ 2 + (t[3] - py) ^ 2 <= N.TRACK_LIFT_YD ^ 2 then z = t.z1 end
@@ -3314,10 +3463,11 @@ function N.TrackCityZ(level, px, py)
         end
       end
     end
-    if not z and building then z = Resumed(level, px, py) end
+    z = Allowed(z)
+    if not z and building then z = Allowed(Resumed(level, px, py)) end
     if not z and building and hearthed and hearthed.level == level and now - hearthed.at < N.HEARTH_TRACK_SECONDS
         and (px - hearthed.x) ^ 2 + (py - hearthed.y) ^ 2 <= N.HEARTH_TRACK_YD ^ 2 then
-      z = InnFloor(level, px, py, hs)
+      z = Allowed(InnFloor(level, px, py, hs))
       if z then hearthed = nil end -- (taken once)
     end
     -- (else only where it's clear: the roads near the player, of the zone text's rooms' heights, all on one floor.
@@ -3327,10 +3477,19 @@ function N.TrackCityZ(level, px, py)
       local zt = GetMinimapZoneText and GetMinimapZoneText()
       local lo, hi
       if l and ns.GPS and ns.GPS.ZoneTextBand then lo, hi = ns.GPS.ZoneTextBand(Geo.Base(level), px, py, zt, l.wmo) end
+      -- (the band's roads only, when it leaves any: Brill inn by its innkeeper has roads near on every floor)
+      local near = band and HB.Keep(band, hs, "z") or hs
       local first, clear = nil, true
-      for _, h in ipairs(hs) do
+      for _, h in ipairs(near) do
         if not lo or (h.z >= lo - 1 and h.z <= hi + 1) then
           if not first then first = h.z elseif math.abs(h.z - first) > N.TRACK_STEP then clear = false end
+        end
+      end
+      if not (first and clear) and near ~= hs then
+        -- (the zone text's rooms and the band disagree: the band's roads all one floor)
+        first, clear = near[1].z, true
+        for _, h in ipairs(near) do
+          if math.abs(h.z - first) > N.TRACK_STEP then clear = false end
         end
       end
       if not (first and clear) then return nil end
@@ -3345,10 +3504,12 @@ function N.TrackCityZ(level, px, py)
       -- the player on the ring under them; "repair" went 559 yd round by the Trade Quarter, "14 yd down")
       if l then
         for _, h in ipairs(ns.Router.HeightsNear(level, px, py, N.TRACK_UNDER_YD) or {}) do
-          if h.z < first - N.TRACK_STEP and (not lo or (h.z >= lo - 1 and h.z <= hi + 1)) then return nil end
+          if h.z < first - N.TRACK_STEP and (not lo or (h.z >= lo - 1 and h.z <= hi + 1))
+              and (not band or HB.InBand(band, h.z)) then return nil end
         end
       end
       z = first
+      if near ~= hs then HB.NotePick(z, "band") end
     end
   end
   -- (the road taken at the start: the nearest of its height)
@@ -3418,12 +3579,69 @@ local routeTrack -- { route, z }
 -- The floor followed over the world grid's surfaces where they're stacked (item 45, Kooki3z 2026-11-24: in
 -- Maraudon's outer cave the route flipped and turned round where passages cross over and under each other; with no
 -- floor followed there, each route started on whichever passage's surface the spot had first, and from the other
--- passage the way is long). The surface at about the height last followed (GRID_TRACK_STEP: a ramp walked, a step
--- down; a fall past it, the nearest below) while the player moved no more than GRID_TRACK_JUMP_YD since; with one
--- surface there, that one. Nil when it's not known (stacked and nothing followed yet: the search picks, as before).
+-- passage the way is long). Since item 106 (1.4.1, SPF parity) a set of candidates, the floors the player may be on
+-- (each { z, x, y }: where it was last seen), not one guess:
+-- - from scratch (nothing followed, a jump of GRID_TRACK_JUMP_YD, a lift or a teleporter, N.AtLift): the surfaces
+--   there; swimming (IsSwimming), the water's; indoors (a cave under the hill), the highest under the ground (a guess
+--   better than the cheapest there: item 89, Blackrock Mountain's ring over the Molten Span); else the dry
+--   ones over the water's (a pier, a dock: WorldGrid.DrySplit); the height band's (HeightBand.lua) when it leaves any;
+-- - then each steps to the surface at about its height (GRID_TRACK_STEP: a ramp walked, a step down). One with none
+--   here is held where it was last seen (the grid lacks its floor here: a deck, a ledge), up to GRID_HOLD_YD from
+--   there, and dropped once another candidate on its floor steps on. Only evidence moves it off its height: a fall seen
+--   (N.FellSince: the highest surface under it, the floor fallen to), swimming started (the water's) or stopped (the
+--   nearest dry one);
+-- - the floor known when they're all one floor (within TRACK_STEP); else unsure (N.GridCandidates: a route starts from
+--   each and keeps the cheapest, WorldGrid's Ends).
+-- `decodedOnly`: the status updates' look, only where the grid's tiles are decoded already (WorldGrid.Decoded: never a load).
+-- Returns the floor where it's stacked and the player is indoors, as before (out on the land a height given each time
+-- moved the route's start off the sand south of Gadgetzan and its walk to Uldum never landed, test_world_grid's).
 N.GRID_TRACK_STEP, N.GRID_TRACK_JUMP_YD = 6, 40
-local gridTrack -- ({ level, z, x, y, at })
-function N.TrackGridZ(level, px, py)
+N.GRID_HOLD_YD = 25
+N.GRID_NEAR_YD = 8 -- (N.GridCandidates: the candidates for a spot this near the last look)
+N.GRID_SAMPLE_EVERY = 0.25 -- (the status updates' look: N.SampleGridFloor)
+N.GRID_CAVE_UNDER_Z = 3 -- (indoors from scratch: the surfaces this far under the ground's height)
+local gridTrack -- ({ level, x, y, at, cands = { { z, x, y, held } }, z, swam })
+function N.GridSwims(e) return e.f ~= nil and e.f % 2 == 1 end -- (WorldGrid's F_SWIM)
+-- (N.TrackGridZ's candidates from scratch)
+function N.GridStart(level, px, py, ss, swimming, indoors)
+  local list = ss
+  if swimming then
+    local water = {}
+    for _, e in ipairs(ss) do if N.GridSwims(e) then water[#water + 1] = e end end
+    if water[1] then list = water end
+  elseif indoors and #ss > 1 then
+    local GS = ns.Ground and ns.Ground.Sample
+    local gz = GS and GS(level, px, py)
+    -- (the highest of them, as before item 106: item 89, on Blackrock Mountain's ring over the lava (261) the Molten
+    -- Span's floor under it (182) was the cheapest start to Blackrock Depths and the route began under him; indoors
+    -- and nothing followed, the floor under the ground nearest it is the better guess than the cheapest)
+    local top
+    for _, e in ipairs(gz and ss or {}) do
+      if e.z < gz - N.GRID_CAVE_UNDER_Z and (not top or e.z > top.z) then top = e end
+    end
+    if top then list = { top } end
+  elseif #ss > 1 and ns.WorldGrid.DrySplit then
+    -- (outdoors: the dry ones over the water's, then the one nearest the shipped ground's height and any as near (as
+    -- WorldGrid's Ends), not every one: on a cliff's rim the cheapest start was the canyon's floor under it, and an
+    -- unsure start there gave up the join onto the route kept, Tanaris' rim searched four times, test_no_spell_settle)
+    list = ns.WorldGrid.DrySplit(ss)
+    local GS = ns.Ground and ns.Ground.Sample
+    local gz = #list > 1 and GS and GS(level, px, py)
+    if gz then
+      local d0
+      for _, e in ipairs(list) do d0 = math.min(d0 or math.huge, math.abs(e.z - gz)) end
+      local near = {}
+      for _, e in ipairs(list) do
+        if math.abs(e.z - gz) <= d0 + (ns.WorldGrid.SAME_FLOOR_Z or 1.5) then near[#near + 1] = e end
+      end
+      list = near
+    end
+  end
+  local cands = {}
+  for _, e in ipairs(list) do cands[#cands + 1] = { z = e.z, x = px, y = py } end
+  return cands
+end
+function N.TrackGridZ(level, px, py, decodedOnly)
   local WG = ns.WorldGrid
   if not (px and WG and WG.On and WG.On() and WG.SurfacesAt and WG.Cont) or (UnitOnTaxi and UnitOnTaxi("player")) then
     gridTrack = nil
@@ -3431,53 +3649,148 @@ function N.TrackGridZ(level, px, py)
   end
   local c = WG.Cont(level)
   if not c then gridTrack = nil return nil end
+  if decodedOnly and not (WG.Decoded and WG.Decoded(c, px, py)) then return nil end
   local ok, ss = pcall(WG.SurfacesAt, c, px, py)
   if not (ok and ss and ss[1]) then return nil end
+  local stacked = #ss > 1
+  -- (item 104: where they're stacked, the height band from range checks to NPCs standing still nearby leaves out the
+  -- surfaces out of it, when it leaves any: a cave's floor under the hill, or the hill)
+  local HB = ns.HeightBand
+  local inBand = stacked and HB and HB.Keep(HB.Here(level, px, py), ss, "z")
+  local cut = false
+  if inBand and #inBand < #ss then ss, cut = inBand, true end
   local now = GetTime()
   local t = gridTrack
-  local fresh = t and t.level == level and now - t.at < N.TRACK_STALE
-    and (t.x - px) ^ 2 + (t.y - py) ^ 2 <= N.GRID_TRACK_JUMP_YD ^ 2
-  local z
-  if #ss == 1 then
-    z = ss[1].z
-  elseif fresh then
-    local best, bd, below, bz
-    for _, e in ipairs(ss) do
-      local dz = math.abs(e.z - t.z)
-      if not bd or dz < bd then best, bd = e.z, dz end
-      if e.z < t.z and (not bz or e.z > bz) then below, bz = e.z, e.z end
-    end
-    z = (bd and bd <= N.GRID_TRACK_STEP) and best or below or best
-  else
-    -- (nothing followed yet: indoors (a cave) the highest surface under the terrain there, outdoors the one nearest the
-    -- terrain; his spot in Maraudon's outer cave has the cave's floor, 86.5, under the hill's top, 139)
-    local GS = ns.Ground and ns.Ground.Sample
-    local gz = GS and GS(level, px, py)
-    if gz then
-      local indoors = N.Indoors and N.Indoors()
-      local best, bd
-      for _, e in ipairs(ss) do
-        if indoors then
-          if e.z < gz - 3 and (not best or e.z > best) then best = e.z end
-        else
-          local dz = math.abs(e.z - gz)
-          if not bd or dz < bd then best, bd = e.z, dz end
+  local swimming = N.Swimming()
+  local indoors = N.Indoors and N.Indoors()
+  local fresh = t and t.level == level and now >= t.at and now - t.at < N.TRACK_STALE and t.cands[1]
+    and (t.x - px) ^ 2 + (t.y - py) ^ 2 <= N.GRID_TRACK_JUMP_YD ^ 2 and not (stacked and N.AtLift(level, px, py))
+  local cands
+  if fresh then
+    local fell = N.FellSince(t.at)
+    local water = {}
+    if swimming then for _, e in ipairs(ss) do if N.GridSwims(e) then water[#water + 1] = e end end end
+    if water[1] then
+      cands = {}
+      for _, e in ipairs(water) do cands[#cands + 1] = { z = e.z, x = px, y = py } end
+    else
+      -- (swimming stopped: out onto a pier, a shore; evidence too)
+      local evidence = fell or (t.swam and not swimming)
+      -- (not swimming, nothing seen: never onto the water's surface, 5.5 yd under Menethil's deck where the grid lacks
+      -- the deck; a fall into it is seen)
+      local onto = ss
+      if not fell then
+        onto = {}
+        for _, e in ipairs(ss) do if not N.GridSwims(e) then onto[#onto + 1] = e end end
+      end
+      local stepped, held = {}, {}
+      for _, k in ipairs(t.cands) do
+        local best, bd, below, nearest, nd
+        for _, e in ipairs(onto) do
+          local dz = math.abs(e.z - k.z)
+          if dz <= N.GRID_TRACK_STEP and (not bd or dz < bd) then best, bd = e.z, dz end
+          if e.z < k.z and (not below or e.z > below) then below = e.z end
+          if not nd or dz < nd then nearest, nd = e.z, dz end
+        end
+        local z = best or (evidence and (fell and below or nearest)) or nil
+        if z then
+          stepped[#stepped + 1] = z
+        elseif not evidence and (k.x - px) ^ 2 + (k.y - py) ^ 2 <= N.GRID_HOLD_YD ^ 2 then
+          held[#held + 1] = k
         end
       end
-      z = best
+      cands = {}
+      local function Has(z)
+        for _, k in ipairs(cands) do if math.abs(k.z - z) <= 0.5 then return true end end
+        return false
+      end
+      for _, z in ipairs(stepped) do
+        if not Has(z) then cands[#cands + 1] = { z = z, x = px, y = py } end
+      end
+      for _, k in ipairs(held) do
+        local mine = false -- (its floor stepped on: not a floor of its own)
+        for _, z in ipairs(stepped) do if math.abs(z - k.z) <= N.TRACK_STEP then mine = true break end end
+        if not mine and not Has(k.z) then cands[#cands + 1] = { z = k.z, x = k.x, y = k.y, held = true } end
+      end
+      if not cands[1] then cands = nil end
     end
   end
-  if z then
-    gridTrack = { level = level, z = z, x = px, y = py, at = now }
-  elseif not fresh then
-    gridTrack = nil
+  cands = cands or N.GridStart(level, px, py, ss, swimming, indoors)
+  -- (the band, when it leaves any of them)
+  if HB and stacked and #cands > 1 then
+    local keep = HB.Keep(HB.Here(level, px, py), cands, "z")
+    if keep and #keep < #cands then cands, cut = keep, true end
   end
-  -- (only where stacked, and indoors: a cave's crossing passages. Out on the land a height given each time moved the
-  -- route's start off the sand south of Gadgetzan and its walk to Uldum never landed, test_world_grid's)
-  return (#ss > 1 and N.Indoors and N.Indoors()) and z or nil
+  local z
+  if cands[1] then
+    local lo, hi = cands[1].z, cands[1].z
+    for _, k in ipairs(cands) do lo, hi = math.min(lo, k.z), math.max(hi, k.z) end
+    if hi - lo <= N.TRACK_STEP then
+      -- (one floor: the candidate nearest the one known before, else the first stepped)
+      local prev, bd = t and t.z, nil
+      for _, k in ipairs(cands) do
+        local d = prev and math.abs(k.z - prev) or (k.held and 1 or 0)
+        if not bd or d < bd then z, bd = k.z, d end
+      end
+      if cut and HB.NotePick then HB.NotePick(z, "band: world grid") end
+    end
+  end
+  gridTrack = { level = level, x = px, y = py, at = now, cands = cands, z = z, swam = swimming or nil,
+    indoors = indoors or nil, stacked = stacked or nil }
+  return (stacked and indoors) and z or nil
+end
+-- The world grid's floor followed by the status updates (N.Status), every GRID_SAMPLE_EVERY at most, where its tiles
+-- are decoded already: the candidates kept as the player moves, falls and swims, not only when a route is worked out.
+N.gridSampledAt = -math.huge
+function N.SampleGridFloor(level, px, py)
+  local now = GetTime()
+  if now >= N.gridSampledAt and now - N.gridSampledAt < N.GRID_SAMPLE_EVERY then return end
+  N.gridSampledAt = now
+  pcall(N.TrackGridZ, level, px, py, true)
+end
+-- The world grid's floors the player may be on at (px, py) on `level` while it's unsure which (N.TrackGridZ's
+-- candidates on more than one floor, looked at a moment ago within GRID_NEAR_YD): a list of heights, else nil.
+function N.GridCandidates(level, px, py)
+  local t = gridTrack
+  local now = GetTime()
+  if not (t and t.level == level and t.z == nil and t.cands and #t.cands > 1 and now >= t.at
+      and now - t.at < N.TRACK_STALE and (t.x - px) ^ 2 + (t.y - py) ^ 2 <= N.GRID_NEAR_YD ^ 2) then
+    return nil
+  end
+  local zs = {}
+  for _, k in ipairs(t.cands) do zs[#zs + 1] = k.z end
+  table.sort(zs)
+  zs.x, zs.y = px, py -- (where: WorldGrid.StartZs takes them for a walk from here only)
+  return zs
+end
+function N.ResetGridTrack() gridTrack, N.gridSampledAt = nil, -math.huge end -- (the tests)
+function N.SetGridTrackForTests(level, x, y, zs, sure) -- (the tests: candidates followed on these floors; `sure`: one known)
+  local cands = {}
+  for _, z in ipairs(zs) do cands[#cands + 1] = { z = z, x = x, y = y } end
+  gridTrack = { level = level, x = x, y = y, at = GetTime(), cands = cands, z = sure and cands[1] and cands[1].z or nil,
+    stacked = true }
+end
+-- The world grid's floor the player is known to be on at (px, py) on `level`, where its surfaces lie over each other
+-- (item 117b, 1.4.1: a reroute off the route starts on the floor the player is on, out on the land too: a bridge's
+-- deck, a ledge over a cave, a cave's passage the game calls outdoors). Only the floor followed by the status updates a
+-- moment ago within GRID_NEAR_YD (N.TrackGridZ's, no surface looked up here: a route's job calls it); nil when it
+-- isn't known (unsure: N.GridCandidates), nothing is stacked there, or nothing was followed.
+function N.GridStartZ(level, px, py)
+  local t = gridTrack
+  local now = GetTime()
+  if not (t and t.z and t.stacked and t.level == level and px and now >= t.at and now - t.at < N.TRACK_STALE
+      and (t.x - px) ^ 2 + (t.y - py) ^ 2 <= N.GRID_NEAR_YD ^ 2) then
+    return nil
+  end
+  return t.z
 end
 -- The floor followed over the world grid's stacked surfaces (N.TrackGridZ) a moment ago on `level`, or nil.
+-- Indoors only, as before item 106 (it's followed out on the land too now: the map's floor fade, G.FloorFade, stays
+-- off outdoors; N.GridTrackZ: wherever).
 function N.GridFollowedZ(level)
+  return gridTrack and gridTrack.indoors and N.GridTrackZ(level) or nil
+end
+function N.GridTrackZ(level)
   local t = gridTrack
   local now = GetTime()
   if t and t.z and t.level == level and now >= t.at and now - t.at < N.TRACK_STALE then return t.z end
@@ -3872,7 +4185,8 @@ local function CompareRide(cont, sx, sy, d, walk, tps, opts, sz, full)
   if opts.transient then qx, qy = math.floor(sx / q + 0.5) * q, math.floor(sy / q + 0.5) * q end
   local legs = N.Plan(cont, qx, qy, walk, d, tps, math.huge)
   -- (its plans' walks are side walks, `side`: to docks and flight masters, searched WorldGrid.SIDE_WALK_CAP nodes at
-  -- most; the walks to the stop itself and the walk all the way, `lr`, as ever)
+  -- most; the walks to the stop itself too once the walk all the way is known (`sideStop`, below); that walk, `lr`, as
+  -- ever)
   local sideOpts = { side = true }
   for k, v in pairs(opts.fixed or {}) do sideOpts[k] = v end
   local fixed = { fixed = sideOpts }
@@ -3891,6 +4205,13 @@ local function CompareRide(cont, sx, sy, d, walk, tps, opts, sz, full)
   local exempt = Rt and Rt.ZoneAt and { [Rt.ZoneAt(Geo.Base(cont), sx, sy)] = true, [Rt.ZoneAt(Geo.Base(d.cont), d.x, d.y)] = true }
   local walkGuard = (noWalk or Unwalkable(lr)) and 0 or N.HostileWalkYards(cont, lr.pts)
   local walkSecs = (noWalk or Unwalkable(lr)) and math.huge or Weighed(cont, lr.pts, walk, exempt, lr.blocked)
+  -- (the walk all the way known (routed, a way found): the plans' walks to the stop itself are side walks too, `sideStop`
+  -- (WorldGrid.SIDE_WALK_CAP). A plan is only weighed against that walk then, and one whose last walk needs more isn't
+  -- better. 1.4.0's leftover, the route-speed study: from Thelsamar to Kharanos as a Horde player the route settled in
+  -- about 25 s, but the plans' walks from Grom'gol's and Tirisfal's docks to Kharanos searched 150,000 nodes round the
+  -- guards and 200,000 through them, one plan after another, none finding a way: over a million nodes, the background
+  -- never quiet)
+  if not noWalk and lr and not lr.pending and not Unwalkable(lr) then sideOpts.sideStop = true end
   -- (issue #348: as an Alliance player walking by Brill, every check was provisional, the ride's walks to far flight
   -- masters and docks, 6k to 30k yd, still searched: each check routed them all, 2 s of background work, and was queued
   -- again at the next recalculation, without a break, though the walk took 211 s and the rides alone thousands.) The
@@ -4714,7 +5035,7 @@ end
 local function FlightSeconds(from, to, fromNode, toNode)
   local cdb = ns.CharDB and ns.CharDB()
   local took = from and to and cdb and cdb.flights and cdb.flights[from .. " > " .. to]
-  if took then return took.seconds end
+  if took then return N.RecordedFlightSecs(took) end
   local _, a = MasterNamed(from, fromNode)
   local _, b = MasterNamed(to, toNode)
   local fl = a and b and Flights()
@@ -4826,7 +5147,7 @@ function N.FlyingRoute(px, py, cont, walk, offroad, f)
   -- along the flight's path at flight speed (N.FlightLeft: through its stops on the way; a
   -- straight line to the landing held a flight with stops up, reported 2026-10-01)
   local left, path = N.FlightLeft(f.from, f.to, px, py, land, f.fromNode, f.toNode)
-  local secs = left / N.FLIGHT_SPEED
+  local secs = left / (N.FLIGHT_SPEED * N.FlightSpeedFactor())
   local total = FlightSeconds(f.from, f.to, f.fromNode, f.toNode)
   if total then secs = math.max(secs, total - (GetTime() - f.start)) end
   local row = { cont, px, py, land[1], land[2], land[3], secs, "flight", f.from or "?", f.to, "flight master", flying = true }
@@ -5212,6 +5533,20 @@ function N.StopLevel(cont, x, y)
 end
 
 local Apply, Rejoin
+-- The floor a route from the player at (px, py) on `cont` starts on: z (a height), else zs (the floors they may be on,
+-- N.GridCandidates), else nothing (the walk's own guess). Compute's and Rejoin's (item 117b: a reroute off the route, and
+-- the short way back onto a long walk, from the cell and the floor the player is on).
+function N.StartFloor(cont, px, py)
+  -- (indoors: item 45, a cave's stacked floors, looked up. Out on the land only the floor the status updates followed,
+  -- N.GridStartZ: there its surface look-ups in the route's job held the sand-to-Uldum walk back from landing)
+  local gridZ = N.Indoors and N.Indoors() and N.TrackGridZ(cont, px, py) or nil
+  local z = N.PlayerZ() or N.TrackCityZ(cont, px, py) or N.TrackRouteZ(cont, px, py) or N.TrackRaisedZ(cont, px, py)
+    or gridZ or N.GridStartZ(cont, px, py)
+  -- (item 106: no floor known, the world grid's candidates followed (N.TrackGridZ): the walk starts from each of them
+  -- and keeps the cheapest, WorldGrid's Ends)
+  local zs = not z and N.GridCandidates(cont, px, py) or nil
+  return z, zs
+end
 -- The jobs of a reroute off the route (N.Route): while one is queued, the pump's bigger slices (GPS.PumpBudget), so the
 -- route from where the player went lands in a few frames, not the 1 ms a frame of a route being kept up.
 local hurried
@@ -5243,13 +5578,10 @@ local function Compute(px, py, cont, d, offroad, firstOnly)
   local t1 = ns.PerfStart and ns.PerfStart()
   N.noWayCliff = nil -- (set again by the stretches: no way but a cliff)
   N.noWayGrid = nil -- (and no way on the world grid's data)
-  -- (indoors only: item 45, a cave's stacked floors; out on the land its surface look-ups in the route's job held the
-  -- sand-to-Uldum walk back from landing)
-  local gridZ = N.Indoors and N.Indoors() and N.TrackGridZ(cont, px, py) or nil
+  local z, zs = N.StartFloor(cont, px, py)
   local first = Stretch(cont, px, py, d, walk, { offroad = offroad, transient = true, fixed = { offroad = offroad },
     teleports = tps, indoors = N.Indoors(), swimming = N.Swimming(), here = here, capitalMap = N.InCapitalMap(),
-    z = N.PlayerZ() or N.TrackCityZ(cont, px, py) or N.TrackRouteZ(cont, px, py) or N.TrackRaisedZ(cont, px, py)
-      or gridZ })
+    z = z, zs = zs })
   if t1 then ns.PerfEnd("route calculation: next stop", t1) end
   if not first then return nil end
   if ns.Router.Breathe then ns.Router.Breathe(1, 1) end
@@ -5310,8 +5642,12 @@ function Rejoin(old, px, py, cont, offroad)
   while cum[j + 1] < along do j = j + 1 end
   local f = (along - cum[j]) / math.max(cum[j + 1] - cum[j], 1e-6)
   local tx, ty = pts[2 * j - 1] + (pts[2 * j + 1] - pts[2 * j - 1]) * f, pts[2 * j] + (pts[2 * j + 2] - pts[2 * j]) * f
+  -- (from the player's floor: item 117b, as Compute's)
+  local sz, szs
+  if full.cont == cont then sz, szs = N.StartFloor(cont, px, py) end -- (a city's level: its heights its own)
   local lr = ns.Router.Route(full.cont, px, py, tx, ty, { offroad = offroad, transient = true,
-    maxDrop = N.LegMaxDrop(N.stops[1]) }) -- (the first leg's jumps avoided: N.AvoidLegJumps)
+    maxDrop = N.LegMaxDrop(N.stops[1]), -- (the first leg's jumps avoided: N.AvoidLegJumps)
+    z = sz, zs = szs, indoors = N.Indoors(), swimming = N.Swimming() })
   if not lr or Unwalkable(lr) then return nil end
   local np, nk = {}, {}
   for k = 1, #lr.pts do np[k] = lr.pts[k] end
@@ -6701,12 +7037,13 @@ function N.Steps()
         if leg.ride then
           local t, from = leg.ride, leg.from
           steps[#steps + 1] = t.flying and N.RidingText(r.flying and r.flying.kind, t[10])
+            or t.ask and Format(L["Ask %s for a portal (to %s)"], t.ask, t[10])
             or t.use and Format(L["Use %s (to %s)"], t[8], t[10])
             or t.learn and Format(L["Learn the flight path, then take the flight to %s"], t[10])
             or N.TAKE[t[8]] and Format(N.TAKE[t[8]], ns.RideEndName(t, from == 1 and 2 or 1))
             or Format(L["Take the %s to %s"], t[8], ns.RideEndName(t, from == 1 and 2 or 1))
           -- (the hearthstone or a teleport kept for a later stop, AssignTeleports: N.TeleportAheadText)
-          if t.use and i > 1 and not steps.teleportAt then
+          if t.use and not t.ask and i > 1 and not steps.teleportAt then
             steps.teleportAt = #steps
             steps.teleportText = Format(L["|cffffd100Use %s after %s|r (to %s)"], t[8], StopLabel(i - 1, N.stops[i - 1], count), t[10])
           end
@@ -6824,6 +7161,51 @@ local function CorpseSpot()
   end
 end
 
+-- The floor the player died on (item 117c, 1.4.1): the game gives the body's spot on the map only, no height, and a
+-- body in a cave under a hill, on a ledge or a bridge was walked to on whichever floor the walk's end guessed (the dry
+-- ground nearest the shipped ground's height: the hill's top over the cave). At PLAYER_DEAD the floor followed there
+-- (N.FollowedZ: a building's, a bridge's; else the world grid's, N.GridTrackZ: known, not merely a candidate) is noted
+-- with the spot, kept in the character's saved stops' table (a /reload as a ghost) until alive again; the body's stop
+-- takes it as its route's height (`guessZ`, N.StopZ; zSource "death") when its spot is within CORPSE_FLOOR_YD of where
+-- they died. Arriving still goes by the yards alone, as for every corpse.
+N.CORPSE_FLOOR_YD = 15
+function N.NoteDeath()
+  local px, py, cont = Geo.PlayerWorld()
+  N.deathFloor = nil
+  local cdb = ns.CharDB and ns.db and ns.CharDB()
+  if cdb then cdb.deathFloor = nil end
+  if not (px and cont) then return nil end
+  local level = N.PlayerLevel(cont)
+  if level ~= cont then return nil end -- (down in a city's level: its heights are its own, not the continent's)
+  N.NoteFloorEvidence() -- (a fall to the death: its landing's floor)
+  pcall(N.TrackCityZ, level, px, py)
+  pcall(N.TrackGridZ, level, px, py, true)
+  local z = N.PlayerZ() or N.FollowedZ(level) or N.GridTrackZ(level)
+  if not z then return nil end
+  N.deathFloor = { cont = cont, x = px, y = py, z = z }
+  if cdb then cdb.deathFloor = N.deathFloor end
+  return z
+end
+-- The floor noted at death for a body at (x, y) on `cont`, or nil.
+function N.DeathFloor(cont, x, y)
+  local df = N.deathFloor
+  if not df then
+    local cdb = ns.CharDB and ns.db and ns.CharDB()
+    df = cdb and type(cdb.deathFloor) == "table" and cdb.deathFloor or nil
+    N.deathFloor = df
+  end
+  if not (df and df.cont == cont and type(df.z) == "number" and df.x and x) then return nil end
+  if (df.x - x) ^ 2 + (df.y - y) ^ 2 > N.CORPSE_FLOOR_YD ^ 2 then return nil end
+  return df.z
+end
+do -- (the player died: their floor noted, N.NoteDeath)
+  local ok, f = pcall(CreateFrame, "Frame")
+  if ok and f then
+    pcall(f.RegisterEvent, f, "PLAYER_DEAD")
+    f:SetScript("OnEvent", function() pcall(N.NoteDeath) end)
+  end
+end
+
 function N.DeathCheck()
   local now = GetTime()
   if now - corpseCheckAt < N.CORPSE_CHECK then return end
@@ -6834,6 +7216,8 @@ function N.DeathCheck()
   if ghost then
     local cont, x, y = CorpseSpot()
     if cont then body = { x = x, y = y, cont = cont, name = L["Your body"], icon = N.CORPSE_ICON, corpse = true } end
+    local fz = body and N.DeathFloor(cont, x, y)
+    if fz then body.guessZ, body.zSource = fz, "death" end
   end
   local d = N.stops[1]
   if body and d and d.corpse and d.cont == body.cont and math.abs(d.x - body.x) < 1 and math.abs(d.y - body.y) < 1 then
@@ -6851,6 +7235,10 @@ function N.DeathCheck()
   if body then
     table.insert(N.stops, 1, body)
     changed = true
+  elseif changed and not ghost then -- (alive again: the floor died on forgotten)
+    N.deathFloor = nil
+    local cdb = ns.CharDB and ns.db and ns.CharDB()
+    if cdb then cdb.deathFloor = nil end
   end
   N.corpse = body ~= nil or nil
   if changed then Changed() end
@@ -7343,7 +7731,7 @@ local function CheckArrival(px, py, cont)
       d.spotReached = true -- at the spot, its quests still open: stay (see QuestCheck)
       at = false
     end
-    if d.rxp or d.zygor or d.polestar or d.questify or d.apr then at = false end -- a guide's step: done when its guide checks it off, not by getting there
+    if d.rxp or d.zygor or d.polestar or d.questify or d.apr or d.openxp then at = false end -- a guide's step: done when its guide checks it off, not by getting there
     if d.boss then -- a boss: done when it dies (wherever you are), not by getting there
       at = false
       if not d.bossDone and N.BossDead(d) then d.bossDone = true end
@@ -7725,8 +8113,11 @@ function N.Status(px, py, cont)
   cont = N.PlayerLevel(cont)
   N.TrackCityZ(cont, px, py) -- (down in a city with floors: the player's floor followed as they move)
   N.TrackRaisedZ(cont, px, py) -- (and onto a bridge drawn over the land, from its end)
+  N.NoteFloorEvidence() -- (item 106: a fall seen, for the floors followed)
+  N.SampleGridFloor(cont, px, py) -- (and the world grid's floors the player may be on, where its tiles are decoded)
   N.RoomWatch(px, py, cont) -- (a room reached through a teleporter: the player put there by it)
   N.DeathCheck()
+  if ns.Unstuck then ns.Unstuck.Watch(px, py, cont) end -- (item 117a: pushing into a wall the grids know)
   if not N.dest then
     N.QuestCheck(px, py, cont) -- (no route: the quest areas you're in, for the arrow window)
     if N.arrivedAt then return L["|cff40ff40Arrived|r"] end -- (the last stop just reached)
@@ -7782,12 +8173,19 @@ function N.Status(px, py, cont)
     head = "|cffffd100" .. N.RidingText(r.flying.kind, r.flying.to) .. "|r  " .. N.RidingWhen(r.flying.kind, r.flying.seconds)
   elseif t then
     local to = ns.RideEndName(t, from == 1 and 2 or 1)
-    if t.use then
+    if t.ask then -- (a party mage's portal, Teleports.lua)
+      head = Format(L["|cffffd100Ask %s for a portal|r (to %s)"], t.ask, to)
+    elseif t.use then
       head = Format(L["|cffffd100Use %s|r (to %s)"], t[8], to)
     elseif atDock and t.learn then
       head = Format(L["|cffffd100Learn the flight path, then fly to %s|r"], to)
     elseif atDock then
       head = "|cffffd100" .. (N.BOARD[t[8]] and Format(N.BOARD[t[8]], to) or Format(L["Board the %s to %s"], t[8], to)) .. "|r"
+      -- (a lift's: its next car there when known, item 118, Lifts.lua)
+      local LT = t[8] == "lift" and ns.Lifts
+      local lift = LT and LT.RideLift and LT.RideLift(t, from)
+      local w = lift and LT.WaitWords(lift.level, lift.x, lift.y, lift.floor)
+      if w then head = head .. "  " .. w end
     else
       local there = N.TO_RIDE[t[11] or t[8]]
       head = head .. "  " .. (there and Format(there, to) or Format(L["to the %s (then to %s)"], t[11] or t[8], to))
@@ -7823,6 +8221,9 @@ function N.Status(px, py, cont)
     head = table.concat(q, "\n") .. "\n" .. head
   end
   if hint then head = head .. "\n" .. hint end
+  -- (pushing into a wall: the nearest way round it, Unstuck.lua)
+  local stuck = ns.Unstuck and ns.Unstuck.Text(px, py, cont)
+  if stuck then head = head .. "\n|cffffd100" .. stuck .. "|r" end
   local into = N.IntoBuildingText(px, py, cont) -- (a stop up a floor with no road there: the way on, in words)
   if into then head = head .. "\n" .. into end
   if N.Checking() then head = head .. "\n|cff9d9d9d" .. N.CheckingText() .. "|r" end -- (the route shown faded meanwhile)
@@ -8125,7 +8526,17 @@ end
 function N.LandHeightHint(lvl, px, py, tx, ty, d)
   if not (tx == d.x and ty == d.y) then return nil end -- (the stop itself, not a ride's dock)
   if (tx - px) ^ 2 + (ty - py) ^ 2 > N.LAND_HINT_YD ^ 2 then return nil end
-  local zs = d.z or N.GroundAt(lvl, tx, ty)
+  -- (a stop with no height of its own in a capital, a building or a city grid's box: its guess (N.GuessStopZ: the
+  -- grid's floor there), never the map's ground, the rock under the city or the hill over it. Item 97: a guard's
+  -- marker in Orgrimmar's Hunter's Hall, the ground 9 under the hall's floor at 59: "Below you, 50 yd down" in the hall)
+  local zs = d.z
+  if not zs then
+    if N.InCapital(lvl, tx, ty) or N.InBuilding(lvl, tx, ty) or N.InGridBox(lvl, tx, ty) then
+      zs = d.guessZ
+    else
+      zs = N.GroundAt(lvl, tx, ty)
+    end
+  end
   local zp = N.PlayerHeightNear(lvl, px, py)
   if not (zs and zp) or math.abs(zs - zp) < N.LAND_HINT_Z then return nil end
   return zs < zp and "down" or "up", math.abs(zs - zp)
@@ -8173,12 +8584,115 @@ function N.SlopeText()
     .. Format(way == "down" and L["%s down"] or L["%s up"], N.FormatDistance(dz, true)) .. "|r"
 end
 
+-- "It's over the ridge" (1.4.1, item 113b): out on the land, a stop within RIDGE_YD the player can't see, the ground
+-- between rising RIDGE_SHOW_Z or more over the line from the player's eye to it (the map's ground, Ground.lua; the
+-- player's height as N.PlayerHeightNear has it, never the game's), and which way round the route goes: the side of the
+-- line its farthest point is on, RIDGE_ROUND_YD or RIDGE_ROUND_SHARE of the way off it (else it goes up and over). On
+-- the world grid, a stop on about the player's level (RIDGE_LEVEL_Z) the grid can't walk to straight (WorldGrid.Clear:
+-- a wall's sides have no links) with the route RIDGE_DETOUR times as long is behind a wall. Said while it holds, down
+-- to RIDGE_KEEP_Z (no flicking at the crest); worked out again RIDGE_STEP_YD on or after RIDGE_SECS.
+-- "ridge" | "wall", "left" | "right" | nil; or nil.
+N.RIDGE_YD, N.RIDGE_MIN_YD = 150, 20
+N.RIDGE_EYE_Z = 2 -- (yards over the ground: the player's eye, and the stop's own middle)
+N.RIDGE_SHOW_Z, N.RIDGE_KEEP_Z = 3, 1
+N.RIDGE_SAMPLE_YD = 3
+N.RIDGE_ROUND_YD, N.RIDGE_ROUND_SHARE = 15, 0.25
+N.RIDGE_LEVEL_Z, N.RIDGE_DETOUR, N.RIDGE_WALL_YD = 6, 1.5, 80
+N.RIDGE_STEP_YD, N.RIDGE_SECS = 3, 1
+N.ridgeKept = nil -- { d, x, y, at, kind, side }
+function N.RidgeSide(r, px, py, tx, ty, D)
+  local part = r and r.parts and r.parts[1]
+  local pts = part and part.pts
+  if not pts then return nil end
+  local vx, vy = tx - px, ty - py
+  local best, bestAbs, along = 0, 0, 0
+  for k = 1, #pts / 2 do
+    if k > 1 then along = along + math.sqrt((pts[2 * k - 1] - pts[2 * k - 3]) ^ 2 + (pts[2 * k] - pts[2 * k - 2]) ^ 2) end
+    if along > 4 * D then break end
+    -- (X north, Y west: + is to the left of the line, as Turns.Bend's)
+    local off = (vx * (pts[2 * k] - py) - vy * (pts[2 * k - 1] - px)) / D
+    if math.abs(off) > bestAbs then best, bestAbs = off, math.abs(off) end
+  end
+  if bestAbs < math.max(N.RIDGE_ROUND_YD, N.RIDGE_ROUND_SHARE * D) then return nil end
+  return best > 0 and "left" or "right"
+end
+function N.RidgeHint(px, py, cont)
+  local d, r = N.dest, N.route
+  if not (d and r and px and d.x and not r.flying) then N.ridgeKept = nil return nil, nil end
+  local lvl = N.PlayerLevel(cont)
+  if d.cont ~= lvl or (ns.CityLevels and ns.CityLevels[lvl]) then return nil, nil end
+  local legs = r.legs
+  if legs and legs[1] and legs[1].walk and legs[2] and legs[2].ride then return nil, nil end -- (a ride first: not the stop)
+  local tx, ty = d.x, d.y
+  local D = math.sqrt((tx - px) ^ 2 + (ty - py) ^ 2)
+  if D > N.RIDGE_YD or D < N.RIDGE_MIN_YD then N.ridgeKept = nil return nil, nil end
+  local now = GetTime and GetTime() or 0
+  local k = N.ridgeKept
+  if k and k.d == d and (k.x - px) ^ 2 + (k.y - py) ^ 2 < N.RIDGE_STEP_YD ^ 2 and now - k.at < N.RIDGE_SECS then
+    return k.kind, k.side
+  end
+  local shown = k and k.d == d and k.kind or nil
+  local kind
+  -- (not in a capital, a building or over a cave: the ground there is the rock over the floor walked)
+  if not (N.InCapital(lvl, px, py) or N.InCapital(lvl, tx, ty) or N.InBuilding(lvl, px, py) or N.InBuilding(lvl, tx, ty)
+      or N.InGridBox(lvl, tx, ty) or N.InGridBox(lvl, px, py) or N.Indoors() == true) then
+    local WG = ns.WorldGrid
+    local over = WG and WG.CaveAt and (WG.CaveAt(lvl, px, py) or WG.CaveAt(lvl, tx, ty))
+    local zp = not over and N.PlayerHeightNear(lvl, px, py)
+    local zs = zp and (d.z or N.GroundAt(lvl, tx, ty))
+    if zp and zs then
+      local e0, e1 = zp + N.RIDGE_EYE_Z, zs + N.RIDGE_EYE_Z
+      local n = math.floor(D / N.RIDGE_SAMPLE_YD)
+      local top, seen = -math.huge, 0
+      for q = 1, n - 1 do
+        local t = q / n
+        local g = N.GroundAt(lvl, px + (tx - px) * t, py + (ty - py) * t)
+        if g then
+          seen = seen + 1
+          top = math.max(top, g - (e0 + (e1 - e0) * t))
+        end
+      end
+      if seen >= (n - 1) / 2 and top >= (shown == "ridge" and N.RIDGE_KEEP_Z or N.RIDGE_SHOW_Z) then kind = "ridge" end
+      -- (behind a wall, on the world grid: about level, not straight across on its floor, and well round)
+      if not kind and D <= N.RIDGE_WALL_YD and math.abs(zs - zp) < N.RIDGE_LEVEL_Z and WG and WG.On and WG.On()
+          and WG.Clear and (r.walkYards or 0) >= N.RIDGE_DETOUR * D then
+        local c = WG.Cont(lvl)
+        if c and not WG.Clear(c, px, py, zp, tx, ty, zs) then kind = "wall" end
+      end
+    end
+  end
+  local side = kind and N.RidgeSide(r, px, py, tx, ty, D) or nil
+  N.ridgeKept = { d = d, x = px, y = py, at = now, kind = kind, side = side }
+  return kind, side
+end
+N.RIDGE_WORDS = {
+  ridge = { left = L["Over the ridge, round to the left"], right = L["Over the ridge, round to the right"],
+    none = L["Over the ridge, up and over"] },
+  wall = { left = L["Behind a wall, round to the left"], right = L["Behind a wall, round to the right"] },
+}
+function N.RidgeText(px, py, cont)
+  local kind, side = N.RidgeHint(px, py, cont)
+  local w = kind and N.RIDGE_WORDS[kind]
+  local t = w and w[side or "none"]
+  return t and ("|cffd8c8a0" .. t .. "|r") or nil
+end
+
 function N.HeightText(px, py, cont)
+  local ridge = N.RidgeText(px, py, cont)
   local way, yd = N.HeightHint(px, py, cont)
-  if not way then return N.SlopeText() end
-  local color = way == "down" and "|cff80c0ff" or "|cffffc080"
-  if not yd then return color .. (way == "down" and L["Below you (down a lift)"] or L["Above you (up a lift)"]) .. "|r" end
-  return color .. Format(way == "down" and L["Below you, %s down"] or L["Above you, %s up"], N.FormatDistance(yd, true)) .. "|r"
+  local h
+  if not way then
+    h = N.SlopeText()
+  else
+    local color = way == "down" and "|cff80c0ff" or "|cffffc080"
+    if not yd then
+      h = color .. (way == "down" and L["Below you (down a lift)"] or L["Above you (up a lift)"]) .. "|r"
+    else
+      h = color .. Format(way == "down" and L["Below you, %s down"] or L["Above you, %s up"], N.FormatDistance(yd, true)) .. "|r"
+    end
+  end
+  if ridge and h then return ridge .. "  " .. h end
+  return ridge or h
 end
 
 -- A stop that's a service (a guard's "Bank", "Auction House", a trainer...) is reached when
@@ -8297,6 +8811,7 @@ end
 function N.AvoidLegSwim(i)
   local d = N.stops[i]
   if not d or d.avoidSwim then return false end
+  N.NoteAvoid({ what = "swim", key = N.RiskKey(d) })
   d.avoidSwim = true
   N.SaveStops()
   N.Invalidate(true, true)
@@ -8308,11 +8823,69 @@ function N.AvoidLegJumps(i, kind)
   local d = N.stops[i]
   if not (d and (kind == "spell" or kind == "all")) then return false end
   if d.avoidJumps == "all" or d.avoidJumps == kind then return false end
+  N.NoteAvoid({ what = "jumps", key = N.RiskKey(d), old = d.avoidJumps })
   d.avoidJumps = kind
   N.SaveStops()
   N.Invalidate(true, true)
   if ns.GPS and ns.GPS.Redraw then ns.GPS.Redraw() end
   return true
+end
+-- Undo for the avoids above (item 96, 1.4.1: the controller's Undo while picking a jump or swim, Pad.lua; Kooki3z asked
+-- for "avoid ... and undo"): each avoid made (a leg's jumps, a leg's swim, a trip's swim ban with world routing off) is
+-- noted, the last one taken back first. One whose stop is gone (reached, removed, another trip) or whose trip's swim
+-- bans were replaced is skipped. Not saved: a /reload starts with none.
+N.avoidUndo = {}
+N.AVOID_UNDO_MAX = 20
+function N.NoteAvoid(e)
+  local list = N.avoidUndo
+  list[#list + 1] = e
+  if #list > N.AVOID_UNDO_MAX then table.remove(list, 1) end
+end
+-- the stop an undo entry is for (by its spot, N.RiskKey: the stops are copied as they're set again), or nil
+do -- (its locals in a block: the file's main chunk is at Lua 5.1's 200)
+local function UndoStop(e)
+  for _, d in ipairs(N.stops) do
+    if d.x and N.RiskKey(d) == e.key then return d end
+  end
+  return nil
+end
+local function UndoValid(e)
+  if e.what == "skipSwim" then return e.bans == N.swimBans and #N.swimBans >= e.n end
+  local d = UndoStop(e)
+  if not d then return false end
+  if e.what == "swim" then return d.avoidSwim == true end
+  return d.avoidJumps ~= nil and d.avoidJumps ~= e.old
+end
+-- Whether there's an avoid to take back now.
+function N.CanUndoAvoid()
+  for i = #N.avoidUndo, 1, -1 do
+    if UndoValid(N.avoidUndo[i]) then return true end
+  end
+  return false
+end
+-- The last avoid taken back (the route worked out again); false with none.
+function N.UndoAvoid()
+  local list = N.avoidUndo
+  while #list > 0 do
+    local e = table.remove(list)
+    if UndoValid(e) then
+      if e.what == "skipSwim" then
+        for k = #N.swimBans, e.n + 1, -1 do N.swimBans[k] = nil end
+        N.noSwim = e.noSwim
+        N.SaveStops()
+        N.SyncSwim()
+      else
+        local d = UndoStop(e)
+        if e.what == "swim" then d.avoidSwim = nil else d.avoidJumps = e.old end
+        N.SaveStops()
+      end
+      N.Invalidate(true, true)
+      if ns.GPS and ns.GPS.Redraw then ns.GPS.Redraw() end
+      return true
+    end
+  end
+  return false
+end
 end
 -- The fall spell the trip's drops are planned with (Kooki3z 2026-11-23: "allow right click to avoid the jump using
 -- spell or item"): a jump's right-click, "Use Slow Fall" (FallSpells.RowKey); FallSpells.Look takes it while it's

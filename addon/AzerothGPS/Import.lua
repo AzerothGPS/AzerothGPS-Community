@@ -208,7 +208,8 @@ end
 -- an open map (see GPS.RouteChanged).
 function I.AddMapPin(pin)
   local N = ns.Nav
-  local stop = { cont = pin.cont, x = pin.x, y = pin.y, name = pin.name, tex = pin.tex, z = pin.z }
+  local stop = { cont = pin.cont, x = pin.x, y = pin.y, name = pin.name, tex = pin.tex, z = pin.z, npcId = pin.npcId,
+    npcName = pin.npcName }
   if #N.stops > 0 then
     local ok, asked = N.AddStop(stop, ns.settings and ns.settings.gps.fastestOrder)
     if not ok then

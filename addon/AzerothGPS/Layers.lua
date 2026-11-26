@@ -2633,16 +2633,17 @@ end
 -- Every enemy mob, shipped (Data/Mobs.lua, `agps mobs`; 1.4.0, Kooki3z 2026-11-22: "add all enemy mobs to the search
 -- function, only showing the closest one in the list"): read from its one string at the first search, never at login,
 -- and only each line's head (id, name, levels, side): a mob's spawns are read when the search finds it (L.MobSpawns).
--- Each { id, name, lo, hi (its levels), side (the enemy of "A", "H" or "B": both), packed (its spawns' text) }. Read
--- again when the string changes (the tests' own).
+-- Each { id, name, lo, hi (its levels), side (the enemy of "A", "H" or "B": both), rank (creature_template's: 0
+-- normal, 1 elite, 2 rare elite, 3 boss, 4 rare; item 91), packed (its spawns' text) }. Read again when the string
+-- changes (the tests' own).
 function Lay.ShippedMobs()
   local packed = ns.MobsPacked
   if Lay.mobsFrom == packed and Lay.shippedMobs then return Lay.shippedMobs end
   local out = {}
   if type(packed) == "string" then
-    for id, name, lo, hi, side, spawns in packed:gmatch("(%d+)|([^|\n]+)|(%d+)|(%d+)|(%a)|([^\n]*)") do
+    for id, name, lo, hi, side, rank, spawns in packed:gmatch("(%d+)|([^|\n]+)|(%d+)|(%d+)|(%a)|(%d)|([^\n]*)") do
       out[#out + 1] = { id = tonumber(id), name = name, lo = tonumber(lo), hi = tonumber(hi), side = side,
-        packed = spawns }
+        rank = tonumber(rank), packed = spawns }
     end
   end
   Lay.mobsFrom, Lay.shippedMobs = packed, out
@@ -2769,6 +2770,66 @@ function Lay.PlaceZ(cont, x, y, name)
   return nil
 end
 
+-- The shipped place (its English name, Data/CityPlaces.lua or TownPlaces) a guard's map marker named `name` at (x, y)
+-- on `cont` marks, or nil. The game's names aren't always ours (item 97, Kooki3z 2026-11-26: a guard's "Orgrimmar
+-- Hunter's Hall" is our "Orgrimmar Hunter Trainer"; the server's list has "Bank of Orgrimmar", "Undercity Warrior
+-- Trainers"): taken by name, the stop had no height, no NPC and no Target button, and in the hall it said "Below you,
+-- 50 yd down" by the rock's height under it. The same name; else the nearest within PLACE_Z_YD whose service starts as
+-- the marker's first word does (or that word as it: "Tailor", "Tailoring Trainer"), the city's name, "of", "the", "'s"
+-- and a plural's "s" left out; else, in another language's client (its names not ours), the only place within
+-- GUARD_PLACE_YD.
+Lay.GUARD_PLACE_YD = 12
+local function PlacesNear(cont, x, y, r)
+  local out = {}
+  local base = Geo.Base(cont)
+  for ui, c in pairs(ns.CityPlaces or {}) do
+    for _, p in ipairs(c) do
+      local px, py, pc = Lay.MapToWorld(ui, p[1] / 100, p[2] / 100)
+      local d2 = px and Geo.Base(pc) == base and (px - x) ^ 2 + (py - y) ^ 2
+      if d2 and d2 <= r * r then out[#out + 1] = { name = p[3], town = c.city, d2 = d2 } end
+    end
+  end
+  for _, t in pairs(ns.TownPlaces or {}) do
+    if t.cont == base then
+      for _, p in ipairs(t) do
+        local d2 = p.x and (p.x - x) ^ 2 + (p.y - y) ^ 2
+        if d2 and d2 <= r * r then out[#out + 1] = { name = p[1], town = t.town, d2 = d2 } end
+      end
+    end
+  end
+  table.sort(out, function(a, b) return a.d2 < b.d2 end)
+  return out
+end
+local function FirstWord(name, town)
+  local s = " " .. name:lower():gsub("'s%f[%A]", "") .. " "
+  if town then s = s:gsub(" " .. town:lower():gsub("%p", "%%%0") .. " ", " ") end
+  for word in s:gmatch("%a+") do
+    if word ~= "of" and word ~= "the" then
+      -- (Lua 5.5: a for loop's variable is constant)
+      if #word > 4 and word:sub(-1) == "s" then return word:sub(1, -2) end
+      return word
+    end
+  end
+  return nil
+end
+function Lay.GuardPlace(cont, x, y, name)
+  if not (cont and x and y and type(name) == "string") then return nil end
+  local near = PlacesNear(cont, x, y, Lay.PLACE_Z_YD)
+  local want = name:lower()
+  for _, p in ipairs(near) do
+    if p.name:lower() == want then return p.name end
+  end
+  for _, p in ipairs(near) do
+    local a, b = FirstWord(name, p.town), FirstWord(p.name, p.town)
+    if a and b and (a == b or (#a >= 4 and #b >= 4 and (a:sub(1, #b) == b or b:sub(1, #a) == a))) then return p.name end
+  end
+  local loc = ns.LOCALE or (GetLocale and GetLocale()) or "enUS"
+  if loc == "enUS" or loc == "enGB" then return nil end
+  local close = PlacesNear(cont, x, y, Lay.GUARD_PLACE_YD)
+  if #close == 1 then return close[1].name end
+  return nil
+end
+
 local cityDbChecked
 function Lay.CityDB()
   local db = ns.db
@@ -2847,12 +2908,23 @@ function Lay.OnGossipPoi(asked)
   if key == lastGossipPoi and not asked then return end -- (the same marker, not asked for again)
   lastGossipPoi, lastGossipAt = key, now
   -- as a stop (unless it's one already)
+  local px, py, pcont = Geo.PlayerWorld()
+  local pin = Lay.GuardStop(cont, x, y, info.name, icon, px, py, pcont)
   for _, d in ipairs(ns.Nav and ns.Nav.stops or {}) do
-    if d.name == info.name and d.cont == cont and (d.x - x) ^ 2 + (d.y - y) ^ 2 <= Lay.CITY_SAME_YD ^ 2 then return end
+    if d.name == info.name and d.cont == pin.cont and ((d.x - x) ^ 2 + (d.y - y) ^ 2 <= Lay.CITY_SAME_YD ^ 2
+        or (pin.npcId and d.npcId == pin.npcId)) then return end
   end
-  if ns.Import and ns.Import.AddMapPin then
-    ns.Import.AddMapPin({ cont = cont, x = x, y = y, name = info.name, tex = icon, z = Lay.PlaceZ(cont, x, y, info.name) })
-  end
+  if ns.Import and ns.Import.AddMapPin then ns.Import.AddMapPin(pin) end
+end
+-- The stop a guard's marker (`name` at (x, y) on `cont`) makes: at the shipped place it marks (Lay.GuardPlace), its
+-- height, and at its NPC, as a place's icon clicked is (GPSFrame's stop from an icon, Lay.PlaceNpc: the one nearest the
+-- player at (px, py) on `pcont` of several), so the Target button shows by it. Its name stays the game's.
+function Lay.GuardStop(cont, x, y, name, icon, px, py, pcont)
+  local place = Lay.GuardPlace(cont, x, y, name)
+  local pin = { cont = cont, x = x, y = y, name = name, tex = icon, z = place and Lay.PlaceZ(cont, x, y, place) }
+  local n = place and Lay.PlaceNpc(place, cont, x, y, px, py, pcont)
+  if n then pin.x, pin.y, pin.cont, pin.z, pin.npcId, pin.npcName = n.x, n.y, n.cont, n.z, n.id, n.name end
+  return pin
 end
 
 ---------------------------------------------------------------------------

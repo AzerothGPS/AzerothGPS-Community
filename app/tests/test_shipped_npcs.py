@@ -39,10 +39,11 @@ def test_the_data_file_is_one_packed_string_of_friendly_npcs():
     assert sides["Innkeeper Renee"] == "H" and sides["Innkeeper Farley"] == "A" and sides["Thrall"] == "H"
     assert sides["Jazzik"] == "B"  # (a neutral goblin vendor: both)
     assert "Hogger" not in sides and "Kobold Vermin" not in sides  # (hostile)
-    # read only by the search: Layers' L.ShippedNpcs
+    # read only by the search (Layers' L.ShippedNpcs) and, one NPC's line at a time, the height band (HeightBand.lua,
+    # item 104: an NPC named near the player)
     readers = sorted(f.name for f in ADDON_DIR.rglob("*.lua") if "NpcsPacked" in f.read_text(encoding="utf-8",
                                                                                                errors="replace"))
-    assert readers == ["Layers.lua", "Npcs.lua"]
+    assert readers == ["HeightBand.lua", "Layers.lua", "Npcs.lua"]
 
 
 def test_the_generator_tells_sides_by_the_faction_templates():

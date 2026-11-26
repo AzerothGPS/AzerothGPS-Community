@@ -250,6 +250,11 @@ OnTaxiChanged = function()
       local flights = ns.CharDB().flights
       local key = pending.from .. " > " .. pending.to
       local f = flights[key] or { from = pending.from, to = pending.to, seconds = 0, samples = 0 }
+      -- (the speed it was flown at, Frequent Flier's or not: Nav.RecordedFlightSecs scales it by the speed then. A
+      -- sample at another speed than the ones averaged starts the average again)
+      local speed = ns.Nav and ns.Nav.FlightSpeedFactor and ns.Nav.FlightSpeedFactor() or 1
+      if f.speed and f.speed ~= speed then f.seconds, f.samples = 0, 0 end
+      f.speed = speed
       f.seconds = (f.seconds * f.samples + secs) / (f.samples + 1)
       f.samples = f.samples + 1
       flights[key] = f

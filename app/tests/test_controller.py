@@ -55,7 +55,8 @@ def pad():
     lua.execute("""
       AGPS_DEF = {}
       for _, a in ipairs(AGPS_NS.Pad.ACTIONS) do
-        if a[1] == "click" or a[1] == "viewControls" or a[1] == "clear" or a[1] == "questRoute" or a[1] == "pause" then
+        if a[1] == "click" or a[1] == "viewControls" or a[1] == "clear" or a[1] == "questRoute" or a[1] == "pause"
+            or a[1] == "avoids" then
           AGPS_DEF[a[1]] = a[2]
           a[2] = nil
         end
@@ -2161,11 +2162,13 @@ def test_the_defaults_put_the_route_controls_on_lb(pad):
     try:
         assert P.ResetBinds() is True
         keys = {a: str(P.Key(a)) for a in ("select", "yes", "back", "remove", "menu", "zoomIn", "zoomOut", "recenter",
-                                          "options", "click", "viewControls", "clear", "questRoute", "pause")}
+                                          "options", "click", "viewControls", "clear", "questRoute", "pause",
+                                          "avoids")}
         assert keys == {"select": "PAD1", "yes": "PAD1", "back": "PAD2", "remove": "PAD3", "menu": "PAD4",
                         "zoomIn": "PADRTRIGGER", "zoomOut": "PADLTRIGGER", "recenter": "PADLSTICK", "options": "PADRSTICK",
                         "click": "PADLSHOULDER", "viewControls": "PADRSHOULDER", "clear": "PADLSHOULDER+PAD3",
-                        "questRoute": "PADLSHOULDER+PAD4", "pause": "PADFORWARD"}  # (Start: 1.3.9)
+                        "questRoute": "PADLSHOULDER+PAD4", "pause": "PADFORWARD",  # (Start: 1.3.9)
+                        "avoids": "PADLSHOULDER+PAD1"}  # (the route's jumps and swims: item 96, 1.4.1)
         # (no two the same way: each default its own button or pair)
         seen = set()
         for a in P.ACTIONS.values():

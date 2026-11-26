@@ -1,0 +1,15 @@
+COLUMNS
+int ID
+int TransportID
+int TimeIndex
+float Pos
+int SequenceID
+
+LAYOUT E622B105
+BUILD 1.60.1.70938
+COMMENT written by hand for client 1.60.1 (wowdev/WoWDBDefs' columns): its 3 inline fields match the file's own field sizes (Pos 96 bits, SequenceID 2 bits in a pallet, TimeIndex 18 bits); TransportID is the relation (the GameObject's entry)
+$noninline,id$ID<32>
+Pos[3]
+SequenceID<u8>
+TimeIndex<u32>
+$noninline,relation$TransportID<32>

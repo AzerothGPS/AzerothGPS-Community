@@ -1,0 +1,125 @@
+"""The creatures inside each dungeon and raid, spawn by spawn (item 105, 1.4.1; Kooki3z 2026-11-26: "guess the player's
+spot inside dungeons from range checks"): the candidate spots DungeonFix.lua matches range checks against.
+
+From the CMaNGOS dump (hostile.py's DUMP): every creature on an instance map AzerothGPS has (Data/Instances.lua's
+levels, 20000 + MapID), its side by the client's FactionTemplate (mobs.py's `mob_side`), less
+critters, the unselectable and invisible, seasonal spawns and placeholders (mobs.py's `_left_out`). Unlike Data/Mobs.lua
+nothing is thinned to camps: which spawn a mob stands at is what the range checks resolve. Neutral and friendly
+creatures are kept too (side "N"): they answer range checks as well. Each spawn keeps its
+MovementType (0 still, 1 random within spawndist, 2 a path) so DungeonFix knows how far off it the mob may be.
+
+Per level: `mobs` { [id] = { name, min level, max level, rank, unit class, side } } (side: the enemy of
+"A", "H" or "B" both, "N" neither: neutral or friendly) and `spawns`, one packed string, a line
+"id x y z move wander" each (tenths of a yard; wander in whole yards). WoW Forever's own instances aren't in the dump:
+none for them.
+
+`agps dungeon-spawns` reports; `--dev` writes it into the developer addon (its DungeonSpawns.lua, for its
+range probe: step 1 of item 105), `--out PATH` anywhere. Not shipped in AzerothGPS until step 2 proves out.
+"""
+from __future__ import annotations
+
+import gzip
+import re
+from collections import defaultdict
+from pathlib import Path
+
+from .hostile import DUMP, _rows
+from .mobs import _left_out, mob_side
+from .npcs import ALLIANCE_FT, HORDE_FT, faction_templates
+from .paths import ADDON_DIR
+
+INSTANCES_FILE = ADDON_DIR / "Data" / "Instances.lua"
+LEVEL_BASE = 20000
+FILE_NAME = "DungeonSpawns.lua"
+
+
+def instance_maps(path: Path = INSTANCES_FILE) -> dict[int, str]:
+    """{ MapID: name } of the dungeons and raids AzerothGPS has (Data/Instances.lua's ns.Instances)."""
+    text = Path(path).read_text(encoding="utf-8")
+    return {int(m.group(1)) - LEVEL_BASE: m.group(2)
+            for m in re.finditer(r'^ns\.Instances\[(\d+)\] = \{ name = "([^"]*)"', text, re.M)}
+
+
+def build_rows(templates: dict, creatures, ft: dict, maps) -> tuple[dict, dict]:
+    """(levels { level: { "mobs": { id: (name, lo, hi, rank, class, side) },
+    "spawns": [(id, x, y, z, move, wander)] } },
+    report { why: count }) from the dump's rows: `templates` { entry: creature_template row }, `creatures` the
+    creature rows, `ft` the client's FactionTemplate rows by id, `maps` the instance MapIDs to keep."""
+    alliance, horde = ft[ALLIANCE_FT], ft[HORDE_FT]
+    maps = set(maps)
+    levels: dict[int, dict] = {}
+    report: dict[str, int] = defaultdict(int)
+    for s in creatures:
+        m = int(s["map"])
+        if m not in maps:
+            continue
+        t = templates.get(s["id"])
+        f = t and ft.get(int(t["Faction"]))
+        if not f:
+            report["unknown"] += 1
+            continue
+        side = mob_side(f, alliance, horde) or "N"  # (neutral and friendly ones answer range checks too)
+        why = _left_out(t["Name"], int(t["CreatureType"]), int(t["UnitFlags"]), int(t["ExtraFlags"]), False)
+        if why:
+            report[why] += 1
+            continue
+        lv = levels.setdefault(LEVEL_BASE + m, {"mobs": {}, "spawns": []})
+        cid = int(s["id"])
+        lv["mobs"][cid] = (t["Name"], int(t["MinLevel"]), int(t["MaxLevel"]), int(t.get("Rank") or 0),
+                           int(t.get("UnitClass") or 0), side)
+        move = int(s.get("MovementType") or 0)
+        lv["spawns"].append((cid, float(s["position_x"]), float(s["position_y"]), float(s["position_z"]),
+                             move if move in (0, 1, 2) else 2, float(s.get("spawndist") or 0)))
+        report["kept"] += 1
+    return levels, dict(report)
+
+
+def build(data_dir: Path, ft: dict | None = None, maps=None) -> tuple[dict, dict]:
+    """build_rows() over the dump in `data_dir` (its seasonal spawns left out)."""
+    ft = ft if ft is not None else faction_templates()
+    maps = maps if maps is not None else instance_maps()
+    txt = gzip.open(Path(data_dir) / DUMP, "rt", encoding="utf-8", errors="replace").read()
+    templates = {r["Entry"]: r for r in _rows(txt, "creature_template")}
+    events = {r["guid"] for r in _rows(txt, "game_event_creature") if int(r["event"]) > 0}
+    creatures = [s for s in _rows(txt, "creature") if s["guid"] not in events and s["id"] != "0"]
+    return build_rows(templates, creatures, ft, maps)
+
+
+def _lua_str(s: str) -> str:
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def lua_text(levels: dict, names: dict[int, str] | None = None) -> str:
+    """The Lua file: ns.DungeonSpawns[level] = { mobs = { [id] = { name, lo, hi, rank, class, side } },
+    spawns = [==[...]==] }."""
+    names = names or {}
+    out = [
+        "-- GENERATED by `agps dungeon-spawns` (AzerothGPS's app/azerothgps/dungeonspawns.py) from the CMaNGOS dump's",
+        "-- creatures. Do not edit by hand. Every creature inside each dungeon and raid (no critters), spawn by spawn",
+        "-- (item 105): per level (20000 + MapID), `mobs` [id] = { name, min level, max level, rank, unit class,",
+        "-- side (the enemy of A, H, B both, N neither) } and `spawns`, a line \"id x y z move wander\" each (move: 0",
+        "-- still, 1 random within wander yards, 2 a path). Read by DungeonFix.lua (ns.DungeonFix.ParseSpawns).",
+        "local _, ns = ...",
+        "ns.DungeonSpawns = ns.DungeonSpawns or {}",
+    ]
+    for level in sorted(levels):
+        lv = levels[level]
+        mobs = ", ".join(f"[{cid}] = {{ {_lua_str(n)}, {lo}, {hi}, {rank}, {cls}, \"{sd}\" }}"
+                         for cid, (n, lo, hi, rank, cls, sd) in sorted(lv["mobs"].items()))
+        lines = "\n".join(f"{cid} {x:.1f} {y:.1f} {z:.1f} {move} {round(wd)}"
+                          for cid, x, y, z, move, wd in sorted(lv["spawns"]))
+        name = names.get(level - LEVEL_BASE)
+        if name:
+            out.append(f"-- {name} (map {level - LEVEL_BASE})")
+        out.append(f"ns.DungeonSpawns[{level}] = {{ mobs = {{ {mobs} }},")
+        out.append(f"  spawns = [==[\n{lines}\n]==] }}")
+    return "\n".join(out) + "\n"
+
+
+def dev_file() -> Path | None:
+    """The developer addon's DungeonSpawns.lua (private_paths.DEV_ADDON next to this repo), or None."""
+    try:
+        from .private_paths import DEV_ADDON
+    except ImportError:
+        return None
+    return ADDON_DIR.parents[2].joinpath(*DEV_ADDON) / FILE_NAME

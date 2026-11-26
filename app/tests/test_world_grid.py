@@ -382,6 +382,7 @@ def test_the_other_faction_s_guards_cost_as_the_router_s(game):
     cdb.faction = "Horde"
     st.avoidHostile = True
     st.avoidHighZones = False  # (the guards' alone here)
+    st.avoidElites = False  # (... no elite areas either, item 91: test_elite_areas.py)
     try:
         guard = ns.Hostile[0].H  # (the Alliance's guards, dangerous to a Horde player)
         gx, gy = guard[1], guard[2]
@@ -397,6 +398,7 @@ def test_the_other_faction_s_guards_cost_as_the_router_s(game):
     finally:
         cdb.faction, st.avoidHostile = was
         st.avoidHighZones = True
+        st.avoidElites = None
 
 
 def test_an_alliance_walk_goes_round_the_horde_s_guards(game):
@@ -751,7 +753,8 @@ def test_road_tolerance_minus_ten_keeps_to_the_roads_on_the_grid(game):
                 # (a yard of road ground never cheaper than ROAD_PRICE_MIN of one off it: item 83, Kooki3z at -10 in the
                 # Barrens, the road's yard a sixth of one took the route past the stop and back, twice the open way)
                 assert abs(x.road - WG.ROAD_PRICE_MIN) < 1e-9
-        assert shares[-10] >= shares[0], shares  # (still at least as much on the roads)
+        # (still about as much on the roads: within 5%, item 57's merges shaped on each way, 157 yd to 160)
+        assert shares[-10] >= 0.95 * shares[0], shares
     finally:
         st.roadTolerance = was
 
@@ -779,8 +782,9 @@ def _turns(r, cos=0.95):
 def test_a_walk_beside_a_building_is_straightened(game, a, b, most):
     lua, ns = game
     WG, st = ns.WorldGrid, ns.settings.gps
-    was = (WG.STRAIGHT_TRIES, WG.COLLINEAR_DEG, st.roadTolerance)
+    was = (WG.STRAIGHT_TRIES, WG.COLLINEAR_DEG, st.roadTolerance, WG.SNAP_MIN_YD)
     st.roadTolerance = 3
+    WG.SNAP_MIN_YD = 1e9  # (the straightening alone: no merges onto roads shaped after it, item 57's)
     try:
         got = {}
         for on in (False, True):
@@ -800,7 +804,7 @@ def test_a_walk_beside_a_building_is_straightened(game, a, b, most):
                        if not WG.Clear(c, p[2 * i], p[2 * i + 1], h[i], p[2 * i + 2], p[2 * i + 3], h[i + 1]))
         assert unclear(got[True]) <= unclear(got[False])
     finally:
-        WG.STRAIGHT_TRIES, WG.COLLINEAR_DEG, st.roadTolerance = was
+        WG.STRAIGHT_TRIES, WG.COLLINEAR_DEG, st.roadTolerance, WG.SNAP_MIN_YD = was
 
 
 # --- the player's swim speed (Kooki3z 2026-11-22: "yes use my current swim speed in the grid too")
@@ -876,6 +880,7 @@ def test_the_city_grid_prices_the_other_faction_as_the_world_grid(game):
     was = (cdb.faction, st.avoidHostile)
     cdb.faction = "Alliance"
     st.avoidHostile = True
+    st.avoidElites = False  # (the guards' alone, item 91)
     try:
         c = CG.City("Orgrimmar")
         x = CG.Costs(c, 2038.2, -4672.6, 2085.0, -4623.8)
@@ -892,6 +897,7 @@ def test_the_city_grid_prices_the_other_faction_as_the_world_grid(game):
             pytest.skip("no lighter NPC in Orgrimmar's grid")
     finally:
         cdb.faction, st.avoidHostile = was
+        st.avoidElites = None
 
 
 # --- never through guards today's routing goes round (Kooki3z 2026-11-22, an Alliance player in Mulgore: the grid's way

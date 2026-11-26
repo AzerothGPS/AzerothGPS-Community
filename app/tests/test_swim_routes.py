@@ -103,7 +103,7 @@ def test_a_swim_is_timed_slower_than_running(game, trip):
     assert swim == pytest.approx(4.7)  # (GetUnitSpeed's fourth value)
     secs = N.TripSecs(r.walkYards, r.swimYards, r.rideSeconds, 7)
     assert secs == pytest.approx((r.walkYards - r.swimYards) / 7 + r.swimYards / swim + r.rideSeconds)
-    assert secs > r.walkYards / 7 + r.rideSeconds + 20
+    assert secs > r.walkYards / 7 + r.rideSeconds + 15  # (1.4.1, one-way ground: 261 yd swum, 82 walked)
     # (on a mount too: left at the water's edge)
     assert N.TripSecs(r.walkYards, r.swimYards, 0, 14) == pytest.approx(
         (r.walkYards - r.swimYards) / 14 + r.swimYards / swim)
@@ -127,7 +127,7 @@ def test_water_walking_or_aquatic_form_makes_water_as_fast_as_land(game, trip, w
     assert fast and fast.spell in (546, 1066, 11319)
     assert (fast.active is True) == (how == "aura")
     assert N.TripSecs(r.walkYards, r.swimYards, r.rideSeconds, 7) == pytest.approx(r.walkYards / 7 + r.rideSeconds)
-    assert N.TripSecs(r.walkYards, r.swimYards, r.rideSeconds, 7) < slow - 20
+    assert N.TripSecs(r.walkYards, r.swimYards, r.rideSeconds, 7) < slow - 15
     assert "as fast as on land" in "\n".join(str(v) for v in ns.GPS.SwimTip().lines.values())
     assert water() is None  # (none: slow again)
     assert N.TripSecs(r.walkYards, r.swimYards, r.rideSeconds, 7) == pytest.approx(slow)

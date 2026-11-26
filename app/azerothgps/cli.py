@@ -319,6 +319,29 @@ def cmd_dungeon_maps(args) -> int:
     return 0
 
 
+def cmd_auto_maps(args) -> int:
+    """Auto maps where the game has none (item 115): the caves and buildings with no minimap art, drawn from their
+    walkable cells floor by floor (automaps.py); renders and summary.txt in data/debug/automaps/, --write
+    Data/AutoMaps.lua."""
+    from . import automaps as A
+
+    cd = _client(args)
+    report: list = []
+    maps = A.build_all(cd, log=print, report=report)
+    out = DATA / "debug" / "automaps"
+    out.mkdir(parents=True, exist_ok=True)
+    for m in maps:
+        A.render(m, out / f"{m['key']}.png")
+    (out / "summary.txt").write_text("".join(f"{c}\t{k}\t{n}\t{what}\n" for c, k, n, what in report), encoding="utf-8")
+    caves = sum(1 for m in maps if m["kind"] == "cave")
+    print(f"{len(maps)} auto maps ({caves} caves, {len(maps) - caves} buildings) of {len(report)} models with no art; "
+          f"renders in {out}")
+    if args.write:
+        A.FILE.write_text(A.automaps_lua(maps, cd.casc.version), encoding="utf-8")
+        print(f"wrote {A.FILE} ({A.FILE.stat().st_size // 1024} KB)")
+    return 0
+
+
 def cmd_interior_maps(args) -> int:
     """Interiors' maps (caves, mines, cellars) from another WoW version, each floor checked against WoW Forever's
     own client (interiormaps.py): the inventory (accepted, skipped, unavailable, and why), renders in
@@ -739,9 +762,15 @@ def cmd_world_grid(args) -> int:
 
 
 def cmd_lifts(args) -> int:
-    """The open world's elevators and lifts in the CMaNGOS dump (lifts.py): the inventory."""
+    """The open world's elevators and lifts in the CMaNGOS dump (lifts.py): the inventory. `--times`: each car's loop
+    from the client's TransportAnimation into Data/LiftTimes.lua (item 118)."""
     from . import lifts
     lifts.run()
+    if args.times:
+        from .extract.spike import ClientData
+
+        cd = ClientData(Path(args.wow_path), args.product, DATA / "ref")
+        print(f"wrote {lifts.write_times(cd)}")
     return 0
 
 
@@ -954,6 +983,15 @@ def cmd_npc_floors(args) -> int:
     return 0
 
 
+def cmd_grid_check(args) -> int:
+    """The drawn roads, the capitals' and buildings' roads and the NPCs' spawns off the walk grids' floors (gridcheck.py,
+    item 112: test_grid_data_checks.py fails on any not in its known list)."""
+    from . import gridcheck
+
+    gridcheck.report()
+    return 0
+
+
 def cmd_interior_floors(args) -> int:
     """The floors' heights in the buildings' inside maps (Data/InteriorFloors.lua) from the models, checked and filled
     with the NPCs' spots; the rooms neither settles go to the floor height survey's list."""
@@ -1136,6 +1174,52 @@ def cmd_npcs(args) -> int:
     return 0
 
 
+def cmd_mobs(args) -> int:
+    """Every enemy mob, for the search (Data/Mobs.lua), and the elite areas routes avoid (Data/Elites.lua)."""
+    from .mobs import ELITES_FILE, FILE, build, elite_areas, elites_lua, lua_text
+    from .paths import data_dir
+
+    elites: list = []
+    mobs, rep = build(data_dir(), elites=elites)
+    spawns = sum(len(m["spawns"]) for m in mobs.values())
+    print(f"{len(mobs)} mobs, {spawns} spawns; left out: " +
+          ", ".join(f"{v} {k}" for k, v in sorted(rep.items()) if k != "kept"))
+    areas = elite_areas(elites)
+    for cont, list_ in areas.items():
+        print(f"continent {cont}: {len(list_)} elite areas, {sum(len(a['circles']) for a in list_)} circles "
+              f"(of {sum(a['n'] for a in list_)} elite spawns)")
+    if args.write:
+        FILE.write_text(lua_text(mobs), encoding="utf-8", newline="\n")
+        print(f"wrote {FILE} ({FILE.stat().st_size // 1024} KB)")
+        ELITES_FILE.write_text(elites_lua(areas), encoding="utf-8", newline="\n")
+        print(f"wrote {ELITES_FILE} ({ELITES_FILE.stat().st_size // 1024} KB)")
+    return 0
+
+
+def cmd_dungeon_spawns(args) -> int:
+    """Every enemy mob inside each dungeon and raid, spawn by spawn (item 105): DungeonFix.lua's candidates."""
+    from .dungeonspawns import build, dev_file, instance_maps, lua_text
+    from .paths import data_dir
+
+    names = instance_maps()
+    levels, rep = build(data_dir(), maps=names)
+    print(f"{len(levels)} instances, {sum(len(v['spawns']) for v in levels.values())} spawns; left out: " +
+          ", ".join(f"{v} {k}" for k, v in sorted(rep.items()) if k != "kept"))
+    for level in sorted(levels):
+        lv = levels[level]
+        still = sum(1 for s in lv["spawns"] if s[4] == 0)
+        print(f"  {names.get(level - 20000, level)}: {len(lv['spawns'])} spawns ({still} standing still), "
+              f"{len(lv['mobs'])} kinds")
+    out = Path(args.out) if args.out else (dev_file() if args.dev else None)
+    if args.dev and out is None:
+        print("no developer addon here (private_paths.py)")
+        return 1
+    if out:
+        out.write_text(lua_text(levels, names), encoding="utf-8", newline="\n")
+        print(f"wrote {out} ({out.stat().st_size // 1024} KB)")
+    return 0
+
+
 def cmd_standin_npcs(args) -> int:
     """WoW Forever's own NPCs from Wowhead's pages as stand-ins (overrides/standin_npcs.json, Data/Npcs.lua)."""
     from . import npcspots, standin
@@ -1244,6 +1328,21 @@ def cmd_terrain_hpa(args) -> int:
     from .hpa import write
 
     print(f"wrote {write()}")
+    return 0
+
+
+def cmd_terrain_down(args) -> int:
+    """One-way ground over the terrain grid (Data/TerrainDown.lua, item 107): roads/terrain_down.py."""
+    from .paths import ADDON_DIR
+    from .roads.terrain_down import terrain_down_lua
+
+    text = terrain_down_lua(_client(args))
+    p = ADDON_DIR / "Data" / "TerrainDown.lua"
+    if args.write:
+        p.write_text(text, encoding="utf-8", newline="\n")
+        print(f"wrote {p} ({len(text) // 1024} KB); prepare the blocks again: agps terrain-hpa")
+    else:
+        print(f"{len(text) // 1024} KB (not written: --write)")
     return 0
 
 
@@ -1744,6 +1843,10 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--product", default=PRODUCT)
     sp.set_defaults(fn=cmd_world_grid)
     sp = sub.add_parser("lifts", help="the open world's elevators and lifts in the CMaNGOS dump: the inventory")
+    sp.add_argument("--times", action="store_true", help="each car's loop from the client (TransportAnimation) into "
+                                                          "Data/LiftTimes.lua")
+    sp.add_argument("--wow-path", default=str(DEFAULT_WOW))
+    sp.add_argument("--product", default=PRODUCT)
     sp.set_defaults(fn=cmd_lifts)
     sp = sub.add_parser("nav-features", help="floors, stairs, bridges, lifts and jumps found in our Recast meshes "
                                              "(navfeatures.py, dev only): the cities' (as city-grid bakes them) into "
@@ -1788,6 +1891,12 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--write", action="store_true",
                     help="write Data/DungeonMaps.lua, app/azerothgps/data/dungeon_maps.json, docs/dungeon-maps.md")
     sp.set_defaults(fn=cmd_dungeon_maps)
+
+    sp = sub.add_parser("auto-maps", help="maps drawn from the walkable cells, floor by floor, for the caves and "
+                        "buildings with no minimap art (renders in data/debug/automaps/)")
+    client_args(sp)
+    sp.add_argument("--write", action="store_true", help="write Data/AutoMaps.lua")
+    sp.set_defaults(fn=cmd_auto_maps)
 
     sp = sub.add_parser("interior-maps", help="interiors' maps (caves, mines) from another WoW version where their "
                         "layout is WoW Forever's (renders in data/debug/interiormaps/)")
@@ -1850,6 +1959,9 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--write", action="store_true")
     sp.set_defaults(fn=cmd_npc_floors)
 
+    sp = sub.add_parser("grid-check", help="roads, stairs and NPC spawns off the city and world grids' floors (gridcheck.py)")
+    sp.set_defaults(fn=cmd_grid_check)
+
     sp = sub.add_parser("interior-floors", help="the floors' heights in the buildings' inside maps (Data/InteriorFloors.lua)")
     client_args(sp)
     sp.add_argument("--write", action="store_true", help="write Data/InteriorFloors.lua and the survey's list")
@@ -1872,6 +1984,17 @@ def main(argv: list[str] | None = None) -> int:
     sp = sub.add_parser("npcs", help="every friendly NPC, for the search (Data/Npcs.lua)")
     sp.add_argument("--write", action="store_true")
     sp.set_defaults(fn=cmd_npcs)
+
+    sp = sub.add_parser("mobs", help="every enemy mob, for the search (Data/Mobs.lua), and the elite areas routes avoid "
+                        "(Data/Elites.lua)")
+    sp.add_argument("--write", action="store_true")
+    sp.set_defaults(fn=cmd_mobs)
+
+    sp = sub.add_parser("dungeon-spawns", help="every enemy mob inside each dungeon and raid, spawn by spawn (item 105: "
+                        "the developer addon's Dungeon Range Probe)")
+    sp.add_argument("--dev", action="store_true", help="write the developer addon's DungeonSpawns.lua")
+    sp.add_argument("--out", help="write the Lua file here")
+    sp.set_defaults(fn=cmd_dungeon_spawns)
 
     sp = sub.add_parser("quest-npcs", help="who takes each quest in, for turn-in stops (Data/QuestNpcs.lua)")
     sp.add_argument("--write", action="store_true")
@@ -1912,6 +2035,11 @@ def main(argv: list[str] | None = None) -> int:
     sp = sub.add_parser("vendors", help="what each shipped vendor sells, for the search (Data/VendorItems.lua)")
     sp.add_argument("--write", action="store_true")
     sp.set_defaults(fn=cmd_vendors)
+
+    sp = sub.add_parser("terrain-down", help="one-way ground over the terrain grid from the client (Data/TerrainDown.lua)")
+    client_args(sp)
+    sp.add_argument("--write", action="store_true")
+    sp.set_defaults(fn=cmd_terrain_down)
 
     sp = sub.add_parser("terrain-hpa", help="prepare the terrain's blocks for the walk search (Data/TerrainHPA.lua)")
     sp.set_defaults(fn=cmd_terrain_hpa)

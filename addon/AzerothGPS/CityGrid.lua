@@ -18,7 +18,8 @@
 -- own, as before.
 --
 -- The player's floor (CG.TrackFloor, the game gives no height: UnitPosition's z is 0): the grid's surfaces under the
--- player, kept to those the grid walks to from the last ones (a floor stays a candidate while there's a way from it), and
+-- player, kept to those the grid walks to from the last ones (a floor stays a candidate while there's a way from it, or
+-- held where it was last seen until the game shows the player left it: item 106, Nav.FellSince, Nav.AtLift), and
 -- the height band (CG.Band): the game checks ranges in 3D, so an NPC the player has named (target, mouseover, the soft
 -- interact target, the NPC whose window is open) standing at a known spawn (Data/Npcs.lua) bounds the player's height:
 -- in range R at d yards across, |z - zNPC| <= sqrt(R^2 - d^2); out of it, more. Read-only range checks
@@ -325,15 +326,21 @@ function CG.SurfacesAt(c, x, y, z)
 end
 
 -- The city whose grid (x, y) on level `cont` is in: a capital's own cells (Router.CapitalAt), Undercity's level, and
--- in a city whose grid is all its own (`whole`: Darnassus, on Teldrassil's crown) any spot over a floor of its grid:
--- the capital's cells there are its ground's top floor reached from the gates, and the Cenarion Enclave's treetops
--- aren't among them (the Arch Druid's routes were the Router's own up to his tree and a straight line from its foot).
+-- in a city whose grid is all its own (`whole`) any spot over a floor of its grid within the capital's rectangle
+-- (Passability.CapitalGridAt): Darnassus, on Teldrassil's crown, where the capital's cells are its ground's top floor
+-- reached from the gates and the Cenarion Enclave's treetops aren't among them (the Arch Druid's routes were the
+-- Router's own up to his tree and a straight line from its foot); Ironforge, whose cells are its halls and leave out
+-- the shops and rooms off them (34 of the shipped NPC spawns in its rectangle: Nissa Firestone's First Aid room by the
+-- Great Forge, the trainers in the Mystic Ward. Since 1.4.0 the world grid's no-way handed most of them to the city's
+-- grid (WorldGrid.CityWalk), but Olthran Craghelm from the inn was "no way" and Braenna Flintcrag's and Outfitter
+-- Eric's walks ended a floor off). Not the grid's floors outside that rectangle: Dun Morogh's slope before the gate.
 function CG.CityFor(cont, x, y)
   if not (cont and x and y and ns.CityGridData) then return nil end
   for name, d in pairs(ns.CityGridData) do
     if (d.level or d.cont) == cont and x >= d.x0 and y >= d.y0 and x < d.x0 + d.w * d.cell and y < d.y0 + d.h * d.cell then
       if d.level or (R().CapitalAt and R().CapitalAt(cont, x, y)) then return name end
-      if d.whole then
+      local P = ns.Passability
+      if d.whole and P and P.CapitalGridAt and P.CapitalGridAt(cont, x, y) then
         local c = CG.City(name)
         local ci = c and CG.CellAt(c, x, y)
         if ci and Count(c, ci) > 0 then return name end
@@ -881,9 +888,22 @@ function CG.Pull(c, steps, sx, sy, tx, ty)
 end
 
 ---------------------------------------------------------------------------------------------------- legs
--- The surfaces a leg's end may start or end on, by its height when known: { s, ci, cost }.
-local function Ends(c, x, y, z)
+-- The surfaces a leg's end may start or end on, by its height when known: { s, ci, cost }. `zs` (no height: the floors
+-- the player may be on, CG.PlayerFloorZs, item 106): the surfaces on them only, when there are any, at their yards
+-- alone, so the search keeps the cheapest.
+local function Ends(c, x, y, z, zs)
   local out = {}
+  if not z and zs and zs[1] then
+    for _, f in ipairs(CG.SurfacesAt(c, x, y)) do
+      for _, cz in ipairs(zs) do
+        if abs(f.z - cz) <= CG.FLOOR_Z then
+          out[#out + 1] = { s = f.s, ci = f.ci, z = f.z, cost = Dist(x, y, f.x, f.y) }
+          break
+        end
+      end
+    end
+    if out[1] then return out end
+  end
   for _, f in ipairs(CG.SurfacesAt(c, x, y, z)) do
     local dz = z and abs(f.z - z) or 0
     if not z or dz <= CG.FLOOR_Z or not out[1] then
@@ -1020,17 +1040,20 @@ local function Splice(r, pre, post)
   return out
 end
 
-function CG.Walk(c, sx, sy, sz, tx, ty, tz, maxDrop)
+function CG.Walk(c, sx, sy, sz, tx, ty, tz, maxDrop, zs)
   local WG = ns.WorldGrid
   -- (the drops taken: within the player's safe drop, Nav.SafeDrop; another limit, another walk)
   maxDrop = maxDrop or CG.MaxDrop()
   local tkey = string.format("%s:%.0f:%.0f:%s:%s|%s%s", c.name, tx, ty, ZKey(tz),
     maxDrop and string.format("%.0f", math.min(maxDrop, 9999)) or "-", WG and WG.CostKey and WG.CostKey() or "",
     (R().ExpertJumper and R().ExpertJumper()) and "|x" or "")
-  local key = string.format("%.0f:%.0f:%s>%s|%s", sx, sy, ZKey(sz), tkey, TrackKey())
+  if sz then zs = nil end
+  -- (`zs`: the floors the player may be on, no height: item 106, another start)
+  local key = string.format("%.0f:%.0f:%s%s>%s|%s", sx, sy, ZKey(sz), zs and ("~" .. table.concat(zs, ",")) or "",
+    tkey, TrackKey())
   local got = CG.routes[key]
   if got then return got.route or false end
-  local reused = CG.Reuse(c, sx, sy, sz, tkey)
+  local reused = not zs and CG.Reuse(c, sx, sy, sz, tkey)
   if reused then return reused end
   local function Work()
     -- (from or to a lift's end: by its way off, from where it reaches the grid)
@@ -1038,7 +1061,7 @@ function CG.Walk(c, sx, sy, sz, tx, ty, tz, maxDrop)
     local ax, ay, az, bx, by, bz = sx, sy, sz, tx, ty, tz
     if ex then ax, ay, az = ex[#ex][1], ex[#ex][2], ex[#ex][3] end
     if gx then bx, by, bz = gx[#gx][1], gx[#gx][2], gx[#gx][3] end
-    local starts = Ends(c, ax, ay, az)
+    local starts = Ends(c, ax, ay, az, not ex and zs or nil)
     local goals = {}
     for _, e in ipairs(Ends(c, bx, by, bz)) do goals[e.s] = e.cost end
     local route = false
@@ -1216,14 +1239,17 @@ function CG.Leg(cont, sx, sy, tx, ty, opts)
     end
     return nil
   end
-  if a and sz == nil then sz = RoadZ(sx, sy) end
+  -- (item 106: the player's start with no floor picked, the floors they may be on followed (CG.PlayerFloorZs): the walk
+  -- starts from each and keeps the cheapest, not the nearest road's)
+  local zs = a and sz == nil and CG.PlayerStart(cont, sx, sy) and CG.PlayerFloorZs(cont, sx, sy) or nil
+  if a and sz == nil and not zs then sz = RoadZ(sx, sy) end
   -- (and a stop with none the same: back up from the Rogue Trainer to Darnassus's Enclave road, not the hollow's floor
   -- under it)
   local tz = opts.tz
   if b and tz == nil then tz = RoadZ(tx, ty) end
   local md = opts.maxDrop or (ns.Nav and ns.Nav.SafeDrop and ns.Nav.SafeDrop()) or nil
   if a and b then
-    local r = CG.Walk(c, sx, sy, sz, tx, ty, tz, md)
+    local r = CG.Walk(c, sx, sy, sz, tx, ty, tz, md, zs)
     if r == "pending" then return "pending" end
     if not r then
       CG.stats.own = CG.stats.own + 1
@@ -1238,7 +1264,7 @@ function CG.Leg(cont, sx, sy, tx, ty, opts)
   if a then
     local x, y, z, i = Crossing(own, cont, name, c, true)
     if not x then return own end
-    local inside = CG.Walk(c, sx, sy, sz, x, y, z, md)
+    local inside = CG.Walk(c, sx, sy, sz, x, y, z, md, zs)
     if inside == "pending" then
       own.pending = true
       return own
@@ -1293,197 +1319,13 @@ function CG.PlayerStart(cont, x, y)
 end
 
 ---------------------------------------------------------------------------------------------------- the player's floor
--- The height band (see the top): readings of range checks against NPCs the player names, each { x, y, z (the NPC's
--- spawn), r (yards), inside (true: in range), at, px, py (where the player stood) }.
-CG.BAND_UNITS = { "target", "mouseover", "softinteract", "softfriend", "npc" }
-CG.INTERACT_YD = { [2] = 11.11, [3] = 9.9, [4] = 28 } -- CheckInteractDistance's (trade, duel, follow)
-CG.RANGE_SLACK = 3 -- yards: in range means within the range and at most this more (the bodies' reach)
-CG.WANDER_YD = 2 -- yards an NPC may stand off its spawn
-CG.SPAWN_YD = 60 -- an NPC's spawn this near the player is the one it stands at ...
-CG.SPAWN_ALONE_YD = 40 -- ... when no other spawn of it is this near that one
-CG.BAND_KEEP_SECONDS = 8 -- a reading counts this long ...
-CG.BAND_KEEP_YD = 3 -- ... while the player is this near where it was taken
-CG.BAND_EVERY = 0.25 -- seconds between looks
--- Spells that may be cast on a friendly NPC (a class's own; one not known is no check: IsSpellInRange says nil).
-CG.BAND_SPELLS = { 2050, 17, 1243, 635, 19740, 5185, 774, 1126, 331, 1459, 5697 }
-
-CG.readings = {}
--- The spawn of creature `id` the unit stands at, near (px, py) on `level`: x, y, z, or nil (none near, or two near
--- each other: can't tell which).
-function CG.SpawnOf(id, level, px, py)
-  local L = ns.Layers
-  if not (L and L.ShippedNpcs) then return nil end
-  local _, byId = L.ShippedNpcs()
-  local n = byId and byId[id]
-  local sp = n and n.spawns
-  if not sp then return nil end
-  local best, bd, second
-  for i = 1, #sp - 3, 4 do
-    if sp[i] == level then
-      local d = Dist(sp[i + 1], sp[i + 2], px, py)
-      if d <= CG.SPAWN_YD then
-        if not bd or d < bd then
-          second = best
-          best, bd = i, d
-        elseif not second then second = i end
-      end
-    end
-  end
-  if not best then return nil end
-  if second and Dist(sp[best + 1], sp[best + 2], sp[second + 1], sp[second + 2]) < CG.SPAWN_ALONE_YD then return nil end
-  return sp[best + 1], sp[best + 2], sp[best + 3], n.name
-end
-
--- A unit's checks now: { r, inside } each, the game's own range checks (nil ones left out).
-function CG.Checks(unit)
-  local out = {}
-  if CheckInteractDistance then
-    for idx, yd in pairs(CG.INTERACT_YD) do
-      local ok, v = pcall(CheckInteractDistance, unit, idx)
-      if ok and v ~= nil and not ns.IsSecret(v) then out[#out + 1] = { r = yd, inside = v and true or false, src = "interact" .. idx } end
-    end
-  end
-  local S = C_Spell
-  if S and S.IsSpellInRange and S.GetSpellInfo then
-    for _, id in ipairs(CG.BAND_SPELLS) do
-      local ok, v = pcall(S.IsSpellInRange, id, unit)
-      if ok and v ~= nil and not ns.IsSecret(v) then
-        local ok2, info = pcall(S.GetSpellInfo, id)
-        local r = ok2 and type(info) == "table" and info.maxRange
-        if type(r) == "number" and r > 0 and not ns.IsSecret(r) then
-          out[#out + 1] = { r = r, inside = v and true or false, src = "spell" .. id }
-        end
-      end
-    end
-  end
-  local I = C_Item
-  if I and I.IsItemInRange then
-    for _, it in ipairs(CG.RangeItems()) do
-      local ok, v = pcall(I.IsItemInRange, it.id, unit)
-      if ok and v ~= nil and not ns.IsSecret(v) then out[#out + 1] = { r = it.r, inside = v and true or false, src = "item" .. it.id } end
-    end
-  end
-  return out
-end
-
--- The items in the bags whose use has a range (its spell's): { id, r }. Looked at again every RANGE_ITEMS_SECONDS.
-CG.RANGE_ITEMS_SECONDS = 30
-function CG.RangeItems()
-  local now = GetTime()
-  if CG.items and now - CG.itemsAt < CG.RANGE_ITEMS_SECONDS then return CG.items end
-  local out, seen = {}, {}
-  local Cn, I, S = C_Container, C_Item, C_Spell
-  if Cn and Cn.GetContainerNumSlots and Cn.GetContainerItemID and I and I.GetItemSpell and S and S.GetSpellInfo then
-    for bag = 0, 4 do
-      local ok, n = pcall(Cn.GetContainerNumSlots, bag)
-      for slot = 1, ok and n or 0 do
-        local ok2, id = pcall(Cn.GetContainerItemID, bag, slot)
-        if ok2 and id and not seen[id] then
-          seen[id] = true
-          local ok3, _, spell = pcall(I.GetItemSpell, id)
-          if ok3 and spell then
-            local ok4, info = pcall(S.GetSpellInfo, spell)
-            local r = ok4 and type(info) == "table" and info.maxRange
-            if type(r) == "number" and r > 0 and r < 60 then out[#out + 1] = { id = id, r = r } end
-          end
-        end
-      end
-    end
-  end
-  CG.items, CG.itemsAt = out, now
-  return out
-end
-
--- New readings from the units the player names, at (px, py) on `level`.
-function CG.Look(level, px, py)
-  local now = GetTime()
-  local seen = {}
-  for _, unit in ipairs(CG.BAND_UNITS) do
-    local ok, exists = pcall(UnitExists or function() return false end, unit)
-    if ok and exists and not ns.IsSecret(exists) and not (UnitIsPlayer and UnitIsPlayer(unit)) then
-      local guid = UnitGUID and UnitGUID(unit)
-      local id = guid and not ns.IsSecret(guid) and ns.Nav and ns.Nav.NpcOf and ns.Nav.NpcOf(guid)
-      if id and not seen[guid] then
-        seen[guid] = true
-        local x, y, z, name = CG.SpawnOf(id, level, px, py)
-        if x then
-          for _, ck in ipairs(CG.Checks(unit)) do
-            CG.readings[#CG.readings + 1] = { x = x, y = y, z = z, r = ck.r, inside = ck.inside, src = ck.src,
-              at = now, px = px, py = py, npc = name, unit = unit, level = level }
-          end
-        end
-      end
-    end
-  end
-  -- (the old ones dropped: too old, or the player moved off)
-  local kept = {}
-  for _, rd in ipairs(CG.readings) do
-    if rd.level == level and now - rd.at <= CG.BAND_KEEP_SECONDS and Dist(rd.px, rd.py, px, py) <= CG.BAND_KEEP_YD then
-      kept[#kept + 1] = rd
-    end
-  end
-  -- (one per NPC and check: the newest)
-  local by, out = {}, {}
-  for i = #kept, 1, -1 do
-    local rd = kept[i]
-    local k = string.format("%.1f:%.1f:%s", rd.x, rd.y, rd.src)
-    if not by[k] then by[k] = true out[#out + 1] = rd end
-  end
-  CG.readings = out
-  return out
-end
-
--- The band of heights the readings allow at (px, py): a list of { lo, hi } (nil: no reading, every height).
-function CG.Band(readings, px, py)
-  if not (readings and readings[1]) then return nil end
-  local band = { { -huge, huge } }
-  local function Cut(lo, hi) -- (keep only [lo, hi])
-    local out = {}
-    for _, iv in ipairs(band) do
-      local a, b = max(iv[1], lo), min(iv[2], hi)
-      if a <= b then out[#out + 1] = { a, b } end
-    end
-    band = out
-  end
-  local function Hole(lo, hi) -- (take out (lo, hi))
-    local out = {}
-    for _, iv in ipairs(band) do
-      if iv[2] <= lo or iv[1] >= hi then
-        out[#out + 1] = iv
-      else
-        if iv[1] < lo then out[#out + 1] = { iv[1], lo } end
-        if iv[2] > hi then out[#out + 1] = { hi, iv[2] } end
-      end
-    end
-    band = out
-  end
-  for _, rd in ipairs(readings) do
-    local d = Dist(rd.x, rd.y, px, py)
-    if rd.inside then
-      local R2 = rd.r + CG.RANGE_SLACK + CG.WANDER_YD
-      local dd = max(0, d - CG.WANDER_YD)
-      if dd < R2 then
-        local hz = sqrt(R2 * R2 - dd * dd)
-        Cut(rd.z - hz, rd.z + hz)
-      end
-    else
-      local dd = d + CG.WANDER_YD
-      if dd < rd.r then
-        local hz = sqrt(rd.r * rd.r - dd * dd)
-        Hole(rd.z - hz, rd.z + hz)
-      end
-    end
-  end
-  return band
-end
-local function InBand(band, z, slack)
-  if not band then return true end
-  for _, iv in ipairs(band) do
-    if z >= iv[1] - slack and z <= iv[2] + slack then return true end
-  end
-  return false
-end
-CG.InBand = InBand
+-- The height band (see the top): HeightBand.lua's since item 104 (1.4.1: the band for every floor followed, not only the
+-- grid's; NPCs only that stand still, ns.NpcsStill). Its names kept here for the grid's own and the tests.
+local HB = ns.HeightBand
+CG.RANGE_SLACK, CG.WANDER_YD = HB.RANGE_SLACK, HB.WANDER_YD
+CG.Band, CG.InBand = HB.Band, HB.InBand
+function CG.Look(level, px, py) return HB.Look(level, px, py) end
+local InBand = HB.InBand
 
 -- The player's floor at (px, py) on `level`: the grid's surfaces there, those the grid walks to from the last ones
 -- (CG.track.set) within the yards moved, then those in the band; one left: its height. `navZ`: the floor Nav followed
@@ -1491,11 +1333,41 @@ CG.InBand = InBand
 CG.TRACK_EVERY = 0.2 -- seconds
 CG.TRACK_JUMP_YD = 40 -- moved this far: from scratch
 CG.TRACK_REACH = 1.5 -- the grid's way from the last surfaces may be this many times the yards moved (and two cells)
+-- (item 106, 1.4.1, SPF parity: a floor the grid has no way from to the new spot is held where it was last seen, not
+-- dropped, up to HOLD_YD from there, unless the game gives evidence the player left it (Nav.FellSince, Nav.AtLift,
+-- swimming started or stopped). Beside a street the grid's cell may hold only the ground under the city; dropping the
+-- street there settled the floor on the ground. A held floor whose own floor stepped on (its root: the surface it was
+-- followed from) isn't one of its own: dropped)
+CG.HOLD_YD = 12
 -- The floor followed is held (item 18, the coordinator 2026-11-24: Ironforge's Forge to the Hall of Thanes flipped
 -- between a 100 yd and a 640 yd way as the start's floor was guessed again and again): the city's grid followed where
 -- it has floors even outside the capital's outline (the Great Forge's edge: the track was dropped there, every route a
 -- new guess); with the walk from the last floors finding none here, the floors near the one followed (FLOOR_Z) before
 -- all of them; and of several, the one followed before.
+-- Whether a lift of the city's grid (its baked lift links, kind 5) has an end within `r` of (px, py) on `level`
+-- (Nav.AtLift: the floor may change there with no walk).
+function CG.LiftNear(level, px, py, r)
+  for nm, d in pairs(ns.CityGridData or {}) do
+    if (d.level or d.cont) == level and px >= d.x0 - r and py >= d.y0 - r and px < d.x0 + d.w * d.cell + r
+        and py < d.y0 + d.h * d.cell + r then
+      local c = CG.City(nm)
+      if c and not c.liftEnds then
+        c.liftEnds = {}
+        for k = 1, c.nBaked or #c.links do
+          local L = c.links[k]
+          if L.kind == 5 and L.pts[1] then
+            c.liftEnds[#c.liftEnds + 1] = L.pts[1]
+            c.liftEnds[#c.liftEnds + 1] = L.pts[#L.pts]
+          end
+        end
+      end
+      for _, p in ipairs(c and c.liftEnds or {}) do
+        if Dist(p[1], p[2], px, py) <= r then return true end
+      end
+    end
+  end
+  return false
+end
 function CG.TrackFloor(level, px, py, navZ)
   local name = CG.GridCityAt(level, px, py)
   local t = CG.track
@@ -1525,20 +1397,38 @@ function CG.TrackFloor(level, px, py, navZ)
     CG.track = { name = name, level = level, x = px, y = py, at = now, set = {}, n = 0 }
     return nil
   end
-  local set = {}
+  local N = ns.Nav
+  local set, roots, held = {}, {}, {}
   local moved = t and t.name == name and Dist(t.x, t.y, px, py)
-  if moved and moved <= CG.TRACK_JUMP_YD and t.set and next(t.set) then
-    -- (the grid's way from the last surfaces, within the yards moved)
+  local follow = moved and moved <= CG.TRACK_JUMP_YD and t.set and true or false
+  -- (item 106: the game's evidence the floor changed with no walk on the grid: a fall, a lift, into or out of water)
+  local swim = N and N.Swimming and N.Swimming() or false
+  local fell = follow and N and N.FellSince and N.FellSince(t.at) or false
+  local lift = follow and N and N.AtLift and N.AtLift(level, px, py) or false
+  local evidence = fell or lift or (follow and (t.swam or false) ~= swim)
+  local prev = t and t.name == name and (t.z or t.pick) or nil
+  if follow and (next(t.set) or next(t.held or {})) then
+    -- (the grid's way from the last surfaces, within the yards moved; a held one's from where it was last seen)
     local want = {}
     for _, f in ipairs(here) do want[f.s] = f end
-    local reach = moved * CG.TRACK_REACH + 2 * c.cell + 1
-    local dist, open = {}, {}
-    for s, ci in pairs(t.set) do dist[s] = 0 open[#open + 1] = { s, ci } end
+    local far = moved
+    for _, h in pairs(t.held or {}) do far = max(far, Dist(h.x, h.y, px, py)) end
+    local reach = far * CG.TRACK_REACH + 2 * c.cell + 1
+    local dist, root, open = {}, {}, {}
+    local tr = t.roots or {}
+    for s, ci in pairs(t.set) do dist[s] = 0 root[s] = tr[s] or s open[#open + 1] = { s, ci } end
+    for s, h in pairs(t.held or {}) do
+      if not dist[s] then dist[s] = 0 root[s] = h.root open[#open + 1] = { s, h.ci } end
+    end
+    local stepped = {} -- (the roots with a way here)
     local qi = 1
     while open[qi] do
       local s, ci = open[qi][1], open[qi][2]
       qi = qi + 1
-      if want[s] then set[s] = ci end
+      if want[s] then
+        set[s], roots[s] = ci, root[s]
+        stepped[root[s]] = true
+      end
       local i, j = floor(ci / c.h), ci % c.h
       for d = 1, 8 do
         local kk = Link(c, s, d)
@@ -1547,7 +1437,7 @@ function CG.TrackFloor(level, px, py, navZ)
           local s2 = First(c, nci) + kk - 1
           local nd = dist[s] + (d > 4 and c.cell * 1.4142 or c.cell)
           if nd <= reach and (not dist[s2] or nd < dist[s2]) then
-            dist[s2] = nd
+            dist[s2], root[s2] = nd, root[s]
             open[#open + 1] = { s2, nci }
           end
         end
@@ -1556,36 +1446,78 @@ function CG.TrackFloor(level, px, py, navZ)
         local L = c.links[li]
         local nd = dist[s] + L.cost
         if L.bci and nd <= reach and (not dist[L.b] or nd < dist[L.b]) then
-          dist[L.b] = nd
+          dist[L.b], root[L.b] = nd, root[s]
           open[#open + 1] = { L.b, L.bci }
         end
       end
       if qi > 5000 then break end
     end
-  end
-  local held = t and t.name == name and (t.z or t.pick) or nil
-  if not next(set) and held then
-    for _, f in ipairs(here) do
-      if abs(Z(c, f.s) - held) <= CG.FLOOR_Z then set[f.s] = f.ci end
+    -- (item 106: the last floors with no way here, on a floor of their own, held where they were last seen; no evidence)
+    if not evidence then
+      local function Hold(s, h)
+        if stepped[h.root] or held[s] or Dist(h.x, h.y, px, py) > CG.HOLD_YD then return end
+        for s2 in pairs(set) do
+          if abs(Z(c, s2) - h.z) <= CG.FLOOR_Z then return end -- (its floor stepped on from another: the same floor)
+        end
+        held[s] = h
+      end
+      for s, ci in pairs(t.set) do Hold(s, { ci = ci, z = Z(c, s), x = t.x, y = t.y, root = tr[s] or s }) end
+      for s, h in pairs(t.held or {}) do Hold(s, h) end
     end
   end
-  if not next(set) then for _, f in ipairs(here) do set[f.s] = f.ci end end
-  -- (the band, when there's a reading)
-  local band = CG.Band(CG.Look(level, px, py), px, py)
-  local inBand = {}
-  for s, ci in pairs(set) do
-    if InBand(band, Z(c, s), 1) then inBand[s] = ci end
+  if lift then
+    -- (at a lift: any of its landings, every floor here)
+    for _, f in ipairs(here) do
+      if not set[f.s] then set[f.s], roots[f.s] = f.ci, f.s end
+    end
   end
-  if next(inBand) then set = inBand end
+  if not next(set) and not next(held) and prev then
+    -- (no way here from the last floors: after a fall, the floors under the one followed; else the floors near it)
+    for _, f in ipairs(here) do
+      local dz = Z(c, f.s) - prev
+      if (fell and dz < -CG.FLOOR_Z) or (not fell and abs(dz) <= CG.FLOOR_Z) then set[f.s], roots[f.s] = f.ci, f.s end
+    end
+  end
+  if not next(set) and not next(held) then
+    for _, f in ipairs(here) do set[f.s], roots[f.s] = f.ci, f.s end
+  end
+  -- (the band, when there's a reading: the held floors too)
+  local band = CG.Band(CG.Look(level, px, py), px, py)
+  local inBand, cut = {}, false
+  for s, ci in pairs(set) do
+    if InBand(band, Z(c, s), 1) then inBand[s] = ci else cut = true end
+  end
+  local heldIn = {}
+  for s, h in pairs(held) do
+    if InBand(band, h.z, 1) then heldIn[s] = h else cut = true end
+  end
+  if next(inBand) or next(heldIn) then set, held = inBand, heldIn else cut = false end
   local n, only = 0, nil
   for s in pairs(set) do n, only = n + 1, s end
-  local z = n == 1 and Z(c, only) or nil
+  local z
+  if n == 1 and not next(held) then
+    z = Z(c, only)
+  elseif n == 0 and next(held) then
+    -- (only held floors: the floor followed kept while they're one floor)
+    local lo, hi, near, nd
+    for _, h in pairs(held) do
+      lo, hi = min(lo or h.z, h.z), max(hi or h.z, h.z)
+      local d = prev and abs(h.z - prev) or 0
+      if not nd or d < nd then near, nd = h.z, d end
+    end
+    if hi - lo <= CG.FLOOR_Z then z = near end
+  end
+  if z and cut then HB.NotePick(z, "city grid") end
   local pick = z
-  if not pick and held then
+  if not pick and prev then
     local best
     for s2 in pairs(set) do
-      local dz = abs(Z(c, s2) - held)
+      local dz = abs(Z(c, s2) - prev)
       if dz <= CG.FLOOR_Z and (not best or dz < best) then best, pick = dz, Z(c, s2) end
+    end
+    for _, h in pairs(held) do
+      local dz = abs(h.z - prev)
+      if dz <= CG.FLOOR_Z and (not best or dz < best) then best, pick = dz, h.z end
     end
   end
   if not pick and navZ then
@@ -1595,8 +1527,8 @@ function CG.TrackFloor(level, px, py, navZ)
       if dz <= CG.FLOOR_Z and (not best or dz < best) then best, pick = dz, Z(c, s) end
     end
   end
-  CG.track = { name = name, level = level, x = px, y = py, at = now, set = set, n = n, z = z, pick = pick, band = band,
-    readings = #CG.readings }
+  CG.track = { name = name, level = level, x = px, y = py, at = now, set = set, roots = roots, held = held, n = n, z = z,
+    pick = pick, band = band, swam = swim, readings = #HB.readings }
   return z
 end
 
@@ -1605,6 +1537,22 @@ function CG.PlayerFloorZ(level, x, y)
   local t = CG.track
   if not (t and t.level == level and Dist(t.x, t.y, x, y) <= CG.PLAYER_YD) then return nil end
   return t.z or t.pick
+end
+-- The floors the player may be on, for a leg starting where they stand with no floor picked (item 106: the walk starts
+-- from each of them and keeps the cheapest, CG.Ends): CG.TrackFloor's candidates' heights, else nil.
+function CG.PlayerFloorZs(level, x, y)
+  local t = CG.track
+  if not (t and t.level == level and not (t.z or t.pick) and Dist(t.x, t.y, x, y) <= CG.PLAYER_YD and t.set) then
+    return nil
+  end
+  local c = CG.City(t.name)
+  if not c then return nil end
+  local zs = {}
+  for s in pairs(t.set) do zs[#zs + 1] = Z(c, s) end
+  for _, h in pairs(t.held or {}) do zs[#zs + 1] = h.z end
+  if not zs[1] then return nil end
+  table.sort(zs)
+  return zs
 end
 
 -- Nav's floor following, with the grid's: N.TrackCityZ's answer, or the grid's floor when it knows it (and Nav's

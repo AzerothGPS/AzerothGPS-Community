@@ -12,6 +12,11 @@ and the cells only across the blocks the walk goes through.
 Per block (only those with ways through): the count, each way's cell in the block (row * K +
 col), then the walk between each pair (i < j) in quarter cells, 4095 for none; two characters of
 Passability.lua's alphabet each. `stamp` is a hash of what it was made from (tests check it).
+
+One-way ground (Data/TerrainDown.lua, item 107: closed cells walked down their fall line only, Passability.DownMove) is
+taken at Passability.HPA_DOWN_DROP (`downDrop`): a block with any in it is directed, its count 2048 more and its walks
+every pair both ways (i to j for each i, then each j but i). Its cells count as ways through on the borders; the step
+across a border is the game's own (ByBlocks' step).
 """
 
 from __future__ import annotations
@@ -26,8 +31,8 @@ K = 32
 RUN_SPLIT = 8  # Passability.lua's P.HPA_RUN_SPLIT
 ALPHABET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_"
 CONTS = (0, 1, 2991)
-FILES = ("Data/Maps.lua", "Data/Roads.lua", "Data/Transports.lua", "Data/Terrain.lua", "Data/Buildings.lua", "Data/Cities.lua",
-         "Data/Caves.lua", "Data/Capitals.lua", "Passability.lua")
+FILES = ("Data/Maps.lua", "Data/Roads.lua", "Data/Transports.lua", "Data/Terrain.lua", "Data/TerrainDown.lua",
+         "Data/Buildings.lua", "Data/Cities.lua", "Data/Caves.lua", "Data/Capitals.lua", "Passability.lua")
 
 
 def runtime():
@@ -74,6 +79,14 @@ def stamp(lua, ns, cont) -> str:
 
     h.update(repr((K, RUN_SPLIT, P.SWIM_COST)).encode())
     grid(ns.Terrain[cont])
+    down = ns.TerrainDown[cont] if ns.TerrainDown else None  # (one-way ground, and the rule's numbers)
+    if down:
+        falls = P.DOWN_FALLS
+        h.update(repr((float(P.HPA_DOWN_DROP), round(float(P.DOWN_CONE), 6), float(P.DOWN_COST),
+                       tuple(float(falls[i]) for i in range(1, len(falls) + 1)))).encode())
+        rows = down.rows
+        for r in sorted(int(k) for k in rows.keys()):
+            h.update(f"{r}:{rows[r]}/".encode())
     halls = ns.CityHalls[cont] if ns.CityHalls else None
     for i in range(1, len(halls) + 1 if halls else 1):
         o = ns.Terrain[halls[i]]
@@ -96,6 +109,33 @@ def values(lua, ns, cont) -> np.ndarray:
     return (np.frombuffer(text.encode(), dtype=np.uint8) - 48).reshape(g.h, g.w)
 
 
+def downs(lua, ns, cont) -> np.ndarray:
+    """Each closed cell's fall line when it's one-way ground at HPA_DOWN_DROP (h x w, -1 none): Passability.BaseDownRow."""
+    g = ns.Terrain[cont]
+    out = np.full((g.h, g.w), -1, np.int16)
+    if not (ns.TerrainDown and ns.TerrainDown[cont]):
+        return out
+    row = ns.Passability.BaseDownRow
+    lut = np.full(256, -1, np.int16)
+    for i, ch in enumerate(ALPHABET):
+        lut[ord(ch)] = i
+    rows = ns.TerrainDown[cont].rows
+    for r in sorted(int(k) for k in rows.keys()):
+        out[r - 1] = lut[np.frombuffer(row(cont, r).encode(), dtype=np.uint8)]
+    return out
+
+
+# the 16 fall lines in the grid's axes (Passability's DOWN_X, DOWN_Y)
+DOWN_XY = np.array([(math.cos(k * math.pi / 8), math.sin(k * math.pi / 8)) for k in range(16)])
+
+
+def _along(d: np.ndarray, dc: int, dr: int, cone: float) -> np.ndarray:
+    """Whether the move (dc, dr) goes down each cell's fall line d (-1, not one-way: True)."""
+    k = np.maximum(d, 0)
+    ok = dc * DOWN_XY[k, 0] + dr * DOWN_XY[k, 1] >= cone * math.hypot(dc, dr)
+    return (d < 0) | ok
+
+
 def _runs(ok: np.ndarray) -> list[int]:
     """The ways through along one border: per run of open pairs, its middle, or both its ends."""
     out, s = [], None
@@ -113,21 +153,34 @@ def _runs(ok: np.ndarray) -> list[int]:
     return out
 
 
-def ways(V: np.ndarray) -> dict[int, list[int]]:
-    """Each block's ways through (cells in the block, row * K + col), sorted."""
+def ways(V: np.ndarray, Dn: np.ndarray | None = None) -> dict[int, list[int]]:
+    """Each block's ways through (cells in the block, row * K + col), sorted. With one-way cells (Dn >= 0): the ways
+    through open ground as without them, and more where a pair across the border has a one-way cell (their own runs),
+    so the open ground's ways stay where they were."""
     h, w = V.shape
     nx, ny = w // K, h // K
     openc = V != 2
+    passc = openc if Dn is None else openc | (Dn >= 0)
     nodes: dict[int, set] = {}
+
+    def border(a_open, b_open, a_pass, b_pass):
+        two = a_open & b_open
+        out = _runs(two)
+        if Dn is not None:
+            out += _runs(a_pass & b_pass & ~two)
+        return out
+
     for br in range(ny):
         for bc in range(nx):
             b, r0, c0 = br * nx + bc, br * K, bc * K
             if bc < nx - 1:  # the border with the block east of it (the next column)
-                for k in _runs(openc[r0:r0 + K, c0 + K - 1] & openc[r0:r0 + K, c0 + K]):
+                for k in border(openc[r0:r0 + K, c0 + K - 1], openc[r0:r0 + K, c0 + K],
+                                passc[r0:r0 + K, c0 + K - 1], passc[r0:r0 + K, c0 + K]):
                     nodes.setdefault(b, set()).add(k * K + K - 1)
                     nodes.setdefault(b + 1, set()).add(k * K)
             if br < ny - 1:  # ... and the one in the next row
-                for k in _runs(openc[r0 + K - 1, c0:c0 + K] & openc[r0 + K, c0:c0 + K]):
+                for k in border(openc[r0 + K - 1, c0:c0 + K], openc[r0 + K, c0:c0 + K],
+                                passc[r0 + K - 1, c0:c0 + K], passc[r0 + K, c0:c0 + K]):
                     nodes.setdefault(b, set()).add((K - 1) * K + k)
                     nodes.setdefault(b + nx, set()).add(k)
     return {b: sorted(s) for b, s in nodes.items()}
@@ -137,15 +190,22 @@ def ways(V: np.ndarray) -> dict[int, list[int]]:
 STEPS = [(dr, dc, math.sqrt(2) if dr and dc else 1.0) for dr in (-1, 0, 1) for dc in (-1, 0, 1) if dr or dc]
 
 
-def walks(V: np.ndarray, b: int, nodes: list[int], nx: int, swim: float) -> np.ndarray:
-    """The walks (cells, water weighted) between a block's ways through: n x n, inf for none."""
+def walks(V: np.ndarray, b: int, nodes: list[int], nx: int, swim: float, Dn: np.ndarray | None = None,
+          cone: float = 0.5, down_cost: float = 1.3) -> np.ndarray:
+    """The walks (cells, water weighted) between a block's ways through: n x n (from i to j), inf for none. One-way
+    cells (Dn: their fall lines, -1 none) are stepped into and out of down their fall line only."""
     from scipy.sparse import csr_matrix
     from scipy.sparse.csgraph import dijkstra
 
     br, bc = divmod(b, nx)
     sub = V[br * K:(br + 1) * K, bc * K:(bc + 1) * K]
+    dsub = None if Dn is None else Dn[br * K:(br + 1) * K, bc * K:(bc + 1) * K]
     openc = sub != 2
+    if dsub is not None:
+        openc = openc | (dsub >= 0)
     mult = np.where(sub == 1, swim, 1.0)
+    if dsub is not None:
+        mult = np.where(dsub >= 0, down_cost, mult)
     rows, cols, wts = [], [], []
     idx = np.arange(K * K).reshape(K, K)
     for dr, dc, ln in STEPS:
@@ -157,6 +217,8 @@ def walks(V: np.ndarray, b: int, nodes: list[int], nx: int, swim: float) -> np.n
         ok = openc[rs, cs] & openc[rt, ct]
         if dr and dc:  # (a diagonal: both cells beside it open)
             ok &= openc[rt, cs] & openc[rs, ct]
+        if dsub is not None:  # (one-way: down the fall lines of the cell left and of the one entered)
+            ok &= _along(dsub[rs, cs], dc, dr, cone) & _along(dsub[rt, ct], dc, dr, cone)
         rows.append(idx[rs, cs][ok])
         cols.append(idx[rt, ct][ok])
         wts.append(mult[rt, ct][ok] * ln)
@@ -175,23 +237,34 @@ def build(lua, ns, cont, log=print) -> str:
     g = ns.Terrain[cont]
     assert g.w % K == 0 and g.h % K == 0, (cont, g.w, g.h)
     V = values(lua, ns, cont)
-    log(f"  {cont}: values {V.shape} ({time.time() - t:.0f}s)")
+    Dn = downs(lua, ns, cont)
+    log(f"  {cont}: values {V.shape}, {int((Dn >= 0).sum())} one-way ({time.time() - t:.0f}s)")
     nx, ny = g.w // K, g.h // K
     swim = float(ns.Passability.SWIM_COST)
+    cone = float(ns.Passability.DOWN_CONE)
+
+    def cost(v):
+        return two(4095 if not np.isfinite(v) else min(4094, int(round(v * 4))))
+
     out = []
-    count = 0
-    for b, nodes in sorted(ways(V).items()):
-        d = walks(V, b, nodes, nx, swim)
+    count = directed = 0
+    for b, nodes in sorted(ways(V, Dn).items()):
+        br, bc = divmod(b, nx)
+        one_way = bool((Dn[br * K:(br + 1) * K, bc * K:(bc + 1) * K] >= 0).any())
+        d = walks(V, b, nodes, nx, swim, Dn if one_way else None, cone, float(ns.Passability.DOWN_COST))
         n = len(nodes)
-        s = [two(n)] + [two(l) for l in nodes]
-        for i in range(n):
-            for j in range(i + 1, n):
-                v = d[i, j]
-                s.append(two(4095 if not np.isfinite(v) else min(4094, int(round(v * 4)))))
+        assert n < 2048, (cont, b, n)
+        s = [two(n + 2048 if one_way else n)] + [two(l) for l in nodes]
+        if one_way:
+            directed += 1
+            s += [cost(d[i, j]) for i in range(n) for j in range(n) if j != i]
+        else:
+            s += [cost(d[i, j]) for i in range(n) for j in range(i + 1, n)]
         out.append(f'[{b}]="{"".join(s)}",')
         count += n
-    log(f"  {cont}: {len(out)} blocks, {count} ways through ({time.time() - t:.0f}s)")
-    lines = [f"ns.TerrainHPA[{cont}] = {{ K = {K}, nx = {nx}, ny = {ny}, w = {g.w}, h = {g.h}, "
+    log(f"  {cont}: {len(out)} blocks ({directed} with one-way ground), {count} ways through ({time.time() - t:.0f}s)")
+    down = f"downDrop = {int(ns.Passability.HPA_DOWN_DROP)}, " if directed else ""
+    lines = [f"ns.TerrainHPA[{cont}] = {{ K = {K}, nx = {nx}, ny = {ny}, w = {g.w}, h = {g.h}, {down}"
              f'stamp = "{stamp(lua, ns, cont)}", c = {{']
     for i in range(0, len(out), 8):
         lines.append(" ".join(out[i:i + 8]))

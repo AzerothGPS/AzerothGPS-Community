@@ -587,6 +587,13 @@ def generate(cd: ClientData, addon_dir: Path) -> list[Path]:
         p.write_text(instances_lua(cd, build_instances(cd, data_dir())), encoding="utf-8", newline="\n")
         written.append(p)
 
+    from . import lifts
+
+    if (data_dir() / lifts.DUMP).exists():  # (the lifts' cars' loops, item 118: the cars' shafts from the same dump)
+        p = data / "LiftTimes.lua"
+        p.write_text(lifts.times_lua(lifts.car_times(cd), cd.casc.version), encoding="utf-8", newline="\n")
+        written.append(p)
+
     written.append(write_roads_lua(data_dir(), addon_dir))
     # (the map's game icons drawn at each size they're shown at: Media/Icons/, Data/IconSizes.lua)
     from .iconscale import write as write_icons

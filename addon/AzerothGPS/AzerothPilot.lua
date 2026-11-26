@@ -15,7 +15,7 @@ ns.AzerothPilot = A
 
 A.TICK = 0.5 -- s between looks at APR's arrow
 A.lastKey = nil -- the step place the route was last given (nil: none yet since turned on)
-A.OTHERS = { "RestedXP", "Zygor", "Polestar", "Questify" } -- (the other guide routes: one guide at a time)
+A.OTHERS = { "RestedXP", "Zygor", "Polestar", "Questify", "OpenXP" } -- (the other guide routes: one guide at a time)
 
 local function APR()
   local a = rawget(_G, "APR")
@@ -38,9 +38,10 @@ function A.On()
   if cdb.aprFollow ~= nil then return cdb.aprFollow == true end
   for _, k in ipairs(A.OTHERS) do
     local g = ns[k]
-    if g and g.On and g.On() then return false end
+    -- (OpenXP Route, added after, asks this one first: only its saved choice here, or each would ask the other)
+    if k ~= "OpenXP" and g and g.On and g.On() then return false end
   end
-  return A.Available()
+  return A.Available() and cdb.openxpFollow ~= true
 end
 
 -- The current step: the step table and its index (APR:GetCurrentStep()), or nil.

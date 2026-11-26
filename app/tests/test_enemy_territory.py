@@ -41,7 +41,7 @@ def trip(game):
     lua, ns = game
     N, st = ns.Nav, ns.settings.gps
     cdb = ns.CharDB()
-    saved = (cdb.faction, cdb.taxiNodes, st.avoidHostile, st.zoom)
+    saved = (cdb.faction, cdb.taxiNodes, st.avoidHostile, st.zoom, st.avoidElites)
     said = lua.eval("{}")
     old_print = ns.Print
     ns.Print = lua.eval("function(t) return function(msg) t[#t + 1] = msg end end")(said)
@@ -62,6 +62,7 @@ def trip(game):
         lua.execute("AGPS_ASKS = {} AGPS_NS.Nav.TransportUsable = " + ("AGPS_USABLE" if rides else "function() return false end"))
         known = ts._masters(ns, 0, faction[0]) if known is None else known
         st.avoidHostile = avoid
+        st.avoidElites = False  # (the guards alone here; the elite areas, item 91: test_elite_areas.py)
         st.zoom = 600
         lua.execute(f"AGPS_LEVEL = {level}")
         cdb.faction = faction
@@ -87,7 +88,7 @@ def trip(game):
         ns.Print = old_print
         lua.execute("AGPS_NS.GPS.Confirm = AGPS_CONFIRM AGPS_NS.Nav.TransportUsable = AGPS_USABLE")
         lua.execute("AGPS_LEVEL = nil")
-        cdb.faction, cdb.taxiNodes, st.avoidHostile, st.zoom = saved
+        cdb.faction, cdb.taxiNodes, st.avoidHostile, st.zoom, st.avoidElites = saved
         ns.Teleports.Changed()
         N.FlightsChanged()
         N.Clear()

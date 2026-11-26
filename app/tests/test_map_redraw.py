@@ -1232,10 +1232,12 @@ def test_a_walk_lists_its_turns_numbered_down_to_the_arrival(game):
         r = N.route
         assert r and len(N.Steps()) < 2  # (one walk: no legs to list)
         st.stepsCollapsed, st.stepsAll = False, False
+        # (2 shown: since 1.4.1's calmer directions this walk has 3 steps, no road joined or left without its turn)
+        G.WALK_TURNS_SHOWN = 2
         text, count = G.WalkTurnsText(r, "the Den", False)
         lines = str(text).split("\n")
         assert lines[0].startswith("|cffffffff1. ") and lines[1].startswith("|cffb0b0b02. "), lines
-        assert count and count > 3 and len(lines) == 4 and ("more step" in lines[3] or "more turns" in lines[3]), lines
+        assert count and count > 2 and len(lines) == 3 and ("more step" in lines[2] or "more turns" in lines[2]), lines
         everything, n = G.WalkTurnsText(r, "the Den", True)
         rows = str(everything).split("\n")
         assert len(rows) == n == count and rows[-1].startswith(f"|cffb0b0b0{n}. Arrive at the Den in "), rows
@@ -1246,6 +1248,7 @@ def test_a_walk_lists_its_turns_numbered_down_to_the_arrival(game):
         assert any(t.startswith("|cffb0b0b02. ") for t in _texts(lua) if "\n" not in t) or             any("|cffb0b0b02. " in t for t in _texts(lua))
         assert G.stepsMore._shown
     finally:
+        G.WALK_TURNS_SHOWN = 3
         st.stepsAll = False
         N.Clear()
 
@@ -6979,7 +6982,8 @@ def test_a_caves_map_opens_from_its_icon_like_a_dungeons_and_right_click_goes_ba
 
 
 def test_a_cave_without_art_has_no_map_to_open(game):
-    # (an animal's den: no minimap art in the client; nothing changes there)
+    # (an animal's den: no minimap art in the client and too small for a map from its cells, its floor the land's
+    # (item 115, Data/AutoMaps.lua): nothing changes there)
     lua, ns = game
     G = ns.GPS
     caves = ns.Caves[1]
@@ -7931,7 +7935,15 @@ def test_the_nearest_roads_come_from_the_road_index_not_every_road(game):
     """)
     graph, scan = lua.eval("AGPS_GRAPH"), lua.eval("AGPS_SCAN")
     assert graph and scan
-    clock = lua.eval("function() return os.clock() * 1000 end")
+    # (Lua instructions counted, not CPU time: under a loaded CI runner the times came out 2.9 to 1, under the 3;
+    # #1000, as #993 and #999)
+    counted = lua.eval("""function(f, ...)
+      local n = 0
+      debug.sethook(function() n = n + 1 end, "", 100)
+      local r = f(...)
+      debug.sethook()
+      return r, n
+    end""")
     g = graph(1)
     oks = (None, lua.eval("function(g) return function(ei) return g.cave[ei] end end")(g),
            lua.eval("function(g) return function(ei) return not g.cave[ei] end end")(g))
@@ -7940,13 +7952,10 @@ def test_the_nearest_roads_come_from_the_road_index_not_every_road(game):
     t_index = t_scan = 0.0
     for k, (x, y) in enumerate(spots):
         for ok in oks:
-            c0 = clock()
-            a = R.NearestEdgesAll(1, x, y, ok)
-            c1 = clock()
-            b = scan(g, x, y, ok)
-            c2 = clock()
+            a, n_index = counted(R.NearestEdgesAll, 1, x, y, ok)
+            b, n_scan = counted(scan, g, x, y, ok)
             if k < len(by_road):
-                t_index, t_scan = t_index + c1 - c0, t_scan + c2 - c1
+                t_index, t_scan = t_index + n_index, t_scan + n_scan
             da = [round(a[i].dist, 3) for i in range(1, len(a) + 1)]
             db = [round(b[i].dist, 3) for i in range(1, len(b) + 1)]
             assert da == db, (x, y, ok is None)
@@ -9419,6 +9428,106 @@ def test_the_options_leave_the_minimap_square_as_it_is(minimap):
         G.ApplySettings()
         G.chrome, G.logo, G.mmChromeCompact = None, None, None
 
+
+def test_the_minimap_square_can_hide_its_border(minimap):
+    # (Kooki3z 2026-11-26 for 1.4.1, item 103: "an option to hide the minimap border", off by default) off: the square's
+    # border shows, as before; on (the options' check box): hidden at once, the map the same size in the same place;
+    # the map grown out of the square and the window out of minimap mode keep their own border
+    lua, ns = minimap
+    G, st, O = ns.GPS, ns.settings.gps, ns.Options
+    _expand_setup(lua)
+    lua.execute("""
+      AGPS_CH = CreateFrame("Frame", nil, AzerothGPSFrame)
+      AGPS_CH.NineSlice = CreateFrame("Frame", nil, AGPS_CH)
+      AGPS_CH.TitleContainer = CreateFrame("Frame", nil, AGPS_CH)
+      AGPS_CH.SetBorder = function(s, layout) s._border = layout; s.NineSlice:Show() end
+      function AGPS_PLACE(f)
+        local t = {}
+        for k, p in pairs(f._pts or {}) do
+          t[#t + 1] = table.concat({ tostring(k), tostring(p[2]), tostring(p[3]), tostring(p[4]), tostring(p[5]) }, ",")
+        end
+        table.sort(t)
+        return table.concat(t, ";") .. "|" .. tostring(f._w) .. "x" .. tostring(f._h)
+      end
+    """)
+    G.chrome = lua.eval("AGPS_CH")
+    ch = G.chrome
+    place = lua.eval("AGPS_PLACE")
+    frame = lua.eval("AzerothGPSFrame")
+    try:
+        assert st.replaceMinimapNoBorder is False  # (the default)
+        st.replaceMinimap = True
+        G.ApplySettings()
+        assert G.MinimapMode() and ch._border == G.MINIMAP_BORDER and ch.NineSlice._shown
+        where = place(frame), place(ch)
+        # on, by its check box: hidden at once, no /reload; the map and the border's frame where they were
+        O.Show()
+        O.ShowPage("Minimap")
+        cb = next(c.control for c in O.settingControls.values() if c.key == "replaceMinimapNoBorder")
+        O.Refresh()
+        assert cb.agpsOn is True and cb.GetChecked(cb) is False
+        cb.SetChecked(cb, True)
+        cb._scripts.OnClick(cb)
+        O.Toggle()  # (closed)
+        assert st.replaceMinimapNoBorder is True
+        assert ch.NineSlice._shown is False and ch._shown and ch._border == G.MINIMAP_BORDER
+        assert (place(frame), place(ch)) == where
+        # kept hidden through the windows' logo look applied again (it gives every window its titled border back)
+        lua.execute("AGPS_NS.ApplyLogoLook()")
+        assert ch.NineSlice._shown is False and ch._border == G.MINIMAP_BORDER
+        G.ApplySettings()
+        assert ch.NineSlice._shown is False and (place(frame), place(ch)) == where
+        # grown out of the square: the usual window's border; back in the square: hidden again
+        G.SetMinimapExpanded(True)
+        for _ in range(4):
+            _tick(lua, ns)
+        assert G.mmState.expanded and ch.NineSlice._shown and ch._border == "ButtonFrameTemplateNoPortrait"
+        G.SetMinimapExpanded(False)
+        for _ in range(4):
+            _tick(lua, ns)
+        assert not G.mmState.expanded and ch.NineSlice._shown is False and ch._border == G.MINIMAP_BORDER
+        # off again: shown, the map still where it was
+        st.replaceMinimapNoBorder = False
+        G.ApplySettings()
+        assert ch.NineSlice._shown and (place(frame), place(ch)) == where
+        # on, then out of minimap mode: the window's own border back
+        st.replaceMinimapNoBorder = True
+        G.ApplySettings()
+        assert ch.NineSlice._shown is False
+        st.replaceMinimap = False
+        G.ApplySettings()
+        assert not G.MinimapMode() and ch.NineSlice._shown and ch._border == "ButtonFrameTemplateNoPortrait"
+        lua.execute("AGPS_NS.ApplyLogoLook()")
+        assert ch.NineSlice._shown
+    finally:
+        st.replaceMinimapNoBorder = False
+        st.replaceMinimap = False
+        G.ApplySettings()
+        G.chrome, G.mmChromeCompact = None, None
+
+
+def test_the_minimap_square_border_option_is_kept_over_a_reload():
+    # (item 103: off by default; turned on, it stays on over a /reload or relog; off again, it stays off)
+    pytest.importorskip("lupa.lua51")
+    from azerothgps.gameharness import start
+    from test_keep_data import SERIALIZE  # (the saved file written as the game does)
+
+    def start_(saved=None):
+        lua, ns = start(saved=saved)
+        lua.execute(SERIALIZE)
+        return lua, ns
+
+    def saved(lua):
+        lua.eval("AGPS_FIRE")("PLAYER_LOGOUT")
+        return lua.eval("AGPS_SERIALIZE")("AzerothGPSDB", lua.globals().AzerothGPSDB)
+    lua, ns = start_()
+    assert ns.settings.gps.replaceMinimapNoBorder is False
+    ns.settings.gps.replaceMinimapNoBorder = True
+    lua2, ns2 = start_(saved(lua))
+    assert ns2.settings.gps.replaceMinimapNoBorder is True and ns2.GPS.SquareHidesBorder()
+    ns2.settings.gps.replaceMinimapNoBorder = False
+    _, ns3 = start_(saved(lua2))
+    assert ns3.settings.gps.replaceMinimapNoBorder is False
 
 
 def test_the_opened_minimap_goes_back_as_you_move_when_asked(minimap):

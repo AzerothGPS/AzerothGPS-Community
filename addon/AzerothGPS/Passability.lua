@@ -287,6 +287,108 @@ function P.SetDropMax(v)
   cliffMemo, cliffMemoN, cliffRuns = {}, 0, {}
   fallMemo, fallMemoN = {}, 0
 end
+
+-- One-way ground (item 107, 1.4.1; issue #271): a closed cell the terrain's own rule closes as too steep to walk up,
+-- no face of it past 70 degrees, is walked down, never up (Data/TerrainDown.lua, app/azerothgps/roads/terrain_down.py:
+-- its fall line, one of 16 ways, and its class). Every way down through cells of a class, from the open ground above
+-- to the open ground below, falls at most DOWN_FALLS[class + 1] yards (the bake bounds it per cell), so a class is
+-- taken only within the safe drop (DropMax: Options' Safe drop, at least the free fall, Nav.FALL_FREE 14; the server's
+-- fall damage starts at 14.57), as the world grid's slopes and ledges (Kooki3z 2026-11-23: "too steep only blocks going
+-- UP"; down it is a drop of its height). A step into or out of one goes within DOWN_CONE of its fall line. Never a
+-- wall's, a building's, a banned swim's, or a grid laid over the continent's (a city's, the ruins'); the ridge filling
+-- and the pockets stay closed both ways (#271: every looser two-way rule opened walls the tests pin). The grid search
+-- (FindPath, the prepared blocks: TerrainHPA.lua's directed blocks, made at HPA_DOWN_DROP), the straight lines
+-- (SegmentCost) and BuildBlock read it the same way (DownMove).
+P.DOWN_FALLS = { 14, 25, 39, 60 } -- (terrain_down.FALLS)
+P.DOWN_CONE = math.cos(math.rad(60)) -- (terrain_down.DOWN_CONE)
+-- (and never past DOWN_FALL_CAP, whatever the safe drop: the fall that costs no health, Nav.FALL_FREE. On the
+-- route-quality against 1.4.1 (200 trips), the 25 yd class left 4 trips slower and the 39 yd one 13, and moved the
+-- Ruins of Lordaeron's north-gate route onto a road over its wall: the blocks' search is an estimate, and more one-way
+-- ways through tipped it. The data keeps 25, 39 and 60 for when the blocks are refined cell by cell)
+P.DOWN_FALL_CAP = 14
+P.HPA_DOWN_DROP = 14 -- (the prepared blocks' drop limit: DOWN_FALL_CAP; under it, directed blocks are built here)
+-- (a step into one-way ground costs this a cell (hpa.py's too): the cells' search takes it only where it saves real
+-- distance. Priced as open ground, a walk zig-zagged down a slope by a few yards' worth of cells, which the straight
+-- lines then couldn't cut (only down its fall line), and came out longer than the way round: Angerfang to Lordamere
+-- Lake 6,125 yd against 6,055)
+P.DOWN_COST = 1.3
+local DOWN_X, DOWN_Y = {}, {} -- (the 16 fall lines in the grid's axes: +col east, +row south)
+for k = 0, 15 do DOWN_X[k], DOWN_Y[k] = math.cos(k * math.pi / 8), math.sin(k * math.pi / 8) end
+local downOf = {} -- [g] = { rows = (TerrainDown's), dec = { [row] = { [col] = code } or false } } or false
+local function DownRows(g)
+  local d = downOf[g]
+  if d == nil then
+    d = false
+    if not g.overlay and not g.slack and not g.cave then
+      for cont, grid in pairs(ns.Terrain or {}) do
+        local t = grid == g and ns.TerrainDown and ns.TerrainDown[cont]
+        if t and t.w == g.w and t.h == g.h then d = { rows = t.rows, dec = {} } end
+      end
+    end
+    downOf[g] = d
+  end
+  return d
+end
+-- (the shipped code of (row, col), or nil)
+local function DownRaw(g, row, col)
+  local d = DownRows(g)
+  if not d then return nil end
+  local dec = d.dec[row]
+  if dec == nil then
+    local s = d.rows[row]
+    dec = false
+    if s then
+      dec = {}
+      local i, n = 1, #s
+      while i <= n do
+        local c0 = INDEX[s:byte(i)] * 64 + INDEX[s:byte(i + 1)]
+        local len = INDEX[s:byte(i + 2)] + 1
+        for k = 0, len - 1 do dec[c0 + k] = INDEX[s:byte(i + 3 + k)] end
+        i = i + 3 + len
+      end
+    end
+    d.dec[row] = dec
+  end
+  return dec and dec[col] or nil
+end
+-- (a banned swim's cell)
+local function Banned(g, row, col)
+  local bl = banRows[g] and banRows[g][row]
+  if bl then
+    for i = 1, #bl - 1, 2 do
+      if col >= bl[i] and col <= bl[i + 1] then return true end
+    end
+  end
+  return false
+end
+-- The fall line (0-15) of a one-way cell walked down within `limit` yards (the safe drop, DropMax, by default), or nil:
+-- not one-way, its class past the limit, or a wall's, a building's, a banned swim's cell.
+local function DownCell(g, row, col, limit)
+  local code = DownRaw(g, row, col)
+  if not code then return nil end
+  if P.DOWN_FALLS[math.floor(code / 16) + 1] > math.min(limit or DropMax(), P.DOWN_FALL_CAP) then return nil end
+  local key = row * 65536 + col
+  local wc = wallCells[g]
+  if wc and wc[key] then return nil end
+  local oc = openCells[g]
+  if oc and oc[key] then return nil end -- (erased: open, both ways)
+  if Buildings(g)[key] or Banned(g, row, col) then return nil end
+  return code % 16
+end
+P.DownCell = DownCell
+local DownAt -- (DownCell less the cells under or beside a grid laid over the continent: below, by BaseDownRow)
+-- Whether a move (dc, dr) in the grid's axes goes down fall line d (within DOWN_CONE of it).
+local function DownAlong(d, dc, dr)
+  return dc * DOWN_X[d] + dr * DOWN_Y[d] >= P.DOWN_CONE * math.sqrt(dc * dc + dr * dr)
+end
+P.DownAlong = DownAlong
+-- Whether the step from (fc, fr) to (c, r) is allowed by the one-way cells: `dTo`/`dFrom` their fall lines (nil: not one-way).
+local function DownMove(dFrom, dTo, dc, dr)
+  if dTo and not DownAlong(dTo, dc, dr) then return false end
+  if dFrom and not DownAlong(dFrom, dc, dr) then return false end
+  return true
+end
+P.DownMove = DownMove
 -- Jumps avoided on the trip (Nav.AvoidJump: their tops): no cliff wall's way down within Nav.JUMP_BAN_YD of one, and no
 -- leg down the ground's cliffs there (CliffAlong); set by Nav.SyncJumps, the cliff walls and the legs worked out again.
 P.jumpBans = nil
@@ -409,6 +511,7 @@ end
 
 -- A continent's wall cells, segments and opened cells from these walls and wall erasers. (`pause()`: called now and
 -- then, RefreshWalls' pause in a background job)
+P.WALL_POINTS_BREATHE = 4000 -- (an eraser's points tested against cells between looks at the slice)
 local function WallGrid(g, lines, opens, pause)
   local cells, segs, open = {}, {}, {}
   local B = P.WALL_BUCKET
@@ -461,9 +564,17 @@ local function WallGrid(g, lines, opens, pause)
       local pad = o.area and 0 or P.OPEN_YD + g.cell
       local cA, rA = ToCell(g, x1 + pad, y1 + pad)
       local cB, rB = ToCell(g, x0 - pad, y0 - pad)
+      local nc = 0
       for r = math.min(rA, rB), math.max(rA, rB) do
         if pause then pause() end
         for c = math.min(cA, cB), math.max(cA, cB) do
+          -- (and within a row, by the points tested: a wide eraser's row against a long loop was 17-30 ms in one go,
+          -- item 108)
+          nc = nc + #pts
+          if pause and nc >= P.WALL_POINTS_BREATHE then
+            nc = 0
+            pause()
+          end
           local x, y = CellCentre(g, c, r)
           if (o.area and InLoop(pts, x, y)) or (not o.area and NearLine(pts, x, y, P.OPEN_YD + g.cell / 2)) then
             open[r * 65536 + c] = true
@@ -665,6 +776,7 @@ end
 -- a square's outlines are decoded the first time a piece is checked over it, into flat lists by MODEL_BUCKET yards
 -- (`idx`, each bucket ax, ay, bx, by, ax, ...), kept for the session.
 P.MODEL_BUCKET = 16
+P.MODEL_SLAB_YD = 0.01 -- (CrossesModelWall: the buckets along a piece taken this much wider, for rounding)
 P.MODEL_REGION = 512
 local modelState = {} -- [cont] = { idx = { [bucket] = { ax, ay, bx, by, ... } }, done = { [region] = true }, w = {} }
 -- An outline's points from its string: { x, y, x, y, ... } (world yards).
@@ -751,8 +863,19 @@ function P.CrossesModelWall(cont, x1, y1, x2, y2)
   EnsureRegions(st, min(x1, x2), min(y1, y2), max(x1, x2), max(y1, y2))
   local B, idx = P.MODEL_BUCKET, st.idx
   local dx, dy = x2 - x1, y2 - y1
-  for kx = floor(min(x1, x2) / B), floor(max(x1, x2) / B) do
-    for ky = floor(min(y1, y2) / B), floor(max(y1, y2) / B) do
+  -- (only the buckets the piece passes through, a hair wider: a crossing's point is on the piece and in the outline's
+  -- piece's box, so in a bucket both are listed in. The whole box's were 900 buckets for a 500 yd diagonal, a slow
+  -- client's 13 ms a check in WorldGrid's road merges. Item 108)
+  local lx, hx, ly, hy = min(x1, x2), max(x1, x2), min(y1, y2), max(y1, y2)
+  local kyLo, kyHi = floor(ly / B), floor(hy / B)
+  for kx = floor(lx / B), floor(hx / B) do
+    local ya, yb = ly, hy
+    if dx ~= 0 then
+      local xa, xb = max(lx, kx * B), min(hx, (kx + 1) * B)
+      local ta, tb = y1 + dy * (xa - x1) / dx, y1 + dy * (xb - x1) / dx
+      ya, yb = min(ta, tb), max(ta, tb)
+    end
+    for ky = max(kyLo, floor((ya - P.MODEL_SLAB_YD) / B)), min(kyHi, floor((yb + P.MODEL_SLAB_YD) / B)) do
       local list = idx[kx * 65536 + ky]
       if list then
         for i = 1, #list, 4 do
@@ -1288,6 +1411,7 @@ local function SegmentCostRaw(cont, x1, y1, x2, y2, endSlack)
   local c2, r2 = ToCell(g, x2, y2)
   local inB1 = bset[r1 * 65536 + c1] and Cell(g, r1, c1) == 2
   local inB2 = bset[r2 * 65536 + c2] and Cell(g, r2, c2) == 2
+  local hasOverlay = ns.CityHalls and ns.CityHalls[cont] and true
   for i = 0, n do
     if canYield and i > 0 and (i % P.SEG_YIELD_EVERY == 0 or (i % 8 == 0 and SliceOver())) then coroutine.yield() end
     local t = i / n
@@ -1306,7 +1430,12 @@ local function SegmentCostRaw(cont, x1, y1, x2, y2, endSlack)
         local cd = v == 2 and CliffCell(g, row, col)
         if cd and dx * cd[1] + dy * cd[2] > 0 then v = CellBase(g, row, col) end
         b = v == 2 and bset[row * 65536 + col] or false
-        -- (the terrain's own steep cell: walked down, maybe; SteepRunDown above)
+        -- (one-way ground crossed down its fall line: open; the line's way in the grid's axes is (-dy, -dx). Up it, or
+        -- across, closed as ever. How far the line falls is CliffAlong's, after)
+        local dw = v == 2 and not b and not g.slack and DownAt(g, cont, hasOverlay, col, row)
+        if dw and DownAlong(dw, -dy, -dx) then v = 0 end
+        -- (the terrain's own steep cell: walked down, maybe; SteepRunDown above. One-way ground crossed off its fall
+        -- line is as before: closed but for such a run, which falls on the whole)
         st = v == 2 and not b and not g.slack and SteepCell(g, row, col, dx, dy) or false
         lastRow, lastCol, lastV, lastB, lastS = row, col, v, b, st
       end
@@ -1372,6 +1501,9 @@ function P.WaterSpans(cont, x1, y1, x2, y2)
       local col = math.floor(((32 - (y1 + dy * t) / TILE) - g.tx0) * k) + 1
       local row = math.floor(((32 - (x1 + dx * t) / TILE) - g.ty0) * k) + 1
       if row ~= lastRow or col ~= lastCol then
+        -- (a new row may be decoded: in a background job, a look at the slice's clock first. A long piece north or
+        -- south crosses hundreds of rows; on the slow client a route's swims were 25-45 ms in one slice. Item 108)
+        if row ~= lastRow and SliceOver() then coroutine.yield() end
         lastRow, lastCol, lastV = row, col, Cell(g, row, col)
       end
       if lastV == 1 then
@@ -1634,6 +1766,36 @@ function P.BaseRow(cont, r)
   return table.concat(t)
 end
 
+-- The fall line of a one-way cell of the continent's grid (DownCell), but none under a capital's or the ruins' grid.
+DownAt = function(g, cont, hasOverlay, c, r, limit)
+  local d = DownCell(g, r, c, limit)
+  if d and hasOverlay then
+    -- (nor a cell beside one: a capital's or the ruins' banks and walls are theirs, and their grid's edge is where the
+    -- continent's steep ground starts. The Ruins of Lordaeron's west bank walked down from its grid's edge missed the
+    -- north gate, test_out_of_the_ruins_through_the_north_gate)
+    local cx, cy = CellCentre(g, c, r)
+    local s = g.cell
+    for k = 0, 8 do
+      local ox, oy = (k % 3 - 1) * s, (math.floor(k / 3) - 1) * s
+      local ov, o = OverlayRaw(cont, cx + ox, cy + oy, true)
+      if ov and not o.cave then return nil end
+    end
+  end
+  return d
+end
+-- A row of `cont`'s one-way cells as the offline prep reads them (hpa.py): a character a cell, "." none, else its fall
+-- line's ALPHABET digit, for the cells the cost rule closes (BaseValue 2, no grid over them) and HPA_DOWN_DROP allows.
+function P.BaseDownRow(cont, r)
+  local g = ns.Terrain[cont]
+  local t = {}
+  local hasOverlay = ns.CityHalls and ns.CityHalls[cont] and true
+  for c = 1, g.w do
+    local d = BaseValue(g, cont, hasOverlay, c, r) == 2 and DownAt(g, cont, hasOverlay, c, r, P.HPA_DOWN_DROP)
+    t[c] = d and ALPHABET:sub(d + 1, d + 1) or "."
+  end
+  return table.concat(t)
+end
+
 -- Cheapest walks over cells from (c0, r0): { [r * 65536 + c] = cost } and where each came
 -- from. `step(c, r)`: the multiplier for stepping into a cell, nil where it can't go (a
 -- diagonal step needs both cells beside it open). `back`: walks to (c0, r0) instead (each
@@ -1652,7 +1814,9 @@ local function Spread(step, c0, r0, back, pause)
       for dr = -1, 1 do
         for dc = -1, 1 do
           if dr ~= 0 or dc ~= 0 then
-            local m = step(c + dc, r + dr, c, r)
+            -- (walking back: the move is from the neighbor into this cell, the one-way cells' way)
+            local m
+            if back then m = step(c + dc, r + dr) and step(c, r, c + dc, r + dr) else m = step(c + dc, r + dr, c, r) end
             if m and (dr == 0 or dc == 0 or (step(c + dc, r) and step(c, r + dr))) then
               local k = (r + dr) * 65536 + c + dc
               local d = dist[n] + (back and here or m) * ((dr ~= 0 and dc ~= 0) and SQ2 or 1)
@@ -1739,6 +1903,11 @@ local function ShutIn(step, c1, r1, c2, r2, limit, pause)
   local function moves(c, r, dc, dr) -- (a move from (c, r) to the cell beside it, as CellPath allows)
     return step(c + dc, r + dr, c, r) and (dr == 0 or dc == 0 or (step(c + dc, r) and step(c, r + dr))) and true or false
   end
+  local function into(c, r, dc, dr) -- (a move from the cell beside (c, r) into it: the flood goes against the moves,
+    -- the one-way cells' way round)
+    return step(c + dc, r + dr) and step(c, r, c + dc, r + dr) and (dr == 0 or dc == 0 or (step(c + dc, r) and step(c, r + dr)))
+      and true or false
+  end
   local seen, list, n = { [r2 * 65536 + c2] = true }, { c2, r2 }, 1
   local i = 1
   while i < #list do
@@ -1748,7 +1917,7 @@ local function ShutIn(step, c1, r1, c2, r2, limit, pause)
     if math.abs(c - c1) <= 1 and math.abs(r - r1) <= 1 and moves(c1, r1, c - c1, r - r1) then return false end
     for dr = -1, 1 do
       for dc = -1, 1 do
-        if (dr ~= 0 or dc ~= 0) and moves(c, r, dc, dr) then
+        if (dr ~= 0 or dc ~= 0) and into(c, r, dc, dr) then
           local k = (r + dr) * 65536 + c + dc
           if not seen[k] then
             n = n + 1
@@ -1795,7 +1964,8 @@ P.HPA_RUN_SPLIT = 8 -- (hpa.RUN_SPLIT) an opening this wide gets a way through a
 local function Two(s, i) return INDEX[s:byte(i)] * 64 + INDEX[s:byte(i + 1)] end
 
 -- A block's ways through: { n, r = {}, c = {} (their cells), cost = {} (n x n: walking
--- between two inside the block, false: no way), at = { [cell in the block] = way } }.
+-- between two inside the block, false: no way), at = { [cell in the block] = way } }. A block with one-way ground in
+-- it (`directed`: its count 2048 more) has every pair both ways, i to j first (hpa.py).
 local function DecodeBlock(H, b)
   local bl = { n = 0, r = {}, c = {}, cost = {}, at = {} }
   local s = H.c[b]
@@ -1803,20 +1973,34 @@ local function DecodeBlock(H, b)
   local K = H.K
   local r0, c0 = math.floor(b / H.nx) * K, (b % H.nx) * K
   local n, p = Two(s, 1), 3
+  local directed = n >= 2048
+  if directed then n = n - 2048 end
   for i = 1, n do
     local l = Two(s, p)
     p = p + 2
     bl.r[i], bl.c[i], bl.at[l] = r0 + math.floor(l / K) + 1, c0 + l % K + 1, i
   end
-  for i = 1, n - 1 do
-    for j = i + 1, n do
-      local v = Two(s, p)
-      p = p + 2
-      local d = v < 4095 and v / 4 or false
-      bl.cost[(i - 1) * n + j], bl.cost[(j - 1) * n + i] = d, d
+  if directed then
+    for i = 1, n do
+      for j = 1, n do
+        if j ~= i then
+          local v = Two(s, p)
+          p = p + 2
+          bl.cost[(i - 1) * n + j] = v < 4095 and v / 4 or false
+        end
+      end
+    end
+  else
+    for i = 1, n - 1 do
+      for j = i + 1, n do
+        local v = Two(s, p)
+        p = p + 2
+        local d = v < 4095 and v / 4 or false
+        bl.cost[(i - 1) * n + j], bl.cost[(j - 1) * n + i] = d, d
+      end
     end
   end
-  bl.n = n
+  bl.n, bl.directed = n, directed or nil
   return bl
 end
 
@@ -1828,7 +2012,7 @@ local function BuildBlock(g, cont, H, b, pause)
   local br, bc = math.floor(b / H.nx), b % H.nx
   local r0, c0 = br * K, bc * K
   local hasOverlay = ns.CityHalls and ns.CityHalls[cont] and true
-  local vals = {}
+  local vals, downs = {}, {}
   local function V(c, r)
     if r < 1 or r > g.h or c < 1 or c > g.w then return 2 end
     local k = r * 65536 + c
@@ -1839,6 +2023,18 @@ local function BuildBlock(g, cont, H, b, pause)
     end
     return v
   end
+  local function Dn(c, r) -- (a closed cell's fall line when it's one-way within the safe drop: hpa.py's, at DropMax)
+    if V(c, r) ~= 2 then return nil end
+    local k = r * 65536 + c
+    local d = downs[k]
+    if d == nil then
+      d = DownAt(g, cont, hasOverlay, c, r) or false
+      downs[k] = d
+    end
+    return d or nil
+  end
+  local function Open(c, r) return V(c, r) ~= 2 or Dn(c, r) ~= nil end
+  local function TwoWay(c, r) return V(c, r) ~= 2 end
   local set = {}
   local function runs(ok, at)
     local s
@@ -1856,25 +2052,44 @@ local function BuildBlock(g, cont, H, b, pause)
       end
     end
   end
-  if bc > 0 then runs(function(k) return V(c0 + 1, r0 + k + 1) ~= 2 and V(c0, r0 + k + 1) ~= 2 end, function(k) return k * K end) end
-  if bc < H.nx - 1 then
-    runs(function(k) return V(c0 + K, r0 + k + 1) ~= 2 and V(c0 + K + 1, r0 + k + 1) ~= 2 end, function(k) return k * K + K - 1 end)
+  -- (each border: the runs open on both sides as without one-way ground, then those a one-way cell opens: hpa.ways)
+  local function border(ac, ar, bc2, br2, at)
+    runs(function(k) return TwoWay(ac(k), ar(k)) and TwoWay(bc2(k), br2(k)) end, at)
+    runs(function(k)
+      return Open(ac(k), ar(k)) and Open(bc2(k), br2(k)) and not (TwoWay(ac(k), ar(k)) and TwoWay(bc2(k), br2(k)))
+    end, at)
   end
-  if br > 0 then runs(function(k) return V(c0 + k + 1, r0 + 1) ~= 2 and V(c0 + k + 1, r0) ~= 2 end, function(k) return k end) end
+  local function f(v) return function() return v end end
+  if bc > 0 then
+    border(f(c0 + 1), function(k) return r0 + k + 1 end, f(c0), function(k) return r0 + k + 1 end, function(k) return k * K end)
+  end
+  if bc < H.nx - 1 then
+    border(f(c0 + K), function(k) return r0 + k + 1 end, f(c0 + K + 1), function(k) return r0 + k + 1 end,
+      function(k) return k * K + K - 1 end)
+  end
+  if br > 0 then
+    border(function(k) return c0 + k + 1 end, f(r0 + 1), function(k) return c0 + k + 1 end, f(r0), function(k) return k end)
+  end
   if br < H.ny - 1 then
-    runs(function(k) return V(c0 + k + 1, r0 + K) ~= 2 and V(c0 + k + 1, r0 + K + 1) ~= 2 end, function(k) return (K - 1) * K + k end)
+    border(function(k) return c0 + k + 1 end, f(r0 + K), function(k) return c0 + k + 1 end, f(r0 + K + 1),
+      function(k) return (K - 1) * K + k end)
   end
   local list = {}
   for l in pairs(set) do list[#list + 1] = l end
   table.sort(list)
-  local bl = { n = #list, r = {}, c = {}, cost = {}, at = {} }
+  local bl = { n = #list, r = {}, c = {}, cost = {}, at = {}, built = true }
   for i, l in ipairs(list) do
     bl.r[i], bl.c[i], bl.at[l] = r0 + math.floor(l / K) + 1, c0 + l % K + 1, i
   end
-  local function step(c, r)
+  local function step(c, r, fc, fr)
     if c <= c0 or c > c0 + K or r <= r0 or r > r0 + K then return nil end
     local v = V(c, r)
-    if v == 2 then return nil end
+    local d = v == 2 and Dn(c, r)
+    if v == 2 and not d then return nil end
+    if fc and (d or V(fc, fr) == 2) and not DownMove(V(fc, fr) == 2 and Dn(fc, fr) or nil, d or nil, c - fc, r - fr) then
+      return nil
+    end
+    if d then return P.DOWN_COST end
     return v == 1 and P.SWIM_COST or 1
   end
   for i = 1, bl.n do
@@ -1901,6 +2116,11 @@ local function ByBlocks(g, H, cont, c1, r1, c2, r2, step, box, danger, pause)
     local bl = blocks[b]
     if not bl then
       bl = (dirty and dirty[b]) and BuildBlock(g, cont, H, b, pause) or DecodeBlock(H, b)
+      -- (one-way ground prepared at HPA_DOWN_DROP: under a smaller safe drop, its block is worked out here; and
+      -- without the one-way data loaded, a test's grid with the blocks alone)
+      if bl.directed and not bl.built and (DropMax() < (H.downDrop or P.HPA_DOWN_DROP) or not DownRows(g)) then
+        bl = BuildBlock(g, cont, H, b, pause)
+      end
       blocks[b] = bl
     end
     return bl
@@ -1923,7 +2143,17 @@ local function ByBlocks(g, H, cont, c1, r1, c2, r2, step, box, danger, pause)
   local function Reach(bl, b, c0, r0, back)
     local dist, lines = {}, {}
     for i = 1, bl.n do
-      local cells, d = LineCells(Within(b), c0, r0, bl.c[i], bl.r[i])
+      local cells, d
+      if back then -- (to the stop: the line walked from the way through, then turned round, as from the stop)
+        cells, d = LineCells(Within(b), bl.c[i], bl.r[i], c0, r0)
+        if cells then
+          local rev = {}
+          for m = #cells, 1, -1 do rev[#rev + 1] = cells[m] end
+          cells = rev
+        end
+      else
+        cells, d = LineCells(Within(b), c0, r0, bl.c[i], bl.r[i])
+      end
       if not cells then return Spread(Within(b), c0, r0, back, pause) end
       local k = bl.r[i] * 65536 + bl.c[i]
       dist[k], lines[k] = d, cells
@@ -2094,6 +2324,9 @@ local function Search(cont, x1, y1, x2, y2, road1, road2, priceRed)
   -- (the other faction's guards: their reach costs Router.HOSTILE_FACTOR a step)
   local Rt = ns.Router
   local side = Rt and Rt.HostileSide and Rt.HostileSide()
+  -- (the elite areas the walk starts or ends in, item 91: not paid for, as the Router's legs and the world grid leave
+  -- them out; the guards' towns here as before)
+  local eliteExempt = side and Rt.EliteTownsNear and Rt.EliteTownsNear(cont, side, x1, y1, x2, y2) or nil
   local hostileCell = {} -- (by row: Row)
   local function hostile(c, r)
     if not side then return false end
@@ -2101,7 +2334,7 @@ local function Search(cont, x1, y1, x2, y2, road1, road2, priceRed)
     local h = row[c]
     if h == nil then
       local hx, hy = CellCentre(g, c, r)
-      h = Rt.HostileAt(cont, hx, hy, side)
+      h = Rt.HostileAt(cont, hx, hy, side, eliteExempt)
       row[c] = h
     end
     return h
@@ -2174,21 +2407,45 @@ local function Search(cont, x1, y1, x2, y2, road1, road2, priceRed)
     -- Road tolerance +3 the route took it, 2026-11-23)
     return not (dz <= drop and ((fc == c1 and fr == r1 and not road1) or (c == c2 and r == r2 and not road2)))
   end
-  local memo = {} -- (by row: Row)
-  -- step multiplier into (c, r) (from (fc, fr), when it's a move: the cliffs), or nil where it can't go
-  local function step(c, r, fc, fr)
+  local memo, owMemo = {}, {} -- (by row: Row)
+  -- (a closed cell's fall line when it's one-way ground walked down within the safe drop: DownCell; the continent's
+  -- own grid only, never a wall's or under a grid laid over it)
+  local downs = not g.overlay and not g.slack and DownRows(g) and true
+  -- (the step multiplier into (c, r) whatever the move, or false; owMemo: its fall line when it's one-way, or false)
+  local function eval(c, r)
     local row = Row(memo, r)
     local m = row[c]
     if m == nil then
-      m = cost0(c, r) or false
+      m = cost0(c, r)
+      local d = false
+      if not m and downs and not (wc and wc[r * 65536 + c]) and Cell(g, r, c) == 2 then
+        d = DownAt(g, cont, hasOverlay, c, r) or false
+        if d then m = P.DOWN_COST end -- (one-way: the moves decide, in step)
+      end
+      Row(owMemo, r)[c] = d
       if m then -- (the guards' reach times its factor; a zone too high LEVEL_FACTOR - 1 more a yard, as the Router
         -- adds it to a leg's cost: water there at the swim cost and that, not their product)
         if hostile(c, r) then m = m * Rt.HOSTILE_FACTOR elseif inRed(c, r) then m = m + LF - 1 end
       end
+      m = m or false
       row[c] = m
     end
-    if m and fc and cliffs and steep(c, r, fc, fr) then return nil end
-    return m or nil
+    return m
+  end
+  -- step multiplier into (c, r) (from (fc, fr), when it's a move: the cliffs, the one-way ground), or nil where it
+  -- can't go
+  local function step(c, r, fc, fr)
+    local m = eval(c, r)
+    if not m then return nil end
+    if fc and downs then
+      -- (into or out of one-way ground: only down its fall line, never up; its fall the class's, within the safe drop,
+      -- so not the ground's cliffs' rule either)
+      eval(fc, fr)
+      local dTo, dFrom = owMemo[r][c], owMemo[fr][fc]
+      if dTo or dFrom then return DownMove(dFrom or nil, dTo or nil, c - fc, r - fr) and m or nil end
+    end
+    if fc and cliffs and steep(c, r, fc, fr) then return nil end
+    return m
   end
   -- Run as a background job (a coroutine, see Router.Pump): hand control back every so
   -- often so no single frame pays for the whole search.
@@ -2256,7 +2513,7 @@ local function Search(cont, x1, y1, x2, y2, road1, road2, priceRed)
       if (sc - len) / (swimCost - 1) > wetSoFar[j] - wetSoFar[i] + g.cell then return false end
     end
     if side then
-      local h = Rt.HostileYards(cont, pts[i][1], pts[i][2], pts[j][1], pts[j][2], side)
+      local h = Rt.HostileYards(cont, pts[i][1], pts[i][2], pts[j][1], pts[j][2], side, eliteExempt)
       if h > hostileSoFar[j] - hostileSoFar[i] + g.cell then return false end
     end
     if redSoFar then

@@ -327,6 +327,7 @@ Command = function(msg)
       db.playerLevel = UnitLevel and UnitLevel("player") or nil
       db.faction = N.Faction and N.Faction() or nil
       db.avoidHostile, db.avoidHighZones = ns.settings.gps.avoidHostile, ns.settings.gps.avoidHighZones
+      db.avoidElites, db.eliteOffset = ns.settings.gps.avoidElites, ns.settings.gps.eliteOffset
       db.rides = N.RideDebug and N.RideDebug() or nil
       ns.Print(string.format("route saved for the bug report (%s stops, %d points): /reload to write it out",
         #stops, #pts / 2))

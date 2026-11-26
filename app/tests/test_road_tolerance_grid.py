@@ -1,9 +1,11 @@
 """Road tolerance in the world grid (item 30, Kooki3z on bbc4c8c4: at +10, Use class spells off, Safe drop 60, from just
 east of Camp Taurajo to Bluefen the route ran down the Southern Gold Road to Shady Rest and back up the marsh, 2.6k yd).
-The grid's road preference follows Router.RoadFactor (WorldGrid's x.road, in its cost key): +10 no road bonus, -10 the
-roads strongly. Here it still goes round: the straight way (900 yd) climbs the ridge between (92 to 216 yd up) and
+The grid's road preference follows Router.RoadFactor (WorldGrid's x.road, in its cost key): +10 a small road bonus
+(item 57), -10 the roads strongly. Here it still goes round: the straight way (900 yd) climbs the ridge between (92 to 216 yd up) and
 falls about 180 yd to the marsh; its far side needs a drop of about 100 yd (1.15k yd at 100, 1.6k at 70-80, 1.08k from
 130), past Safe drop 60. So the trip is round at any tolerance without a fall spell, the shortest at +10."""
+
+import math
 
 import pytest
 
@@ -36,7 +38,9 @@ def _route(lua, ns, tol, **opts):
     WG.routes, WG.order, WG.targets = lua.table(), lua.table(), lua.table()
     r = R.Route(1, TAURAJO_EAST[0], TAURAJO_EAST[1], BLUEFEN[0], BLUEFEN[1], lua.table(**opts))
     ks = [r.kinds[i] for i in range(1, len(r.pts) // 2)]
-    return r.length, sum(1 for k in ks if k == R.KIND_ROAD), r.pending
+    road = sum(math.dist((r.pts[2 * i - 1], r.pts[2 * i]), (r.pts[2 * i + 1], r.pts[2 * i + 2]))
+               for i in range(1, len(ks) + 1) if ks[i - 1] == R.KIND_ROAD)
+    return r.length, road, r.pending
 
 
 def test_road_tolerance_steers_the_world_grid(game, no_spells_60):  # noqa: F811
@@ -45,7 +49,9 @@ def test_road_tolerance_steers_the_world_grid(game, no_spells_60):  # noqa: F811
     at10, road10, p10 = _route(lua, ns, 10)
     atm10, roadm10, pm10 = _route(lua, ns, -10)
     assert not (p0 or p10 or pm10)
-    assert at10 < at0 - 200 and road10 == 0, (at10, at0, road10)  # (+10: no road kept, shorter)
+    # (+10: shorter, little road (under a tenth of it); not none since item 57's small road bonus there, ROAD_PRICE_TOP:
+    # the straight way's few yards beside a road that runs its way are taken on it, which 0's way round never passes)
+    assert at10 < at0 - 200 and road10 < 0.1 * at10, (at10, at0, road10, road0)
     assert atm10 > at0 and roadm10 > road0, (atm10, at0, roadm10, road0)  # (-10: onto the roads)
 
 

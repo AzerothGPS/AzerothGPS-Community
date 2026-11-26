@@ -27,6 +27,10 @@ rules with that database's newer npcflag bits (SERVER_SERVICES):
 Riverglades (WoW Forever's own zone) has none in either: the client data's flight masters and places there ship
 as points of interest (gen-addon-data's Data/Pois.lua), and its quest POI/vignette tables have nothing there.
 
+Which NPCs stand still (item 104, 1.4.1): `ns.NpcsStill` lists the NPCs every spawn of which, in the dump and the
+snapshot, has MovementType 0 (idle: no wander, no patrol). The height band (HeightBand.lua) measures the player's
+height only against those; the logged and stand-in NPCs, whose movement isn't known, aren't listed.
+
 `agps npcs` reports; `--write` writes Data/Npcs.lua. Run it again when the dump or the snapshot changes.
 """
 from __future__ import annotations
@@ -189,6 +193,7 @@ def build(data_dir: Path, ft: dict[int, dict] | None = None, undercity=None):
                     svc = svc.replace("i", "")  # (the mount vendors have the flag too: "innkeeper" isn't them)
                 n = npcs[int(e)] = {"name": t["Name"], "sub": sub, "svc": svc,
                                     "trainer": trainer_kind(t), "side": side(f, alliance, horde), "spawns": []}
+            _moves(n, s["MovementType"])
             if any(sl == level and math.hypot(sx - x, sy - y) <= SAME_YD for sl, sx, sy, _ in n["spawns"]):
                 report["same spot"] += 1
                 continue
@@ -198,6 +203,17 @@ def build(data_dir: Path, ft: dict[int, dict] | None = None, undercity=None):
     _add_logged(npcs, report)
     _add_standin(npcs, report)
     return npcs, dict(report)
+
+
+def _moves(n: dict, movement) -> None:
+    """Note a spawn's MovementType on NPC `n`: `moves` False while every spawn seen stands still (0), True once one
+    wanders, patrols or follows a path (lua_text's `ns.NpcsStill`)."""
+    n["moves"] = n.get("moves", False) or str(movement).strip() not in ("0", "")
+
+
+def still_ids(npcs: dict) -> list[int]:
+    """The NPCs known to stand still at their spawns (every spawn MovementType 0; unknown movement: not listed)."""
+    return sorted(i for i, n in npcs.items() if n.get("moves") is False and n.get("from") != "standin")
 
 
 def _add_standin(npcs, report, doc=None):
@@ -293,6 +309,8 @@ def _add_server(npcs, report, ft, alliance, horde, rows=None, undercity=None):
         i = int(r["id"])
         if m != ISLE and _in_dump(npcs, by_name, i, r["name"], level, x, y):
             report["in the dump"] += 1
+            if i in npcs:  # (the server's word on its movement counts too: either moving, not still)
+                _moves(npcs[i], r["movement"])
             continue
         n = npcs.get(i)
         if n is None:
@@ -304,6 +322,7 @@ def _add_server(npcs, report, ft, alliance, horde, rows=None, undercity=None):
                            "side": side(f, alliance, horde), "spawns": [], "from": "server"}
             if n["side"] == "B" and m != ISLE:
                 n["side"] = _town_side(town, level, x, y)
+        _moves(n, r["movement"])
         if any(sl == level and math.hypot(sx - x, sy - y) <= SAME_YD for sl, sx, sy, _ in n["spawns"]):
             report["same spot"] += 1
             continue
@@ -378,6 +397,9 @@ def lua_text(npcs: dict) -> str:
     if standin:  # (Wowhead's WoW Forever pages, unverified: overrides/standin_npcs.json, Layers' n.standin)
         out.append("-- Stand-ins (Wowhead's WoW Forever pages, unverified; real data replaces them by id):")
         out.append('ns.NpcsStandIn = "' + " ".join(map(str, standin)) + '"')
+    # (item 104: the NPCs that stand still at their spawns, for the height band, HeightBand.lua)
+    out.append("-- Standing still at their spawns (MovementType 0 everywhere; the height band's, HeightBand.lua):")
+    out.append('ns.NpcsStill = "' + " ".join(map(str, still_ids(npcs))) + '"')
     server = sorted(i for i, n in npcs.items() if n.get("from") == "server")  # (the last line: tests read it)
     out.append("-- From the server snapshot: " + " ".join(map(str, server)))
     return "\n".join(out) + "\n"

@@ -2007,6 +2007,23 @@ local function BuildWindow()
         if g and g.Redraw then g.Redraw() end
       end
     end)
+  -- (item 114, the grid ideas: MapExtras.lua's height profile strip and floor picker)
+  Key("heightProfile")
+  check(L["Show the route's height profile"], L["A strip along the bottom of the map shows the way to your next stop from the side: green where it climbs, orange where it drops, the jumps marked, and a dot for you. It shows only when the way goes up or down. Not on the minimap square."],
+    function() return GPS().heightProfile ~= false end, function(v)
+      GPS().heightProfile = v and true or false
+      for _, g in ipairs({ ns.GPS or false, ns.mapClone or false }) do
+        if g and g.Redraw then g.Redraw() end
+      end
+    end)
+  Key("floorPicker")
+  check(L["Floor picker where floors stack"], L["Where floors lie over each other (Undercity, the capitals, inns, towers, caves under hills), \"+\" and \"-\" buttons on the map pick the floor you look at, starting on yours. The route on the floor picked shows full, and a stop you double-click there goes on that floor."],
+    function() return GPS().floorPicker ~= false end, function(v)
+      GPS().floorPicker = v and true or false
+      for _, g in ipairs({ ns.GPS or false, ns.mapClone or false }) do
+        if g and g.Redraw then g.Redraw() end
+      end
+    end)
   header(L["Following and zooming"])
   Key("rotate")
   check(L["Turn the map with me"], L["On: the map turns so that where you face is up (heading-up). Off: north stays up and the arrow turns. Not in the game's world map: north stays up there, as on the game's map."],
@@ -2258,6 +2275,11 @@ local function BuildWindow()
     { value = "medium", text = L["Medium"] },
     { value = "large", text = L["Large"] },
   }, function() return GPS().replaceMinimapSize or "small" end, function(v) GPS().replaceMinimapSize = v end, Replacing, INDENT)
+  -- (Kooki3z 2026-11-26 for 1.4.1: the square without its border; GPSFrame's G.SquareHidesBorder)
+  Key("replaceMinimapNoBorder")
+  check(L["Hide the minimap square's border"], L["Only the map shows in the minimap corner, with no metal border around it. The map keeps its size and place. The GPS map opened out of it keeps its usual border."],
+    function() return GPS().replaceMinimapNoBorder == true end, function(v) GPS().replaceMinimapNoBorder = v end,
+    Replacing, INDENT)
   -- (asked 2026-11-17: "add option to not show the route on our minimap replacement"; GPSFrame's G.SquareHidesRoute)
   Key("replaceMinimapRoute")
   check(L["Route on the minimap square"], L["Your route's line on the GPS map in the minimap corner. Off: only the stops' markers there. The GPS map opened out of it, and the one in the world map, still show the route."],
@@ -2516,7 +2538,7 @@ local function BuildWindow()
     function() return GPS().flightMapRing ~= false end, function(v) GPS().flightMapRing = v end,
     function() return GPS().useFlights ~= false end, INDENT)
   Key("useHearthstone")
-  check(L["Use hearthstone"], L["Routes may start with your Hearthstone (or a shaman's Astral Recall) when it's in your bags, off cooldown, and faster. Home is your inn's town; the exact spot is learned after your first hearth. The directions say when; click the button beside them to use it."],
+  check(L["Use hearthstone"], L["Routes may start with your Hearthstone (or a shaman's Astral Recall) when it's in your bags, off cooldown, and faster. Home is your inn's town; the exact spot is learned when you bind there or after your first hearth. The directions say when; click the button beside them to use it."],
     function() return GPS().useHearthstone ~= false end, function(v)
       GPS().useHearthstone = v
       ns.Nav.OptionsChanged()
@@ -2525,6 +2547,13 @@ local function BuildWindow()
   check(L["Use class teleports and teleport items"], L["Routes may start with a mage's teleport (with a Rune of Teleportation), Teleport: Moonglade, or an engineer's Dimensional Ripper - Everlook or Ultrasafe Transporter: Gadgetzan (with the specialization it needs) when it's known or in your bags, off cooldown, and faster. Click the button beside the directions to use it."],
     function() return GPS().useTeleports ~= false end, function(v)
       GPS().useTeleports = v
+      ns.Nav.OptionsChanged()
+    end)
+  -- (item 109, SPF parity: a party mage's portals, off: the route then asks another player for something; Teleports.lua)
+  Key("usePartyPortals")
+  check(L["Use a party mage's portals"], L["Routes may start with a portal from a mage in your group who's standing near you, to your faction's cities their level allows (40, or 50 for Darnassus and Thunder Bluff), when that's faster. The directions say to ask them; they need a Rune of Portals."],
+    function() return GPS().usePartyPortals == true end, function(v)
+      GPS().usePartyPortals = v
       ns.Nav.OptionsChanged()
     end)
   Key("avoidHighZones")
@@ -2536,15 +2565,41 @@ local function BuildWindow()
       GPS().avoidHostile = v
       ns.Nav.OptionsChanged()
     end)
+  -- (item 91, Kooki3z 2026-11-26: elite enemy areas, avoided as the guards are, on by default; the slider: from which
+  -- level, relative to the player's, Router.EliteMin)
+  Key("avoidElites")
+  check(L["Avoid elite enemy areas"], L["Routes keep away from areas where elite enemies stand (gold on the map), going around when there's a reasonable way, like the other faction's towns. A stop inside one is still reached."],
+    function() return GPS().avoidElites ~= false end, function(v)
+      GPS().avoidElites = v
+      ns.Nav.OptionsChanged()
+    end)
+  Key("eliteOffset")
+  local eliteSlider = slider(L["Avoid elites this many levels relative to your level:"], ns.Router.ELITE_OFFSET_MIN,
+    ns.Router.ELITE_OFFSET_MAX, 1, function(v) return string.format("%+d", v) end,
+    function() return ns.Router.EliteOffset() end, function(v)
+      GPS().eliteOffset = v
+      ns.Nav.OptionsChanged()
+    end, function() return GPS().avoidElites ~= false end,
+    L["An area is avoided when its elites are at least your level plus this many: at -10, a level 45 character avoids elites of level 35 and up."])
+  eliteSlider:SetWidth(330) -- (its long name and the value beside it)
+  O.eliteSlider = eliteSlider
   -- (item 63c, Kooki3z 2026-11-24: the guard zones the route goes around, drawn; on by default. Item 98, 2026-11-25: every
-  -- enemy zone in view, with or without a route, so not under "avoid" any more; the saved key kept)
+  -- enemy zone in view, with or without a route, so not under "avoid" any more; the saved key kept. Item 91: the elite
+  -- areas avoided too, gold)
   Key("showAvoided")
-  check(L["Show enemy areas"], L["Red areas on the map where the other faction's guards stand."],
+  check(L["Show enemy areas"], L["Red areas on the map where the other faction's guards stand, gold where elite enemies routes avoid are."],
     function() return GPS().showAvoided ~= false end, function(v) GPS().showAvoided = v end, nil, INDENT)
   Key("allowSwim")
   check(L["Allow swimming"], L["Routes may swim across rivers, lakes and the sea near the shore when that's faster, timed at swimming speed. Swims show as a wavy line; right-click one to go round by land on that trip. Off: routes go round by land wherever there's a way (an island is still swum to)."],
     function() return GPS().allowSwim ~= false end, function(v)
       GPS().allowSwim = v
+      ns.Nav.OptionsChanged()
+    end)
+  -- (item 109, SPF parity: water walking was always on; Nav.WaterFast)
+  Key("useWaterWalking")
+  check(L["Use water walking"], L["With Water Walking, Levitate, an Elixir of Water Walking or Aquatic Form known or in your bags (and its reagent, where it needs one), routes cross water as fast as land. Off: water is swum."],
+    function() return GPS().useWaterWalking ~= false end, function(v)
+      GPS().useWaterWalking = v
       ns.Nav.OptionsChanged()
     end)
   -- (asked 2026-11-04: how much the roads are kept; Router.RoadFactor)
@@ -2583,6 +2638,44 @@ local function BuildWindow()
       if ns.FallSpells then ns.FallSpells.Refresh() end
       ns.Nav.OptionsChanged()
     end, function() return GPS().useClassSpells ~= false end, 20)
+  -- (item 102, Kooki3z: immunities that survive the landing, an Expert jumper's, each its own option under it, on by
+  -- default; FallSpells.SPELLS' `immune` rows. Named as the game names the spell.)
+  local function expertOn() return GPS().useClassSpells ~= false and GPS().expertJumper == true end
+  local function immune(id, english)
+    local name = ns.SpellName and ns.SpellName(id) or english
+    if type(name) ~= "string" or name == "" then name = english end
+    return name, Format(L["Expert jumper may jump off any ledge with %s ready: cast it just before you land and the fall does no harm."], name)
+  end
+  local function immuneChanged()
+    if ns.FallSpells then ns.FallSpells.Refresh() end
+    ns.Nav.OptionsChanged()
+  end
+  Key("jumpDivineShield")
+  local dsName, dsTip = immune(642, "Divine Shield")
+  check(dsName, dsTip, function() return GPS().jumpDivineShield ~= false end, function(v)
+    GPS().jumpDivineShield = v and true or false
+    immuneChanged()
+  end, expertOn, 40)
+  Key("jumpDivineProtection")
+  local dpName, dpTip = immune(498, "Divine Protection")
+  check(dpName, dpTip, function() return GPS().jumpDivineProtection ~= false end, function(v)
+    GPS().jumpDivineProtection = v and true or false
+    immuneChanged()
+  end, expertOn, 40)
+  Key("jumpBlessingOfProtection")
+  local bopName, bopTip = immune(1022, "Blessing of Protection")
+  check(bopName, bopTip .. " " .. L["Cast on yourself, whatever you have targeted."],
+    function() return GPS().jumpBlessingOfProtection ~= false end, function(v)
+      GPS().jumpBlessingOfProtection = v and true or false
+      immuneChanged()
+    end, expertOn, 40)
+  Key("jumpIceBlock")
+  local ibName, ibTip = immune(11958, "Ice Block")
+  check(ibName, ibTip .. " " .. L["Always cast in the air: it holds you in place."],
+    function() return GPS().jumpIceBlock ~= false end, function(v)
+      GPS().jumpIceBlock = v and true or false
+      immuneChanged()
+    end, expertOn, 40)
   -- (Kooki3z 2026-11-23: the plain drop limit, Nav.PlainSafeDrop)
   Key("safeDropYd")
   slider(L["Safe drop"], ns.Nav.SAFE_DROP_MIN, ns.Nav.SAFE_DROP_MAX, 1, function(v) return ns.Nav.FormatDistance(v) end,

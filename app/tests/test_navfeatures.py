@@ -147,7 +147,9 @@ def test_orgrimmars_ledge_drop_is_a_jump_on_the_grid(game):
     finally:
         ns.Router.JUMP_CALLOUT_YD = 25
     # (said though the stop is just past it: a jump near the end isn't left out as the turns there are)
-    assert [t for k, t, _d in said if k == "drop"] == ["Jump down here"], said
+    # (with its fall where known, item 113a: "Jump down here (7 yd)")
+    drops = [t for k, t, _d in said if k == "drop"]
+    assert len(drops) == 1 and re.fullmatch(r"Jump down here( \(\d+ yd\))?", drops[0]), said
 
 
 def test_a_known_stair_is_found_and_said_on_a_grid_walk(game):
@@ -349,7 +351,7 @@ def test_at_a_ledges_top_the_jump_step_stays_until_the_player_falls(game):
         assert ms and str(ms[0].kind) == "drop", [str(m.kind) for m in ms]
         for _ in range(3):  # (standing at the top, a few updates on)
             r, ms = step(ORG_LEDGE_TOP[0] + 0.5, ORG_LEDGE_TOP[1] + 0.5)
-            assert str(ms[0].kind) == "drop" and str(ms[0].text) == "Jump down here", [str(m.text) for m in ms]
+            assert str(ms[0].kind) == "drop" and str(ms[0].text).startswith("Jump down here"), [str(m.text) for m in ms]
             assert ns.Arrow.ColorFor(ms[0], 0.0)[0] == 4
         # (the arrow aims at the path past the drop, not at the ledge)
         path = ns.Turns.Path(r)

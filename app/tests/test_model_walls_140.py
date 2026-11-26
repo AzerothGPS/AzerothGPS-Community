@@ -16,6 +16,9 @@ capitals are their city grids', and a gate's arch the mesh walks under isn't a w
 - The shipped world grid links nothing across a model wall in the tiles round those places.
 """
 
+import math
+import random
+
 import pytest
 
 from test_map_redraw import game  # noqa: F401
@@ -167,3 +170,44 @@ def test_the_router_s_own_ways_go_past_a_model_wall_as_its_terrain_knows(game): 
         lua.execute("UnitFactionGroup = AGPS_RQ[1]")
         st.worldGrid, ns.CharDB().faction = saved
         ns.WorldGrid.Set(bool(st.worldGrid))
+
+
+def test_a_piece_is_checked_only_against_the_buckets_it_passes_through(game):  # noqa: F811
+    # (item 108: CrossesModelWall looked at every bucket in a piece's box, 900 for a 500 yd diagonal, 13 ms a check on
+    # the slow client in WorldGrid's road merges. Only the buckets along the piece now: the same answers as every
+    # outline piece tested whole, on random pieces round the Crossroads' and Razor Hill's fences, short and long, any
+    # direction, through corners and along bucket lines)
+    lua, ns = game
+    P = ns.Passability
+    brute = lua.eval("""function(cont, x1, y1, x2, y2)
+      for _, p in ipairs(AGPS_NS.Passability.ModelWallOutlines(cont)) do
+        for i = 1, #p - 3, 2 do
+          local ax, ay, bx, by = p[i], p[i + 1], p[i + 2], p[i + 3]
+          local dx, dy = x2 - x1, y2 - y1
+          local d1 = dx * (ay - y1) - dy * (ax - x1)
+          local d2 = dx * (by - y1) - dy * (bx - x1)
+          if (d1 <= 0 and d2 >= 0) or (d1 >= 0 and d2 <= 0) then
+            local ex, ey = bx - ax, by - ay
+            local d3 = ex * (y1 - ay) - ey * (x1 - ax)
+            local d4 = ex * (y2 - ay) - ey * (x2 - ax)
+            if ((d3 <= 0 and d4 >= 0) or (d3 >= 0 and d4 <= 0)) and not (d1 == 0 and d2 == 0) then return true end
+          end
+        end
+      end
+      return false
+    end""")
+    rng = random.Random(108)
+    hits = 0
+    B = P.MODEL_BUCKET
+    for cx, cy in ((-450.0, -2650.0), (320.0, -4700.0)):
+        for k in range(300):
+            x1, y1 = cx + rng.uniform(-200, 200), cy + rng.uniform(-200, 200)
+            if k % 3 == 0:  # (along a bucket line, or straight up or across)
+                x1 = round(x1 / B) * B
+            length = rng.choice((5.0, 40.0, 150.0, 500.0))
+            a = rng.choice((0.0, 90.0, 45.0, rng.uniform(0, 360)))
+            x2, y2 = x1 + length * math.cos(math.radians(a)), y1 + length * math.sin(math.radians(a))
+            want = bool(brute(1, x1, y1, x2, y2))
+            hits += want
+            assert bool(P.CrossesModelWall(1, x1, y1, x2, y2)) == want, (x1, y1, x2, y2)
+    assert hits > 30

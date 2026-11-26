@@ -251,3 +251,106 @@ def test_the_ride_check_s_side_walk_is_searched_to_its_cap_at_most(grid):
         while R.HasWork():
             R.Pump(now() + 50, now)
         R.SYNC_WALKS = True
+
+
+# --- 1.4.1: the ride check's walks to the stop, once the walk all the way is known
+THELSAMAR, KHARANOS = (-5349.0, -2960.0), (-5586.0, -482.0)
+QUIET_BUDGET = 650000  # nodes from setting the stop to the background going quiet (519k on 2026-11-26; over 1.2M before)
+
+
+def test_with_the_walk_known_the_ride_check_s_walk_to_the_stop_is_a_side_walk(grid):
+    """A plan's walk to the trip's stop itself, asked by the ride check (`side`): searched as the route's own until the
+    walk all the way is known; then (`sideStop`, Nav's CompareRide) to SIDE_WALK_CAP at most. A side walk's best way is
+    never searched after (WG.Refine): it's only weighed, never walked as it is."""
+    lua, ns = grid
+    R, N, WG = ns.Router, ns.Nav, ns.WorldGrid
+    now = lua.eval("function() return os.clock() * 1000 end")
+    N.Clear()
+    R.Reset()
+    N.SetStops(lua.eval(f"{{ {{ x = {FREEWIND[0]}, y = {FREEWIND[1]}, cont = 1, name = 'stop' }} }}"), False, "red")
+    R.Reset()
+    R.SYNC_WALKS = False
+    lua.execute(SEARCHES)
+    lua.execute("AGPS_SIDE.refine = AGPS_NS.WorldGrid.Refine; AGPS_SIDE.refined = 0; "
+                "AGPS_NS.WorldGrid.Refine = function(...) AGPS_SIDE.refined = AGPS_SIDE.refined + 1 "
+                "return AGPS_SIDE.refine(...) end")
+    ask = lua.eval("""function(sx, sy, tx, ty, known)
+      local WG = AGPS_NS.WorldGrid
+      return WG.Walk(WG.Cont(1), sx, sy, nil, tx, ty, nil, { side = true, sideStop = known or nil })
+    end""")
+    was = WG.SIDE_WALK_CAP
+    try:
+        WG.SIDE_WALK_CAP = 2000
+
+        def run(known):
+            lua.execute("AGPS_SIDE.caps = {}")
+            WG.routes, WG.order, WG.targets = lua.table(), lua.table(), lua.table()
+            WG.failed, WG.failOrder = lua.table(), lua.table()
+            assert ask(TAURAJO[0], TAURAJO[1], FREEWIND[0], FREEWIND[1], known) == "pending"
+            for _ in range(20000):
+                if not R.HasWork():
+                    break
+                R.Pump(now() + 20, now)
+            return list(lua.eval("AGPS_SIDE.caps").values())
+
+        caps = run(False)  # (the walk all the way not known: the stop's walk as the route's own)
+        assert caps and caps[0] > 2000, caps
+        caps = run(True)
+        assert caps and all(0 < cap <= 2000 for cap in caps), caps
+        # (a side walk that's found: its best way not searched after)
+        WG.SIDE_WALK_CAP = 60000
+        lua.execute("AGPS_SIDE.refined = 0")
+        run(True)
+        assert lua.eval("AGPS_SIDE.refined") == 0
+    finally:
+        WG.SIDE_WALK_CAP = was
+        lua.execute("AGPS_NS.WorldGrid.Search = AGPS_SIDE.real; AGPS_NS.WorldGrid.Refine = AGPS_SIDE.refine")
+        while R.HasWork():
+            R.Pump(now() + 50, now)
+        R.SYNC_WALKS = True
+        N.Clear()
+
+
+def test_thelsamar_to_kharanos_past_the_guards_the_background_goes_quiet(grid):
+    """1.4.0's leftover (the route-speed study and the 1.4.0 handoff): as a Horde player from Thelsamar to Kharanos, past
+    Dun Morogh's guards, the route settled but the background never went quiet: the ride check's plans' walks from far
+    docks (Grom'gol, Tirisfal) to Kharanos searched 150,000 nodes round the guards and 200,000 through them, plan after
+    plan, none finding a way (over 1.2M nodes in 6,000 frames, still going). Now, the walk all the way known, they're
+    side walks (SIDE_WALK_CAP) and their best ways aren't searched: the route settles as before and the background goes
+    quiet within QUIET_BUDGET nodes."""
+    lua, ns = grid
+    R, N, WG, CG = ns.Router, ns.Nav, ns.WorldGrid, ns.CityGrid
+    ticks, nodes, r = settle(lua, ns, "Horde", 0, THELSAMAR, KHARANOS)
+    assert ticks is not None, f"never settled ({nodes} nodes)"
+    now = lua.eval("function() return os.clock() * 1000 end")
+    # (settle() worked its queue to the end once settled: from the same start, the stops set again, worked out frame by
+    # frame as the game does until it's quiet)
+    WG.routes, WG.order, WG.targets = lua.table(), lua.table(), lua.table()
+    WG.failed, WG.failOrder = lua.table(), lua.table()
+    CG.routes, CG.order = lua.table(), lua.table()
+    R.Reset()
+    N.Clear()
+    R.SYNC_WALKS = False
+    n0 = WG.stats.nodes + CG.stats.nodes
+    N.SetStops(lua.eval(f"{{ {{ x = {KHARANOS[0]}, y = {KHARANOS[1]}, cont = 0, name = 'stop' }} }}"), False, "red")
+    quiet, used = 0, 0
+    try:
+        for tick in range(20000):
+            lua.execute(f"AGPS_T = {1000 + tick * 0.05}")
+            r = N.Route(THELSAMAR[0], THELSAMAR[1], 0) or r
+            t1 = now()
+            while R.HasWork() and now() - t1 < 8:
+                res = R.Pump(now() + 4, now)
+                done, fixed = res if isinstance(res, tuple) else (res, None)
+                if done:
+                    N.SearchDone(fixed)
+            used = WG.stats.nodes + CG.stats.nodes - n0
+            quiet = 0 if R.HasWork() else quiet + 1
+            if quiet >= 40 or used > QUIET_BUDGET:
+                break
+    finally:
+        while R.HasWork():
+            R.Pump(now() + 50, now)
+        R.SYNC_WALKS = True
+    assert quiet >= 40 and used <= QUIET_BUDGET, f"not quiet after {used} nodes"
+    assert r is not None and not r.pending and (r.totalYards or 0) < 4000, (r and r.totalYards)

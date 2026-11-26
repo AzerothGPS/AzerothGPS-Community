@@ -402,16 +402,17 @@ def test_the_stonetalon_ledge_is_walked_down_not_round_by_the_road():
     maxDrop = ns.Nav.SafeDrop()
     r = R.Route(1, *LEDGE_TOP, *LEDGE_FOOT, lua.table(offroad=False, maxDrop=maxDrop))
     assert r.length < 400, r.length  # (straight down off the road by the ledge's top: ~300; was ~640)
-    # never up it: the same legs the other way are closed
+    # never up it: the same legs the other way are closed (1.4.1, item 107: the grid's one-way ground walks the face
+    # down in a leg or two, ~240 yd, where one straight leg fell 46 yd)
     pts = [r.pts[i] for i in range(1, len(r.pts) + 1)]
     down = 0
     for i in range(0, len(pts) - 2, 2):
         a, b = (pts[i], pts[i + 1]), (pts[i + 2], pts[i + 3])
-        if z(*a) - z(*b) > 30:
+        if z(*a) - z(*b) > 8:
             down += 1
             assert P.SegmentCost(1, *a, *b) is not None
             assert P.SegmentCost(1, *b, *a) is None
-    assert down == 1
+    assert down >= 1
     R.Reset()
     back = R.Route(1, *LEDGE_FOOT, *LEDGE_TOP, lua.table(offroad=False, maxDrop=maxDrop))
     assert back.length > 500, back.length  # (up: round by the road)

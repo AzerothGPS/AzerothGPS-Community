@@ -13,24 +13,57 @@ ns.Teleports = T
 T.CAST_SECONDS = 25 -- casting (10 s) plus the loading screen, roughly
 local HEARTHSTONE_ITEM, RUNE_OF_TELEPORTATION = 6948, 17031
 local HEARTHSTONE_SPELL, ASTRAL_RECALL = 8690, 556
+-- The hearthstones, from this client's own data (item 109, read 2026-11-26: ItemEffect/ItemXItemEffect, SpellEffect,
+-- SpellCooldowns, SpellCategories): 6948 (spell 8690) and WoW Forever's own "Hearthstone" 284163 (spell 1315212), both a
+-- teleport to the bind point (SpellEffect 252, target 9 "home"), a 10 s cast, a 1 h cooldown in the same category (89):
+-- one hearth spends both. The first in the bags is the one used.
+T.HEARTHSTONE_ITEMS = { HEARTHSTONE_ITEM, 284163 }
+T.HOME_SPELLS = { [HEARTHSTONE_SPELL] = true, [1315212] = true, [ASTRAL_RECALL] = true }
 
--- Where each teleport lands (world yards, approximate): { spell, cont, x, y, name, needsRune }
+-- Where each teleport lands (world yards): { spell, cont, x, y, name, needsRune }. The landing is the server's
+-- spell_target_position for the spell (the CMaNGOS dump; item 109 put Darnassus's and Moonglade's there: Moonglade's had
+-- been 180 yd off). Reagents (Rune of Teleportation, 17031; Moonglade none) from the client's SpellReagents.
 T.SPELLS = {
   { 3567, 1, 1469.9, -4221.5, "Orgrimmar", true }, -- Teleport: Orgrimmar
   { 3563, 0, 1773.5, 61.1, "Undercity", true }, -- Teleport: Undercity
   { 3566, 1, -965.0, 283.4, "Thunder Bluff", true }, -- Teleport: Thunder Bluff
-  { 3561, 0, -9003.5, 869.0, "Stormwind", true }, -- Teleport: Stormwind
+  { 3561, 0, -9003.5, 870.0, "Stormwind", true }, -- Teleport: Stormwind
   { 3562, 0, -4613.6, -915.4, "Ironforge", true }, -- Teleport: Ironforge
-  { 3565, 1, 9660.8, 2513.6, "Darnassus", true }, -- Teleport: Darnassus
-  { 18960, 1, 7980.0, -2501.0, "Moonglade", false }, -- Teleport: Moonglade (druid)
+  { 3565, 1, 9664.1, 2526.4, "Darnassus", true }, -- Teleport: Darnassus
+  { 18960, 1, 7991.9, -2679.8, "Moonglade", false }, -- Teleport: Moonglade (druid)
 }
 
--- Teleport items: { item, cont, x, y, name, the engineering specialization it needs (spell), item name }
+-- Teleport items: { item, cont, x, y, name, the engineering specialization it needs (spell), item name, worn = }.
+-- Landings: the server's spell_target_position for Everlook Transporter (23442) and Gadgetzan Transporter (23441, the
+-- Gnomish Transporter's success). 260820 (item 109): WoW Forever's own item with the Everlook Transporter's spell (the
+-- client's ItemEffect, 3 charges, the same 4 h cooldown category 68003), a trinket: used worn, and only when the game
+-- says it's usable (IsUsableItem: its skill and charges), since its own requirements aren't in the client's readable data.
 T.ITEMS = {
-  { 18984, 1, 6723.5, -4662.5, "Everlook", 20222, "Dimensional Ripper - Everlook" }, -- Goblin Engineer
-  { 18986, 1, -7139.1, -3752.1, "Gadgetzan", 20219, "Ultrasafe Transporter: Gadgetzan" }, -- Gnomish Engineer
+  { 18984, 1, 6755.3, -4658.1, "Everlook", 20222, "Dimensional Ripper - Everlook" }, -- Goblin Engineer
+  { 18986, 1, -7109.1, -3825.2, "Gadgetzan", 20219, "Ultrasafe Transporter: Gadgetzan" }, -- Gnomish Engineer
+  { 260820, 1, 6755.3, -4658.1, "Everlook", nil, "Everlook Transporter", worn = true },
 }
 T.HEARTHSTONE_ITEM, T.ASTRAL_RECALL = HEARTHSTONE_ITEM, ASTRAL_RECALL
+
+-- A party mage's portals (item 109, option `usePartyPortals`, Options > Routing, off: the route then asks another player
+-- for something). The client says nothing of another player's spells, so what a mage in the group can open is told by
+-- their level against the client's SpellLevels (read 2026-11-26): Portal: Stormwind 10059, Ironforge 11416, Orgrimmar
+-- 11417 and Undercity 11418 at 40, Darnassus 11419 and Thunder Bluff 11420 at 50, each a Rune of Portals (17032,
+-- SpellReagents), the player's own faction's cities only. Only from where the player stands, with the mage within
+-- PARTY_MAGE_YD (UnitPosition gives party members' positions here): a stop further on can't count on the mage being
+-- there. Landings: the server's portal effects (17334, 17607-17611). No use button: the portal is the mage's to cast,
+-- the player clicks it themselves. { spell, cont, x, y, name, level, side }
+T.PARTY_PORTALS = {
+  { 10059, 0, -9003.5, 870.0, "Stormwind", 40, "Alliance" },
+  { 11416, 0, -4613.6, -915.4, "Ironforge", 40, "Alliance" },
+  { 11419, 1, 9660.8, 2513.6, "Darnassus", 50, "Alliance" },
+  { 11417, 1, 1469.9, -4221.5, "Orgrimmar", 40, "Horde" },
+  { 11418, 0, 1773.5, 61.1, "Undercity", 40, "Horde" },
+  { 11420, 1, -965.0, 283.4, "Thunder Bluff", 50, "Horde" },
+}
+T.PARTY_MAGE_YD = 60 -- the mage this near: they can open a portal here
+T.PARTY_HERE_YD = 30 -- a route starting this near the player (not from a later stop)
+T.PARTY_SECONDS = 45 -- asking, the mage's 10 s cast, stepping in and the loading screen
 
 local function S() return ns.settings and ns.settings.gps end
 
@@ -78,6 +111,80 @@ end
 local function SpellKnown(spell)
   if IsPlayerSpell then return IsPlayerSpell(spell) end
   return IsSpellKnown and IsSpellKnown(spell) or false
+end
+
+local function Worn(item)
+  local f = (C_Item and C_Item.IsEquippedItem) or IsEquippedItem
+  if not f then return false end
+  local ok, v = pcall(f, item)
+  return ok and v == true
+end
+
+-- Whether the game lets the player use an item now (its skill, its charges); true when the client can't say.
+local function Usable(item)
+  local f = (C_Item and C_Item.IsUsableItem) or IsUsableItem
+  if not f then return true end
+  local ok, v = pcall(f, item)
+  if not ok or (ns.IsSecret and ns.IsSecret(v)) then return true end
+  return v and true or false
+end
+
+-- The hearthstone in the bags: the first ready one, else the first had (on its cooldown); nil with none.
+local function Hearthstone()
+  local had
+  for _, item in ipairs(T.HEARTHSTONE_ITEMS) do
+    if ItemCount(item) > 0 then
+      if ItemLeft(item) <= 0 then return item, true end
+      had = had or item
+    end
+  end
+  return had, false
+end
+T.Hearthstone = Hearthstone
+
+-- Another mage in the group, near the player (T.PARTY_MAGE_YD): their name and level, else nil.
+function T.PartyMage()
+  local inGroup = IsInGroup and IsInGroup()
+  if not inGroup then return nil end
+  local raid = IsInRaid and IsInRaid()
+  local x, y, cont = Geo.PlayerWorld()
+  if not x then return nil end
+  local n = GetNumGroupMembers and GetNumGroupMembers() or 0
+  if ns.IsSecret and ns.IsSecret(n) then return nil end
+  for i = 1, math.min(n, 40) do
+    local unit = raid and ("raid" .. i) or ("party" .. i)
+    local ok, mine = pcall(UnitIsUnit, unit, "player")
+    if not (ok and mine) and UnitExists and UnitExists(unit) then
+      local _, class = UnitClass(unit)
+      local level = UnitLevel(unit)
+      local okp, ux, uy, _, inst = pcall(UnitPosition, unit)
+      local readable = not (ns.IsSecret and (ns.IsSecret(class) or ns.IsSecret(level) or ns.IsSecret(ux)))
+      local on = not UnitIsConnected or UnitIsConnected(unit)
+      if readable and on and class == "MAGE" and okp and ux and Geo.Base(inst) == Geo.Base(cont)
+          and (ux - x) ^ 2 + (uy - y) ^ 2 <= T.PARTY_MAGE_YD ^ 2 then
+        local name = UnitName(unit)
+        if name and not (ns.IsSecret and ns.IsSecret(name)) then return name, level end
+      end
+    end
+  end
+  return nil
+end
+
+-- The portals a party mage near the player can open for them: { name, dest, ask = the mage's name, spell }.
+local function PartyPortals()
+  local st = S()
+  if not st or not st.usePartyPortals then return {} end
+  local mage, level = T.PartyMage()
+  if not mage then return {} end
+  local side = UnitFactionGroup and UnitFactionGroup("player")
+  local out = {}
+  for _, p in ipairs(T.PARTY_PORTALS) do
+    if p[7] == side and (level or 0) >= p[6] then
+      out[#out + 1] = { string.format(L["%s's portal"], mage), { cont = p[2], x = p[3], y = p[4], name = p[5] },
+        ask = mage, portal = p[1] }
+    end
+  end
+  return out
 end
 
 local function SpellLeft(spell)
@@ -169,8 +276,8 @@ end
 -- (item or spell: what the use button uses).
 local function Row(c, cont, px, py)
   local dest = c[2]
-  return { cont, px, py, dest.cont, dest.x, dest.y, T.CAST_SECONDS, c[1], "", dest.name, c[1], use = true,
-    item = c.item, spell = c.spell }
+  return { cont, px, py, dest.cont, dest.x, dest.y, c.ask and T.PARTY_SECONDS or T.CAST_SECONDS, c[1], "", dest.name,
+    c[1], use = true, item = c.item, spell = c.spell, ask = c.ask }
 end
 
 local cache, cacheAt = nil, -100
@@ -185,7 +292,8 @@ function T.Available(cont, px, py)
   local st = S()
   local hearth = not st or st.useHearthstone ~= false
   local teleports = not st or st.useTeleports ~= false
-  if not hearth and not teleports then return {} end
+  local party = st and st.usePartyPortals
+  if not hearth and not teleports and not party then return {} end
   local now = GetTime()
   if not cache or now - cacheAt > 3 then
     cacheAt = now
@@ -202,10 +310,11 @@ function T.Available(cont, px, py)
       if SpellKnown(ASTRAL_RECALL) then
         Add(SpellReady(ASTRAL_RECALL), ns.SpellName and ns.SpellName(ASTRAL_RECALL) or "Astral Recall", home, nil, ASTRAL_RECALL)
       end
-      if ItemCount(HEARTHSTONE_ITEM) > 0 then Add(ItemReady(HEARTHSTONE_ITEM), L["your Hearthstone"], home, HEARTHSTONE_ITEM) end
+      local stone, ready = Hearthstone()
+      if stone then Add(ready, L["your Hearthstone"], home, stone) end
     end
     for _, it in ipairs(teleports and T.ITEMS or {}) do -- (an engineer's teleporter: its specialization to use it)
-      if SpellKnown(it[6]) and ItemCount(it[1]) > 0 then
+      if (not it[6] or SpellKnown(it[6])) and ItemCount(it[1]) > 0 and (not it.worn or Worn(it[1])) and Usable(it[1]) then
         local name = GetItemInfo and GetItemInfo(it[1]) or it[7]
         Add(ItemReady(it[1]), name, { cont = it[2], x = it[3], y = it[4], name = it[5] }, it[1])
       end
@@ -220,6 +329,13 @@ function T.Available(cont, px, py)
   end
   local out = {}
   for _, c in ipairs(cache) do out[#out + 1] = Row(c, cont, px, py) end
+  -- (a party mage's portals: from where the player stands only, looked at each time: the mage moves)
+  if party then
+    local x, y, pc = Geo.PlayerWorld()
+    if x and px and Geo.Base(pc) == Geo.Base(cont) and (px - x) ^ 2 + (py - y) ^ 2 <= T.PARTY_HERE_YD ^ 2 then
+      for _, c in ipairs(PartyPortals()) do out[#out + 1] = Row(c, cont, px, py) end
+    end
+  end
   return out
 end
 
@@ -270,6 +386,19 @@ function T.LearnHome()
   if ns.Nav then ns.Nav.Invalidate(true, true) end
 end
 
+-- Just bound at an innkeeper (HEARTHSTONE_BOUND, item 109): the player stands by the innkeeper, so that's home, whatever
+-- the bind's name says (the client gives only the name; an inn whose name isn't the subzone's was learned only after the
+-- first hearth). Kept in the character's own db (CharDB().bind) at runtime, never written to a file by hand.
+function T.LearnBind()
+  local bind = GetBindLocation and GetBindLocation()
+  local x, y, cont = Geo.PlayerWorld()
+  local cdb = ns.CharDB and ns.CharDB()
+  if not bind or bind == "" or not x or not cdb then return end
+  cdb.bind = { cont = cont, x = x, y = y, name = bind }
+  cache = nil
+  if ns.Nav then ns.Nav.Invalidate(true, true) end
+end
+
 -- For /agps debug: what the addon sees.
 function T.Describe()
   local home = T.Home()
@@ -281,7 +410,7 @@ function T.Describe()
   local wait = T.Waiting()
   return string.format("bind=%s home=%s hearthstones=%d ready=%s available: %s waiting: %s",
     tostring(GetBindLocation and GetBindLocation()), home and string.format("%s (%d, %.0f, %.0f)", home.name, home.cont, home.x, home.y) or "unknown",
-    ItemCount(HEARTHSTONE_ITEM), tostring(ItemReady(HEARTHSTONE_ITEM)), #list > 0 and table.concat(list, ", ") or "none",
+    ItemCount(HEARTHSTONE_ITEM) + ItemCount(T.HEARTHSTONE_ITEMS[2]), tostring(select(2, Hearthstone())), #list > 0 and table.concat(list, ", ") or "none",
     #wait > 0 and table.concat(wait, ", ") or "none")
 end
 
@@ -296,14 +425,24 @@ function T.Init()
   ev:RegisterEvent("ZONE_CHANGED_INDOORS")
   ev:RegisterEvent("PLAYER_ENTERING_WORLD")
   ev:RegisterEvent("HEARTHSTONE_BOUND")
+  ev:RegisterEvent("GROUP_ROSTER_UPDATE") -- (a party mage joined or left: usePartyPortals)
   if C_Timer and C_Timer.NewTicker then C_Timer.NewTicker(T.TICK_SECONDS, T.Tick) end
   ev:SetScript("OnEvent", function(_, event, unit, _, spell)
     cache = nil
+    if event == "GROUP_ROSTER_UPDATE" then
+      local st = S()
+      if st and st.usePartyPortals and ns.Nav and ns.Nav.dest and ns.Nav.Invalidate then ns.Nav.Invalidate(true) end
+      return
+    end
+    if event == "HEARTHSTONE_BOUND" then
+      C_Timer.After(1, T.LearnBind)
+      return
+    end
     if event ~= "UNIT_SPELLCAST_SUCCEEDED" then
       C_Timer.After(1, T.LearnHome)
       return
     end
-    if event == "UNIT_SPELLCAST_SUCCEEDED" and unit == "player" and (spell == HEARTHSTONE_SPELL or spell == ASTRAL_RECALL) then
+    if event == "UNIT_SPELLCAST_SUCCEEDED" and unit == "player" and T.HOME_SPELLS[spell] then
       -- (recorded once the player is there: moved HOME_MOVED_YD or more, or onto another continent, looked at each second
       -- up to HOME_WAIT_SECONDS; the loading screen can outlast a fixed wait, item 51b)
       local fx, fy, fcont = Geo.PlayerWorld()
@@ -319,7 +458,7 @@ function T.Init()
         local cdb = ns.CharDB and ns.CharDB()
         if x and cdb then cdb.bind = { cont = cont, x = x, y = y, name = GetBindLocation and GetBindLocation() } end
         -- (in an inn with its inside: the floor followed from the innkeeper's, Nav.Hearthed)
-        if x and ns.Nav and ns.Nav.Hearthed and spell == HEARTHSTONE_SPELL then
+        if x and ns.Nav and ns.Nav.Hearthed and spell ~= ASTRAL_RECALL then
           ns.Nav.Hearthed(ns.Nav.PlayerLevel and ns.Nav.PlayerLevel(cont) or cont, x, y)
         end
         if ns.Nav then ns.Nav.Invalidate(true) end

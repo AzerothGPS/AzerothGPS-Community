@@ -116,13 +116,15 @@ def test_the_walk_to_the_stop_is_searched_before_the_planner_s_others(game):
         lua.execute(f"AGPS_POS = {{ {SANDS[0]}, {SANDS[1]}, 1 }}")
         N.SetStops(lua.eval(f"{{ {{ x = {ULDUM[0]}, y = {ULDUM[1]}, cont = 1, name = 'stop' }} }}"), False, "red")
         N.Route(SANDS[0], SANDS[1], 1)
-        assert R.IsFocus(1, ULDUM[0], ULDUM[1])
+        # (the stop where it is on walkable ground: StopSnap.lua moves Uldum's gate 8 yd; #1000)
+        stop = (N.stops[1].x, N.stops[1].y)
+        assert R.IsFocus(1, stop[0], stop[1])
         lua.execute("QJOBS = function() local _, j = debug.getupvalue(AGPS_NS.Router.HasWork, 1); return j end")
         jobs = lua.eval("QJOBS()")
         keys = [str(jobs[i].key) for i in range(1, len(jobs) + 1)]
         # (the grid's search for the walk to the stop, first; and no Router's own walk queued for it at all)
-        assert keys[0].startswith("worldgrid:%.0f:%.0f:" % SANDS) and ">1>%.0f:%.0f:" % ULDUM in keys[0], keys[:3]
-        assert "1:%.0f:%.0f:%.0f:%.0f" % (SANDS[0], SANDS[1], ULDUM[0], ULDUM[1]) not in keys
+        assert keys[0].startswith("worldgrid:%.0f:%.0f:" % SANDS) and ">1>%.0f:%.0f:" % stop in keys[0], keys[:3]
+        assert "1:%.0f:%.0f:%.0f:%.0f" % (SANDS[0], SANDS[1], stop[0], stop[1]) not in keys
     finally:
         now = lua.eval("function() return os.clock() * 1000 end")
         while R.HasWork():

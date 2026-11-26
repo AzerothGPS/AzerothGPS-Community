@@ -109,15 +109,16 @@ class City:
     # aren't in the collision read, and a found jump went off the ring "through the wall", Kooki3z 2026-11-22)
     dry: bool = False  # no surface under its models' liquid (Undercity's slime canals: the grid walked their shallow edges
     # across, Kooki3z 2026-11-22, "the actual bridge here"; navfeatures.Tris' liquids)
-    whole: bool = False  # every floor of its grid is the city's (CityGrid.CityFor; `whole = true` in the data), not only
-    # over the capital's own cells: Darnassus, whose treetops aren't among them
+    whole: bool = False  # every floor of its grid within the capital's rectangle is the city's (CityGrid.CityFor;
+    # `whole = true` in the data), not only over the capital's own cells: Darnassus, whose treetops aren't among them;
+    # Ironforge, whose cells are its halls and leave out the shops and rooms off them (Nissa Firestone's First Aid room)
 
 
 CITIES = [
     City("Orgrimmar", "orgrimmar", 1, cell=3.0),
     City("Stormwind City", "stormwind_city", 0, cell=3.0),
     City("Undercity", "undercity", 0, 10001, cell=2.0, found_jumps=False, dry=True),
-    City("Ironforge", "ironforge", 0, cell=3.0, near_z=16.0),
+    City("Ironforge", "ironforge", 0, cell=3.0, near_z=16.0, whole=True),
     City("Thunder Bluff", "thunder_bluff", 1, cell=2.0, found_jumps=False),  # (its mesas' rails and fences: as Undercity's)
     City("Darnassus", "darnassus", 1, cell=3.0, near_z=16.0, whole=True),
 ]

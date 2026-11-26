@@ -3170,6 +3170,7 @@ local floorCache = {}
 function G.InstanceFloors(inst)
   local cached = floorCache[inst]
   if cached then return cached end
+  if type(inst) == "table" and inst.auto then return inst.floors end -- (a map drawn from its cells: its own floors)
   local list = G.ArtList(inst) -- (a cave's map too: G.CaveArt's)
   local rooms, total = {}, 0
   for _, p in ipairs(list or {}) do
@@ -4119,17 +4120,20 @@ function G.SwimAtCursor()
   end
   return nil
 end
--- What a swim's tooltip says: { title, lines }.
-function G.SwimTip()
+-- What a swim's tooltip says: { title, lines }. (`sg`: the swim, else the one at the cursor; `pad`: the controller's
+-- button for the avoid, Pad.lua's picking, said instead of the right-click)
+function G.SwimTip(sg, pad)
   local N = ns.Nav
   local lines = {}
   local fast = N.WaterFast and N.WaterFast()
   if fast then
     lines[#lines + 1] = Format(L["%s: as fast as on land."], fast.name or "?")
   end
-  local _, _, sg = G.SwimAtCursor()
+  if not sg then sg = select(3, G.SwimAtCursor()) end
   if G.SwimSegStays(sg) then -- (only when there's truly no way by land: removed, and swum after all)
     lines[#lines + 1] = L["No way round by land: this swim stays."]
+  elseif pad then
+    lines[#lines + 1] = Format(L["%s: avoid swimming for this stop"], pad)
   else
     lines[#lines + 1] = L["Right-click: avoid swimming for this stop"]
   end
@@ -4256,17 +4260,32 @@ function G.JumpInfo(sg)
   local dz = kind == R.KIND_DROP and R.DropFall and R.DropFall(part.pts, part.kinds, i) or nil
   local FS = ns.FallSpells
   local spell = dz and FS and FS.Needs and FS.Needs(dz) and true or false
+  -- (item 114b: where it lands, its run's foot; a running jump's drop by the route's own heights when it has them)
+  local MX = ns.MapExtras
+  local lx, ly, ldz
+  if MX and MX.JumpLanding then lx, ly, ldz = MX.JumpLanding(part, sg.i) end
+  if not dz and ldz and ldz >= 1 then dz = ldz end
   return { cont = part.cont, x = x, y = y, kind = kind == R.KIND_JUMP and "jump" or "drop", dz = dz, spell = spell,
-    stop = part.stop or 1 }
+    stop = part.stop or 1, landX = lx, landY = ly }
 end
--- What a jump's tooltip says: { title, lines }.
-function G.JumpTip(info)
+-- What a jump's tooltip says: { title, lines }. (`pad`: the controller's button for the avoid, Pad.lua's picking, said
+-- instead of the right-click)
+function G.JumpTip(info, pad)
   local lines = {}
   local FS = ns.FallSpells
   local spell = info and info.spell
   if spell == nil then spell = info and info.dz and FS and FS.Needs and FS.Needs(info.dz) and true or false end
   local title = info and info.kind == "jump" and L["Jump across"] or spell and L["Spell jump"] or L["Jump down"]
   if info and info.dz then lines[#lines + 1] = Format(L["Falls about %d yd."], math.floor(info.dz + 0.5)) end
+  -- (item 114b: whether it hurts at the Safe drop setting, in yards only: the player's health is secret; its color)
+  local MX = ns.MapExtras
+  local hurt, hr, hg, hb
+  if MX and MX.HurtLine and info then hurt, hr, hg, hb = MX.HurtLine(info.dz) end
+  if hurt then
+    lines[#lines + 1] = hurt
+    lines.colors = { [#lines] = { hr, hg, hb } }
+  end
+  if info and info.landX and not pad then lines[#lines + 1] = L["The ring on the map is where you land."] end -- (G.JumpHover's)
   -- (what to do with the spell: at the edge within its reach from the top, else just before landing (Expert jumper);
   -- Kooki3z 2026-11-23: not "up to 1000 yd")
   local c = spell and FS.Current()
@@ -4281,7 +4300,11 @@ function G.JumpTip(info)
     end
   end
   -- (item 26: a spell jump's right-click avoids the leg's spell jumps, a plain one's all its jumps)
-  lines[#lines + 1] = spell and L["Right-click: avoid spell jumps for this stop"] or L["Right-click: avoid jumps for this stop"]
+  if pad then
+    lines[#lines + 1] = Format(spell and L["%s: avoid spell jumps for this stop"] or L["%s: avoid jumps for this stop"], pad)
+  else
+    lines[#lines + 1] = spell and L["Right-click: avoid spell jumps for this stop"] or L["Right-click: avoid jumps for this stop"]
+  end
   return { title = title, lines = lines }
 end
 function G.JumpHover(dt)
@@ -4292,19 +4315,27 @@ function G.JumpHover(dt)
     and not (G.roadMode or G.wallMode) and select(3, G.JumpAtCursor()) or nil
   local owned = GameTooltip:IsShown() and GameTooltip:GetOwner() == frame
   if on and GameTooltip:IsShown() and not owned then return end -- (another tooltip, an icon's, has it)
+  local MX = ns.MapExtras
   if not on then
     if owned and G.jumpTip then GameTooltip:Hide() end
     G.jumpTip = nil
+    if MX then MX.ShowLanding(G, nil) end
     return
   end
+  local info = G.JumpInfo(on)
+  if MX then MX.ShowLanding(G, on, info) end -- (item 114b: the ring where it lands, the map may have moved)
   if owned and G.jumpTip == on then return end
-  local tip = G.JumpTip(G.JumpInfo(on))
+  local tip = G.JumpTip(info)
   G.jumpTip = on
   GameTooltip:SetOwner(frame, "ANCHOR_CURSOR")
   GameTooltip:SetText(tip.title, 1, 1, 1)
+  local colors = tip.lines.colors or {}
   for k, l in ipairs(tip.lines) do
+    local c = colors[k]
     if k == #tip.lines then
       GameTooltip:AddLine(l, 0.7, 0.7, 0.7, true)
+    elseif c then
+      GameTooltip:AddLine(l, c[1], c[2], c[3], true)
     else
       GameTooltip:AddLine(l, nil, nil, nil, true)
     end
@@ -4661,6 +4692,10 @@ function G.PartFloorFade(part, i, pz)
 end
 -- The player's floor on `level` to the yard, or nil.
 function G.FloorFadeKey(level)
+  -- (item 114c: a floor picked on the map's floor picker there, MapExtras.lua; "all floors" picked: no fade)
+  local MX = ns.MapExtras
+  local picked = G.mx and MX and MX.PickedZ(G.mx, level)
+  if picked ~= nil then return picked and math.floor(picked + 0.5) or nil end
   local N = ns.Nav
   local z = level and N and N.PlayerFloorZ and N.PlayerFloorZ(level)
   return z and math.floor(z + 0.5) or nil
@@ -4769,10 +4804,14 @@ end
 -- drawn as one strip each, so every pixel of the union is at the one alpha. No outline (item 86: just the flat fill).
 -- The circles' own frames, empty, only take the hover for the tooltip; circles under AVOIDED_MIN_PX across (far out)
 -- aren't drawn.
+-- The elite areas avoided (item 91, Router.EliteMin) the same way, in gold (ELITE_COLOR): their own union, over the
+-- guards' where both are; hovered "Elite enemies (level 33-36): avoided".
 G.AVOIDED_COLOR, G.AVOIDED_ALPHA = { 1, 0.15, 0.1 }, 0.25
+G.ELITE_COLOR = { 1, 0.78, 0.1 }
 G.AVOIDED_ROW_PX, G.AVOIDED_MIN_PX = 2, 2
 G.avoidedPool, G.avoidedUsed = {}, 0
 G.avoidedStrips, G.avoidedStripN = {}, 0
+G.eliteStrips, G.eliteStripN = {}, 0
 -- The union of circles { {x, y, r}, ... } (screen pixels) as rows: { {y, x1, x2}, ... }, rows `row` tall from the
 -- lowest circle's bottom, each row's spans merged (none overlapping), clipped to |x|, |y| <= `lim`. Each circle's spans
 -- go to the rows it covers only (an enemy city in view is a few hundred circles).
@@ -4825,10 +4864,15 @@ function G.AvoidedRows(circles, row, lim)
   end
   return out
 end
--- The hover's text of zone frame `f`: "Enemy guards: <town>".
+-- The hover's text of zone frame `f`: "Enemy guards: <town>", or an elite area's (item 91): "Elite enemies (level
+-- 33-36): avoided".
 function G.AvoidedTip(f)
   local N = ns.Nav
-  local side = N and N.Faction and N.Faction()
+  local a = f.agpsElite and ns.EliteAreas and ns.EliteAreas[f.agpsCont] and ns.EliteAreas[f.agpsCont][f.agpsElite]
+  if a then
+    return Format(L["Elite enemies (level %s): avoided"], a[1] == a[2] and tostring(a[1]) or (a[1] .. "-" .. a[2]))
+  end
+  local side = N and N.EnemySide and N.EnemySide()
   local name = side and f.agpsI and N.HostileTownName and N.HostileTownName(f.agpsCont, side, f.agpsI)
   return Format(L["Enemy guards: %s"], name or "?")
 end
@@ -4859,7 +4903,7 @@ function G.LayAvoided(cx, cy, cont, rot, s, half)
     if not (pc == cont or (pc and Geo.Base and Geo.Base(pc) == cont)) then px, py = nil, nil end
     zones = N.EnemyZonesShown(cont, cx - yd, cy - yd, cx + yd, cy + yd, px, py, N.route)
   end
-  local circles = {}
+  local circles, gold = {}, {}
   if lineLayer and G.markLayer then
     for _, z in ipairs(zones) do
       local size = 2 * z[3] * s
@@ -4867,7 +4911,8 @@ function G.LayAvoided(cx, cy, cont, rot, s, half)
         local dx, dy = Geo.ScreenOffset(cx, cy, z[1], z[2])
         dx, dy = Geo.Rotate(dx * s, dy * s, rot)
         if math.abs(dx) - size / 2 <= lim and math.abs(dy) - size / 2 <= lim then
-          circles[#circles + 1] = { dx, dy, size / 2 }
+          local into = z[5] and gold or circles
+          into[#into + 1] = { dx, dy, size / 2 }
           used = used + 1
           local f = G.avoidedPool[used]
           if not f then
@@ -4877,13 +4922,17 @@ function G.LayAvoided(cx, cy, cont, rot, s, half)
             if f.SetMouseMotionEnabled then pcall(f.SetMouseMotionEnabled, f, true) end
             f:SetScript("OnEnter", function(self)
               GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
-              GameTooltip:SetText(G.AvoidedTip(self), 1, 0.4, 0.3)
+              if self.agpsElite then
+                GameTooltip:SetText(G.AvoidedTip(self), 1, 0.82, 0.2)
+              else
+                GameTooltip:SetText(G.AvoidedTip(self), 1, 0.4, 0.3)
+              end
               GameTooltip:Show()
             end)
             f:SetScript("OnLeave", GameTooltip_Hide)
             G.avoidedPool[used] = f
           end
-          f.agpsCont, f.agpsI = cont, z[4]
+          f.agpsCont, f.agpsI, f.agpsElite = cont, z[4], z[5]
           f:SetSize(size, size)
           f:ClearAllPoints()
           f:SetPoint("CENTER", G.markLayer, "CENTER", dx, dy)
@@ -4894,17 +4943,23 @@ function G.LayAvoided(cx, cy, cont, rot, s, half)
   end
   for i = used + 1, G.avoidedUsed do G.avoidedPool[i]:Hide() end
   G.avoidedUsed = used
-  -- (the union's fill: one strip a span)
-  local nStrip = 0
-  if used > 0 then
-    local c = G.AVOIDED_COLOR
+  -- (each union's fill: one strip a span; the guards' red, the elites' gold)
+  G.avoidedStripN = G.LayAvoidedStrips(G.avoidedStrips, G.avoidedStripN, circles, G.AVOIDED_COLOR, lim, 1)
+  G.eliteStripN = G.LayAvoidedStrips(G.eliteStrips, G.eliteStripN, gold, G.ELITE_COLOR, lim, 2)
+  return used
+end
+-- The union of `circles` (screen pixels) filled in `color` at AVOIDED_ALPHA on the strips of `pool` (`shown` of them up
+-- before), `sub` their sublevel; returns how many are up now.
+function G.LayAvoidedStrips(pool, shown, circles, color, lim, sub)
+  local n = 0
+  if circles[1] and lineLayer and G.markLayer then
     for _, rw in ipairs(G.AvoidedRows(circles, G.AVOIDED_ROW_PX, lim)) do
-      nStrip = nStrip + 1
-      local t = G.avoidedStrips[nStrip]
+      n = n + 1
+      local t = pool[n]
       if not t then
-        t = lineLayer:CreateTexture(nil, "BACKGROUND")
-        t:SetColorTexture(c[1], c[2], c[3], G.AVOIDED_ALPHA)
-        G.avoidedStrips[nStrip] = t
+        t = lineLayer:CreateTexture(nil, "BACKGROUND", nil, sub)
+        t:SetColorTexture(color[1], color[2], color[3], G.AVOIDED_ALPHA)
+        pool[n] = t
       end
       t:ClearAllPoints()
       t:SetPoint("CENTER", G.markLayer, "CENTER", (rw[2] + rw[3]) / 2, rw[1])
@@ -4912,9 +4967,8 @@ function G.LayAvoided(cx, cy, cont, rot, s, half)
       t:Show()
     end
   end
-  for i = nStrip + 1, G.avoidedStripN do G.avoidedStrips[i]:Hide() end
-  G.avoidedStripN = nStrip
-  return used
+  for i = n + 1, shown do pool[i]:Hide() end
+  return n
 end
 -- The road end picked (G.roadEnd), glowing: the flight masters' circle over it, pulsing, hung off the marks' layer as the
 -- lines are.
@@ -7020,6 +7074,11 @@ G.MINIMAP_ART = { "MinimapBorder", "MinimapBorderTop", "MinimapCompassTexture", 
 G.MINIMAP_BORDER = ns.WINDOW_PLAIN_BORDER or "SimplePanelTemplate"
 -- (its place round the square: left, top, right, bottom from the frame's corners, G.ApplyMinimapChrome)
 G.MINIMAP_BORDER_FIT = { 1.5, 3.5, 1.5, -0.5 }
+-- The square without its border (Kooki3z 2026-11-26 for 1.4.1, option `replaceMinimapNoBorder`, off by default): only
+-- the map shows. (The game's own minimap art, G.MINIMAP_ART, is hidden while it's the square either way.)
+function G.SquareHidesBorder()
+  return S().replaceMinimapNoBorder == true
+end
 G.MINIMAP_MASK_AGAIN = { 0.1, 0.5 } -- s after the minimap is given back: its own mask set once more
 G.MINIMAP_TWEEN = 0.25 -- s: the square grows into the window, and back
 G.MINIMAP_IDLE = 5 -- s with nothing done on the expanded map before it goes back to the square (the default)
@@ -8854,6 +8913,9 @@ function G.ApplyMinimapChrome(compact, force)
   if changed or force then
     if c.SetBorder then pcall(c.SetBorder, c, compact and G.MINIMAP_BORDER or "ButtonFrameTemplateNoPortrait") end
   end
+  -- (the square's border hidden, option `replaceMinimapNoBorder`: its metal pieces only, each time so a change shows
+  -- at once; the map keeps its size and place, the border only sat round it. The window's own always shown.)
+  if c.NineSlice then c.NineSlice:SetShown(not (compact and G.SquareHidesBorder())) end
   if compact then
     -- (everything on it but its border, each time: the logo's look, the title's slots show theirs again)
     G.mmChromeHid = G.mmChromeHid or {}
@@ -10541,6 +10603,13 @@ function G.Update()
       local rc = G.RouteCave(viewCont)
       if rc then h, hk, routed = { cave = rc, cont = viewCont }, "route-cave:" .. tostring(rc), true end
     end
+    -- (none of those, the view on the player standing in a cave or building with no art: its map drawn from its cells,
+    -- zoomed in to INTERIOR_MAX_ZOOM, as the inside maps show; item 115)
+    G.playerAutoKey = here and not free and G.PlayerAutoMap(viewCont, px, py) or nil
+    if not (h and h.cave) and G.playerAutoKey
+        and zoom / math.max(G.ZoomScale and G.ZoomScale() or 1, 1e-6) <= G.INTERIOR_MAX_ZOOM then
+      h, hk, routed = { cave = G.playerAutoKey, cont = viewCont }, "player-auto:" .. G.playerAutoKey, true
+    end
     if h and h.cave and hk ~= G.hoverDismissKey and not view.cave and not inst and not browse
         and S().interiors ~= false and h.cont == viewCont and not G.IsMapStyle(G.Style())
         and (routed or G.InteriorZoomOK(zoom)) then
@@ -11153,6 +11222,7 @@ function G.Update()
   end, viewCont)
   G.DrawParty(cx, cy, rot, s, viewCont) -- (party members: G, not a local of this file's, the 60 limit)
   G.DrawYouHere(cx, cy, rot, s, viewCont) -- (in a dungeon: where the player marked themselves)
+  if ns.Shore then ns.Shore.Draw(cx, cy, rot, s, viewCont) end -- (swimming with no route: the way out, item 116a)
   -- a farming area being drawn: its outline so far
   local lasso = G.lasso
   if lasso and lasso.cont == viewCont then
@@ -11581,6 +11651,10 @@ function G.Update()
   northLabel:Show()
 
   view.cont = viewCont
+  if G.mx then -- (item 114: the height profile and the floor picker, MapExtras.lua)
+    local okX, errX = pcall(ns.MapExtras.OnRedraw, G, route, G.shownLevel or viewCont, cx, cy, zoom)
+    if not okX then G.LogError("map extras", errX) end
+  end
   G.UpdateInfo()
 end
 
@@ -12371,6 +12445,21 @@ function G.PadPan(dxUI, dyUI)
       or nil, cave = free and free.cave }
   if recenter then recenter:Show() end
   elapsed = 1
+end
+-- The controller's picking of a jump or swim (Pad.lua, item 96): the view's middle on (x, y) of `cont`, the turn kept, as
+-- the pad's own pan there.
+function G.PadLookAt(cont, x, y)
+  if not (cont and x and y) then return false end
+  lastActivity = GetTime()
+  tour = nil
+  if browse then browse, browseZoom, browseCont, browseBounds = nil, nil, nil, nil end -- (a map browsed: the land's)
+  free = { x = x, y = y, rot = view.rot or 0, cross = true, cont = cont, pan = true,
+    land = (free and free.land) or (free ~= nil and not free.city and not free.instance and not free.cave and not G.cityMap)
+      or nil }
+  if recenter then recenter:Show() end
+  elapsed = 1
+  if G.NoMapOn() and G.NoMapStitched() then G.NoMapGlide(cont, x, y) end -- (No map over OpenMap's: it looks)
+  return true
 end
 -- The map's Clear Route (its button, the controller's control, /agps clear): the route and its stops gone, the view
 -- left where it is (asked 2026-11-16 for the controller, "clearing route ... jumps back to the player position again,
@@ -13442,7 +13531,11 @@ function G.CaveArt(cont, key)
     if c[2] == key then row = c break end
   end
   local p0 = row and ints and G.InteriorAt(cont, row[3], row[4])
-  if not p0 then return nil end
+  if not p0 then -- (no art: its map drawn from its walkable cells, where it has one; item 115, G.AutoArt)
+    local auto = G.AutoArt(cont, key)
+    byCont[key] = auto or false
+    return auto
+  end
   local art = { list = { p0 }, x0 = p0[6], y0 = p0[7], x1 = p0[8], y1 = p0[9], cont = cont, key = key,
     name = row[1] ~= "" and row[1] or L["Cave"] }
   -- (its other models: of its name, their art within CAVE_GROUP_GAP_YD of one already in, through others too)
@@ -13540,7 +13633,7 @@ function G.CaveClick(dxUI, dyUI)
   if browse or view.instance or (G.Held and G.Held()) then return false end
   local x, y = G.ScreenToWorld(view.x, view.y, dxUI, dyUI, view.rot, view.s)
   local cont = Geo.Base(view.cont or 0)
-  local key = G.CaveAt(cont, x, y)
+  local key = G.CaveAt(cont, x, y) or G.AutoMapAt(cont, x, y) -- (a building with no art: item 115)
   local art = key and G.CaveArt(cont, key)
   if not art or view.cave == art then return false end
   local mine = lastClick
@@ -13557,7 +13650,9 @@ end
 function G.LayoutCaveMap(cx, cy, rot, zoom, half, kept, ground, terrain)
   local art = view.cave
   local floors = G.InstanceFloors(art)
-  local k = G.ShownFloor(art, nil)
+  -- (a map drawn from its cells, the player in it: the floor followed along its roads, when one is)
+  local pz = art.auto and G.playerAutoKey == art.key and ns.Nav and ns.Nav.FollowedZ and ns.Nav.FollowedZ(art.cont) or nil
+  local k = G.ShownFloor(art, pz)
   view.floor = k
   local band = k > 0 and floors[#floors - k + 1] or nil
   -- (its world map, another WoW version's where its rooms are laid out alike: Data/InteriorMaps.lua)
@@ -13567,7 +13662,10 @@ function G.LayoutCaveMap(cx, cy, rot, zoom, half, kept, ground, terrain)
   view.interiorMap, view.interiorMapOnly = f, f and G.IsMapStyle(G.Style()) or nil
   local quads = kept("cave:" .. art.key .. ":" .. tostring(band and band[1]) .. ":" .. tostring(f and f.ui)
       .. ":" .. tostring(view.interiorMapOnly) .. (terrain and ":terrain" or ground and ":ground" or ""))
-  if not quads then
+  if not quads and art.auto then -- (item 115: no art, drawn from its walkable cells, the floor shown full)
+    quads = G.LayoutAutoMap({}, cx, cy, art, k > 0 and #floors - k + 1 or nil, rot, zoom, half, terrain ~= nil or ground)
+    if terrain then G.LayoutInteriorTerrain(quads, cx, cy, terrain, rot, zoom, half) end
+  elseif not quads then
     quads = G.LayoutUnderMap(f, view.interiorMapOnly, cx, cy, rot, zoom, half, function()
       local q = G.LayoutInstanceArt(cx, cy, art, rot, zoom, half, band)
       if terrain and #q > 0 then
@@ -13591,6 +13689,136 @@ function G.LayoutCaveMap(cx, cy, rot, zoom, half, kept, ground, terrain)
     fl.down:SetEnabled(k < n)
   end
   return quads, band, k
+end
+
+-- Auto maps where the game has none (item 115, Kooki3z 2026-11-26): the caves and buildings whose models have no
+-- minimap art (the animal dens, many tunnels, the night elves' and trolls' buildings), drawn from their walkable cells
+-- floor by floor (Data/AutoMaps.lua, `agps auto-maps`: each floor its cells as rectangles of AutoMaps.cell yards). One
+-- is a cave's map as G.CaveArt gives it (`auto`, `floors` its { lo, hi } bands, lowest first, for G.InstanceFloors
+-- and the floor bar), opened, hovered, routed into or stood in as a cave with art is (`G.AutoMapAt`: a building's by
+-- its cells). Plain color quads (WHITE8X8 tinted: no art, no filter): the floor shown full, the others faint.
+G.AUTO_TEX = "Interface\\Buttons\\WHITE8X8"
+G.AUTO_FLOOR = { 0.50, 0.44, 0.34, 1 } -- the floor shown (all floors: each, the higher ones a little lighter)
+G.AUTO_FAINT_ALPHA = 0.28 -- the other floors' alpha while one floor is shown
+G.autoRows = {} -- [cont] = { [key] = its row of ns.AutoMaps[cont] } (on G: the main chunk is at Lua 5.1's 200 locals)
+-- The decoded map `key` on continent `cont` (ns.AutoMaps' row): { list = {} (no art), auto = { { mx, my, ex, ey, ... }
+-- per floor: its rectangles' middles and extents, X and Y, in world yards },
+-- floors, x0, y0, x1, y1 (world box), name, cont, key }, or nil.
+function G.AutoArt(cont, key)
+  local data = ns.AutoMaps and ns.AutoMaps[cont]
+  if not (data and key) then return nil end
+  local rows = G.autoRows[cont]
+  if not rows then
+    rows = {}
+    for _, r in ipairs(data) do rows[r[1]] = r end
+    G.autoRows[cont] = rows
+  end
+  local r = rows[key]
+  if not r then return nil end
+  if r.art then return r.art end
+  local cell, X0, Y0 = ns.AutoMaps.cell or 2, r[4], r[5]
+  local code = G.autoCode
+  if not code then
+    code = {}
+    local abc = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz-_"
+    for i = 1, #abc do code[abc:byte(i)] = i - 1 end
+    G.autoCode = code
+  end
+  local art = { list = {}, auto = {}, floors = {}, cont = cont, key = key, cell = cell, auto0 = { X0, Y0 },
+    name = r[2] ~= "" and r[2] or L["Cave"], kind = r[3],
+    x0 = math.huge, y0 = math.huge, x1 = -math.huge, y1 = -math.huge }
+  for i, f in ipairs(r[8]) do
+    -- (each rectangle four numbers in one list: its middle and its extents in world yards, X north and Y west as the
+    -- cells' rows and columns)
+    local s, rects = f[3], {}
+    for j = 1, #s - 7, 8 do
+      local b = { s:byte(j, j + 7) }
+      local row, col = code[b[1]] * 64 + code[b[2]], code[b[3]] * 64 + code[b[4]]
+      local h, w = code[b[5]] * 64 + code[b[6]], code[b[7]] * 64 + code[b[8]]
+      local mx, my = X0 - (row + h / 2) * cell, Y0 - (col + w / 2) * cell
+      local n = #rects
+      rects[n + 1], rects[n + 2], rects[n + 3], rects[n + 4] = mx, my, h * cell, w * cell
+      art.x0, art.x1 = math.min(art.x0, mx - h * cell / 2), math.max(art.x1, mx + h * cell / 2)
+      art.y0, art.y1 = math.min(art.y0, my - w * cell / 2), math.max(art.y1, my + w * cell / 2)
+    end
+    art.auto[i] = rects
+    art.floors[i] = { f[1], f[2] }
+  end
+  if #art.auto == 0 then return nil end
+  r.art = art
+  return art
+end
+-- The auto map (its key) one of whose floors' cells (x, y) on continent `cont` is on, or nil: buildings' only unless
+-- `caves` (a cave's own cells are its grid's, G.CaveAt).
+function G.AutoMapAt(cont, x, y, caves)
+  local data = x and ns.AutoMaps and ns.AutoMaps[cont]
+  if not data then return nil end
+  local cell = ns.AutoMaps.cell or 2
+  for _, r in ipairs(data) do
+    if (caves or r[3] ~= "cave") and x <= r[4] and x >= r[4] - r[6] * cell and y <= r[5] and y >= r[5] - r[7] * cell then
+      local art = G.AutoArt(cont, r[1])
+      for _, q in ipairs(art and art.auto or {}) do
+        for j = 1, #q - 3, 4 do
+          if math.abs(x - q[j]) <= q[j + 2] / 2 and math.abs(y - q[j + 1]) <= q[j + 3] / 2 then return r[1] end
+        end
+      end
+    end
+  end
+  return nil
+end
+-- The auto map the player stands in on continent `cont` at (px, py), or nil: a building's by its cells (its models are
+-- often flagged outdoors: IsIndoors says nothing there), a cave's by its cells while the game doesn't say outdoors (up
+-- on the hill over it).
+function G.PlayerAutoMap(cont, px, py)
+  local key = G.AutoMapAt(cont, px, py, true)
+  if not key then return nil end
+  local art = G.AutoArt(cont, key)
+  if not art or (art.kind == "cave" and ns.Nav and ns.Nav.Indoors and ns.Nav.Indoors() == false) then return nil end
+  return key
+end
+G.autoTints = {} -- [floor][faint] = { r, g, b, a } (made once: no garbage each layout)
+-- Quads for auto map `art` (G.AutoArt's) in the view centered on (cx, cy), added to `quads`: floor `floor` (its index,
+-- 1 the lowest; the floor picker's or the floor bar's) full and the others faint (G.AUTO_FAINT_ALPHA), or with none
+-- every floor full, the higher over the lower. `outline`: the floor shown gets the thin black edge (over the terrain,
+-- as a building's art, G.InteriorOutline).
+function G.LayoutAutoMap(quads, cx, cy, art, floor, rot, zoom, half, outline)
+  local s = half / zoom
+  local reach = zoom * 1.5
+  local texRot = math.pi / 2 + rot -- (the quad's width along world X, as G.LayoutInterior's at yaw 0)
+  local n = #art.auto
+  local faint, shown = {}, {}
+  for i, rects in ipairs(art.auto) do
+    local dim = floor and floor > 0 and i ~= floor
+    local byFloor = G.autoTints[i]
+    if not byFloor then
+      byFloor = {}
+      G.autoTints[i] = byFloor
+    end
+    local tint = byFloor[dim and 1 or 0]
+    if not tint then
+      local c, lift = G.AUTO_FLOOR, n > 1 and (i - 1) / (n - 1) * 0.18 or 0
+      tint = dim and { c[1], c[2], c[3], G.AUTO_FAINT_ALPHA } or { c[1] + lift, c[2] + lift, c[3] + lift, c[4] }
+      byFloor[dim and 1 or 0] = tint
+    end
+    local into = dim and faint or shown
+    local sub = dim and math.min(i, 3) - 4 or math.min(i, 7) -- (faint ones under the floor shown)
+    for j = 1, #rects - 3, 4 do
+      local mx, my, ex, ey = rects[j], rects[j + 1], rects[j + 2], rects[j + 3]
+      if math.abs(mx - cx) <= reach + ex / 2 and math.abs(my - cy) <= reach + ey / 2 then
+        local dx, dy = Geo.ScreenOffset(cx, cy, mx, my)
+        dx, dy = Geo.Rotate(dx * s, dy * s, rot)
+        into[#into + 1] = { G.AUTO_TEX, dx, dy, ex * s + 0.5, ey * s + 0.5, texRot, 0, 1, 0, 1, sub, tint = tint }
+      end
+    end
+  end
+  if outline and #shown > 0 then G.InteriorOutline(shown) end
+  for _, q in ipairs(faint) do quads[#quads + 1] = q end
+  for _, q in ipairs(shown) do quads[#quads + 1] = q end
+  return quads
+end
+-- The floors of auto map `art` ({ lo, hi } world heights, lowest first: the floor picker's list), or nil.
+function G.AutoMapFloors(art)
+  return art and art.auto and art.floors or nil
 end
 
 -- Dungeons and raids (Data/Instances.lua) --------------------------------------------------
@@ -15360,6 +15588,10 @@ function G.AddPending(dxUI, dyUI)
   -- cave's floor guessed for a click on the land (item 82g: a stop north of Lushwater Oasis took the Wailing Caverns'
   -- road under the hill))
   local z = G.ClickFloorZ(view.cont, x, y)
+  -- (item 114c: a floor picked on the map's floor picker near: the stop on it, MapExtras.lua)
+  local MX = ns.MapExtras
+  local pz = G.mx and MX and MX.ClickZ(G.mx, G.shownLevel or view.cont, x, y)
+  if pz then z = pz end
   G.AddStopAt(x, y, nil, nil, nil, z)
 end
 -- The height a click at (x, y) on continent `cont` means over a cave (G.CaveAt): the cave's floor there with its
@@ -15379,16 +15611,27 @@ function G.ClickFloorZ(cont, x, y)
   if not shown then return ground end
   return G.CaveFloorZ(cont, x, y, ground) or ground
 end
--- The cave's floor under (x, y): the world grid's highest surface CAVE_UNDER_YD or more under the ground there.
+-- The cave's floor under (x, y): the world grid's highest surface CAVE_UNDER_YD or more under the ground there (and
+-- under the cave's `under` height when it has one: Data/Caves.lua's parting of its floor from the ground over it), the
+-- highest of those on road ground first (the cave's own roads run on its floor). A rock's ledge inside the hill over
+-- the floor was taken: the cave sweep's Dun Algaz tunnel (a speck 65 yd over its road), Woodpaw Den (17 yd over it),
+-- Mo'grosh Stronghold (over its `under`), and their routes said No way found yet.
 function G.CaveFloorZ(cont, x, y, ground)
   local WG = ns.WorldGrid
   local c = WG and WG.Cont and WG.Cont(cont)
   if not (c and ground and WG.SurfacesAt) then return nil end
-  local best
+  local key = WG.CaveAt and WG.CaveAt(cont, x, y)
+  local t = key and ns.Terrain and ns.Terrain[key]
+  local top = ground - G.CAVE_UNDER_YD
+  if t and t.under and t.under < top then top = t.under end
+  local best, road
   for _, s in ipairs(WG.SurfacesAt(c, x, y)) do
-    if s.z <= ground - G.CAVE_UNDER_YD and (not best or s.z > best) then best = s.z end
+    if s.z <= top then
+      if not best or s.z > best then best = s.z end
+      if (s.f or 0) % 4 >= 2 and (not road or s.z > road) then road = s.z end -- (WorldGrid's F_ROAD)
+    end
   end
-  return best
+  return road or best
 end
 -- The cave the route's next stop is in (item 84b): one placed in it, or an NPC's spot under the ground in one.
 function G.RouteCave(cont)
@@ -15841,6 +16084,8 @@ function G.UseWait(b, t)
     b:SetAttribute("spell", ns.SpellName and ns.SpellName(t.spell) or t.spell)
     b:SetAttribute("item", nil)
   end
+  -- (a spell cast on the player whatever's targeted: FallSpells' Blessing of Protection, `unit`)
+  b:SetAttribute("unit", (not wait and t.unit) or nil)
   if b.icon.SetDesaturated then b.icon:SetDesaturated(wait or b.early == true) end
 end
 G.USE_EARLY_ALPHA = 0.6
@@ -16888,10 +17133,12 @@ end
 -- would 30% longer or more, ask the player if they want to risk going through enemy territory to save time"; "when
 -- routing through multiple higher level zones, just ask in 1 popup"). Yes: the way past them; no: the safe way.
 -- The route still through the other faction's guards with "Avoid the other faction's towns" on (Nav.CheckHostileRoute):
--- "This route goes through <towns> (<their faction> guards). Take it?" `side`: the player's ("A", "H").
-function G.ConfirmHostile(names, side, onYes, onNo)
+-- "This route goes through <towns> (<their faction> guards). Take it?" `side`: the player's ("A", "H"). `elite`: all of
+-- them elite areas (item 91), "(elite enemies)".
+function G.ConfirmHostile(names, side, onYes, onNo, elite)
   local towns = #names > 0 and table.concat(names, ", ") or "?"
-  local text = side == "A" and Format(L["This route goes through %s (Horde guards). Take it?"], towns)
+  local text = elite and Format(L["This route goes through %s (elite enemies). Take it?"], towns)
+    or side == "A" and Format(L["This route goes through %s (Horde guards). Take it?"], towns)
     or Format(L["This route goes through %s (Alliance guards). Take it?"], towns)
   return G.Confirm(text, function()
     onYes()
@@ -16903,8 +17150,12 @@ function G.ConfirmHostile(names, side, onYes, onNo)
 end
 -- "Take it?" -> No and no way round the guards found in time (Nav.GiveUpRefused, item 87): the way past them after all?
 -- `towns`: their names, one string, or nil. onNo(true) on No; the question let go unanswered (Escape is No): onNo().
-function G.ConfirmNoWayRound(towns, onYes, onNo)
-  local text = towns and towns ~= "" and Format(L["No way around the other faction's guards at %s was found.\n\nTake the way past them?"], towns)
+-- `elite`: all of them elite areas (item 91).
+function G.ConfirmNoWayRound(towns, onYes, onNo, elite)
+  local named = towns and towns ~= ""
+  local text = elite and (named and Format(L["No way around the elite enemies at %s was found.\n\nTake the way past them?"], towns)
+      or L["No way around the elite enemies was found.\n\nTake the way past them?"])
+    or named and Format(L["No way around the other faction's guards at %s was found.\n\nTake the way past them?"], towns)
     or L["No way around the other faction's guards was found.\n\nTake the way past them?"]
   return G.Confirm(text, function()
     onYes()
@@ -16915,11 +17166,13 @@ function G.ConfirmNoWayRound(towns, onYes, onNo)
   end)
 end
 function G.ConfirmRisk(q, onYes, onNo)
-  local names = {}
+  local names, elite = {}, q.towns and q.towns[1] ~= nil
   for k, t in ipairs(q.towns or {}) do
     if k <= 3 then names[k] = t[1] end
+    elite = elite and t[3] == true -- (all elite areas, item 91: the elites' words)
   end
-  local text = Format(L["Going past the other faction's guards at %s saves %s over the safe way round."],
+  local text = Format(elite and L["Going past the elite enemies at %s saves %s over the safe way round."]
+    or L["Going past the other faction's guards at %s saves %s over the safe way round."],
     #names > 0 and table.concat(names, ", ") or "?", ns.Nav.FormatTime(q.saved or 0))
   if q.safeRed then
     local zn, lvl = ZonesText(q.safeRed)
@@ -18156,6 +18409,15 @@ function G.Init()
         if G.mapMenu then G.mapMenu:Hide() end
         ns.AzerothPilot.Toggle()
       end },
+    -- (item 111, Kooki3z 2026-11-26: OpenXP 2.0, which no longer makes RestedXP's arrow; OpenXP.lua)
+    { id = "openxpRoute", icon = "Interface\\Icons\\INV_Misc_Book_07", label = L["OpenXP Route"],
+      tip = L["Routes to each step of your OpenXP guide in turn: the step OpenXP's map pin marks is your next stop, done when OpenXP checks it off (not by getting there), then on to the next. Click again to stop. Replaces the current route. (Shown with OpenXP 2.0 installed)"],
+      when = function() return ns.OpenXP and ns.OpenXP.Available() end,
+      isOn = function() return ns.OpenXP and ns.OpenXP.On() end,
+      action = function()
+        if G.mapMenu then G.mapMenu:Hide() end
+        ns.OpenXP.Toggle()
+      end },
     { id = "hearth", key = "useHearthstone", icon = "Interface\\Icons\\INV_Misc_Rune_01", label = L["Use Hearthstone"],
       tip = L["A route may start with your Hearthstone when it's ready and faster."], route = true, defaultOn = true },
     { id = "quests", key = "layerQuests", icon = ns.Layers and ns.Layers.ICON and ns.Layers.ICON.objective, label = L["Quests"],
@@ -18239,7 +18501,7 @@ function G.Init()
   -- (the questing addons' routes, shown only with their addon loaded: on the bar to the right, always shown; asked
   -- 2026-11-16 for 1.3.5, "if using RestedXP or any of the supported questing addons, these buttons are always shown by
   -- default to the right")
-  G.QUICK_DEFAULT = { search = "menuUp", quickFind = "menuUp", questRoute = "menuRight", rxpRoute = "barRight", zygorRoute = "barRight", polestarRoute = "barRight", questifyRoute = "barRight", aprRoute = "barRight", hearth = "menuRight", pauseRoute = "menuRight",
+  G.QUICK_DEFAULT = { search = "menuUp", quickFind = "menuUp", questRoute = "menuRight", rxpRoute = "barRight", zygorRoute = "barRight", polestarRoute = "barRight", questifyRoute = "barRight", aprRoute = "barRight", openxpRoute = "barRight", hearth = "menuRight", pauseRoute = "menuRight",
     city = "hidden", dungeonsG = "menuUp", styles = "hidden", gather = "menuUp", questsG = "menuUp" }
   -- Groups: one button in the bar or menu; clicked, its buttons slide out beside it (to the
   -- right from a column going up, upward from a row going right).
@@ -19384,6 +19646,10 @@ function G.Init()
   fl.text:SetShadowOffset(1, -1)
   fl.text:Hide()
   G.MakePathColorPicker(top)
+  -- (item 114: the height profile strip over the info line, and the floor picker where the dungeon floor column goes;
+  -- MapExtras.lua)
+  G.mx = ns.MapExtras and ns.MapExtras.New(G) or nil
+  if G.mx then ns.MapExtras.Make(G, top, { infoText, fl.text, routeBtn }) end
 
   -- Hidden (closed, a key, combat) with stops placed but not confirmed yet: they become the
   -- route now (the 5 s auto-confirm runs only while the map shows), so the direction arrow
@@ -19976,7 +20242,9 @@ function G.BuildingHover()
     -- (a cave under the mouse first: its whole map, as opened from its icon; asked 2026-11-14, "all caves should show
     -- with mouse over too just like buildings": a building's room under the mouse came up in only part of a cave, or
     -- none. G.CaveAt, the caves with art, G.CaveArt)
-    local cave = x and not (view.cave and not G.hoveredCave) and c == Geo.Base(c) and G.CaveAt(c, x, y) -- (shown by
+    -- (a building with no art: its map drawn from its cells, item 115, G.AutoMapAt)
+    local cave = x and not (view.cave and not G.hoveredCave) and c == Geo.Base(c)
+      and (G.CaveAt(c, x, y) or G.AutoMapAt(c, x, y)) -- (shown by
     -- this hover: looked for still, or it went and came every check, a video 2026-11-14)
     if cave and G.CaveArt(c, cave) then
       hit = { cave = cave, cont = c }

@@ -297,6 +297,7 @@ A.SetUse = SetUse
 
 local function UpdateText(px, py, cont)
   local N = ns.Nav
+  A.shore = nil -- (swimming with no route: the shore to get out at, set below)
   ns.Nav.Status(px, py, cont) -- keeps the route current and advances stops, even with the GPS hidden
   -- the route starting with a hearthstone or teleport from here (its step 1): said as that, with its
   -- button where the arrow is (asked, 2026-10-01: the turns of the walk after it were shown instead,
@@ -376,7 +377,17 @@ local function UpdateText(px, py, cont)
   end
   if not r or not d then
     path, maneuvers = nil, nil
-    return false
+    -- (swimming with no route: the arrow at the nearest shore they can walk up onto, and its yards; Shore.lua, item
+    -- 116a. A route's own way out wins: none of it with one)
+    local sh = not d and ns.Shore and ns.Shore.Current()
+    if not sh then return false end
+    A.shore = sh
+    line1:SetText(ns.Shore.Text(sh))
+    line2:SetText("")
+    line3:SetText("")
+    line4:SetText("")
+    for _, row in ipairs(rows) do row:Hide() end
+    return true
   end
   if r.flying or use then -- in the air: where it lands and when; turns resume after landing (or the teleport)
     path, maneuvers = nil, {}
@@ -440,13 +451,23 @@ local function UpdateText(px, py, cont)
     -- what to do now, then the maneuver: "Continue straight, then slight right in 13 yd" (shorter when
     -- the panel is too narrow for it on one line)
     local function yd(v) return "|cffffffff" .. N.FormatDistance(v) .. "|r" end
-    line1:SetText(ns.Turns.NowText(m, yd))
-    if line1:GetStringWidth() > line1:GetWidth() + 1 then line1:SetText(ns.Turns.NowText(m, yd, true)) end
+    -- (the shorter words, once needed for a maneuver, kept for it: the distance's digits changing as the player goes
+    -- on swapped "Continue straight, then" and "Straight, then" back and forth, 1.4.1)
+    local key = tostring(m.words or m.kind) .. ":" .. tostring(m.x or m.dist)
+    local short = A.shortFor == key
+    line1:SetText(ns.Turns.NowText(m, yd, short))
+    if not short and line1:GetStringWidth() > line1:GetWidth() + 1 then
+      line1:SetText(ns.Turns.NowText(m, yd, true))
+      A.shortFor = key
+    end
     -- (and the stop's height against yours, in a city: "Below you, 12 yd down"; at a jump, its fall, not the slope's
     -- few yards before it: Kooki3z 2026-11-23, "Cast Slow Fall, then jump down / 3 yd down")
     local hint
     if m.kind == "drop" or m.kind == "jump" then
-      hint = m.dropYd and ("|cff80c0ff" .. Format(L["%s down"], N.FormatDistance(m.dropYd, true)) .. "|r") or nil
+      -- (not again when the line says it: "Jump down here (12 yd)", item 113a)
+      local fall = m.dropYd and N.FormatDistance(m.dropYd, true)
+      local said = fall and (line1:GetText() or ""):find("(" .. fall .. ")", 1, true)
+      hint = fall and not said and ("|cff80c0ff" .. Format(L["%s down"], fall) .. "|r") or nil
     else
       hint = N.HeightText(px, py, cont)
     end
@@ -597,6 +618,16 @@ local function Update(dt)
     end
     grip:SetShown(show and not st.dirLocked)
     if not active then return end
+  end
+  local sh = A.shore
+  if sh and px and not path and not Hidden() then -- (the shore to get out at: Shore.lua)
+    local shown = A.EaseStep(A.easeState, ns.Turns.RelativeAngle(px, py, Geo.Facing(), sh.x, sh.y), dt)
+    if A.Easing() then A.still = false end
+    arrow:SetRotation(shown)
+    arrow:SetVertexColor(0.35, 0.75, 1)
+    jumpIcon:Hide()
+    lastSet.rot, lastSet.color, lastSet.jump = nil, nil, nil
+    return
   end
   if not px or not path or Hidden() then return end
   local tx, ty = ns.Turns.Target(path, px, py)
