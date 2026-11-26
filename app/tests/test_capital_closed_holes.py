@@ -78,7 +78,9 @@ def test_pithwick_is_reached_by_kooki3zs_walk_into_his_shop(game):
     # over it; the route ended 21 yd off him before)
     lua, ns = game
     r, pts = _route(lua, ns, FORGE, HOLES["Pithwick"])
-    assert math.dist(pts[-2], pts[-1]) <= 5
+    # (the last piece in the shop: the Router's own ends by the shop's road; the city grid's (city routing, on by
+    # default) walks a straight line across the shop's floor to him, a little longer)
+    assert math.dist(pts[-2], pts[-1]) <= (5 if r.cityGrid is None else 8)
     assert all(abs(r.fz[i] - 504) <= 2 for i in range(len(pts) - 2, len(pts) + 1))
 
 

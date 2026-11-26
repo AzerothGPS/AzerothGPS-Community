@@ -565,7 +565,10 @@ def test_yes_no_questions_are_azerothgps_popups(game):
     box.yes._scripts.OnClick(box.yes)
     assert said.yes and not said.no and not box._shown
     G.Confirm("Again?", yes, no)
-    box._scripts.OnHide(box)  # (closed unanswered: as no)
+    box._scripts.OnHide(box)  # (hidden with the map it's on, itself still shown: still waiting, the "?" shows it)
+    assert not said.no
+    box.Hide(box)  # (closed unanswered, Escape or the time out: as no; the mock's Hide sends no OnHide)
+    box._scripts.OnHide(box)
     assert said.no
     # a shared route: its own question, "Use Route" / "Ignore"
     stops = lua.eval("{ { x = 2250, y = 250, cont = 0, name = 'Brill' }, { x = 1600, y = 240, cont = 0, name = 'Ruins' } }")
@@ -759,9 +762,12 @@ def test_no_dev_tool_ships_with_the_addon():
         [f for f in files if "dev" in f]
     toc = (ADDON / "AzerothGPS.toc").read_text(encoding="utf-8").lower()
     assert not re.search(r"^\s*[^#].*_dev\b", toc, re.M)  # (no developer files listed)
-    # (asked 2026-10-06) the simulated player and the map-click hook are the dev tools' only: AzerothGPS never sets them
-    src = "\n".join(p.read_text(encoding="utf-8") for p in ADDON.rglob("*.lua"))
+    # (asked 2026-10-06) the simulated player and the map-click hook are the dev tools' only: AzerothGPS never sets them,
+    # but for the tutorial's spell-jump demo (Kooki3z 2026-11-25), which sets and ends it in Tutorial.lua alone
+    src = "\n".join(p.read_text(encoding="utf-8") for p in ADDON.rglob("*.lua") if p.name != "Tutorial.lua")
     assert len(re.findall(r"SetOverride\(", src)) == 1  # (its definition)
+    tut = (ADDON / "Tutorial.lua").read_text(encoding="utf-8")
+    assert len(re.findall(r"SetOverride\(", tut)) == 2  # (T.JumpDemoStart's and T.JumpDemoStop's)
     assert not re.search(r"mapClickHook\s*=[^=]", src) and not re.search(r"override\s*=\s*\{", src)
     assert not re.search(r"mapModClickHook\s*=[^=]", src)  # (another addon's modified clicks: never set here)
 
@@ -1999,7 +2005,7 @@ def test_the_arrow_isnt_set_again_while_nothing_changes(game):
         G.Update()
 
 
-_ARROW_KEYS = ("arrowSnap", "arrowSide", "dirShown", "dirStopsOnly", "arrowPx", "dirTextScale", "arrowLocked", "dirLocked", "dirPoint",
+_ARROW_KEYS = ("arrowSnap", "arrowSide", "arrowShown", "dirShown", "dirStopsOnly", "arrowPx", "dirTextScale", "arrowLocked", "dirLocked", "dirPoint",
                "dirSize", "arrowFreePoint", "arrowPoint", "arrowSize", "arrowBg", "dirBg")
 
 
@@ -2007,6 +2013,7 @@ def _arrow_settings(st):
     # (the arrow's settings as they were, for the test's end; the defaults meanwhile)
     saved = {k: st[k] for k in _ARROW_KEYS}
     st.arrowSnap, st.arrowSide, st.dirShown, st.dirStopsOnly = True, "left", True, False
+    st.arrowShown = True
     st.arrowPx, st.dirTextScale, st.arrowLocked, st.dirLocked = 58, 1, True, True
     return saved
 
@@ -6332,6 +6339,9 @@ def test_darnassus_rogue_trainer_is_down_the_spiral_stairs(game):
     R, L = ns.Router, ns.Layers
     x, y = lua.eval("function(L) local x, y = L.MapToWorld(1457, 0.370, 0.219) return { x, y } end")(L).values()
     tz, road = 1295.1, (10089.9, 2537.3)  # (Data/CityPlaces.lua: his NPC's height; the Enclave's road over him)
+    # (city routing, on by default: the spiral walked, no hop from turn to turn without Expert jumper; Kooki3z
+    # 2026-11-23, "walk the walkway")
+    assert ns.settings.gps.cityGrid and not ns.Router.ExpertJumper()
     for back in (False, True):
         opts = {"z": tz} if back else {"tz": tz}
         a, b = ((x, y), road) if back else (road, (x, y))
@@ -6342,7 +6352,10 @@ def test_darnassus_rogue_trainer_is_down_the_spiral_stairs(game):
         fz = [r.fz[i] for i in range(1, n + 1)]
         assert abs(fz[-1 if not back else 0] - tz) <= 3.5, fz  # (on his floor)
         assert min(fz) >= tz - 3.5  # (no lower than his floor on the way)
-        stairs = sum(math.dist(pts[k], pts[k + 1]) for k in range(n - 1) if R.StairAt(1, *pts[k], *pts[k + 1]))
+        CG = ns.CityGrid  # (the grid's walk keeps a yard or two off the stairs road's line: its stairs too)
+        stairs = sum(math.dist(pts[k], pts[k + 1]) for k in range(n - 1)
+                     if R.StairAt(1, *pts[k], *pts[k + 1]) or CG.StairAt(1, *pts[k], *pts[k + 1], (fz[k] + fz[k + 1]) / 2))
+        assert R.KIND_DROP not in [r.kinds[i] for i in range(1, n)]  # (walked, no hop from turn to turn)
         assert stairs >= 70, stairs  # (the spiral's two turns: 88 yd)
         steep = [(pts[k], fz[k], fz[k + 1]) for k in range(n - 1)
                  if abs(fz[k + 1] - fz[k]) > 2 * max(math.dist(pts[k], pts[k + 1]), 1.0)]
@@ -6383,6 +6396,7 @@ def test_from_partway_down_darnassus_spiral_the_route_goes_on_down(game):
     lua, ns = game
     R = ns.Router
     tz, stop = 1295.1, (10083.8, 2546.8)
+    assert ns.settings.gps.cityGrid  # (city routing: the spiral walked on down, as above)
     for x, y, z in ((10114.0, 2604.0, 1325.0), (10113.0, 2604.0, 1325.0), (10115.0, 2604.0, 1325.5),
                     (10121.0, 2601.0, 1328.0), (10117.1, 2604.8, 1325.9)):
         r = R.Route(1, x, y, *stop, lua.table_from({"z": z, "tz": tz}))
@@ -6390,7 +6404,8 @@ def test_from_partway_down_darnassus_spiral_the_route_goes_on_down(game):
         n = len(r.pts) // 2
         pts = [(r.pts[2 * i - 1], r.pts[2 * i]) for i in range(1, n + 1)]
         fz = [r.fz[i] for i in range(1, n + 1) if r.fz[i] is not None]
-        assert max(fz) <= z + 1.5, ((x, y, z), max(fz))  # (no climb back up)
+        # (no climb back up; the grid's floor under the player a yard or two off theirs on the spiral's slope)
+        assert max(fz) <= z + (2.5 if r.cityGrid else 1.5), ((x, y, z), max(fz))
         assert math.dist(pts[0], pts[1]) <= 3, ((x, y), pts[:3])  # (onto the stairs where the player is)
         length = sum(math.dist(pts[k], pts[k + 1]) for k in range(n - 1))
         assert length <= 140, ((x, y, z), length)  # (on down: 127 to 135 yd; back up first, 146 to 158)
@@ -7145,7 +7160,7 @@ def test_dolanaar_to_ruttheran_takes_darnassus_s_teleporter_down(game):
         for _ in range(20):
             lua.execute("AGPS_T = AGPS_T + 0.5")
             G.Update()
-        steps = str(N.StepsText(3))
+        steps = str(N.StepsText(6))  # (city routing, on by default: a swim across Darnassus's pond on the way)
         assert "to the teleporter (The Temple Gardens, Darnassus)" in steps
         assert "Take the teleporter to Rut'theran Village, Teldrassil" in steps
         assert N.route.rideSeconds == 5
@@ -7178,7 +7193,7 @@ def test_from_dolanaar_the_boat_at_ruttheran_is_reached_by_the_teleporter(game):
         for _ in range(20):
             lua.execute("AGPS_T = AGPS_T + 0.5")
             G.Update()
-        steps = str(N.StepsText(6))
+        steps = str(N.StepsText(10))  # (city routing, on by default: a swim across Darnassus's pond on the way)
         assert "to the teleporter (The Temple Gardens, Darnassus)" in steps
         assert "Take the teleporter to Rut'theran Village, Teldrassil" in steps
         assert "Take the boat to Auberdine, Darkshore" in steps
@@ -7335,7 +7350,8 @@ def test_a_ride_whose_walk_is_a_long_way_round_is_planned_again(game):
     # (the overnight trip sweep, 2026-10-07) Horde, level 5, Lakeridge Highway to Kurzen's Compound: the way with a ride
     # walked to Stonard's flight master, 1.1k yd straight and 10k yd round, so the ride check (Nav's CompareRide) chose
     # the walk, 9.2k yd. It plans the way with a ride again past that walk (Nav.WalkDetour): by Rog'mar's flight to
-    # Grom'gol, under half the walk's time
+    # Grom'gol, under half the walk's time. (Since Riverglades has its levels, 38-45 (Router.ZONE_LEVELS_BY_ID), it is
+    # too high at level 5 like Burning Steppes: the way with a ride now learns Flame Crest's flight to Grom'gol instead)
     lua, ns = game
     G, N = ns.GPS, ns.Nav
     cdb = ns.CharDB()
@@ -7357,8 +7373,7 @@ def test_a_ride_whose_walk_is_a_long_way_round_is_planned_again(game):
             G.Update()
         assert "planned again past a long way round): rides" in str(N.lastRideCheck)
         steps = str(N.StepsText(4))
-        assert "to the flight master (Rog'mar, Riverglades)" in steps
-        assert "Take the flight to Grom'gol, Stranglethorn" in steps
+        assert "flight master (" in steps and "flight to Grom'gol, Stranglethorn" in steps, steps
     finally:
         lua.execute("AGPS_LEVEL = nil")
         cdb.faction, cdb.taxiNodes = fac, nodes
@@ -7374,14 +7389,15 @@ def test_a_ride_whose_walk_came_out_far_longer_than_planned_has_the_next_plan_lo
     # flies to Stormwind and takes the tram, then walks from Ironforge, 2.3k yd straight. His roads made that walk 7.5k yd
     # (13.8k before): no longer a long way round, so the ride check stopped at the tram's plan, slower than the walk, and
     # walked (1,318 s). A walk thousands of yards past the plan's (Nav.WalkLonger) gets the next plan looked at too: by
-    # Farholde Keep's flight (919 s)
+    # Farholde Keep's flight (919 s). (Level 34, not 30: Riverglades has its levels since, 38-45, and at 30 it is too
+    # high to fly into (Router.LEVEL_RED); at 34 it isn't, as it wasn't when this was written)
     lua, ns = game
     G, N = ns.GPS, ns.Nav
     cdb = ns.CharDB()
     fac, nodes = cdb.faction, cdb.taxiNodes
     known = (2, 5, 6, 7, 14, 16, 45, 66, 67, 71, 84, 85, 86, 87, 3276)
     try:
-        lua.execute("AGPS_LEVEL = 30")
+        lua.execute("AGPS_LEVEL = 34")
         cdb.faction = "Alliance"
         cdb.taxiNodes = lua.eval("{ [1415] = { nodes = { "
                                  + "".join(f"{{ nodeID = {n}, known = true }}, " for n in known) + "} } }")
@@ -8171,7 +8187,9 @@ def test_road_tolerance_keeps_to_the_roads_or_cuts_across(game):
     # from Brill to the fields northwest of it off the roads more as the tolerance goes up
     lua, ns = game
     N, R, st = ns.Nav, ns.Router, ns.settings.gps
-    assert st.roadTolerance == 0 and R.RoadFactor(R.OFFROAD_PENALTY) == R.OFFROAD_PENALTY
+    assert st.roadTolerance == 3  # (the default since 1.4.0: +3, Core.lua's roadTolerance140)
+    st.roadTolerance = 0
+    assert R.RoadFactor(R.OFFROAD_PENALTY) == R.OFFROAD_PENALTY
     try:
         st.roadTolerance = 10
         assert R.RoadFactor(1.25) == 1 and R.RoadFactor(2) == 1
@@ -8198,7 +8216,7 @@ def test_road_tolerance_keeps_to_the_roads_or_cuts_across(game):
         keep, usual, cut = offroad(-10), offroad(0), offroad(10)
         assert keep < usual < cut and cut > 2 * usual, (keep, usual, cut)
     finally:
-        st.roadTolerance = 0
+        st.roadTolerance = 3
         N.Clear()
         lua.execute("AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = 2254.0, 293.0, 0 AGPS_T = AGPS_T + 1")
         ns.GPS.Update()
@@ -8763,6 +8781,11 @@ def minimap(game):
     lua, ns = game
     st = ns.settings.gps
     lua.execute(MM_SETUP)
+    # (the options closed: a test before it in the same process may have left them open (Options.Show), which keeps the
+    # grown-out map in use and makes Options.Toggle close them; run in parallel, any test can come before)
+    opts = lua.eval("AzerothGPSOptions")
+    if opts:
+        opts.Hide(opts)
     # (the minimap given back while the map's grown out of the square, as before 2026-11-15; the square kept as it is,
     # the option's default, in the tests that turn it on)
     st.replaceMinimapKeepSquare = False
@@ -9539,6 +9562,9 @@ def test_the_minimap_button_opens_the_map_out_of_the_square_and_reset_asks_first
         assert not ask._shown and ns.settings.gps.replaceMinimapSize == ns.DEFAULTS.gps.replaceMinimapSize
     finally:
         ns.settings.gps.replaceMinimapSize = was
+        # (the reset put world routing back on, the players' default: off again for the tests after, which were
+        # written for it off unless they turn it on; gameharness.start)
+        ns.settings.gps.worldGrid = False
 
 
 def test_the_opened_maps_wait_is_the_players_own_or_never(minimap):
@@ -11276,8 +11302,9 @@ def _arrow_route(lua, ns, t0):
     assert N.route and not N.RedAsking()
 
 
-def test_arrow_side_hide_hides_the_arrow_and_keeps_the_directions(game):
-    # (asked 2026-11-17: "add a fifth option that is 'Hide' that hides the arrow") the arrow's panel unseen and
+def test_the_arrow_off_hides_the_arrow_and_keeps_the_directions(game):
+    # (asked 2026-11-17: "add a fifth option that is 'Hide' that hides the arrow"; its own check since 2026-11-24,
+    # `arrowShown`, the old Hide carried over to it) the arrow's panel unseen and
     # click-through, the directions as ever (their own clamp, no arrow column); a hearthstone to use at the route's start
     # brings the panel back for its button; with the directions hidden too the arrow shows (never an empty window)
     lua, ns = game
@@ -11293,7 +11320,7 @@ def test_arrow_side_hide_hides_the_arrow_and_keeps_the_directions(game):
         A.Apply()
         af._scripts.OnUpdate(af, 1)
         assert af._alpha > 0 and af._mouse and dirf._alpha > 0  # (as before: both seen)
-        st.arrowSide = "hide"
+        st.arrowShown = False
         A.Apply()
         lua.execute("AGPS_T = 1201")
         af._scripts.OnUpdate(af, 1)
@@ -11570,6 +11597,23 @@ def test_the_route_tour_waits_for_the_route_before_zooming(game):
         N.route = real
         G.TourStep(t + 20.5)
         assert G.TourPhase() == "out"  # (the route shown: the tour goes on)
+        # (item 29: the world grid's stand-in, its faded line while it works, is waited out too; fit once, on settling)
+        G.ConfirmRoute()
+        assert G.TourPhase() == "hold"
+        wg_was = ns.settings.gps.worldGrid
+        ns.settings.gps.worldGrid = True
+        ns.WorldGrid.Set(True)
+        stand_in = lua.table(pending=True, parts=real.parts, legs=real.legs)
+        N.route = stand_in
+        assert N.StandIn()
+        for k in range(1, 40):
+            G.TourStep(t + 30 + k * 0.5)
+            assert G.TourPhase() == "hold"  # (no zoom to the line)
+        N.route = real
+        G.TourStep(t + 60.5)
+        assert G.TourPhase() == "out"
+        ns.settings.gps.worldGrid = wg_was
+        ns.WorldGrid.Set(bool(wg_was))
     finally:
         N.Clear()
         G.Follow()

@@ -8,6 +8,7 @@ test that passed only on a rerun (.github/scripts/ci_gate.py skips). A preempted
 try. Here, on a dev PC, nothing is run again: one failure is a failure.
 """
 
+import gc
 import os
 
 import pytest
@@ -26,3 +27,12 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if item.get_closest_marker("timing"):
             item.add_marker(pytest.mark.flaky(reruns=TIMING_RERUNS, only_rerun=["AssertionError"]))
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _a_modules_harnesses_freed_after_it():
+    """Python's cycle collector run after each test file: a harness (gameharness.start, a LuaRuntime) a test left in a
+    cycle (a Python function it gave Lua that refers back to the runtime) is freed then, not whenever Python's own
+    allocations next trigger it, which never sees Lua's memory (2026-11-23: dead harnesses, GBs a CI worker)."""
+    yield
+    gc.collect()

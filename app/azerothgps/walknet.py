@@ -848,11 +848,12 @@ def simplify_3d(pts: list, zs: list, eps: float, floor_at) -> list:
     return rec(0, len(pts) - 1)
 
 
-def model_faces(cd, wmo: int, slope: float, groups=None, liquid_kinds: bool = False):
+def model_faces(cd, wmo: int, slope: float, groups=None, liquid_kinds: bool = False, ceilings: list | None = None):
     """A model's faces in its own frame: floors (group, centroid z, triangle) and walls
     (group, (zmin, zmax), triangle), by the face's slope; and its liquids (group, local
     (x0, y0, x1, y1), surface z; `liquid_kinds`: and the tile's kind, 0 water, 1 ocean,
-    2 magma, 3 slime). `groups`: only these."""
+    2 magma, 3 slime). `groups`: only these. `ceilings`: a list the faces facing down are added to (group, triangle):
+    navfeatures' covered decks."""
     from . import interiors as I
     from .extract import adt
 
@@ -897,6 +898,8 @@ def model_faces(cd, wmo: int, slope: float, groups=None, liquid_kinds: bool = Fa
                     walls.append((gi, (min(zs3), max(zs3)), (a1, a2, a3)))
                     continue
                 if norms and norms[i1][2] + norms[i2][2] + norms[i3][2] <= 0:
+                    if ceilings is not None:
+                        ceilings.append((gi, (a1, a2, a3)))
                     continue
                 floors.append((gi, (a1[2] + a2[2] + a3[2]) / 3, (a1, a2, a3)))
             if "MLIQ" in sub:

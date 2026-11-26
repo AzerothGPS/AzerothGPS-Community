@@ -111,12 +111,29 @@ function T.FormatCooldown(sec)
 end
 
 -- The hearthstone's destination: the spot recorded after the last hearth (exact), else
--- the town of the inn (GetBindLocation) found among the place names.
+-- the town of the inn (GetBindLocation) found among the place names. (A recorded spot far from where the bind's name
+-- says, another continent or past HOME_CHECK_YD, isn't taken: item 51b, Kooki3z 2026-11-24, "Use your Hearthstone (to
+-- Valley of Trials)" and the route on from Undercity: the spot had been read before the teleport, the player still in
+-- Undercity, and kept under the new bind's name.)
+T.HOME_CHECK_YD = 600
+T.HOME_MOVED_YD, T.HOME_WAIT_SECONDS = 200, 20
+local NamedHome
 function T.Home()
   local cdb = ns.CharDB and ns.CharDB()
   local bind = GetBindLocation and GetBindLocation()
   local rec = cdb and cdb.bind
-  if rec and rec.name == bind then return rec end
+  if rec and rec.name == bind then
+    local named = NamedHome(bind)
+    if not named or (Geo.Base(named.cont) == Geo.Base(rec.cont)
+        and (named.x - rec.x) ^ 2 + (named.y - rec.y) ^ 2 <= T.HOME_CHECK_YD ^ 2) then
+      return rec
+    end
+    cdb.bind = nil -- (not that inn's: forgotten, the next hearth records it again)
+    return named
+  end
+  return NamedHome(bind)
+end
+function NamedHome(bind)
   if not bind or bind == "" then return nil end
   -- the inn's building (bind locations are often an inn's own name), then a place name
   -- (towns, villages), then any point of interest, then a zone or city map's middle
@@ -287,8 +304,18 @@ function T.Init()
       return
     end
     if event == "UNIT_SPELLCAST_SUCCEEDED" and unit == "player" and (spell == HEARTHSTONE_SPELL or spell == ASTRAL_RECALL) then
-      C_Timer.After(4, function()
+      -- (recorded once the player is there: moved HOME_MOVED_YD or more, or onto another continent, looked at each second
+      -- up to HOME_WAIT_SECONDS; the loading screen can outlast a fixed wait, item 51b)
+      local fx, fy, fcont = Geo.PlayerWorld()
+      local tries = 0
+      local function Arrived()
+        tries = tries + 1
         local x, y, cont = Geo.PlayerWorld()
+        local moved = x and fx and (Geo.Base(cont) ~= Geo.Base(fcont) or (x - fx) ^ 2 + (y - fy) ^ 2 >= T.HOME_MOVED_YD ^ 2)
+        if not moved then
+          if tries < T.HOME_WAIT_SECONDS then C_Timer.After(1, Arrived) end
+          return
+        end
         local cdb = ns.CharDB and ns.CharDB()
         if x and cdb then cdb.bind = { cont = cont, x = x, y = y, name = GetBindLocation and GetBindLocation() } end
         -- (in an inn with its inside: the floor followed from the innkeeper's, Nav.Hearthed)
@@ -296,7 +323,8 @@ function T.Init()
           ns.Nav.Hearthed(ns.Nav.PlayerLevel and ns.Nav.PlayerLevel(cont) or cont, x, y)
         end
         if ns.Nav then ns.Nav.Invalidate(true) end
-      end)
+      end
+      C_Timer.After(4, Arrived)
     end
   end)
   if ns.TimeScript then ns.TimeScript(ev, "OnEvent", "events (teleports)") end

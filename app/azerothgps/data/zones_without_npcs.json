@@ -1,8 +1,4 @@
 {
- "_note": "Zones (uiMap) on the continents with no shipped NPC (app/tests/test_zones_without_npcs.py). Reviewed 2026-11-23: none of these have NPCs in the 1.12 dump, the client's files or the server snapshot (PR #976). Their NPCs come from logging them in the live game. Take a zone off once it has shipped NPCs.",
- "zones": {
-  "2482": "Mount Hyjal",
-  "2548": "Riverglades",
-  "2652": "Shen'dralas"
- }
+ "_note": "Zones (uiMap) on the continents with no shipped NPC (app/tests/test_zones_without_npcs.py). Reviewed 2026-11-23: none of these have NPCs in the 1.12 dump, the client's files or the server snapshot (PR #976). Their NPCs come from logging them in the live game. Take a zone off once it has shipped NPCs. Riverglades, Mount Hyjal and Shen'dralas came off 2026-11-25: Wowhead stand-ins ship there (overrides/standin_npcs.json) till logged in game.",
+ "zones": {}
 }

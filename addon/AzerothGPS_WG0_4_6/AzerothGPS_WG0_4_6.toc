@@ -1,0 +1,11 @@
+## Interface: 16001
+## Title: |cff2680ffAzerothGPS map data: Eastern Kingdoms 4-6|r
+## Notes: Part of AzerothGPS, loaded automatically when needed. Keep it enabled.
+## Author: AzerothGPS
+## Group: AzerothGPS
+## IconTexture: Interface\AddOns\AzerothGPS\Media\Device
+## LoadOnDemand: 1
+## Dependencies: AzerothGPS
+
+Data.lua
+Alt.lua

@@ -692,13 +692,15 @@ def test_in_game_the_swim_lands_once_its_walk_is_in_not_after_the_ride_checks_wa
             if r and r.pending and provisional is None:
                 provisional = r.walkYards
             if r and not r.pending and r.swimYards > 1500:
-                landed = (r.walkYards, r.swimYards, _queued(lua))
+                landed = (r.walkYards, r.swimYards, _queued(lua), N.RideChecking())
                 break
             if not R.HasWork() and r and not r.pending:
                 break
         assert provisional and provisional > 4000, provisional  # (by the roads while the walk is searched)
         assert landed and landed[0] < 2600, (N.route.walkYards, N.route.swimYards)
-        assert landed[2] >= 20, landed  # (the ride check's walks still queued: not waited for)
+        # (the ride check still to finish: not waited for. Its walks were queued ahead, 20 and more of them left when the
+        # swim landed; `low` since 2026-11-23, after the route's own searches, the check may not have queued them yet)
+        assert landed[3], landed  # (N.RideChecking: the check still running when the swim landed)
     finally:
         R.WARM, R.SYNC_WALKS = False, True
         R.Reset()
@@ -707,3 +709,82 @@ def test_in_game_the_swim_lands_once_its_walk_is_in_not_after_the_ride_checks_wa
         N.Clear()
         lua.execute("AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = 2254.0, 293.0, 0 AGPS_T = AGPS_T + 1")
         G.Follow()
+
+
+def _leg_yards(r):
+    out = {}
+    for p in range(1, len(r.parts) + 1):
+        part = r.parts[p]
+        n = len(part.pts) // 2
+        yd = sum(math.dist((part.pts[2 * i - 1], part.pts[2 * i]), (part.pts[2 * i + 1], part.pts[2 * i + 2]))
+                 for i in range(1, n))
+        out[part.stop or 1] = out.get(part.stop or 1, 0) + yd
+    return out
+
+
+def test_avoiding_a_swim_is_for_its_stop_only(game):  # noqa: F811
+    # (item 42c, Kooki3z 2026-11-24: right-clicking a swim avoided swimming for every stop of the route; with world
+    # routing on it's for that stop only, saved with it, the next stop's swim kept)
+    lua, ns = game
+    N, st, WG = ns.Nav, ns.settings.gps, ns.WorldGrid
+    cdb = ns.CharDB()
+    saved = (cdb.faction, st.allowSwim, st.fastestOrder, st.worldGrid)
+    lua.execute("AGPS_LEVEL = 60")
+    try:
+        st.allowSwim, st.fastestOrder, st.worldGrid = True, False, True
+        WG.Set(True)
+        cdb.faction = "Alliance"
+        N.Clear()
+        ns.Router.Reset()
+        lua.execute(f"AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = {ISLE[0]}, {ISLE[1]}, 0")
+        N.SetStops(lua.eval(f"{{ {{ x = {SHORE[0]}, y = {SHORE[1]}, cont = 0, name = 'a' }},"
+                            f" {{ x = {ISLE[0] + 10}, y = {ISLE[1] - 10}, cont = 0, name = 'b' }} }}"), False, "red")
+        N.Invalidate(True, True)
+        for _ in range(12):
+            lua.execute("AGPS_T = AGPS_T + 0.5")
+            ns.GPS.Update()
+        before = _leg_yards(N.route)
+        assert N.AvoidLegSwim(1) is True and N.AvoidLegSwim(1) is False
+        assert N.stops[1].avoidSwim and not N.stops[2].avoidSwim and ns.CharDB().stops[1].avoidSwim
+        for _ in range(12):
+            lua.execute("AGPS_T = AGPS_T + 0.5")
+            ns.GPS.Update()
+        after = _leg_yards(N.route)
+        # (the first stop: less water, a longer way; from the isle some swim stays, it's an island)
+        assert after[1] > before[1] + 20, (before, after)
+        assert after[2] == pytest.approx(before[2], rel=0.05), (before, after)  # (the second's swim kept)
+        assert not N.noSwim  # (not the whole trip's)
+    finally:
+        lua.execute("AGPS_LEVEL = nil")
+        cdb.faction, st.allowSwim, st.fastestOrder, st.worldGrid = saved
+        WG.Set(bool(saved[3]))
+        N.Clear()
+        N.SyncSwim()
+
+
+def test_the_swim_weight_comes_from_one_reading_on_foot(game):  # noqa: F811
+    """Item 62/63a (Kooki3z, a mage at GM speed 5, then 1 and a /reload: still 350 yd swum down the Southfury). The
+    ratio is read only on foot (not mounted, no ability, no form), from one GetUnitSpeed; a mounted or boosted reading
+    leaves it; `/agps debug speeds reset` starts over; never under SWIM_MIN."""
+    lua, ns = game
+    N, WG = ns.Nav, ns.WorldGrid
+    old = lua.eval("GetUnitSpeed")
+    lua.execute("AGPS_IM = IsMounted")
+    try:
+        lua.execute("GetUnitSpeed = function() return 0, 7, 7, 4.72 end; IsMounted = function() return false end")
+        N.Speeds()
+        assert abs(WG.SwimWeight() - 7 / 4.72) < 1e-6
+        # (mounted: a fast swim read with the mount's run: the ratio kept)
+        lua.execute("GetUnitSpeed = function() return 14, 14, 14, 30 end; IsMounted = function() return true end")
+        N.Speeds()
+        assert abs(WG.SwimWeight() - 7 / 4.72) < 1e-6
+        # (GM speed on foot: both fast, the ratio the same)
+        lua.execute("GetUnitSpeed = function() return 0, 35, 35, 23.6 end; IsMounted = function() return false end")
+        N.Speeds()
+        assert abs(WG.SwimWeight() - 35 / 23.6) < 1e-6
+        lua.globals().SlashCmdList.AZEROTHGPS("debug speeds reset")
+        assert N.SwimRatio() is not None  # (read again at once, by the command's own reading)
+    finally:
+        lua.globals().GetUnitSpeed = old
+        lua.execute("IsMounted = AGPS_IM")
+        N.ResetSpeeds()

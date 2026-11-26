@@ -351,16 +351,16 @@ O.LANGUAGES = { { "enUS", "English" }, { "deDE", "Deutsch" }, { "esES", "Espa\19
 -- prep, like the toc's version (Kooki3z 2026-11-20: "part of release prep like how we update the version number in
 -- the addon in game should be the What's New section in help"): test_options checks it's never older than the toc,
 -- release.yml that it's the tag's.
-O.WHATS_NEW_VERSION = "1.3.14"
+O.WHATS_NEW_VERSION = "1.4.0"
 O.WHATS_NEW = {
-  L["- Quest Route: right-click the button and toggle icons pop out, like Quick Find's: by level, turn-ins only, objectives only, tracked quests, this zone."],
-  L["- Near an NPC stop, a pulsing Target button targets the NPC and marks it (Options > Directions)."],
-  L["- The GPS map window shows over the game's windows: quest log, bags, world map."],
-  L["- Controller: the Quest Route button's toggle icons work from the controller (X pops them out)."],
-  L["- Road and wall drawing and Record are no longer part of AzerothGPS; roads you drew still guide your routes."],
-  L["- Zephras Isle: its NPCs are in the search and Quick Find before you've talked to them."],
-  L["- Controller: the show/hide key can be a controller button (Options > Keys and buttons)."],
-  L["- An NPC upstairs or in a cellar is no longer reached at the door below; quest turn-ins go to their NPC."],
+  L["- Grid routing: routes walk the map's own ground in the open world and the capitals, every floor, stair and bridge."],
+  L["- Spell jumping: with a fall spell or item ready, routes jump down cliffs; the step says when to cast (Options > Routing: Use class spells)."],
+  L["- Options > Routing: Safe drop sets how far routes drop without a fall spell; Expert jumper casts just before landing."],
+  L["- Jumps are drawn as a coil on the map; right-click one to avoid spell jumps (or all jumps) on the way to that stop."],
+  L["- With no way on foot, the directions say so instead of drawing a line through walls."],
+  L["- Search: enemy mobs by name, at their nearest camp; orange or red ones show their levels."],
+  L["- The direction arrow and the directions text turn on and off on their own (Options > Directions)."],
+  L["- What's New window with the new options: Options > Help or /agps whatsnew."],
 }
 -- A page's old id, still asked for by other code and addons (API.ShowOptions): the page it's on now.
 O.PAGE_ALIASES = { ["Help improve"] = "Help" }
@@ -1918,6 +1918,10 @@ local function BuildWindow()
   Key("searchCommonNpcs")
   check(L["Find NPCs met in several places"], L["NPCs you've talked to in places far apart (a guard, a supplier in every town) are left out of the search. On: they're found too, at the place you met them nearest you."],
     function() return GPS().searchCommonNpcs == true end, function(v) GPS().searchCommonNpcs = v end)
+  -- (1.4.0, Kooki3z 2026-11-22: "add all enemy mobs to the search function")
+  Key("searchEnemies")
+  check(L["Include enemies"], L["Enemy mobs are found by name too, each once at its camp nearest you. Ones orange or red to you show their level range before the name."],
+    function() return GPS().searchEnemies ~= false end, function(v) GPS().searchEnemies = v end)
 
   -- (asked 2026-11-10: "4 different map pages... maybe reduce to 2": three. The map itself (how it looks, and where it
   -- shows: the minimap's place, the game's world map), its icons (on it, and on the game's minimap), and its window
@@ -2532,6 +2536,11 @@ local function BuildWindow()
       GPS().avoidHostile = v
       ns.Nav.OptionsChanged()
     end)
+  -- (item 63c, Kooki3z 2026-11-24: the guard zones the route goes around, drawn; on by default. Item 98, 2026-11-25: every
+  -- enemy zone in view, with or without a route, so not under "avoid" any more; the saved key kept)
+  Key("showAvoided")
+  check(L["Show enemy areas"], L["Red areas on the map where the other faction's guards stand."],
+    function() return GPS().showAvoided ~= false end, function(v) GPS().showAvoided = v end, nil, INDENT)
   Key("allowSwim")
   check(L["Allow swimming"], L["Routes may swim across rivers, lakes and the sea near the shore when that's faster, timed at swimming speed. Swims show as a wavy line; right-click one to go round by land on that trip. Off: routes go round by land wherever there's a way (an island is still swum to)."],
     function() return GPS().allowSwim ~= false end, function(v)
@@ -2540,13 +2549,49 @@ local function BuildWindow()
     end)
   -- (asked 2026-11-04: how much the roads are kept; Router.RoadFactor)
   Key("roadTolerance")
-  slider(L["Road tolerance"], ns.Router.ROAD_TOLERANCE_MIN, ns.Router.ROAD_TOLERANCE_MAX, 1,
-    function(v) return v == 0 and L["0 (as AzerothGPS chooses)"] or string.format("%+d", v) end,
-    function() return GPS().roadTolerance or 0 end, function(v)
+  -- (item 61, Kooki3z read +10 as "most road": the name and its ends' labels say which way, the values as they were)
+  local roadSlider = slider(L["Roads or shortcuts"], ns.Router.ROAD_TOLERANCE_MIN, ns.Router.ROAD_TOLERANCE_MAX, 1,
+    function(v) return v == ns.DEFAULTS.gps.roadTolerance and string.format(L["%+d (as AzerothGPS chooses)"], v) or string.format("%+d", v) end,
+    function() return GPS().roadTolerance or ns.DEFAULTS.gps.roadTolerance end, function(v)
       GPS().roadTolerance = v
       ns.Nav.OptionsChanged()
     end)
-  note(L["Below 0, routes keep to the roads more and more; above 0, they cut straight across open ground more and more, at the top as if the roads weren't there."])
+  -- (under the slider's two ends: which way is which; the old name still found by the search)
+  O.roadSlider = roadSlider
+  roadSlider.leftEnd = roadSlider:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+  roadSlider.leftEnd:SetPoint("TOPLEFT", roadSlider.slider, "BOTTOMLEFT", 2, -1)
+  roadSlider.leftEnd:SetText(L["Stick to roads"])
+  roadSlider.rightEnd = roadSlider:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+  roadSlider.rightEnd:SetPoint("TOPRIGHT", roadSlider.slider, "BOTTOMRIGHT", -2, -1)
+  roadSlider.rightEnd:SetText(L["Cut across"])
+  AddText(group, "road tolerance", L["Stick to roads"], L["Cut across"])
+  note(L["Left: routes keep to the roads more. Right: they cut across open ground more; at the far right as if there were no roads."])
+  header(L["Jumping"])
+  -- (Kooki3z 2026-11-22: FallSpells.lua)
+  Key("useClassSpells")
+  check(L["Use class spells"], L["Spell jumping: with a spell or item that slows your fall ready (a mage's or priest's with its reagent in your bags, your race's own, a parachute cloak), routes may jump down drops too high to survive without it, as many as your cooldowns and reagents allow on the trip. The step before says to cast it, and a button beside the directions casts it when you click it."],
+    function() return GPS().useClassSpells ~= false end, function(v)
+      GPS().useClassSpells = v
+      if ns.FallSpells then ns.FallSpells.Refresh() end
+      ns.Nav.OptionsChanged()
+    end)
+  -- (Kooki3z 2026-11-23: spell jumping with no height limit, nested under it, off by default)
+  Key("expertJumper")
+  check(L["Expert jumper"], L["Spell jumping off any ledge, however high: jump, fall, and cast your fall spell just before you land (the directions say when, and the button shows then). Casting it too early can run out before you land."] .. " " .. L["Can make routes take much longer to work out on long trips."],
+    function() return GPS().expertJumper == true end, function(v)
+      GPS().expertJumper = v and true or false
+      if ns.FallSpells then ns.FallSpells.Refresh() end
+      ns.Nav.OptionsChanged()
+    end, function() return GPS().useClassSpells ~= false end, 20)
+  -- (Kooki3z 2026-11-23: the plain drop limit, Nav.PlainSafeDrop)
+  Key("safeDropYd")
+  slider(L["Safe drop"], ns.Nav.SAFE_DROP_MIN, ns.Nav.SAFE_DROP_MAX, 1, function(v) return ns.Nav.FormatDistance(v) end,
+    function() return ns.Nav.SafeDropSetting() end, function(v)
+      GPS().safeDropYd = v
+      ns.Nav.OptionsChanged()
+    end, nil, L["How far routes may drop without a fall spell. Above about 39 yd a fall can kill a low-level character."])
+  -- (the grid system, CityGrid.lua and WorldGrid.lua: always on, no option since item 74, Kooki3z 2026-11-25: "it's much
+  -- more reliable than the previous system". Core's load forces both settings on.)
   header(L["Trips with several stops"])
   Key("fastestOrder")
   check(L["Visit stops in the fastest order"], L["Routes with several stops visit them in the fastest order instead of the order you placed them. (Double-click the map to place stops.)"],
@@ -2689,11 +2734,11 @@ local function BuildWindow()
 
   ---------------------------------------------------------------- Directions
   Page(L["Directions"], nil, "Directions")
-  local function ArrowOn() return GPS().arrow and true or false end
-  local function DirOn() return ArrowOn() and GPS().dirShown ~= false end
-  -- (Arrow side "Hide", asked 2026-11-17: the directions alone; Arrow.lua's A.Hidden)
-  local function ArrowHidden() return GPS().arrowSide == "hide" end
-  local function ArrowShown() return ArrowOn() and not (ArrowHidden() and GPS().dirShown ~= false) end
+  -- (the arrow and the directions text on or off each on its own, Kooki3z 2026-11-24; `arrow`, the window, either)
+  local function ArrowOn() return GPS().arrow ~= false and GPS().arrowShown ~= false end
+  local function DirOn() return GPS().arrow ~= false and GPS().dirShown ~= false end
+  local function ArrowShown() return ArrowOn() end
+  local function SyncArrow() GPS().arrow = GPS().arrowShown ~= false or GPS().dirShown ~= false end
   header(L["Quests"])
   -- Questing objective tracker, with the ! the arrow shows in a quest's area (on this page since 2026-10-16; at its top since 2026-11-15, asked)
   local qholder = CreateFrame("Frame", nil, page)
@@ -2725,9 +2770,9 @@ local function BuildWindow()
   Key("questing")
   Track(qcb)
   header(L["Direction arrow"])
-  Key("arrow")
+  Key("arrowShown")
   check(L["Show direction arrow"], L["Two small panels (TomTom style): an arrow along the route, and beside it the directions: the next turn (\"Turn left 120 yd, toward Razor Hill\"), the stop's distance and ETA, and the stops after it when made taller."],
-    function() return GPS().arrow end, function(v) GPS().arrow = v end)
+    function() return ArrowOn() end, function(v) GPS().arrowShown = v and true or false SyncArrow() end)
   Key("arrowLocked")
   check(L["Lock arrow position"], L["Locks the arrow in place. Unlocked: drag it to move it. Snapped to the directions text, it still moves with the text while the text is unlocked. With no route it shows a placeholder while unlocked, so you can place it. Locked, clicks pass through it to the game world."],
     function() return GPS().arrowLocked end, function(v) GPS().arrowLocked = v end, ArrowOn, INDENT)
@@ -2748,8 +2793,7 @@ local function BuildWindow()
   -- (asked 2026-11-17, "hide the text separately and only show the arrow": this one, named for the text; gray while the
   -- arrow is hidden, so the two are never both hidden)
   check(L["Show the directions text"], L["The panel beside the arrow with the next turn, the stop's distance and ETA and the stops after it. Off: the arrow alone, without the text."],
-    function() return GPS().dirShown ~= false end, function(v) GPS().dirShown = v end,
-    function() return ArrowOn() and not ArrowHidden() end)
+    function() return DirOn() end, function(v) GPS().dirShown = v and true or false SyncArrow() end)
   -- (asked 2026-11-18: "a separate lock option for the directions text than the arrow")
   Key("dirLocked")
   check(L["Lock directions text position"], L["Locks the directions text in place, apart from the arrow. Unlocked: drag it to move it and its bottom-right corner to resize it (taller lists the later stops). With no route it shows a placeholder while unlocked, so you can place it. Locked, clicks pass through it to the game world."],
@@ -2760,7 +2804,7 @@ local function BuildWindow()
   Key("arrowSnap")
   check(L["Snap the arrow to the directions"], L["The arrow sits against a side of the directions and the two move as one: drag the directions to move both. Unlocked, drag the arrow away to move it on its own, and drop it against a side of the directions to snap it there again."],
     function() return GPS().arrowSnap ~= false end, function(v) GPS().arrowSnap = v end,
-    function() return DirOn() and not ArrowHidden() end, INDENT)
+    function() return DirOn() and ArrowOn() end, INDENT)
   -- (a side picked snaps the arrow there, as dropping it against that side does; Hide hides it, snapped or not, so it's
   -- there with the arrow on its own too: asked 2026-11-17)
   Key("arrowSide")
@@ -2769,11 +2813,10 @@ local function BuildWindow()
     { value = "right", text = L["Right"] },
     { value = "top", text = L["Above"] },
     { value = "bottom", text = L["Below"] },
-    { value = "hide", text = L["Hide"], tip = L["No arrow: the directions text alone. The arrow's place shows a hearthstone or teleport to use when the route starts with one."] },
   }, function() return GPS().arrowSide or "left" end, function(v)
     GPS().arrowSide = v
-    if v ~= "hide" then GPS().arrowSnap = true end
-  end, DirOn, INDENT * 2)
+    GPS().arrowSnap = true
+  end, function() return DirOn() and ArrowOn() end, INDENT * 2)
   Key("dirTextScale")
   slider(L["Text size"], 70, 160, 5, "%d%%",
     function() return math.floor((GPS().dirTextScale or 1) * 100 + 0.5) end, function(v) GPS().dirTextScale = v / 100 end, DirOn)
@@ -3294,6 +3337,12 @@ local function BuildWindow()
     note(L["The first-time setup: your minimap, where the map opens, the route's directions and the icons' size."])
     O.setupButton = Button(page, L["Run Setup Again"], 170, function() if ns.Setup then ns.Setup.Open() end end)
     place(O.setupButton, 28, 4)
+    -- (item 34: the What's New popup again, WhatsNew.lua)
+    O.whatsNewButton = Button(page, L["What's New"], 170, function() if ns.WhatsNew then ns.WhatsNew.Open() end end)
+    place(O.whatsNewButton, 28, 4)
+    -- (item 48: the FAQ window, Faq.lua; beside What's New)
+    O.faqButton = Button(page, L["FAQ"], 120, function() if ns.Faq then ns.Faq.Open() end end)
+    O.faqButton:SetPoint("LEFT", O.whatsNewButton, "RIGHT", 6, 0)
     -- (the map's Search Places help, moved here from its button's tooltip: asked 2026-11-14, "too much text for a
     -- button hover"; not on General, which fits without scrolling)
     header(L["Search Places"])

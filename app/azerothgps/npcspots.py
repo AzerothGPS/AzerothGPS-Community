@@ -157,6 +157,10 @@ def parse_lua(text: str) -> tuple[str, dict]:
     for i in (m.group(1).split() if m else ()):
         if int(i) in npcs:
             npcs[int(i)]["from"] = "server"
+    m = re.search(r'^ns\.NpcsStandIn = "([\d ]*)"$', rest, re.M)  # (the stand-ins: standin.py)
+    for i in (m.group(1).split() if m else ()):
+        if int(i) in npcs:
+            npcs[int(i)]["from"] = "standin"
     return head, npcs
 
 

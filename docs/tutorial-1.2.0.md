@@ -9,15 +9,16 @@ be checked without the game. The code is `addon/AzerothGPS/Tutorial.lua`; the te
 
 ## In short
 
-- **When it's offered.** At a first install ("Welcome to AzerothGPS") and once after an update that adds sections
-  ("What's new in 1.2.0"; for 1.2.0 every section is new): "Take a short tutorial?" with **Start Tutorial**, **Not Now**
-  and **Don't Ask Again**. It comes up 8 seconds after the world is entered, never in combat, in a dungeon, dead, on a
-  flight, or during a companion's game on the map (then at the next loading screen or login instead).
-  Not Now asks again at the next login, 3 times at most. Closing the window without an answer counts as Not Now.
-- **Any time.** Options > Help has a Tutorial section: **Play All**, a **Play** button for every section (done ones are
-  marked), and the checkbox "Offer the tutorial after big updates" (Don't Ask Again turns it off). `/agps tutorial`
-  plays all of it, `/agps tutorial <section>` one section (`minimap`, `route`, `quests`, `arrow`, `gather`, `pins`,
-  `search`, `dungeon`, `window`), `/agps tutorial exit` leaves it.
+- **Only on request (since 1.4.0).** Kooki3z, 2026-11-25: "Let's make the tutorials only on request from the Help
+  section. From here on new install is setup page only and updates are What's New only." No popup offers it: not at a
+  first install (the setup instead), not after an update (What's New instead), not after a /reload cut one short.
+  (1.2.0 to 1.3.14 offered it at a first install and after an update that added sections, with Start Tutorial, Not Now
+  and Don't Ask Again, and a "Carry on where you were?" after a /reload; all removed.)
+- **Any time.** Options > Help has a Tutorial section: **Play All** and a **Play** button for every section (done ones
+  are marked). `/agps tutorial` plays all of it, `/agps tutorial <section>` one section (`minimap`, `route`, `quests`,
+  `arrow`, `cities`, `gather`, `pins`, `search`, `dungeon`, `window`), `/agps tutorial exit` leaves it. (`roads` was
+  removed in 1.3.14; `cities` was added in 1.4.0 and shows "(new)" in the list for a player who has played 1.2.0's
+  sections.) It never starts in combat, in a dungeon, dead, on a flight, or during a companion's game on the map.
 - **The player does it.** Each step points at the control with a pulsing gold outline and waits for the player to do
   the thing; the addon notices and moves on ("Done!"). Every such step has **Skip Step**. Steps that can't be done on
   the spot (the route across the sea, the dungeon's map) are set up by the addon and have **Next**.
@@ -126,6 +127,37 @@ The arrow and the directions panel are turned on and unlocked, with an example s
 4. **Size and lock** (shown)
    After the tutorial, right-click the arrow or the panel to lock that one in place: each has its own lock. The arrow's size, the text size and both locks are in Options > Directions.
 
+### 4b. Ground, stairs and jumps (`cities`, added in 1.4.0)
+
+Asked 2026-11-23 ("update tutorials for 1.4.0 too"). Told, not shown: no capital or ledge is near every player, so like
+the arrow section the arrow and the directions are turned on (an example stop if there's no route) and the steps point
+at them. With the map as the minimap it stays in its corner.
+
+1. **The map's own ground** (shown; the glow on the directions)
+   Routes walk the map's own ground, in the open world and the six capitals: every floor, stair, ramp and bridge. The directions say when to take the stairs, cross a bridge or board a lift.
+2. **Jumps** (shown; the glow on the arrow)
+   A coiled line on the map and an orange arrow mean a jump is coming up. Right-click a coil to avoid jumps on the way to that stop.
+3. **Class spells for big drops** (shown, a live example; the glow on the demo's cast button, else the directions)
+   With a spell that slows your fall ready, routes may take bigger drops. In this example as a mage, click the button beside the directions to watch the jump. Nothing is cast.
+   After the example ends: The example stopped and your own route is back. Show Again plays it again.
+
+   The example (Kooki3z 2026-11-25; `T.JumpDemoStart`): the player's route and the stops waiting set aside, a
+   simulated player (`Geo.override`) on the Barrens' side of Bluefen's ridge (-2310, -3254) with a trip down into
+   Dustwallow (-2558, -3233), as a mage with Slow Fall and Light Feathers (`FallSpells` `FS.demo`, in memory; the real
+   character's spells and bags are never read for it). The map shows the trip's jump coil and the directions the real
+   spell-jump step; the cast button is an insecure look-alike (`G.DemoUseButton`, no secure template) that casts
+   nothing: clicked (or A on a controller) the simulated player runs to the ledge, glides down and arrives. Nothing of
+   the trip is saved (`Nav.demoRoute`). Everything is put back at once (`T.JumpDemoStop`) when the step is left, the
+   tutorial ends, the player moves, combat starts, the map hides (the world map closes in world-map mode, which the
+   step uses when it's the player's), or at a /reload or logout. Show Again plays it from the start.
+4. **The other faction's ground** (shown; the glow on the directions)
+   Routes go around the other faction's guards (the red areas on the map). When the only way goes past them, the route asks you first: Take it?
+5. **Your choice** (shown)
+   Use class spells, Expert jumper and Safe drop are in Options > Routing.
+
+The spells aren't named (Slow Fall, Levitate, the Skyborne's Gliding on Air): their names differ in each language and
+the step's text would be wrong in some. The directions name them in the game's own words when the time comes.
+
 ### 5. Herbs and ore (`gather`, added in 1.2.0)
 
 Six example nodes (Peacebloom, Silverleaf, Earthroot, Copper Vein twice, Tin Vein) within 80 yards of the player,
@@ -166,7 +198,7 @@ loses nothing). The player's own pins are never touched.
 5. **Remove a pin** (shown)
    Right-click a pin to remove it. The pin made in this tutorial is practice: it is removed when you move on.
 
-### 7. Search Places (`search`, added in 1.2.0)
+### 7. Search Places (`search`, added in 1.2.0, updated in 1.4.0)
 
 1. **Open the search** (the player does it)
    Click the magnifier, Search Places, in the map menu.
@@ -179,6 +211,12 @@ loses nothing). The player's own pins are never touched.
    Noticed by: one more stop. With no class trainer known for the character's faction the step says it can't be done.
 4. **More to find** (shown)
    The search also finds flight masters, inns, towns and zones. Type what you need and get a route to it.
+5. **Enemies too** (shown; added in 1.4.0, Options > General > Include enemies)
+   Enemy mobs are found by name too, at their camp nearest you. Ones orange or red to you show their levels first.
+6. **Target the NPC** (shown; added in 1.4.0, the Target button of 1.3.14, Options > Directions)
+   Near an NPC stop, click the pulsing Target button under the directions: it targets the NPC and, when you're solo, marks it.
+
+Updated in 1.4.0: the section is marked "(updated)" in the lists for players who played it before, not offered again.
 
 ### 8. Dungeon maps (`dungeon`, added in 1.2.0)
 
@@ -253,33 +291,26 @@ drawn, erased or recorded is practice.
 
 - The sections' list (the panel's list and Options > Help): a section played through is "(done)"; one played before a
   later release changed it (its `updated`) is "(updated)"; one not played and added after the newest one played is
-  "(new)". Only new sections bring the offer back; an updated one is only marked.
+  "(new)".
 
-- The offer, first install: "Take a short tutorial? It shows the main features on your own map and puts everything
-  back after. Options > Help plays it any time."
-- The offer, after an update: "Take a short tutorial of the new features? It uses your own map and puts everything
-  back after. Options > Help plays it any time."
 - Starting: "Tutorial started. Everything goes back to how you had it when it ends."
 - Leaving: "Tutorial closed: everything is back as you had it. Options > Help plays it again."
-- After a /reload in the middle: "The tutorial was cut short, and everything is back as you had it. Carry on where you
-  were?" (Yes / No)
 - It can't start: "The tutorial can't start in combat, in a dungeon, on a flight or while dead. Try again after." / "not during a game on the map" / "The tutorial is already running."
 - Options > Help: "A short tour of the main features on your own map. Everything goes back to how you had it after."
 
 ## What's saved, and the snapshot
 
 `AzerothGPSDB.tutorial` (account-wide): `seen` (section id = the version it was added in, for the sections played to
-their end: the "(done)" marks), `ask` (the checkbox; Don't Ask Again sets it false), `declined` (Not Now so far),
-`offered` (the newest section version the player was offered: the offer comes again only for sections newer than it),
-`askedFor`, `fresh` (set at a first install, for the welcome title), and `run` while a tutorial runs.
+their end: the "(done)" marks) and `run` while a tutorial runs. The old offer's `ask`, `declined`, `offered`,
+`askedFor` and `fresh` may still be in saved data from before 1.4.0; nothing reads them.
 
 Before the first step the tutorial takes a snapshot: every option of the map (`settings.gps`, whole), the character's
 route (stops, loop, the zones and rides answered for it, RestedXP Route / Zygor Route on or off), the stops waiting for
 Confirm Route, the map's view (browsed map, dungeon map, zoom), whether the road or wall tools were on and whether the
 Record window was open. It's put back at the end of every section (so each section starts from the player's own
 setup), at the end and on exit. While a tutorial runs the snapshot is in the saved variables (`tutorial.run`): after a
-/reload, a logout or a crash the settings and the route are put back at the next login before the map starts, and the
-tutorial is offered again from the section it was in.
+/reload, a logout or a crash the settings and the route are put back at the next login before the map starts.
+Nothing pops up after (since 1.4.0): Options > Help or `/agps tutorial` starts it again.
 
 Because the whole options table is put back, an option the player changes in the options window while a tutorial runs
 is put back too.
@@ -289,9 +320,7 @@ is put back too.
 - **Yes to "Keep the GPS map as your minimap?" keeps the size picked two steps earlier too** (the option on, at that
   size). Everything else goes back. No, or no answer, leaves the option as the player had it; a player who has it on
   already isn't asked.
-- **The offer counts as taken once the player clicks Start Tutorial**, even if they exit early: it isn't offered again
-  for those sections (Options > Help has them). Don't Ask Again also covers the sections on offer, so ticking the
-  checkbox again brings the offer back only for a later update.
+- **No offer (1.4.0)**: the tutorial is started only from Options > Help or `/agps tutorial`.
 - **With the map as the minimap, sections 2 to 9 open it out and hold it out**: the 5 quiet seconds don't count
   (`G.mmHold`), "back when you move" and "back in combat" are off for the tutorial, and a map sent back by its arrow
   button is opened out again while a step needs it.
@@ -316,8 +345,7 @@ is put back too.
 Everything runs in the test harness (a stand-in for the game's UI), which can't show how anything looks or how the
 mouse behaves. To look at first, in this order:
 
-1. **The offer and the panel**: a fresh character's first login (or delete `tutorial` from the saved variables): the
-   window's size and its three buttons' widths in English and one long language (German or Russian); the panel's
+1. **The panel**: started from Options > Help, in English and one long language (German or Russian): the panel's
    height following its text (it's sized again at each look, in case a text's height isn't known when it's first
    set); the panel over the map opened out of the minimap square.
 2. **The outline**: that it sits on the right control at every step, most of all on the square's corner logo, the map

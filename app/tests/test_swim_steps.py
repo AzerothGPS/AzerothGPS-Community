@@ -107,8 +107,9 @@ def test_the_steps_advance_across_a_swim_and_the_arrow_says_swim(game, trip):
     swim = ps[k]
     # approaching it: "start swimming" ahead
     _, ms = T.Ahead(r, "stop")
-    m = next(ms[i] for i in range(1, len(ms) + 1) if ms[i].kind == "swim")
-    assert m.dist == pytest.approx(swim.s0, abs=2) and not m.swimNow
+    # (the trip's first swims are marsh channels, bake9: two of them; the coast's is the longest's mark)
+    m = [ms[i] for i in range(1, len(ms) + 1) if ms[i].kind == "swim" and abs(ms[i].dist - swim.s0) <= 2]
+    assert m and not m[0].swimNow, [(ms[i].kind, ms[i].dist) for i in range(1, len(ms) + 1)]
     # in the middle of the swim: it's step 1, the walk before it gone
     path = T.Path(r)
     x, y = T.PointAt(path, (swim.s0 + swim.s1) / 2)

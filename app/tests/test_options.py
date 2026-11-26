@@ -25,7 +25,7 @@ BEFORE = """shown locked windowFrame reopenFollow approachZoom rotate size width
 distanceUnits minimap.hide searchCommonNpcs hz rerouteSeconds stopsAhead gentleBackground arrowHz alpha
 fadeMoving movingAlpha clickThroughMoving clickThroughCombat combatHideMap combatAlpha combatHideArrow arrowCombatAlpha
 avoidHighZones useFlights questZoneOnly useHearthstone useTeleports avoidHostile roadTolerance fastestOrder
-cityKeepOrder navCloseClears acceptWay acceptMapPins acceptShared arrow arrowLocked questing arrowPx arrowBg dirShown
+cityKeepOrder navCloseClears acceptWay acceptMapPins acceptShared arrowShown arrowLocked questing arrowPx arrowBg dirShown
 dirStopsOnly dirTextScale dirBg arrowSnap arrowSide terrainZoomOut interiors style seamExploredOnly poiTaxi poiPoi
 poiLabels layerQuests showParty minimapRoute minimapIcons minimapShape layerQuestAreas layerHerbs layerOre
 layerInstances layerCaves showCustomPins otherAddonPins replaceMinimap replaceMinimapCollapseOnMove
@@ -33,7 +33,9 @@ replaceMinimapCollapseOnCombat replaceMinimapSize windowTint windowButtons windo
 charmSwing pinning copyRoads copyWalls copyRoutes copyPins""".split()
 # (askToSave, "Remind me to save": removed with the map's Save and Dismiss buttons, asked 2026-11-17)
 # Settings that were a slash command only (or the Quick buttons page's "On" column only) and have a control now.
-NEW = ["extraWindow", "followOnMove", "arrowEase", "allowSwim", "language", "layerCity", "showRoads", "showWalls", "useWorldMap", "escClosesMap", "replaceMinimapIdle", "questAutoReroute", "quietChat",
+# (cityGrid and worldGrid: their Grid system (beta) options removed, item 74: always on, no control)
+NEW = ["showAvoided",  # (1.4.0: the guard zones a route goes around, drawn; item 63c)
+       "extraWindow", "followOnMove", "arrowEase", "allowSwim", "language", "layerCity", "showRoads", "showWalls", "useWorldMap", "escClosesMap", "replaceMinimapIdle", "questAutoReroute", "quietChat",
        "questPickRoute", "seamTerrainYd", "seamContinentAt", "seamWorldAt", "seamTerrainBlend",
        "seamContinentBlend", "seamWorldBlend", "interiorZoomYd", "roundIcons", "interiorHoldSec", "iconSize",
        # (asked 2026-11-14: how far out each kind of icon shows, GPSFrame's G.IconShown)
@@ -57,10 +59,14 @@ NEW = ["extraWindow", "followOnMove", "arrowEase", "allowSwim", "language", "lay
        "questLevelOrder",  # (Kooki3z 2026-11-21: the quest route by level, lowest or about to turn gray first)
        "questTurninsOnly", "questObjectivesOnly",  # (1.3.14, Kooki3z: the Quest Route button's toggles)
        "routeSlopeShade",  # (Kooki3z 2026-11-20: the route lighter uphill, darker downhill)
-       "targetNpcButton", "targetNpcMarkSolo", "targetNpcMarkGroup"]  # (1.3.14, Kooki3z: a Target button near an NPC stop)
+       "targetNpcButton", "targetNpcMarkSolo", "targetNpcMarkGroup",  # (1.3.14, Kooki3z: a Target button near an NPC stop)
+       "useClassSpells",  # (Kooki3z 2026-11-22: big drops with a fall spell; its full-health sibling removed, item 28)
+       "expertJumper",  # (Kooki3z 2026-11-23: spell jumping off any ledge)
+       "safeDropYd",  # (Kooki3z 2026-11-23: the plain drop limit, Safe drop)
+       "searchEnemies"]  # (1.4.0, Kooki3z 2026-11-22: enemy mobs in the search)
 # Where each setting's control is: the page a player would look on.
 HOME = {
-    "General": "shown showCoords distanceUnits language quietChat searchCommonNpcs",
+    "General": "shown showCoords distanceUnits language quietChat searchCommonNpcs searchEnemies",
     # (asked 2026-11-16: "add a new Controller section and make a keybinding list for each map control")
     "Controller": "padControl padLegend",
     # (asked 2026-11-10: "4 different map pages... maybe reduce to 2": the map itself, its icons, and its window)
@@ -79,9 +85,9 @@ HOME = {
               "iconYdCaves iconYdHerbs iconYdOre iconYdPins",
     "Opacity": "alpha fadeMoving movingAlpha combatHideMap combatAlpha combatHideArrow arrowCombatAlpha "
                "clickThroughMoving clickThroughCombat",
-    "Routing": "useFlights flightMapRing useHearthstone useTeleports avoidHighZones avoidHostile allowSwim roadTolerance fastestOrder "
+    "Routing": "useFlights flightMapRing useHearthstone useTeleports avoidHighZones avoidHostile showAvoided allowSwim useClassSpells expertJumper safeDropYd roadTolerance fastestOrder "
                "cityKeepOrder importKeepOrder questZoneOnly questTrackedOnly questTurninsOnly questObjectivesOnly questLevelOrder questAutoReroute questPickRoute navCloseClears acceptWay acceptMapPins acceptShared",
-    "Directions": "arrow arrowLocked arrowEase arrowPx arrowBg dirShown dirLocked dirStopsOnly arrowSnap arrowSide dirTextScale dirBg "
+    "Directions": "arrowShown arrowLocked arrowEase arrowPx arrowBg dirShown dirLocked dirStopsOnly arrowSnap arrowSide dirTextScale dirBg "
                   "questing targetNpcButton targetNpcMarkSolo targetNpcMarkGroup",
     "Quick buttons": "keyBlockedInCombat",  # (2026-11-19: the keys with the buttons)
     "Performance": "hz rerouteSeconds stopsAhead autoPauseRouting autoPauseSeconds stutterPause gentleBackground arrowHz",
@@ -160,8 +166,9 @@ def test_every_setting_the_options_change_is_named_for_its_control(game):
     set_in_code = set(re.findall(r"GPS\(\)\.(\w+) = ", pages)) | {"minimap.hide", "language"}
     known = {c.key for c in _controls(ns, mirrors=True)}
     # (`quick`: the Quick buttons table, a place per button, not a setting with a control of its own;
-    # `seamExploredOnly` and `style` are set through their own functions)
-    assert set_in_code - known == {"quick"}
+    # `seamExploredOnly` and `style` are set through their own functions; `arrow`, the window, either of the arrow's and
+    # the directions text's own (arrowShown, dirShown) on, kept so by their checks, Kooki3z 2026-11-24)
+    assert set_in_code - known == {"quick", "arrow"}
     assert known - set_in_code == {"style", "seamExploredOnly", "stopsAhead", "copyRoads", "copyWalls", "copyRoutes",
                                    "copyPins", "layerCity"} - set_in_code
     # and every one of them is a real setting: in the defaults (or the two kept outside `gps`)
@@ -202,14 +209,12 @@ DEPENDENTS = [
     ("seamContinentAt", "style", "zone"), ("seamWorldAt", "style", "nospoiler"),
     ("seamTerrainBlend", "style", "minimap"), ("seamContinentBlend", "style", "zone"), ("seamWorldBlend", "style", "minimap"),
     ("interiorZoomYd", "style", "zone"), ("interiorHoldSec", "style", "zone"),
-    ("arrowLocked", "arrow", False), ("arrowEase", "arrow", False), ("arrowPx", "arrow", False), ("arrowBg", "arrow", False),
-    ("dirShown", "arrow", False), ("dirStopsOnly", "dirShown", False),
-    ("dirLocked", "dirShown", False), ("dirLocked", "arrow", False), ("dirStopsOnly", "arrow", False),
+    # (the arrow and the directions text on or off each on its own, Kooki3z 2026-11-24: the arrow's options gray with
+    # the arrow off, the text's with the text off; the snapping and its side need both)
+    ("arrowLocked", "arrowShown", False), ("arrowEase", "arrowShown", False), ("arrowPx", "arrowShown", False),
+    ("arrowBg", "arrowShown", False), ("dirStopsOnly", "dirShown", False), ("dirLocked", "dirShown", False),
     ("arrowSnap", "dirShown", False), ("dirTextScale", "dirShown", False), ("dirBg", "dirShown", False),
-    ("arrowSide", "dirShown", False),
-    # (asked 2026-11-17: Arrow side's Hide; the arrow's own options gray, and the text can't be hidden too)
-    ("arrowPx", "arrowSide", "hide"), ("arrowBg", "arrowSide", "hide"), ("arrowSnap", "arrowSide", "hide"),
-    ("dirShown", "arrowSide", "hide"),
+    ("arrowSide", "dirShown", False), ("arrowSnap", "arrowShown", False), ("arrowSide", "arrowShown", False),
     ("iconYdQuests", "layerQuests", False), ("iconYdTaxi", "poiTaxi", False), ("iconYdPoi", "poiPoi", False),
     ("iconYdCity", "layerCity", False), ("iconYdInstances", "layerInstances", False), ("iconYdCaves", "layerCaves", False),
     ("iconYdHerbs", "layerHerbs", False), ("iconYdOre", "layerOre", False), ("iconYdPins", "showCustomPins", False),
@@ -220,7 +225,7 @@ DEPENDENTS = [
 # (the parents' values with every dependent on)
 ALL_ON = {"replaceMinimap": True, "fadeMoving": True, "combatHideMap": False, "combatHideArrow": False,
           "locked": False, "lockSize": False, "windowFrame": True, "charm": "thunderfury", "fastestOrder": True,
-          "layerQuests": True, "style": "seamless", "arrow": True, "dirShown": True, "arrowSnap": True, "arrowSide": "left",
+          "layerQuests": True, "style": "seamless", "arrow": True, "arrowShown": True, "dirShown": True, "arrowSnap": True, "arrowSide": "left",
           "poiTaxi": True, "poiPoi": True, "layerCity": True, "layerInstances": True, "layerCaves": True,
           "layerHerbs": True, "layerOre": True, "showCustomPins": True, "navPanelDetached": True}
 
@@ -302,10 +307,10 @@ def test_dependent_options_sit_indented_under_their_parent(game):
                           ("interiorHoldSec", "rotate"),
                           ("layerQuestAreas", "layerQuests"), ("replaceMinimapCollapseOnMove", "replaceMinimap"),
                           ("freeSize", "lockSize"), ("charmSwing", "windowFrame"), ("cityKeepOrder", "fastestOrder"),
-                          ("arrowLocked", "arrow"), ("dirLocked", "dirShown"), ("dirStopsOnly", "dirShown")):
+                          ("arrowLocked", "arrowShown"), ("dirLocked", "dirShown"), ("dirStopsOnly", "dirShown")):
         assert x(child) == x(parent) + 20, child
     for child, parent in (("layerQuestAreas", "layerQuests"), ("replaceMinimapCollapseOnMove", "replaceMinimap"),
-                          ("cityKeepOrder", "fastestOrder"), ("arrowLocked", "arrow"), ("dirLocked", "dirShown"),
+                          ("cityKeepOrder", "fastestOrder"), ("arrowLocked", "arrowShown"), ("dirLocked", "dirShown"),
                           ("dirStopsOnly", "dirShown")):
         assert y(child) < y(parent), child  # (below it)
 
@@ -876,32 +881,34 @@ def test_the_icon_distance_sliders_set_each_kinds_yards_and_reset():
             st[k] = ns.DEFAULTS.gps[k]
 
 
-def test_arrow_side_hide_and_the_directions_text_alone(game):
-    # (asked 2026-11-17: "add a fifth option that is 'Hide' that hides the arrow", and "hide the text separately and only
-    # show the arrow") Hide is the fifth Arrow side, there with the arrow snapped or not; a side picked snaps the arrow
-    # there (as dropping it against that side does), Hide leaves the snapping as it was; the text's own checkbox is
-    # named for the text, and gray while the arrow is hidden (never both hidden)
+def test_the_arrow_and_the_directions_text_each_on_or_off_on_its_own(game):
+    # (Kooki3z 2026-11-24: "the directions text on screen but not the direction arrow"; turning the arrow off took the
+    # text too. Two checks of their own, any combination; Arrow side's old "Hide" is the arrow's check now)
     lua, ns = game
     st, O = ns.settings.gps, ns.Options
     by_key = {c.key: c.control for c in _controls(ns)}
     buttons = by_key["arrowSide"]
     radio = {buttons[i].value: buttons[i] for i in range(1, len(buttons) + 1)}
-    assert list(radio) == ["left", "right", "top", "bottom", "hide"]
-    assert radio["hide"].text._text == "Hide"
-    saved = {k: st[k] for k in ("arrow", "arrowSnap", "arrowSide", "dirShown")}
+    assert list(radio) == ["left", "right", "top", "bottom"]
+    saved = {k: st[k] for k in ("arrow", "arrowShown", "arrowSnap", "arrowSide", "dirShown")}
     try:
-        st.arrow, st.dirShown, st.arrowSnap, st.arrowSide = True, True, False, "left"
+        st.arrow, st.arrowShown, st.dirShown = True, True, True
         O.Refresh()
-        assert buttons.agpsOn is True  # (the arrow on its own: still there to pick)
-        radio["hide"]._scripts.OnClick(radio["hide"])
-        assert st.arrowSide == "hide" and st.arrowSnap is False
+        arrow_cb, dir_cb = by_key["arrowShown"], by_key["dirShown"]
+        assert arrow_cb.agpsOn is None and dir_cb.agpsOn is None  # (neither grays the other)
+        arrow_cb._checked = False
+        arrow_cb._scripts.OnClick(arrow_cb)
+        assert st.arrowShown is False and st.dirShown is not False and st.arrow is True  # (the text alone)
         O.Refresh()
-        assert by_key["dirShown"].agpsOn is False and by_key["arrowSnap"].agpsOn is False
+        assert by_key["arrowPx"].agpsOn is False and by_key["dirTextScale"].agpsOn is True
+        dir_cb._checked = False
+        dir_cb._scripts.OnClick(dir_cb)
+        assert st.dirShown is False and st.arrow is False  # (both off: no window)
+        arrow_cb._checked = True
+        arrow_cb._scripts.OnClick(arrow_cb)
+        assert st.arrowShown is True and st.arrow is True  # (the arrow alone)
         radio["right"]._scripts.OnClick(radio["right"])
         assert st.arrowSide == "right" and st.arrowSnap is True
-        O.Refresh()
-        assert by_key["dirShown"].agpsOn is True
-        assert [w for w in lua.eval("AGPS_WIDGETS").values() if w._text == "Show the directions text"]
     finally:
         for k, v in saved.items():
             st[k] = v

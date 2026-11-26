@@ -15,7 +15,7 @@ ns.Transports = {
   { 0, 544.8, 424.2, 2991, 1848.3, 569.1, 210, "zeppelin", "Old Dalaran Ruins, Alterac Mountains", "Valanaar Skydocks, Zephras Isle", cycle = 319.1, ride1 = 89.7, ride2 = 109.4, wait1 = 60, wait2 = 60, faction = "A", area1 = 17707, map1 = 1416, area2 = 16628, map2 = 2521 },
   { 1, -802.0, 366.5, 2991, 1952.1, 1017.1, 194, "zeppelin", "Camp Gev'rek, Mulgore", "Fairweather Stables, Zephras Isle", cycle = 339.0, ride1 = 73.7, ride2 = 145.3, wait1 = 60, wait2 = 60, faction = "H", area1 = 17223, map1 = 1412, area2 = 17684, map2 = 2521 },
   { 1, 6548.3, 942.2, 0, -8654.5, 1344.4, 172, "boat", "The Long Wash, Darkshore", "Stormwind Harbor, Stormwind City", cycle = 214.6, ride1 = 52.4, ride2 = 42.2, wait1 = 60, wait2 = 60, area1 = 453, map1 = 1439, area2 = 17203, map2 = 1453 },
-  { 0, -8346.5, 514.0, 0, -4840.3, -1330.5, 130, "tram", "Stormwind City", "Ironforge", "Deeprun Tram", z1 = 96.6, z2 = 508.2, map1 = 1453, map2 = 1455 },
+  { 0, -8346.5, 514.0, 0, -4840.3, -1330.5, 130, "tram", "Stormwind City", "Ironforge", "Deeprun Tram", z1 = 91.8, z2 = 502.0, map1 = 1453, map2 = 1455 },
   { 1, 9947.5, 2630.0, 1, 8799.4, 969.8, 5, "teleporter", "The Temple Gardens, Darnassus", "Rut'theran Village, Teldrassil", "teleporter", z1 = 1318.6, area1 = 1661, map1 = 1457, area2 = 702, map2 = 1438 },
   { 0, -9020.1, 880.5, 0, -9023.3, 892.4, 5, "teleporter", "Wizard's Sanctum, Stormwind City", "Wizard's Sanctum, Stormwind City", "teleporter", z1 = 151.6, z2 = 33.5, room = 2, land1 = { -9014.94, 873.33 }, land2 = { -9017.46, 885.90 }, face = 5.4978 },
 }

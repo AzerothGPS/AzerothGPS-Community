@@ -1664,7 +1664,12 @@ end
 -- neutral and interactive) offering something past gossip (NPC_DOT_SERVICES), the player's side's or neutral, whose
 -- spawn is in one of the rooms the map draws (G.LayoutInterior's: in its box, about its heights). Each { x, y, z, name,
 -- title, icon (Pins.NpcIcon's; nil for one with none of its own) }. Worked out once a building and room.
+-- Stand-ins (Layers' `n.standin`: WoW Forever's own NPCs from Wowhead's map percentages, their height the ground's
+-- there; Kooki3z on 6195a75c, Riverglades' in Search Places with no icon in their buildings): placed by x and y alone,
+-- within STANDIN_NPC_SLACK_YD of a room (the percentages' rounding), in the rooms drawn or any room over or under them
+-- (their height can't tell the floor: Bilgerat's bankers stand over the cellar the map shows).
 G.NPC_DOT_SERVICES = "qvftbhipdmasr" -- (npcs.py's letters but "g", gossip alone)
+G.STANDIN_NPC_SLACK_YD = 4
 G.npcDotCache = {}
 function G.InteriorNpcs(place, wmo, room, cont)
   local key = table.concat({ place[1], place[2], place[3], tostring(room), cont or 0 }, ":")
@@ -1673,12 +1678,23 @@ function G.InteriorNpcs(place, wmo, room, cont)
   local out = {}
   local Lay = ns.Layers
   if Lay and Lay.ShippedNpcs and wmo and room then
-    local groups = {}
+    local groups, column = {}, {}
     local zlo, zhi = room[3] - Z_SLACK, room[6] + Z_SLACK
     for _, g in ipairs(wmo.groups) do
       if g == room or (g["in"] and g[6] >= zlo and g[3] <= zhi and G.RoomGroupShown(place, room, g)) then
         groups[#groups + 1] = g
       end
+    end
+    -- (a stand-in's: those, and every room over or under them, G.STANDIN_NPC_SLACK_YD round each)
+    for _, g in ipairs(wmo.groups) do
+      local over = false
+      for _, h in ipairs(groups) do
+        if g == h or (g["in"] and g[1] <= h[4] and g[4] >= h[1] and g[2] <= h[5] and g[5] >= h[2]) then
+          over = true
+          break
+        end
+      end
+      if over then column[#column + 1] = g end
     end
     local base = Geo.Base(cont)
     local c, sn = math.cos(place[5]), math.sin(place[5])
@@ -1694,8 +1710,10 @@ function G.InteriorNpcs(place, wmo, room, cont)
           if x >= place[6] and x <= place[8] and y >= place[7] and y <= place[9] and Geo.Base(sp[i]) == base then
             local dx, dy = x - place[2], y - place[3]
             local lx, ly, lz = dx * c + dy * sn, -dx * sn + dy * c, z - place[4]
-            for _, g in ipairs(groups) do
-              if lx >= g[1] and lx <= g[4] and ly >= g[2] and ly <= g[5] and lz >= g[3] - Z_SLACK and lz <= g[6] + Z_SLACK then
+            local m = n.standin and G.STANDIN_NPC_SLACK_YD or 0
+            for _, g in ipairs(n.standin and column or groups) do
+              if lx >= g[1] - m and lx <= g[4] + m and ly >= g[2] - m and ly <= g[5] + m
+                  and (n.standin or (lz >= g[3] - Z_SLACK and lz <= g[6] + Z_SLACK)) then
                 local icon = ns.Pins and ns.Pins.NpcIcon and ns.Pins.NpcIcon({ shipped = n }) or nil
                 local I = ns.Pins and ns.Pins.NPC_ICONS
                 -- (no icon of its own, or a quest giver's: a dot; asked 2026-11-14, "don't use quest indicators")
@@ -2856,7 +2874,7 @@ end
 function G.RouteIdleSig()
   local N = ns.Nav
   return table.concat({ tostring(N.route), tostring(N.dest), tostring(N.Version()),
-    tostring(N.Checking and N.Checking() or false), tostring(N.RedAsking and N.RedAsking() or false),
+    tostring(G.RouteFaded()), tostring(N.RedAsking and N.RedAsking() or false),
     tostring(N.QuestPaused and N.QuestPaused() or false), tostring(G.drawVersion) }, "|")
 end
 -- Fading while moving (options): the map's tiles, points of interest, road and quest-area
@@ -2874,6 +2892,11 @@ local TAXI_ICON = {
 local LABEL_MAX_ZOOM = 1200 -- place names only when zoomed in this far
 local ROUTE_COLOR = 3
 G.CHECKING_ALPHA = 0.45 -- (a new route still being checked for a shorter way: drawn this faint, Nav.Checking)
+-- (drawn faint: being checked, Nav.Checking, or world routing's stand-in while its searches land, Nav.StandIn)
+function G.RouteFaded()
+  local N = ns.Nav
+  return (N.Checking and N.Checking()) or (N.StandIn and N.StandIn()) or false
+end
 G.ROUTE_TOP_SUB = 2 -- (the draw sublevel of the leg to the next stop with several stops: over the later legs, DrawLines)
 local pool, poolUsed = {}, 0
 local lines, linesUsed = {}, 0
@@ -2890,6 +2913,13 @@ G.ROUTE_BASE_COLORS = ROAD_COLORS -- (a color index's own color, for the route s
 local ROUTE_STYLE = { [0] = { 3, 5, false }, [1] = { 3, 4, true }, [2] = { 4, 4, true }, [3] = { 5, 3, true } }
 ROUTE_STYLE[5], ROUTE_STYLE[6] = ROUTE_STYLE[2], ROUTE_STYLE[2] -- (a lift down or up, Router.KIND_LIFT_*: as a ride)
 G.RIDE_KINDS = { [2] = true, [5] = true, [6] = true } -- (rides keep their color with several stops)
+-- (asked 2026-11-22, testing 1.4.0: "why dotted lines? lets use non dotted lines") with the city or world grid on, a
+-- walk off the roads is walked on the map's own mesh, not a guess across open ground: drawn solid like a road. Rides
+-- stay dotted.
+function G.WalksSolid()
+  local gps = ns.settings and ns.settings.gps
+  return gps and (gps.cityGrid == true or gps.worldGrid == true) or false
+end
 local DASH, GAP = 7, 5 -- off-road route legs are dotted (UI units)
 G.HEADING_UP_LOW = 0.6 -- heading-up, following: the player this share of the half below the middle
 G.DETOUR_COLOR = { 0.62, 0.40, 0.18 } -- brown: the detour to a flight master not learned yet (Nav.LearnOnRoute)
@@ -4051,14 +4081,14 @@ end
 -- their tooltip (G.SwimHover) and right-click (G.SwimClick).
 G.swimSegs, G.swimSegN = {}, 0
 G.SWIM_HOVER_PX = 8
-function G.AddSwimSeg(x1, y1, x2, y2, swim)
+function G.AddSwimSeg(x1, y1, x2, y2, swim, col)
   G.swimSegN = G.swimSegN + 1
   local sg = G.swimSegs[G.swimSegN]
   if not sg then
     sg = {}
     G.swimSegs[G.swimSegN] = sg
   end
-  sg[1], sg[2], sg[3], sg[4] = x1, y1, x2, y2
+  sg[1], sg[2], sg[3], sg[4], sg.color = x1, y1, x2, y2, col -- (`color`: the waves' own, red past guards)
   sg.part, sg.i, sg.t1, sg.t2 = swim and swim.part, swim and swim.i, swim and swim.t1, swim and swim.t2
 end
 -- Whether swim seg `sg` is one kept because there's no way round by land (Nav.SwimStays: its water banned, then swum
@@ -4101,7 +4131,7 @@ function G.SwimTip()
   if G.SwimSegStays(sg) then -- (only when there's truly no way by land: removed, and swum after all)
     lines[#lines + 1] = L["No way round by land: this swim stays."]
   else
-    lines[#lines + 1] = L["Right-click: go round by land instead (this trip)"]
+    lines[#lines + 1] = L["Right-click: avoid swimming for this stop"]
   end
   return { title = L["Swim"], lines = lines }
 end
@@ -4139,6 +4169,215 @@ function G.SwimClick()
   if G.SwimSegStays(sg) then return false end -- (no way round it by land: the map's own click)
   G.AskRemove({ swim = true, swimX = x, swimY = y, swimPart = sg.part, swimI = sg.i, swimT1 = sg.t1, swimT2 = sg.t2 })
   return true
+end
+-- Jumps on the route (Kooki3z 2026-11-23: "idea for jumps, show them as coiled lines like swimming does with wavy
+-- lines"): a jump down a ledge or across a gap (Router.KIND_DROP, KIND_JUMP) drawn as a coil, short straight lines along
+-- loops (a circle rolling along the jump; no texture of its own), solid (dashed for a while, then "lets change the
+-- dotted jump lines to solid, can't make out the coils with dotted lines"), at full strength (a faded, dashed stand-in
+-- route round it stays told apart by the loops), the same on the GPS map, in the world map and on the minimap.
+-- G.CoilLines(ax, ay, bx, by, r, pitch, fn): fn(x1, y1, x2, y2) for each line; a jump shorter on the screen than JUMP_MIN_PX (a drop's few yards) is
+-- drawn that long round its middle. It shares the swims' G.waveLeft lines a redraw: past it, a straight line.
+G.JUMP_COIL_PX, G.JUMP_COIL_R, G.JUMP_COIL_STEPS = 7, 4, 10
+-- (solid since Kooki3z 2026-11-23, "can't make out the coils with dotted lines": no gap; the loops tell it from a
+-- faded dashed stand-in route)
+G.JUMP_COIL_ON, G.JUMP_COIL_OFF = 1, 0 -- (each dash this many of a loop's lines, then a gap this many)
+G.JUMP_MIN_PX = 16
+function G.CoilLines(ax, ay, bx, by, r, pitch, fn)
+  local len = math.sqrt((bx - ax) ^ 2 + (by - ay) ^ 2)
+  if len < 0.5 then return end
+  local ux, uy = (bx - ax) / len, (by - ay) / len
+  if len < G.JUMP_MIN_PX then
+    local mx, my, h = (ax + bx) / 2, (ay + by) / 2, G.JUMP_MIN_PX / 2
+    ax, ay, bx, by, len = mx - ux * h, my - uy * h, mx + ux * h, my + uy * h, G.JUMP_MIN_PX
+  end
+  local loops = math.max(1, math.floor(len / pitch + 0.5))
+  local steps = loops * G.JUMP_COIL_STEPS
+  if steps > G.waveLeft then return fn(ax, ay, bx, by) end
+  G.waveLeft = G.waveLeft - steps
+  local a = len / (2 * math.pi * loops) -- (along a radian)
+  local b = math.max(r, a * 1.4) -- (its radius: more than that, so it loops)
+  local px, py = ax, ay
+  local per = G.JUMP_COIL_ON + G.JUMP_COIL_OFF
+  for k = 1, steps do
+    local phi = 2 * math.pi * loops * k / steps
+    local s, o = a * phi + b * (1 - math.cos(phi)), b * math.sin(phi)
+    local x, y = ax + ux * s - uy * o, ay + uy * s + ux * o
+    if (k - 1) % per < G.JUMP_COIL_ON then fn(px, py, x, y) end
+    px, py = x, y
+  end
+end
+-- The jumps drawn on the map at the last redraw, on the screen (round G.markLayer's middle): G.jumpSegs[1..G.jumpSegN]
+-- = { x1, y1, x2, y2, part =, i = } (the route part's piece i), for their tooltip (G.JumpHover) and right-click
+-- (G.JumpClick).
+G.jumpSegs, G.jumpSegN = {}, 0
+G.JUMP_HOVER_PX = 9
+function G.AddJumpSeg(x1, y1, x2, y2, part, i, col)
+  G.jumpSegN = G.jumpSegN + 1
+  local sg = G.jumpSegs[G.jumpSegN]
+  if not sg then
+    sg = {}
+    G.jumpSegs[G.jumpSegN] = sg
+  end
+  sg[1], sg[2], sg[3], sg[4], sg.part, sg.i = x1, y1, x2, y2, part, i
+  sg.color = col -- (the coil's own, red past guards: item 88d)
+end
+-- A jump on the map at the cursor (within JUMP_HOVER_PX of it, or of the coil drawn round a short one): the spot round
+-- G.markLayer's middle and its seg, or nil.
+function G.JumpAtCursor()
+  if G.square or G.jumpSegN == 0 or not (G.markLayer and GetCursorPosition) then return nil end
+  local mx, my = GetCursorPosition()
+  local sc = G.markLayer:GetEffectiveScale()
+  local lx, ly = G.markLayer:GetCenter()
+  if not (lx and sc and sc > 0) then return nil end
+  local x, y = mx / sc - lx, my / sc - ly
+  local r2 = G.JUMP_HOVER_PX ^ 2
+  for i = 1, G.jumpSegN do
+    local sg = G.jumpSegs[i]
+    local vx, vy = sg[3] - sg[1], sg[4] - sg[2]
+    local L2 = vx * vx + vy * vy
+    local t = L2 > 0 and math.max(0, math.min(1, ((x - sg[1]) * vx + (y - sg[2]) * vy) / L2)) or 0
+    local far = (sg[1] + vx * t - x) ^ 2 + (sg[2] + vy * t - y) ^ 2
+    local short = L2 < G.JUMP_MIN_PX ^ 2 and ((sg[1] + sg[3]) / 2 - x) ^ 2 + ((sg[2] + sg[4]) / 2 - y) ^ 2
+    if far <= r2 or (short and short <= (G.JUMP_MIN_PX / 2 + G.JUMP_HOVER_PX / 2) ^ 2) then return x, y, sg end
+  end
+  return nil
+end
+-- What jump seg `sg` is in the world: { cont, x, y (its top: where the run of its kind starts), kind ("drop" or
+-- "jump"), dz (a drop's fall, Router.DropFall, or nil) }.
+function G.JumpInfo(sg)
+  local part = sg and sg.part
+  local R = ns.Router
+  if not (part and part.pts and part.kinds and sg.i and R) then return nil end
+  local kind = part.kinds[sg.i]
+  local i = sg.i
+  while i > 1 and part.kinds[i - 1] == kind do i = i - 1 end
+  local x, y = part.pts[2 * i - 1], part.pts[2 * i]
+  if not (x and y) then return nil end
+  local dz = kind == R.KIND_DROP and R.DropFall and R.DropFall(part.pts, part.kinds, i) or nil
+  local FS = ns.FallSpells
+  local spell = dz and FS and FS.Needs and FS.Needs(dz) and true or false
+  return { cont = part.cont, x = x, y = y, kind = kind == R.KIND_JUMP and "jump" or "drop", dz = dz, spell = spell,
+    stop = part.stop or 1 }
+end
+-- What a jump's tooltip says: { title, lines }.
+function G.JumpTip(info)
+  local lines = {}
+  local FS = ns.FallSpells
+  local spell = info and info.spell
+  if spell == nil then spell = info and info.dz and FS and FS.Needs and FS.Needs(info.dz) and true or false end
+  local title = info and info.kind == "jump" and L["Jump across"] or spell and L["Spell jump"] or L["Jump down"]
+  if info and info.dz then lines[#lines + 1] = Format(L["Falls about %d yd."], math.floor(info.dz + 0.5)) end
+  -- (what to do with the spell: at the edge within its reach from the top, else just before landing (Expert jumper);
+  -- Kooki3z 2026-11-23: not "up to 1000 yd")
+  local c = spell and FS.Current()
+  if c then
+    local name = FS.Name(c)
+    if FS.InAir(c, info.dz) then
+      lines[#lines + 1] = Format(c.row.use and L["Jump, then use %s just before you land"] or
+        L["Jump, then cast %s just before you land"], name)
+    else
+      lines[#lines + 1] = Format(c.row.use and L["Use %s at the edge, then jump"] or L["Cast %s at the edge, then jump"],
+        name)
+    end
+  end
+  -- (item 26: a spell jump's right-click avoids the leg's spell jumps, a plain one's all its jumps)
+  lines[#lines + 1] = spell and L["Right-click: avoid spell jumps for this stop"] or L["Right-click: avoid jumps for this stop"]
+  return { title = title, lines = lines }
+end
+function G.JumpHover(dt)
+  G.jumpHoverWait = (G.jumpHoverWait or 0) - dt
+  if G.jumpHoverWait > 0 then return end
+  G.jumpHoverWait = 0.1
+  local on = G.jumpSegN > 0 and canvas and canvas:IsMouseOver() and not drag and not G.lasso
+    and not (G.roadMode or G.wallMode) and select(3, G.JumpAtCursor()) or nil
+  local owned = GameTooltip:IsShown() and GameTooltip:GetOwner() == frame
+  if on and GameTooltip:IsShown() and not owned then return end -- (another tooltip, an icon's, has it)
+  if not on then
+    if owned and G.jumpTip then GameTooltip:Hide() end
+    G.jumpTip = nil
+    return
+  end
+  if owned and G.jumpTip == on then return end
+  local tip = G.JumpTip(G.JumpInfo(on))
+  G.jumpTip = on
+  GameTooltip:SetOwner(frame, "ANCHOR_CURSOR")
+  GameTooltip:SetText(tip.title, 1, 1, 1)
+  for k, l in ipairs(tip.lines) do
+    if k == #tip.lines then
+      GameTooltip:AddLine(l, 0.7, 0.7, 0.7, true)
+    else
+      GameTooltip:AddLine(l, nil, nil, nil, true)
+    end
+  end
+  GameTooltip:Show()
+end
+-- A right-click on the map over a jump: its menu there (G.AskJump); true when it was one.
+function G.JumpClick()
+  local x, y, sg = G.JumpAtCursor()
+  if not x then return false end
+  local info = G.JumpInfo(sg)
+  if not info then return false end
+  G.AskJump(info, x, y)
+  return true
+end
+-- The jump's menu (Kooki3z 2026-11-23: "allow right click to avoid the jump using spell or item"): small buttons over
+-- the spot, as a stop's "Remove?": "Avoid Spell Jumps" or "Avoid Jumps" for the leg (Nav.AvoidLegJumps, item 26); no
+-- fall spell to pick (item 32). Gone after
+-- JUMP_ASK_SECONDS untaken, or on a click on the map. G.jumpAsk: the frame, its `buttons` and `items`.
+G.JUMP_ASK_SECONDS = 6
+function G.AskJump(info, x, y)
+  local ask = G.jumpAsk
+  if not ask then
+    ask = CreateFrame("Frame", nil, keepLayer)
+    ask:SetFrameLevel(keepLayer:GetFrameLevel() + 6)
+    ask:SetSize(10, 10)
+    ask.buttons = {}
+    ask:SetScript("OnUpdate", function(self)
+      if GetTime() - self.shownAt > G.JUMP_ASK_SECONDS then self:Hide() end -- not taken up: go away
+    end)
+    G.jumpAsk = ask
+  end
+  if G.removeAsk then G.removeAsk:Hide() end
+  local kind = info.spell and "spell" or "all"
+  local items = { { text = info.spell and L["Avoid Spell Jumps"] or L["Avoid Jumps"],
+    act = function() ns.Nav.AvoidLegJumps(info.stop or 1, kind) end } }
+  -- (no fall spell to pick here: item 32, Kooki3z 2026-11-24, "you can't pick a spell"; the trip takes the one ready)
+  local width = 100
+  for k, it in ipairs(items) do
+    local b = ask.buttons[k]
+    if not b then
+      b = CreateFrame("Button", nil, ask, "UIPanelButtonTemplate")
+      b:SetSize(120, 20)
+      b:SetScript("OnClick", function(self)
+        ask:Hide()
+        if self.act then self.act() end
+        G.Redraw()
+      end)
+      ask.buttons[k] = b
+    end
+    b:SetText(it.text)
+    b.act = it.act
+    width = math.max(width, (b:GetTextWidth() or 0) + 20) -- (a longer word in another language)
+    b:ClearAllPoints()
+    b:SetPoint("BOTTOM", ask, "BOTTOM", 0, (#items - k) * 22)
+    b:Show()
+  end
+  for k = 1, #ask.buttons do
+    local b = ask.buttons[k]
+    if k > #items then
+      b:Hide()
+      b.act = nil
+    else
+      b:SetWidth(width)
+    end
+  end
+  ask.items, ask.info = items, info
+  ask.shownAt = GetTime()
+  ask:SetSize(width, #items * 22)
+  ask:ClearAllPoints()
+  ask:SetPoint("BOTTOM", G.markLayer, "CENTER", x, y + 8)
+  ask:Show()
+  GameTooltip_Hide()
 end
 -- Only the route near what's shown (asked 2026-10-06: zoomed in on a long route cost as much as zoomed out): each of
 -- the route's parts is cut once into chunks of ROUTE_CHUNK segments, its points in the view's continent coordinates,
@@ -4347,6 +4586,97 @@ function G.SlopeColor(route, part, i, kind, col)
   end
   return out
 end
+-- The route faded by its floor (Kooki3z 2026-11-25: "For routes inside a building/cave or going up/down multiple
+-- floors, fade the opacity of the route's sections more and more ... the further they are from the player's floor"):
+-- each stretch's alpha by its height (the route's own, `zs` else `fz`: the end nearer the player's floor, nothing
+-- between a stretch climbing past it) against the player's floor on its level (Nav.PlayerFloorZ: the floor followed);
+-- within FLOOR_FADE_SAME_YD full, then FLOOR_FADE_PER_STEP less each FLOOR_FADE_STEP_YD further, at least
+-- FLOOR_FADE_MIN. Only indoors (G.FloorIndoorsAt), where the map has an inside view (the "raise the roof" hover's data):
+-- a building's indoor rooms (G.InteriorUnder), a cave or mine with its map (G.CaveAt, G.CaveArt), a level of its own
+-- (Undercity's, a dungeon's). Never an open city's model (G.OPEN_CITY_MODELS: nearly all of Orgrimmar's rooms are
+-- flagged indoors, its streets too). Tested in game (Kooki3z, 2026-11-25): the first rule (any stacked place, down to
+-- 10%) faded Orgrimmar's route from the south gate through the Valley of Strength to the wind rider tower outdoors
+-- and it was hard to see; so indoors only, and at least half. Out on the land, hills, and Router's Build carrying a
+-- building's last floor on over the land: full alpha. No heights, no floor followed, another level: full, as before.
+-- Each stretch's place (indoors or not, its heights) worked out once and kept with the route's points
+-- (G.floorFadeCache, weak), its alpha once per floor followed (to the yard); the first part as followed reads the whole
+-- first part's (as G.RouteSlopeLevel). The style (coil, wavy, dotted, red) is the stretch's own: only its alpha is
+-- multiplied. G.floorStackLooks counts the places worked out (the tests).
+G.FLOOR_FADE_SAME_YD, G.FLOOR_FADE_STEP_YD = 3, 5
+G.FLOOR_FADE_PER_STEP, G.FLOOR_FADE_MIN = 0.25, 0.5
+G.floorFadeCache = setmetatable({}, { __mode = "k" }) -- [part.pts] = { cont, zs, fz, n, h = { [i] = lo/false }, hi, key, a }
+G.floorStackLooks = 0
+-- The alpha for a stretch `dz` yards off the player's floor.
+function G.FloorFadeAlpha(dz)
+  if not dz or dz <= G.FLOOR_FADE_SAME_YD then return 1 end
+  local steps = math.ceil((dz - G.FLOOR_FADE_SAME_YD) / G.FLOOR_FADE_STEP_YD)
+  return math.max(G.FLOOR_FADE_MIN, 1 - G.FLOOR_FADE_PER_STEP * steps)
+end
+-- Whether (x, y) of `cont` is indoors with an inside view: a building's indoor room (not an open city's), a cave or
+-- mine with its map, or a level of its own.
+function G.FloorIndoorsAt(cont, x, y)
+  G.floorStackLooks = G.floorStackLooks + 1
+  if ns.CityLevels and ns.CityLevels[cont] then return true end -- (Undercity's, a dungeon's: its own map)
+  local cave = G.CaveAt(cont, x, y)
+  if cave and G.CaveArt(cont, cave) then return true end
+  local p = G.InteriorUnder(x, y, cont)
+  return p ~= nil and not G.OPEN_CITY_MODELS[p[1]]
+end
+function G.FloorFadeEntry(part)
+  local pts = part.pts
+  local e = G.floorFadeCache[pts]
+  if e and e.cont == part.cont and e.zs == part.zs and e.fz == part.fz and e.n == #pts then return e end
+  e = { cont = part.cont, zs = part.zs, fz = part.fz, n = #pts, h = {}, hi = {}, a = {} }
+  G.floorFadeCache[pts] = e
+  return e
+end
+-- Stretch `i` of `part`'s alpha against the player's floor `pz` (to the yard).
+function G.PartFloorFade(part, i, pz)
+  local e = G.FloorFadeEntry(part)
+  if e.key ~= pz then e.key, e.a = pz, {} end
+  local a = e.a[i]
+  if a then return a end
+  local lo = e.h[i]
+  if lo == nil then
+    lo = false
+    local zs, fz = part.zs, part.fz
+    local za, zb = zs and zs[i], zs and zs[i + 1]
+    if type(za) ~= "number" or type(zb) ~= "number" then za, zb = fz and fz[i], fz and fz[i + 1] end
+    local pts = part.pts
+    if type(za) == "number" and type(zb) == "number" and pts[2 * i + 2] then
+      local x = (pts[2 * i - 1] + pts[2 * i + 1]) / 2
+      local y = (pts[2 * i] + pts[2 * i + 2]) / 2
+      if G.FloorIndoorsAt(part.cont, x, y) then lo, e.hi[i] = math.min(za, zb), math.max(za, zb) end
+    end
+    e.h[i] = lo
+  end
+  a = 1
+  if lo then
+    local hi = e.hi[i]
+    local dz = pz < lo and lo - pz or pz > hi and pz - hi or 0
+    a = G.FloorFadeAlpha(dz)
+  end
+  e.a[i] = a
+  return a
+end
+-- The player's floor on `level` to the yard, or nil.
+function G.FloorFadeKey(level)
+  local N = ns.Nav
+  local z = level and N and N.PlayerFloorZ and N.PlayerFloorZ(level)
+  return z and math.floor(z + 0.5) or nil
+end
+-- Stretch `i` of `route`'s `part`: its alpha by its floor (1: as before). `pz`: G.FloorFadeKey(part.cont), when known.
+function G.FloorFade(route, part, i, pz)
+  if not (part and part.pts and i) then return 1 end
+  if pz == nil then pz = G.FloorFadeKey(part.cont) end
+  if not pz then return 1 end
+  local full = route and route.fullFirst
+  if full and full ~= part and full.pts and route.parts and route.parts[1] == part and full.cont == part.cont then
+    local off = (route.followIdx or 1) - 1
+    if #full.pts - #part.pts == 2 * off then return G.PartFloorFade(full, i + off, pz) end
+  end
+  return G.PartFloorFade(part, i, pz)
+end
 -- (asked 2026-10-06: a route that doesn't change isn't drawn again) a line whose ends moved less than this (UI units)
 -- since it was placed is left where it is: the game calls that place lines are most of a redraw's line work, and a
 -- still map's lines are the same every redraw. G.lineMoves counts the lines placed (the tests).
@@ -4427,6 +4757,164 @@ local function DrawLines(n, thickness, colors, alpha)
   linesUsed, dashesUsed = nl, nd
   G.PlaceStairGlyphs(n > 0 and G.stairGlyphN or 0) -- (no lines: none of the stairs' icons either)
   G.PlaceRoadEndGlow()
+end
+-- The other faction's guard zones in view (Nav.EnemyZonesShown): red at AVOIDED_ALPHA on the GPS map, the world map's and
+-- the minimap square (item 63c, Kooki3z 2026-11-24, then only those the route went round; item 98, 2026-11-25: every
+-- one in the map's visible area, with or without a route, never the player's own faction's; on 6195a75c, as before 98:
+-- only those within ENEMY_NEAR_PLAYER_YD of the player or ENEMY_NEAR_ROUTE_YD of the route); the option Show enemy areas
+-- (Routing; saved as showAvoided) hides them. Hovered: "Enemy guards: <town>" (Nav.HostileTownName, item 99), on the
+-- minimap square too (G.MinimapTipAt: the game's Minimap over it takes the mouse, item 86). They take no clicks.
+-- Their UNION drawn once (item 79, Kooki3z at Astranaar: circles drawn each at 25% stacked where they overlapped, the
+-- area solid red and the map under it hidden): rows AVOIDED_ROW_PX tall, each row's spans across the circles merged and
+-- drawn as one strip each, so every pixel of the union is at the one alpha. No outline (item 86: just the flat fill).
+-- The circles' own frames, empty, only take the hover for the tooltip; circles under AVOIDED_MIN_PX across (far out)
+-- aren't drawn.
+G.AVOIDED_COLOR, G.AVOIDED_ALPHA = { 1, 0.15, 0.1 }, 0.25
+G.AVOIDED_ROW_PX, G.AVOIDED_MIN_PX = 2, 2
+G.avoidedPool, G.avoidedUsed = {}, 0
+G.avoidedStrips, G.avoidedStripN = {}, 0
+-- The union of circles { {x, y, r}, ... } (screen pixels) as rows: { {y, x1, x2}, ... }, rows `row` tall from the
+-- lowest circle's bottom, each row's spans merged (none overlapping), clipped to |x|, |y| <= `lim`. Each circle's spans
+-- go to the rows it covers only (an enemy city in view is a few hundred circles).
+function G.AvoidedRows(circles, row, lim)
+  local out = {}
+  if #circles == 0 then return out end
+  local y0, y1 = math.huge, -math.huge
+  for _, c in ipairs(circles) do
+    y0, y1 = math.min(y0, c[2] - c[3]), math.max(y1, c[2] + c[3])
+  end
+  y0, y1 = math.max(y0, -lim), math.min(y1, lim)
+  if y1 <= y0 then return out end
+  local n = math.ceil((y1 - y0) / row - 0.5)
+  local byRow = {}
+  for _, c in ipairs(circles) do
+    local k0 = math.max(0, math.ceil((c[2] - c[3] - y0) / row - 0.5))
+    local k1 = math.min(n - 1, math.floor((c[2] + c[3] - y0) / row - 0.5))
+    for k = k0, k1 do
+      local d = y0 + row / 2 + k * row - c[2]
+      if math.abs(d) < c[3] then
+        local w = math.sqrt(c[3] * c[3] - d * d)
+        local sp = byRow[k]
+        if not sp then
+          sp = {}
+          byRow[k] = sp
+        end
+        sp[#sp + 1] = { math.max(c[1] - w, -lim), math.min(c[1] + w, lim) }
+      end
+    end
+  end
+  local function byLeft(p, q) return p[1] < q[1] end
+  for k = 0, n - 1 do
+    local spans = byRow[k]
+    if spans then
+      local y = y0 + row / 2 + k * row
+      table.sort(spans, byLeft)
+      local cur
+      for _, sp in ipairs(spans) do
+        if sp[2] > sp[1] then
+          if cur and sp[1] <= cur[2] then
+            cur[2] = math.max(cur[2], sp[2])
+          else
+            if cur then out[#out + 1] = { y, cur[1], cur[2] } end
+            cur = { sp[1], sp[2] }
+          end
+        end
+      end
+      if cur then out[#out + 1] = { y, cur[1], cur[2] } end
+    end
+  end
+  return out
+end
+-- The hover's text of zone frame `f`: "Enemy guards: <town>".
+function G.AvoidedTip(f)
+  local N = ns.Nav
+  local side = N and N.Faction and N.Faction()
+  local name = side and f.agpsI and N.HostileTownName and N.HostileTownName(f.agpsCont, side, f.agpsI)
+  return Format(L["Enemy guards: %s"], name or "?")
+end
+-- The zone frame under the cursor (shown, the cursor within its circle), the last laid first, or nil.
+function G.AvoidedAt()
+  for i = G.avoidedUsed, 1, -1 do
+    local f = G.avoidedPool[i]
+    if f:IsVisible() and f:IsMouseOver() then
+      local fx, fy = f:GetCenter()
+      local cx, cy = GetCursorPosition()
+      local k = f:GetEffectiveScale() or 1
+      local r = (f:GetWidth() or 0) / 2
+      if not (fx and fy and cx and cy) or (cx / k - fx) ^ 2 + (cy / k - fy) ^ 2 <= r * r then return f end
+    end
+  end
+  return nil
+end
+function G.LayAvoided(cx, cy, cont, rot, s, half)
+  local used = 0
+  local N = ns.Nav
+  local st = ns.settings and ns.settings.gps
+  local lim = (half or 0) * 1.5
+  local zones = {}
+  if st and st.showAvoided ~= false and N and N.EnemyZonesIn and s and s > 0 then
+    local yd = lim / s -- (the visible area, turned or not: the box round its corners)
+    -- (only those near the player or the route: N.EnemyZonesShown)
+    local px, py, pc = Geo.PlayerWorld()
+    if not (pc == cont or (pc and Geo.Base and Geo.Base(pc) == cont)) then px, py = nil, nil end
+    zones = N.EnemyZonesShown(cont, cx - yd, cy - yd, cx + yd, cy + yd, px, py, N.route)
+  end
+  local circles = {}
+  if lineLayer and G.markLayer then
+    for _, z in ipairs(zones) do
+      local size = 2 * z[3] * s
+      if size >= G.AVOIDED_MIN_PX then
+        local dx, dy = Geo.ScreenOffset(cx, cy, z[1], z[2])
+        dx, dy = Geo.Rotate(dx * s, dy * s, rot)
+        if math.abs(dx) - size / 2 <= lim and math.abs(dy) - size / 2 <= lim then
+          circles[#circles + 1] = { dx, dy, size / 2 }
+          used = used + 1
+          local f = G.avoidedPool[used]
+          if not f then
+            f = CreateFrame("Frame", nil, lineLayer)
+            -- (hovered for its tooltip, clicks through to the map; nothing drawn: the union is)
+            if f.SetMouseClickEnabled then pcall(f.SetMouseClickEnabled, f, false) end
+            if f.SetMouseMotionEnabled then pcall(f.SetMouseMotionEnabled, f, true) end
+            f:SetScript("OnEnter", function(self)
+              GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+              GameTooltip:SetText(G.AvoidedTip(self), 1, 0.4, 0.3)
+              GameTooltip:Show()
+            end)
+            f:SetScript("OnLeave", GameTooltip_Hide)
+            G.avoidedPool[used] = f
+          end
+          f.agpsCont, f.agpsI = cont, z[4]
+          f:SetSize(size, size)
+          f:ClearAllPoints()
+          f:SetPoint("CENTER", G.markLayer, "CENTER", dx, dy)
+          f:Show()
+        end
+      end
+    end
+  end
+  for i = used + 1, G.avoidedUsed do G.avoidedPool[i]:Hide() end
+  G.avoidedUsed = used
+  -- (the union's fill: one strip a span)
+  local nStrip = 0
+  if used > 0 then
+    local c = G.AVOIDED_COLOR
+    for _, rw in ipairs(G.AvoidedRows(circles, G.AVOIDED_ROW_PX, lim)) do
+      nStrip = nStrip + 1
+      local t = G.avoidedStrips[nStrip]
+      if not t then
+        t = lineLayer:CreateTexture(nil, "BACKGROUND")
+        t:SetColorTexture(c[1], c[2], c[3], G.AVOIDED_ALPHA)
+        G.avoidedStrips[nStrip] = t
+      end
+      t:ClearAllPoints()
+      t:SetPoint("CENTER", G.markLayer, "CENTER", (rw[2] + rw[3]) / 2, rw[1])
+      t:SetSize(rw[3] - rw[2], G.AVOIDED_ROW_PX)
+      t:Show()
+    end
+  end
+  for i = nStrip + 1, G.avoidedStripN do G.avoidedStrips[i]:Hide() end
+  G.avoidedStripN = nStrip
+  return used
 end
 -- The road end picked (G.roadEnd), glowing: the flight masters' circle over it, pulsing, hung off the marks' layer as the
 -- lines are.
@@ -4731,6 +5219,12 @@ local function PoiButton(i)
     local npc = type(self.npc) == "table" and self.npc.kind == "npc" and self.npc or nil
     local npcId = pin and pin.npc or npc and npc.id
     local npcName = pin and (pin.npcName or pin.name) or npc and npc.name
+    -- (a flight master's icon (POI kind 1, the taxi node: a few yards off the NPC): that flight master's stop, its
+    -- height and Target button; Kooki3z 2026-11-23, Thunder Bluff's Tal "arrived 45yd under it")
+    if not npcId and self.kind == 1 and ns.Layers and ns.Layers.FlightMasterNear then
+      local f = ns.Layers.FlightMasterNear(self.level or view.cont, self.wx, self.wy)
+      if f then npcId, npcName = f.id, f.name end
+    end
     G.AddStopAt(self.wx, self.wy, self.name, self.level, self.stopTex, self.z, self.pin ~= nil, self.questID,
       npcId, npcName)
   end)
@@ -5148,9 +5642,15 @@ function G.AddRouteStairs(pois, route, viewCont, cx, cy, rot, s, half)
       p[4], p.up = up and L["Stairs up"] or L["Stairs down"], up
       p.note = up and L["The route goes up to the floor above here"] or L["The route goes down to the floor below here"]
     end
+    local CG = ns.CityGrid
     G.EachSegmentNear(route, viewCont, cx, cy, half * 1.5 / s, function(x1, y1, x2, y2, kind, _stop, partCont, _along, f1, f2)
       local l = ns.CityLevels and ns.CityLevels[partCont]
+      -- (no icon at a jump: the directions say it, Kooki3z 2026-11-22)
       local st = not l and (kind == 0 or kind == nil) and R.StairAt(partCont, x1, y1, x2, y2)
+      -- (a walk on a city's grid: the stairs found in its mesh, navfeatures.py)
+      if not st and not l and kind == 1 and CG and CG.StairAt then
+        st = CG.StairAt(partCont, x1, y1, x2, y2, f1 and f2 and (f1 + f2) / 2 or nil)
+      end
       -- (one flight however its pieces read: stairs over stairs, an inn's cellar under its stairs up, can read the
       -- other way on a piece; the flight goes the way the route's floors go across it, coming down Brill's inn's read
       -- "up" by its first piece, 2026-10-06)
@@ -5678,6 +6178,8 @@ end
 function G.FitRoundButtons()
   for _, b in ipairs(G.roundButtons) do G.FitRoundButton(b) end
   if G.useBtn and G.useBtn:IsShown() then G.FitUseButton(G.useBtn) end
+  local twin = G.useBtn and G.useBtn.twin -- (the tutorial demo's look-alike, G.DemoUseButton)
+  if twin and twin:IsShown() then G.FitUseButton(twin) end
 end
 -- ... when the map's pixels per unit changed since last fitted (looked at with the quick buttons' watch)
 function G.FitRoundButtonsIfScaled(owner)
@@ -5951,21 +6453,31 @@ function G.UpdateMinimapRoute(force)
   local level, paused = N.PlayerLevel(cont), N.QuestPaused()
   if not force and mm.route == r and mm.pts == r.pts and mm.dest == N.dest and mm.yards == yards and mm.width == width
       and math.abs(mm.px - px) < step and math.abs(mm.py - py) < step and math.abs(mm.facing - facing) < 0.005
-      and mm.square == square and mm.level == level and mm.paused == paused and mm.slope == G.SlopeShadeOn() then
+      and mm.square == square and mm.level == level and mm.paused == paused and mm.slope == G.SlopeShadeOn()
+      and mm.floor == G.FloorFadeKey(level) then
     return mm.used -- (nothing it shows changed)
   end
   local t0 = ns.PerfStart and ns.PerfStart()
   mm.route, mm.pts, mm.dest, mm.yards, mm.width, mm.px, mm.py, mm.facing = r, r.pts, N.dest, yards, width, px, py, facing
   mm.square, mm.level, mm.paused, mm.slope = square, level, paused, G.SlopeShadeOn()
+  local floorKey = G.FloorFadeKey(level) -- (the player's floor: the route's stretches faded by theirs, G.FloorFade)
+  mm.floor = floorKey
   mm.draws = mm.draws + 1
   local rad = width / 2 - 1
   local n = 0
   local col = G.MINIMAP_ROUTE_COLOR
   G.waveLeft = G.SWIM_WAVE_MAX
   local Line
+  local floorA = 1
   local function Piece(x1, y1, x2, y2, kind, c, swim)
     local ax, ay = G.MinimapPoint(px, py, x1, y1, yards, width, facing)
     local bx, by = G.MinimapPoint(px, py, x2, y2, yards, width, facing)
+    local R = ns.Router
+    if kind == R.KIND_DROP or kind == R.KIND_JUMP then -- (a jump: a coil, as on the map)
+      local sx1, sy1, sx2, sy2 = G.ClipSeg(ax, ay, bx, by, rad + 4)
+      if sx1 then G.CoilLines(sx1, sy1, sx2, sy2, 3, 6, function(a, b, cc, d) Line(a, b, cc, d, 0, c) end) end
+      return
+    end
     if swim then -- (a swim: wavy, Nav.SwimSpans)
       local total = math.sqrt((bx - ax) ^ 2 + (by - ay) ^ 2)
       local sx1, sy1, sx2, sy2, t0 = G.ClipSeg(ax, ay, bx, by, rad + 4) -- (only what's on the minimap)
@@ -5991,7 +6503,7 @@ function G.UpdateMinimapRoute(force)
       l:SetThickness(G.MINIMAP_ROUTE_WIDTH)
       mm.lines[n] = l
     end
-    l:SetColorTexture(c[1], c[2], c[3], kind == 0 and 0.95 or 0.6) -- (off the roads: fainter)
+    l:SetColorTexture(c[1], c[2], c[3], (kind == 0 and 0.95 or 0.6) * floorA) -- (off the roads: fainter)
     l:SetStartPoint("CENTER", f, cx1, cy1)
     l:SetEndPoint("CENTER", f, cx2, cy2)
     l:Show()
@@ -5999,6 +6511,10 @@ function G.UpdateMinimapRoute(force)
   -- (only the route's chunks within the minimap's reach: G.EachSegmentNear)
   G.EachSegmentNear(r, cont, px, py, yards, function(x1, y1, x2, y2, kind, stop, partCont, _, _, _, part, i)
     if paused or (stop or 1) ~= 1 or partCont ~= level then return end -- (the way to the next stop, on this level)
+    -- (a small drop, under Router.JUMP_CALLOUT_YD: drawn as the walk, no coil; Router.JumpCalledOut)
+    local R = ns.Router
+    if kind == R.KIND_DROP and part and not R.JumpCalledOut(part.pts, part.kinds, i) then kind = R.KIND_OFFROAD end
+    floorA = floorKey and G.FloorFade(r, part, i, floorKey) or 1
     -- (the other faction's territory: red, Nav.HostileSpans; asked 2026-11-14, on the minimap square too)
     -- (and the swims: wavy, Nav.SwimSpans)
     if N.HostileSpans(part, i) or N.SwimSpans(part, i) then
@@ -6359,6 +6875,9 @@ function G.MinimapTipAt()
         return G.MinimapTipText(b.name, b.kind == 16 and b.note or nil, b.city, b.level or cont, b.wx, b.wy)
       end
     end
+    -- (the red enemy zones under it: item 86, "Enemy guards: <town>" as on the map)
+    local z = G.AvoidedAt()
+    if z then return G.AvoidedTip(z) end
     return nil
   end
   local f = mm.frame
@@ -6609,6 +7128,10 @@ function G.WorldMapLevel()
   local l = child and child.GetFrameLevel and child:GetFrameLevel()
   if type(l) ~= "number" then l = box and box.GetFrameLevel and box:GetFrameLevel() end
   l = type(l) == "number" and l + 1 or G.WORLD_MAP_LEVEL
+  -- (over the game's own map art, its detail layers, made at the canvas's level + 1 as ours was: at the same level
+  -- which was drawn over the other changed with the map it showed, item 92. G.WorldMapArtPins reads their level)
+  local art = G.wmState and G.wmState.on and G.wmState.artTop
+  if type(art) == "number" and art + 1 > l then l = art + 1 end
   -- (the No map style: over the map's own art, its explored areas and another map addon's stitched art too, which are
   -- icons over the canvas; still under the game's other icons. G.NoMapArtTop)
   if G.NoMapOn() then l = math.max(l, G.NoMapArtTop()) end
@@ -6716,10 +7239,11 @@ G.WORLD_MAP_ART_PINS = { "MapExplorationPinTemplate", "FogOfWarPinTemplate" }
 G.WORLD_MAP_AREA_PINS = { "QuestBlobPinTemplate" }
 function G.WorldMapArtPins(shown)
   local wm = rawget(_G, "WorldMapFrame")
-  if not (wm and wm.EnumeratePinsByTemplate) then return end
+  if not wm then return end
   local st = S()
   local ours = st and st.layerQuests and st.layerQuestAreas
   local function set(list, a)
+    if not wm.EnumeratePinsByTemplate then return end
     for _, tmpl in ipairs(list) do
       pcall(function()
         for pin in wm:EnumeratePinsByTemplate(tmpl) do
@@ -6732,6 +7256,152 @@ function G.WorldMapArtPins(shown)
   -- Kooki3z 2026-11-20: "we'd use whatever map others are using instead")
   set(G.WORLD_MAP_ART_PINS, (shown or G.NoMapOn()) and 1 or 0)
   set(G.WORLD_MAP_AREA_PINS, (shown or not ours) and 1 or 0)
+  -- (the game's own painted map art too, its detail layers: unseen under ours, the top one's level read for ours to go
+  -- over it, G.WorldMapLevel)
+  G.WorldMapArtSweep(not (shown or G.NoMapOn()))
+end
+-- The game's map art hidden (`hide`) or given back, and its layers' top level read (G.wmState.artTop). Kooki3z on
+-- 6195a75c (item 92 again): the art still showed as the zone changed. The game sets a detail layer's alpha again by
+-- itself (Blizzard_MapCanvasDetailLayer's RefreshAlpha: as its tiles finish loading, in its own OnUpdate a frame or more
+-- after the map changed; as the map zooms, AdjustDetailLayerAlpha; as it fades, SetGlobalAlpha), so alpha 0 set once
+-- lasted only till then. Each layer's RefreshAlpha is hooked (G.HookWorldMapArt), the world map's RefreshDetailLayers
+-- too (new layers hidden as they're made), and G.WorldMapTick looks at the list every frame (G.WorldMapArtKeep: art
+-- laid some other way, plain textures on the canvas).
+G.wmArtHooked = setmetatable({}, { __mode = "k" })
+G.wmArtWas = setmetatable({}, { __mode = "k" }) -- [art hidden] = its alpha before
+function G.WorldMapArtHide(f)
+  if not (G.wmState and G.wmState.artHidden and f) then return end
+  local ok, a = pcall(f.GetAlpha, f)
+  if ok and a ~= 0 then
+    if G.wmArtWas[f] == nil then G.wmArtWas[f] = a end
+    pcall(f.SetAlpha, f, 0)
+  end
+end
+-- Art `f`'s own alpha given back: a detail layer's as the game would set it now (RefreshAlpha's, read without calling
+-- it: loaded, its layer's alpha times the map's), else what it had before it was hidden, else 1.
+function G.WorldMapArtOwnAlpha(f)
+  local was = G.wmArtWas[f]
+  G.wmArtWas[f] = nil
+  local ok, a = pcall(function()
+    if f:IsFullyLoaded() == true then return f:GetLayerAlpha() * f:GetGlobalAlpha() end
+  end)
+  if ok and type(a) == "number" then return a end
+  return was or 1
+end
+function G.HookWorldMapArt(f)
+  if G.wmArtHooked[f] or not hooksecurefunc then return end
+  G.wmArtHooked[f] = true
+  if type(f.RefreshAlpha) == "function" then pcall(hooksecurefunc, f, "RefreshAlpha", G.WorldMapArtHide) end
+end
+function G.WorldMapArtSweep(hide)
+  local st = G.wmState
+  local wm = rawget(_G, "WorldMapFrame")
+  -- (the world map's own: new layers as they're made, its zoom's and fade's alpha)
+  if wm and hooksecurefunc and not G.wmArtHooked[wm] then
+    G.wmArtHooked[wm] = true
+    for _, m in ipairs({ "RefreshDetailLayers", "AdjustDetailLayerAlpha", "SetGlobalAlpha" }) do
+      if type(wm[m]) == "function" then
+        pcall(hooksecurefunc, wm, m, G.WorldMapArtOnGame)
+      end
+    end
+  end
+  st.artHidden = hide and true or nil
+  local top
+  local list = G.WorldMapArtLayers()
+  for _, f in ipairs(list) do
+    G.HookWorldMapArt(f)
+    pcall(function()
+      if hide then
+        G.WorldMapArtHide(f)
+      elseif f:GetAlpha() == 0 then
+        f:SetAlpha(G.WorldMapArtOwnAlpha(f))
+      end
+      local l = f.GetFrameLevel and f:GetFrameLevel()
+      if type(l) == "number" and (not top or l > top) then top = l end
+    end)
+  end
+  st.artList = list
+  -- (hidden: the top level only ever raised while the world map shows ours, so our level never steps down and back as
+  -- the game releases and makes its layers again; Kooki3z on 62ac7ac2, the map's parts wiggling as it opened)
+  if hide and st.artTop and (not top or top < st.artTop) then top = st.artTop end
+  st.artTop = top
+  st.artMap = G.WorldMapShownID()
+end
+-- The world map's own RefreshDetailLayers, AdjustDetailLayerAlpha or SetGlobalAlpha just ran (hooked): its layers,
+-- new ones too, hidden at once. Alpha only, in the game's own call: no levels, no layout, nothing else of ours moved.
+function G.WorldMapArtOnGame()
+  local st = G.wmState
+  if not (st and st.artHidden) then return end
+  local wm = rawget(_G, "WorldMapFrame")
+  local pool = wm and rawget(wm, "detailLayerPool")
+  if not (type(pool) == "table" and pool.EnumerateActive) then return end
+  pcall(function()
+    for f in pool:EnumerateActive() do
+      G.HookWorldMapArt(f)
+      G.WorldMapArtHide(f)
+    end
+  end)
+end
+-- Every frame while ours shows over the world map: the art's layers still unseen (set again by the game since).
+function G.WorldMapArtKeep()
+  local st = G.wmState
+  if not (st.artHidden and st.artList) then return end
+  for _, f in ipairs(st.artList) do G.WorldMapArtHide(f) end
+end
+-- The map the game's world map shows (its id), else nil.
+function G.WorldMapShownID()
+  local wm = rawget(_G, "WorldMapFrame")
+  local ok, id = pcall(function() return wm and wm.GetMapID and wm:GetMapID() end)
+  return ok and type(id) == "number" and id or nil
+end
+-- The game's map art in its world map: the canvas's detail layers (each a frame of the map's own tiles, made again
+-- as its map changes). Kooki3z's recording 2026-11-25 (item 92): in the world map with the OpenMap style the game's
+-- painted zone and continent art came and went over ours as the zone it showed changed, blurry close in and black
+-- where its tiles hadn't loaded: those frames are made at the canvas's level + 1, the level ours had too, and which of
+-- the two the game drew over the other changed with its map. From its pool, and the canvas's children that are one
+-- (a map's art laid another way: its frames with SetMapAndLayer, and its plain textures on the canvas, its background
+-- and border layers', as the old world map's WorldMapDetailTile<n> were).
+G.WORLD_MAP_ART_DRAW_LAYERS = { BACKGROUND = true, BORDER = true }
+function G.WorldMapArtLayers()
+  local list, seen = {}, {}
+  local function add(f)
+    if type(f) == "table" and f ~= frame and not seen[f] then
+      seen[f] = true
+      list[#list + 1] = f
+    end
+  end
+  local wm = rawget(_G, "WorldMapFrame")
+  local pool = wm and rawget(wm, "detailLayerPool")
+  if type(pool) == "table" and pool.EnumerateActive then
+    pcall(function()
+      for f in pool:EnumerateActive() do add(f) end
+    end)
+  end
+  local box = G.WorldMapBox()
+  local child = box and rawget(box, "Child")
+  if type(child) == "table" and child.GetChildren then
+    pcall(function()
+      for _, f in ipairs({ child:GetChildren() }) do
+        if type(f) == "table" and type(f.SetMapAndLayer) == "function" then add(f) end
+      end
+    end)
+  end
+  if type(child) == "table" and child.GetRegions then
+    pcall(function()
+      for _, t in ipairs({ child:GetRegions() }) do
+        if type(t) == "table" and t.GetObjectType and t:GetObjectType() == "Texture"
+            and G.WORLD_MAP_ART_DRAW_LAYERS[(t.GetDrawLayer and t:GetDrawLayer()) or ""] then
+          add(t)
+        end
+      end
+    end)
+  end
+  for i = 1, 16 do -- (the old world map's tiles, by name)
+    local t = rawget(_G, "WorldMapDetailTile" .. i)
+    if not t then break end
+    add(t)
+  end
+  return list
 end
 
 -- The game's map kept on the same ground as ours, so its icons are where ours would put them: the map we drive (pan,
@@ -6963,6 +7633,12 @@ function G.WorldMapSync()
     st.sc = sc
     pcall(box.InstantPanAndZoom, box, sc, u, v, true) -- (its icons sized for this scale)
     G.WorldMapArtPins(false)
+    -- (its art's layers made again for the new map: ours over them at once, not a frame later, item 92)
+    local level = G.WorldMapLevel()
+    if st.level and st.level ~= level then
+      st.level = level
+      G.RaiseWorldMapOverlays(G.SetLevelTree(level, nil, true))
+    end
     G.WorldMapKeepScale()
   end
   pcall(box.SetHorizontalScroll, box, h)
@@ -7249,9 +7925,13 @@ function G.WorldMapTick()
     st.levelAt = now
     G.SetLevelTree(st.level, nil, true)
   end
-  if not st.artPinsAt or now - st.artPinsAt >= 1 then -- (the game's icons made again since: a quest area redrawn)
+  -- (the game's icons made again since: a quest area redrawn; and its map changed, by us or by itself, its art's
+  -- layers made again: unseen and under ours at once, item 92)
+  if not st.artPinsAt or now - st.artPinsAt >= 1 or G.WorldMapShownID() ~= st.artMap then
     st.artPinsAt = now
     G.WorldMapArtPins(false)
+  else
+    G.WorldMapArtKeep() -- (every frame: the art's alpha set again by the game since, its tiles loaded or a zoom)
   end
   if st.level and G.WorldMapLevel() ~= st.level then G.ApplySettings() end -- (the game's window raised: over its art again)
   G.WorldMapSync()
@@ -8492,7 +9172,180 @@ function G.PlaceMinimapResume(on)
 end
 -- again as it is now (routing paused or resumed, the option changed)
 function G.RefreshMinimapResume()
-  return G.PlaceMinimapResume(G.mmResumeOn)
+  local shown = G.PlaceMinimapResume(G.mmResumeOn)
+  if G.PlaceMinimapAsk then G.PlaceMinimapAsk() end
+  return shown
+end
+
+-- A question waiting (item 54, Kooki3z 2026-11-24): a glowing "?" button on the minimap's logo, at its top middle (item
+-- 58), and the gold glow round the logo, while AzerothGPS waits on an answer to a
+-- question of its own (the enemy ground's "Take it?", a zone too high, any yes or no that holds the route): with the map
+-- closed one asked on the map isn't seen. A click opens the map (the square out, the world map, or the window) and
+-- brings the question up. Both hide while the question shows, come back if the map's closed unanswered, and go once
+-- it's answered or the route cleared (G.AskWanted). On the square (the GPS map as the minimap,
+-- and in world-map mode where the logo stays on it), else by the game minimap's own AzerothGPS button.
+G.ASK_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
+G.ASK_POLL_SECONDS = 0.25
+G.ASK_OVERLAP = 0.12 -- (the "?" over the logo's top edge by this share of the logo: on its ring)
+-- The question waiting: its box (ns.Ask's, a yes and a no, not answered, shown even with its map hidden: the last one
+-- asked, else the last one on the map), or true while one is on its way (Nav's "Take it?" or "Risk enemy territory?")
+-- or routing is paused for want of an answer ("no way around the guards found", its question let go: asked again by
+-- G.BringUpQuestion), else nil.
+function G.PendingQuestion()
+  for _, b in ipairs({ ns.lastAsk or false, G.askBox or false }) do
+    if b and b.IsShown and b:IsShown() and not b.answered and b.no and b.no:IsShown() then return b end
+  end
+  local N = ns.Nav
+  if N and (N.hostileAsking or N.riskAsking or N.guardsAsking or (N.paused == "guards" and N.dest)) then return true end
+  return nil
+end
+-- Whether the "?" shows: a question waiting that isn't on the screen (its map closed, or not shown yet). Item 58,
+-- Kooki3z 2026-11-24: no glow while the map's open with the question showing; closed unanswered, back glowing.
+function G.AskWanted()
+  if G.SyncAskHolder then G.SyncAskHolder() end -- (the question on the map shown or hidden with it first)
+  local q = G.PendingQuestion()
+  if q == nil then return false end
+  if type(q) == "table" and G.ShownUp(q) then return false end
+  return true
+end
+-- Whether frame `f` and every parent up are shown (the game's IsVisible, read the same way everywhere).
+function G.ShownUp(f)
+  local n = 0
+  while f and n < 40 do
+    if f.IsShown and not f:IsShown() then return false end
+    f = f.GetParent and f:GetParent() or nil
+    n = n + 1
+  end
+  return true
+end
+-- The map opened, its question brought up.
+function G.BringUpQuestion()
+  local m = G.mmState
+  if m and m.on then
+    if G.WorldMapWanted and G.WorldMapWanted() then
+      if not (WorldMapFrame and WorldMapFrame:IsShown()) then G.ToggleMapView() end
+    elseif not m.expanded then
+      G.SetMinimapExpanded(true)
+    end
+  elseif ns.settings and ns.settings.gps and not ns.settings.gps.shown then
+    ns.settings.gps.shown = true
+    if ns.Options and ns.Options.Apply then ns.Options.Apply() elseif G.ApplySettings then G.ApplySettings() end
+  end
+  G.SyncAskHolder()
+  local b = G.PendingQuestion()
+  -- (paused for the guards with their question let go: asked again, on the map now open)
+  local N = ns.Nav
+  if b == true and N and N.paused == "guards" and not N.guardsAsking and N.GiveUpRefused then
+    N.GiveUpRefused()
+    b = G.PendingQuestion()
+  end
+  if type(b) == "table" and b.Raise then b:Raise() end
+end
+function G.MakeMinimapAsk()
+  if G.mmAsk or G.clone then return G.mmAsk end
+  local r = CreateFrame("Button", nil, frame)
+  r:SetSize(22, 22)
+  local bg = r:CreateTexture(nil, "BACKGROUND")
+  bg:SetAllPoints()
+  bg:SetTexture(G.MAP_MENU_ART)
+  bg:SetVertexColor(0.35, 0.35, 0.35)
+  local icon = r:CreateTexture(nil, "ARTWORK")
+  icon:SetPoint("CENTER")
+  ns.SetIcon(icon, G.ASK_ICON, "Interface\\Icons\\INV_Misc_QuestionMark")
+  local mask = r:CreateMaskTexture()
+  mask:SetAllPoints(icon)
+  mask:SetTexture(G.ROUND_MASK, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+  icon:AddMaskTexture(mask)
+  local hl = r:CreateTexture(nil, "HIGHLIGHT")
+  hl:SetAllPoints()
+  hl:SetTexture(G.MAP_MENU_ART)
+  hl:SetBlendMode("ADD")
+  hl:SetAlpha(0.3)
+  r.icon = icon
+  G.RoundArt(r, 22, G.RESUME_ICON_SHARE, { bg, hl }, icon, mask)
+  r:RegisterForClicks("LeftButtonUp")
+  r:SetScript("OnClick", function()
+    GameTooltip_Hide()
+    G.BringUpQuestion()
+  end)
+  r:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+    GameTooltip:SetText(L["A question is waiting: click to answer"], 1, 1, 1, true)
+    GameTooltip:Show()
+  end)
+  r:SetScript("OnLeave", GameTooltip_Hide)
+  r:Hide()
+  G.mmAsk = r
+  -- (watched: a question asked or answered shows or hides it; the glows' pulse while it shows)
+  local watch = CreateFrame("Frame")
+  watch.left, watch.was = 0, false
+  watch:SetScript("OnUpdate", function(self, elapsed)
+    local a = G.GlowAlpha and G.GlowAlpha() or 0.8
+    if r:IsShown() then
+      if r.glow then r.glow:SetAlpha(a) end
+      for _, g in ipairs(G.askLogoGlows or {}) do g:SetAlpha(a) end
+    end
+    self.left = self.left - (elapsed or 0)
+    if self.left > 0 then return end
+    self.left = G.ASK_POLL_SECONDS
+    local now = G.AskWanted()
+    if now ~= self.was or (now and not r:IsShown()) then
+      self.was = now
+      G.PlaceMinimapAsk()
+    end
+  end)
+  G.mmAskWatch = watch
+  return r
+end
+-- A glow round `owner` (the logo), made once, shown or hidden.
+local function LogoGlow(owner, on)
+  if not owner then return end
+  if on and not owner.agpsAskGlow and G.MakeGlow then
+    owner.agpsAskGlow = G.MakeGlow(owner)
+    G.askLogoGlows = G.askLogoGlows or {}
+    G.askLogoGlows[#G.askLogoGlows + 1] = owner.agpsAskGlow
+  end
+  local g = owner.agpsAskGlow
+  if not g then return end
+  if on then
+    local w = owner.GetWidth and owner:GetWidth() or 20
+    g:SetSize(w * G.GLOW_SHARE, w * G.GLOW_SHARE)
+  end
+  g:SetShown(on and true or false)
+end
+function G.PlaceMinimapAsk()
+  local r = G.mmAsk
+  if not r then return false end
+  local want = G.AskWanted()
+  local b, on = G.mmButton, G.mmResumeOn
+  local square = want and on and b and b:IsShown()
+  local plain = want and not square and ns.Options and ns.Options.button
+  if plain and not (plain.IsShown and plain:IsShown()) then plain = nil end
+  LogoGlow(b, square)
+  LogoGlow(ns.Options and ns.Options.button, plain and true or false)
+  if not (square or plain) then
+    r:Hide()
+    return false
+  end
+  local host = square and b or plain
+  if r:GetParent() ~= host:GetParent() then r:SetParent(host:GetParent()) end
+  r:SetFrameStrata(host:GetFrameStrata() or "MEDIUM")
+  r:SetFrameLevel((host:GetFrameLevel() or 1) + 1)
+  local size = square and (b.logoSize or G.MinimapLogoUnits()) or 31
+  local side = math.max(G.MINIMAP_RESUME_MIN, math.floor(size * G.MINIMAP_RESUME_SHARE + 0.5))
+  G.FitRoundButton(r, side)
+  side = r.agpsArt.F / r.agpsArt.ppu
+  r:ClearAllPoints()
+  -- (above the logo, its top middle, on its ring: item 58, Kooki3z 2026-11-24; clear of the Resume button right of it)
+  r:SetPoint("BOTTOM", host, "TOP", 0, square and -size * G.ASK_OVERLAP or -6)
+  if not r.glow and G.MakeGlow then r.glow = G.MakeGlow(r) end
+  if r.glow then
+    local u = G.FitFrameArt(r.glow, r, side * G.GLOW_SHARE)
+    r.glow:SetSize(u, u)
+    r.glow:Show()
+  end
+  r:Show()
+  return true
 end
 
 -- What it's doing, for /agps replace status: the radius both ways, the turn, the hiding.
@@ -8646,6 +9499,7 @@ function G.InitMinimapReplace()
   b:Hide()
   G.mmButton = b
   G.MakeMinimapResume()
+  G.MakeMinimapAsk()
   -- (and on the opened window while the square is kept, the logo staying on the square: the arrow back as before 1.3.0,
   -- asked 2026-11-16 for 1.3.5, "the little arrow in the pop out map in the bottom left is gone ... lets add that back")
   local back = CreateFrame("Button", nil, frame)
@@ -9025,6 +9879,10 @@ function G.ApplyNavDetach()
       G.useBtn:Hide()
       G.useBtn.key = nil
     end
+    if G.useBtn and G.useBtn.twin then -- (the tutorial demo's look-alike: the same)
+      G.useBtn.twin:Hide()
+      G.useBtn.twin.key = nil
+    end
   end
   if want and not G.navMoving then -- (not while it's being dragged: a settings change meanwhile)
     local p = st.navPanelPoint
@@ -9402,6 +10260,25 @@ end
 -- The directions panel over the map: the status (distances, ETAs, the stops), the steps, and their buttons; laid
 -- out again only when its text or states changed. From each redraw, and on its own while the still map with a route
 -- waits for its idle redraw (issue #191: the ETAs and countdowns tick, nothing else on the map moves).
+-- "Working out the route..." on the panel (1.4.0, Kooki3z: "have the '...' cycle from 1 to 3 dots indicating its
+-- working"): from the map's OnUpdate (and the pump's, detached), only its text set and only when the dots change
+-- (Nav.WorkingDots: every WORKING_DOTS_EVERY), never laid out again; the text laid out has all of its dots (left
+-- justified: nothing moves). The route there, or another message picked (every WORKING_SWAP_EVERY): laid out at once.
+function G.WorkingDotsTick()
+  local w, N = G.navWorking, ns.Nav
+  if not w then return end
+  if N.route or not N.warming or N.WorkingShown() ~= w.text then
+    G.navWorking, G.navPanelSig = nil, nil
+    if G.Redraw then G.Redraw() end
+    return
+  end
+  local s = N.WorkingDots()
+  if s and s ~= w.shown then
+    w.shown = s
+    G.navText:SetText(w.tail == "" and s or s .. w.tail)
+  end
+end
+
 function G.UpdateNavPanel(px, py, cont, hidden, route, dest)
   local st = S()
   local status
@@ -9415,10 +10292,12 @@ function G.UpdateNavPanel(px, py, cont, hidden, route, dest)
   else
     status = ns.Nav.Status(px, py, cont)
   end
-  local steps = status and not hidden and ns.Nav.StepsText(st.stepsAll and 99 or 3) or ""
+  -- (world routing's stand-in while its searches land, Nav.StandIn: no steps or turns from it)
+  local standIn = not hidden and ns.Nav.StandIn and ns.Nav.StandIn()
+  local steps = status and not hidden and not standIn and ns.Nav.StepsText(st.stepsAll and 99 or 3) or ""
   -- a walk with no other legs: its turns, numbered, as the list of a trip's legs (G.WalkTurnsText)
   G.walkTurns = nil
-  if status and steps == "" and route and not route.flying and ns.Turns and not ns.Nav.questing then
+  if status and steps == "" and route and not route.flying and ns.Turns and not ns.Nav.questing and not standIn then
     steps, G.walkTurns = G.WalkTurnsText(route, dest and dest.name or L["the stop"], st.stepsAll)
   end
   -- collapsed (the -/+ button, with steps to list): only the "All stops" / times line
@@ -9441,8 +10320,12 @@ function G.UpdateNavPanel(px, py, cont, hidden, route, dest)
     G.NavWrap() and "w" or "-" }, "|")
   if psig ~= G.navPanelSig then
   G.navPanelSig = psig
-  navText:SetText((collapsed and G.CollapsedStatus(status) or status or "") .. (G.tpAhead and "\n" .. G.tpAhead or "")
-    .. (G.hostileNote and "\n" .. G.hostileNote or ""))
+  local tail = (G.tpAhead and "\n" .. G.tpAhead or "") .. (G.hostileNote and "\n" .. G.hostileNote or "")
+  navText:SetText((collapsed and G.CollapsedStatus(status) or status or "") .. tail)
+  -- (the route being worked out: laid out with all its dots, and those cycled between, G.WorkingDotsTick)
+  local wt = not hidden and not collapsed and ns.Nav.warming and not ns.Nav.route and ns.Nav.WorkingShown()
+  G.navWorking = wt and status == wt and { text = wt, tail = tail } or nil
+  if G.navWorking then G.WorkingDotsTick() end -- (its dots as they are now, from the start)
   if collapsed then steps = "" end
   stepsText:SetText(steps)
   stepsText:SetShown(steps ~= "")
@@ -9482,7 +10365,9 @@ function G.UpdateNavPanel(px, py, cont, hidden, route, dest)
     steps = "" -- (as the laid-out path leaves it: what follows reads it)
   end
   -- (not while the steps are collapsed: asked, 2026-10-01; the arrow window has its own)
-  G.UpdateUseButton(navPanel:IsShown() and not hidden and not collapsed and not G.NavBare() and ns.Nav.UseNow() or nil)
+  -- (or a fall spell to cast before a big drop ahead: FallSpells.CastNow)
+  G.UpdateUseButton(navPanel:IsShown() and not hidden and not collapsed and not G.NavBare()
+    and (ns.Nav.UseNow() or (ns.FallSpells and ns.FallSpells.CastNow())) or nil)
   -- (a dungeon's floor and route note: under the panel while it shows, not under its text)
   if fl.bar and fl.bar:IsShown() then G.PlaceFloorBar() end
   if G.pathColorBox and G.pathColorBox:IsShown() then G.PlacePathColorPicker() end
@@ -9647,15 +10532,26 @@ function G.Update()
   do -- (a cave hovered, or held: its map, as a building's; G.BuildingHover)
     local h, hk = G.hoverInside, G.hoverInsideKey
     if not (h and h.cave) and G.heldInside and GetTime() <= G.heldInside.untilT then h, hk = G.heldInside.hit, G.heldInside.key end
+    -- (and with none hovered, the cave the route's stop is in, shown as if it were: the route goes in, item 84b. Until
+    -- the route's cleared or its stop reached: N.dest moves on)
+    -- (at any zoom, item 84d: Kooki3z, the cave's inside only at the closest zoom while his route went in. The route's
+    -- cave kept shown zoomed out too, past the inside maps' zoom (G.InteriorZoomOK) and the seamless map's (CaveSeamZoom))
+    local routed = false
+    if not (h and h.cave) then
+      local rc = G.RouteCave(viewCont)
+      if rc then h, hk, routed = { cave = rc, cont = viewCont }, "route-cave:" .. tostring(rc), true end
+    end
     if h and h.cave and hk ~= G.hoverDismissKey and not view.cave and not inst and not browse
-        and S().interiors ~= false and h.cont == viewCont and not G.IsMapStyle(G.Style()) and G.InteriorZoomOK(zoom) then
+        and S().interiors ~= false and h.cont == viewCont and not G.IsMapStyle(G.Style())
+        and (routed or G.InteriorZoomOK(zoom)) then
       view.cave = G.CaveArt(viewCont, h.cave)
       G.hoveredCave = view.cave and h.cave or nil
     else
       G.hoveredCave = nil
     end
+    G.routeCaveShown = routed and view.cave ~= nil or nil
   end
-  if view.cave and G.Seamless() and zoom > G.CaveSeamZoom(view.cave) then view.cave = nil end
+  if view.cave and G.Seamless() and zoom > G.CaveSeamZoom(view.cave) and not G.routeCaveShown then view.cave = nil end
   local quads
   -- Indoors inside a known building: show its interior map, like the game minimap.
   local place, wmo, room
@@ -10003,6 +10899,8 @@ function G.Update()
       AddSeg(sg[1], sg[2], sg[3], sg[4], forced or sg[5], forced and 4 or sg[7], forced and 0.9 or sg[6])
     end
   end
+  -- (the guard zones the route goes around: item 63c)
+  if not inst then G.LayAvoided(cx, cy, viewCont, rot, s, half) end
   -- walls (blood red): with the roads shown, or the road tools on
   if inst then -- a dungeon's map: its floors' outline where there's no art (and walls drawn in it)
     for _, sg in ipairs(G.LayoutWalls(cx, cy, inst, rot, zoom, half, not instArt)) do
@@ -10057,6 +10955,7 @@ function G.Update()
   local dest = ns.Nav.dest
   local route = not hidden and ns.Nav.Route(px, py, cont) or nil
   G.swimSegN = 0 -- (the swims drawn: none till the route's are, G.SwimAtCursor)
+  G.jumpSegN = 0 -- (and the jumps, G.JumpAtCursor)
   if route and ns.Nav.RedAsking and ns.Nav.RedAsking() then route = nil end -- (asked "keep this route?": not drawn yet)
   -- (held by another addon: the route goes on, not drawn; the square with its route off, G.SquareHidesRoute: same)
   if route and not G.Held() and not G.SquareHidesRoute() then
@@ -10104,8 +11003,9 @@ function G.Update()
     -- route so far, for a rainbow)
     local look = G.LatestLook(G.routeLooks) or G.ownRouteLook -- (or the Rainbow of Options > Window)
     local floorOf = {} -- (each stop's floor once a redraw, Nav.StopFloor: not per segment)
-    -- (a new route still being checked for a shorter way: faded until it has settled, Nav.Checking; asked 2026-10-08)
-    G.routeFade = ns.Nav.Checking and ns.Nav.Checking() and G.CHECKING_ALPHA or 1
+    -- (a new route still being checked for a shorter way: faded until it has settled, Nav.Checking; asked 2026-10-08.
+    -- And world routing's stand-in till its searches land, Nav.StandIn)
+    G.routeFade = G.RouteFaded() and G.CHECKING_ALPHA or 1
     -- One stretch of the route on the screen, in its look: faint and dotted on another level, else solid or dotted.
     -- (`swim`: { t0, total }, a swim (Nav.SwimSpans): wavy, solid; t0 the share of `total` screen units of the whole
     -- swim before (ax, ay))
@@ -10115,35 +11015,44 @@ function G.Update()
     -- With several stops that leg's lines are drawn on a higher sublevel (G.ROUTE_TOP_SUB, its glow one under), over
     -- the rest of the route; `legTop`, set for each stretch below)
     local legTop
-    local function DrawLeg(ax, ay, bx, by, col, width, dotted, partCont, swim)
+    -- (each stretch's alpha by its floor, G.FloorFade: set for each stretch below; the player's floor once a redraw)
+    local floorA, floorKeys = 1, {}
+    local function DrawLeg(ax, ay, bx, by, col, width, dotted, partCont, swim, jump)
       local under = partCont and partCont ~= shown and ns.CityLevels and ns.CityLevels[partCont]
       if under and not under.instance and not ns.CityLevels[shown] then
         -- (down in an underground city while the player is up top: not drawn over the land above)
       elseif partCont and partCont ~= shown and (ns.CityLevels and (ns.CityLevels[partCont] or ns.CityLevels[shown])) then
         AddSeg(ax, ay, bx, by, col, math.max(2, width - 2), 0.45 * G.routeFade, true, true) -- (another level)
       else
-        if look and look.glow then AddSeg(ax, ay, bx, by, col, width * 2.6 + 2, 0.3 * G.routeFade, true, nil, legTop and legTop - 1) end -- (under it)
+        local fa = G.routeFade * floorA -- (faded by its floor, G.FloorFade)
+        if look and look.glow then AddSeg(ax, ay, bx, by, col, width * 2.6 + 2, 0.3 * fa, true, nil, legTop and legTop - 1) end -- (under it)
         local cx1, cy1, cx2, cy2, t0
-        if swim then cx1, cy1, cx2, cy2, t0 = G.ClipSeg(ax, ay, bx, by, swimBound) end
-        if swim and cx1 then
-          G.AddSwimSeg(cx1, cy1, cx2, cy2, swim)
+        if swim or jump then cx1, cy1, cx2, cy2, t0 = G.ClipSeg(ax, ay, bx, by, swimBound) end
+        if jump and cx1 then -- (a jump: a solid coil, full strength; Kooki3z 2026-11-23)
+          G.AddJumpSeg(cx1, cy1, cx2, cy2, jump[1], jump[2], col)
+          G.CoilLines(cx1, cy1, cx2, cy2, G.JUMP_COIL_R + width * 0.25, G.JUMP_COIL_PX + width,
+            function(x1, y1, x2, y2) AddSeg(x1, y1, x2, y2, col, math.max(2, width - 1), floorA, true, nil, legTop) end)
+        elseif jump then
+          -- (nowhere on the map)
+        elseif swim and cx1 then
+          G.AddSwimSeg(cx1, cy1, cx2, cy2, swim, col)
           local full = math.sqrt((bx - ax) ^ 2 + (by - ay) ^ 2)
           local w = math.max(2, width - 1)
           G.WaveLines(cx1, cy1, cx2, cy2, 1.5 + width * 0.5, G.SWIM_WAVE_PX + width * 2, swim[1] + full * t0, swim[2],
-            function(x1, y1, x2, y2) AddSeg(x1, y1, x2, y2, col, w, G.routeFade, true, nil, legTop) end)
+            function(x1, y1, x2, y2) AddSeg(x1, y1, x2, y2, col, w, fa, true, nil, legTop) end)
         elseif swim then
           -- (nowhere on the map)
         elseif not dotted then
-          AddSeg(ax, ay, bx, by, col, width, G.routeFade, true, nil, legTop)
+          AddSeg(ax, ay, bx, by, col, width, fa, true, nil, legTop)
         elseif G.dashTexture then
-          AddSeg(ax, ay, bx, by, col, width, G.routeFade, true, true, legTop)
+          AddSeg(ax, ay, bx, by, col, width, fa, true, true, legTop)
         else
           local vx, vy = bx - ax, by - ay
           local len = math.sqrt(vx * vx + vy * vy)
           local t, n = 0, 0
           while t < len and n < 400 do
             local t2 = math.min(t + DASH, len)
-            AddSeg(ax + vx * t / len, ay + vy * t / len, ax + vx * t2 / len, ay + vy * t2 / len, col, width, G.routeFade, true, nil, legTop)
+            AddSeg(ax + vx * t / len, ay + vy * t / len, ax + vx * t2 / len, ay + vy * t2 / len, col, width, fa, true, nil, legTop)
             t, n = t2 + GAP, n + 1
           end
         end
@@ -10161,7 +11070,14 @@ function G.Update()
           or (ay < -reach and by < -reach) then return end
       local style = ROUTE_STYLE[kind] or ROUTE_STYLE[1]
       legTop = multi and stop == 1 and G.ROUTE_TOP_SUB or nil
-      local col, width, dotted = G.RouteLegLook(look, color(stop, kind, style[1]), style[2], style[3], kind, mid,
+      local fk = floorKeys[partCont]
+      if fk == nil then
+        fk = G.FloorFadeKey(partCont) or false
+        floorKeys[partCont] = fk
+      end
+      floorA = fk and G.FloorFade(route, part, i, fk) or 1
+      local col, width, dotted = G.RouteLegLook(look, color(stop, kind, style[1]), style[2],
+        style[3] and not (kind == 1 and G.WalksSolid()), kind, mid,
         multi, not (stops[stop] and stops[stop].corpse))
       -- (lighter uphill, darker downhill: G.SlopeColor; `flat`, the color as it was, for a swim's waves)
       local flat = col
@@ -10189,7 +11105,20 @@ function G.Update()
         -- red over any look, dotted off the roads as the rest)
         -- (and the swims, Nav.SwimSpans: wavy, asked for 1.3.10)
         local N = ns.Nav
-        if N.HostileSpans(part, i) or N.SwimSpans(part, i) then
+        local R = ns.Router
+        -- (a small drop, under Router.JUMP_CALLOUT_YD: drawn as the walk, no coil; Router.JumpCalledOut)
+        -- (item 88d, Kooki3z 2026-11-25: through the other faction's guards only the color turns red; a jump stays a
+        -- coil, a swim wavy, a walk plain and a walk-down dotted)
+        if kind == R.KIND_JUMP or (kind == R.KIND_DROP and R.JumpCalledOut(part and part.pts, part and part.kinds, i)) then
+          if N.HostileSpans(part, i) then
+            N.EachRoutePiece(part, i, function(t1, t2, hostile)
+              DrawLeg(ax + (bx - ax) * t1, ay + (by - ay) * t1, ax + (bx - ax) * t2, ay + (by - ay) * t2,
+                hostile and N.HOSTILE_COLOR or col, width, dotted, partCont, nil, { part, i })
+            end)
+          else
+            DrawLeg(ax, ay, bx, by, col, width, dotted, partCont, nil, { part, i })
+          end
+        elseif N.HostileSpans(part, i) or N.SwimSpans(part, i) then
           local full = math.sqrt((bx - ax) ^ 2 + (by - ay) ^ 2)
           N.EachRoutePiece(part, i, function(t1, t2, hostile, swim)
             DrawLeg(ax + (bx - ax) * t1, ay + (by - ay) * t1, ax + (bx - ax) * t2, ay + (by - ay) * t2,
@@ -11240,6 +12169,7 @@ function G.ApplySettings()
   if mini then G.PlaceMiniIcon() end
   if G.miniIcon or mini then G.MiniIcon():SetShown(mini and true or false) end
   elapsed = 1 -- redraw now
+  if G.askHolder then G.SyncAskHolder() end -- (a question on the map shown or hidden with it now: item 93)
   G.ApplyExtraWindow()
   G.Mirror("ApplySettings") -- (settings changed in one map window: the other one's too)
 end
@@ -13056,7 +13986,9 @@ local function TourStep(now)
   if not px or not ns.Nav.dest then tour = nil return end
   -- (no route shown yet, still being worked out: the hold waits for it, no zooming over nothing; Kooki3z 2026-11-23,
   -- "the zoom in when setting a route shouldn't happen until a route is actually displayed")
-  if tour.phase == "hold" and not ns.Nav.route then
+  -- (nor while the route shown is the world grid's stand-in, its faded line while "Working out the route..." (Nav.StandIn):
+  -- fit once, to the first settled route. Item 29, Kooki3z 2026-11-24: it zoomed to the straight line, then again)
+  if tour.phase == "hold" and (not ns.Nav.route or (ns.Nav.StandIn and ns.Nav.StandIn())) then
     tour.t0 = now - (tour.skip and ROUTE_TOUR.hold or 0)
     return
   end
@@ -13131,6 +14063,21 @@ function G.RouteHere()
   if not px or not free then return end
   if ns.Nav.DungeonLocked() then ns.Nav.SayLocked() return end
   local viewCont = ViewCont(cont)
+  -- (on a dungeon's map: its way in, the wing's whose map this is (G.InstanceStopEntrance), as a stop picked on it
+  -- goes; item 45b, Kooki3z 2026-11-24: Route Here on Maraudon's Orange map went to the Purple portal, the crosshair's
+  -- spot inside handed on as it was and the nearer way in taken)
+  local inst = G.InstanceOf(viewCont)
+  if inst then
+    local e = G.InstanceStopEntrance(inst, free.x, free.y, cont, px, py)
+    if not e then
+      ns.Print(Format(L["%s: no way in known to route to"], ns.InstanceName(inst) or L["that dungeon"]))
+      return
+    end
+    local sc = ns.Nav.StopLevel and ns.Nav.StopLevel(e.cont, e.x, e.y) or e.cont
+    if ns.Nav.SetDestination(e.x, e.y, sc, e.name) == false then return end
+    StartTour(px, py, cont, ViewCont(cont), false)
+    return
+  end
   if ns.Nav.SetDestination(free.x, free.y, viewCont) == false then return end -- (asked first: a zone too high)
   StartTour(px, py, cont, viewCont, false)
 end
@@ -13175,14 +14122,14 @@ local function SearchIndex()
   G.searchFaction, G.searchNamesVer = fac, namesVer
   local list, seen = {}, {}
   -- (`name` in the game's language, `en` the data's English: found by either, ns.PoiName and the like)
-  local function add(name, sub, cont, x, y, generic, en)
+  local function add(name, sub, cont, x, y, generic, en, z)
     if not name or name == "" or not cont then return end
     local key = name:lower() .. ":" .. cont .. ":" .. math.floor(x / 200) .. ":" .. math.floor(y / 200)
     if seen[key] then return end
     seen[key] = true
     -- (what it is, for the search's generic words: "flight master", "boat dock"; not a place's or a zone's)
     local kind = generic and sub:lower() or nil
-    list[#list + 1] = { name = name, lower = G.SearchLower(name), sub = sub, cont = cont, x = x, y = y, kind = kind,
+    list[#list + 1] = { name = name, lower = G.SearchLower(name), sub = sub, cont = cont, x = x, y = y, z = z, kind = kind,
       en = en and en ~= name and G.SearchLower(en) or nil }
   end
   for cont, pois in pairs(ns.Pois or {}) do
@@ -13206,8 +14153,9 @@ local function SearchIndex()
     else
       local what = t[8] == "teleporter" and L["Teleporter"] or t[8] == "boat" and L["boat dock"] -- (Darnassus's portal: no dock)
         or t[8] == "zeppelin" and L["zeppelin dock"] or t[8] == "tram" and L["tram dock"] or (t[8] .. " dock")
-      add(ns.RideEndName(t, 1), what, t[1], t[2], t[3], true, t[9])
-      add(ns.RideEndName(t, 2), what, t[4], t[5], t[6], true, t[10])
+      -- (with its end's floor when known: the tram's way in under Stormwind's Royal Gallery, Kooki3z 2026-11-23)
+      add(ns.RideEndName(t, 1), what, t[1], t[2], t[3], true, t[9], t.z1)
+      add(ns.RideEndName(t, 2), what, t[4], t[5], t[6], true, t[10], t.z2)
     end
   end
   searchIndex = list
@@ -13556,6 +14504,81 @@ function G.PlaceShippedNpc(e, px, py, pc, learned)
   e.cont, e.x, e.y = lv, x, y
   e.z = Lay.LearnedZ(learned, lv, x, y) or z
 end
+-- The enemy mobs as search entries (Layers.ShippedMobs, Data/Mobs.lua; 1.4.0, Kooki3z 2026-11-22: "add all enemy mobs
+-- to the search function, only showing the closest one in the list"): those an enemy of the player's faction, each
+-- once, found by name only (no generic words), the skull beside it and "Enemy, <place>" in grey; placed at its camp
+-- nearest the player when shown (G.PlaceMob). None with the option `searchEnemies` off. Made once per faction.
+G.MOB_ICON = "Interface\\TargetingFrame\\UI-TargetingFrame-Skull"
+function G.ShippedMobEntries()
+  local Lay = ns.Layers
+  if not (Lay and Lay.ShippedMobs) then return {} end
+  local s = ns.settings and ns.settings.gps
+  if s and s.searchEnemies == false then return {} end
+  local list = Lay.ShippedMobs()
+  local fac = ns.Nav.Faction and ns.Nav.Faction() or false
+  local c = G.mobSearch
+  if c and c.list == list and c.fac == fac and c.names == ns.npcNamesVer then return c.entries end
+  local out = {}
+  for _, m in ipairs(list) do
+    if m.side == "B" or not fac or m.side == fac then
+      local shown = ns.NpcName and ns.NpcName(m.id, m.name) or m.name
+      out[#out + 1] = { name = shown, lower = G.SearchLower(shown),
+        en = shown ~= m.name and G.SearchLower(m.name) or nil, mob = m, id = m.id, tex = G.MOB_ICON, sub = L["Enemy"] }
+    end
+  end
+  G.mobSearch = { list = list, fac = fac, entries = out, names = ns.npcNamesVer }
+  return out
+end
+-- Search entry `e` of a mob, found: at its camp nearest the player (px, py on level `pc`; one on the player's continent
+-- or island first, Layers.NearestSpawn), "Enemy, <place>" in grey.
+function G.PlaceMob(e, px, py, pc)
+  local Lay = ns.Layers
+  local m = e.mob
+  local lv, x, y, z = Lay.NearestSpawn({ spawns = Lay.MobSpawns(m) }, px, py, pc)
+  e.cont, e.x, e.y, e.z = lv, x, y, z
+  e.sub = G.MobSub(lv, x, y)
+end
+-- A mob's grey text at a camp: "Enemy, Elwynn Forest" (G.NpcPlaceName).
+function G.MobSub(level, x, y)
+  local place = level and G.NpcPlaceName(level, x, y)
+  return place and (L["Enemy"] .. ", " .. place) or L["Enemy"]
+end
+-- A mob's levels before its name (Kooki3z 2026-11-22: "If the mob level is orange or red to the player, show their level
+-- range like (11-12) or (11) to the left of the enemies' name"): its highest level 3 or more over the player's (the
+-- game's orange; 5 or more: red), in the game's color for that level (GetCreatureDifficultyColor or
+-- GetQuestDifficultyColor, else MOB_ORANGE / MOB_RED). "" for the others and for what isn't a mob.
+G.MOB_ORANGE, G.MOB_RED = { 1, 0.5, 0.25 }, { 1, 0.1, 0.1 }
+function G.MobLevelColor(level, playerLevel)
+  local d = level - playerLevel
+  if d < 3 then return nil end
+  local f = GetCreatureDifficultyColor or GetQuestDifficultyColor
+  if f then
+    local ok, c, g, b = pcall(f, level)
+    if ok and type(c) == "table" and c.r then return c.r, c.g, c.b end
+    if ok and type(c) == "number" and g and b then return c, g, b end
+  end
+  local own = d >= 5 and G.MOB_RED or G.MOB_ORANGE
+  return own[1], own[2], own[3]
+end
+function G.MobLevelLabel(e, playerLevel)
+  local m = e and e.mob
+  if not (m and m.hi) then return "" end
+  if not playerLevel then
+    local ok, lvl = pcall(UnitLevel or error, "player")
+    playerLevel = ok and tonumber(lvl) or nil
+  end
+  if not playerLevel then return "" end
+  local r, g, b = G.MobLevelColor(m.hi, playerLevel)
+  if not r then return "" end
+  local text = m.lo ~= m.hi and string.format("(%d-%d)", m.lo, m.hi) or string.format("(%d)", m.hi)
+  return string.format("|cff%02x%02x%02x%s|r ", math.floor(r * 255 + 0.5), math.floor(g * 255 + 0.5),
+    math.floor(b * 255 + 0.5), text)
+end
+-- A search row's text: its icon, a mob's levels (G.MobLevelLabel), its name, the grey text and the yards.
+function G.SearchRowText(e)
+  return string.format("%s%s%s  |cff9d9d9d%s|r%s", e.tex and ("|T" .. e.tex .. ":14:14|t ") or "",
+    G.MobLevelLabel(e), e.name, e.sub or "", e.yd and ("  " .. ns.Nav.FormatDistance(e.yd)) or "")
+end
 -- The search list's Pin button (asked 2026-11-14): search entry `e` (an NPC or a city place) pinned for good
 -- (Pins.AddFromSearch), on its floor: where floors there are told by under or over a cave's ground (G.PinFloors'
 -- `down`), by its height (Router.CaveDown). Says so when it's pinned there already. Returns the pin made, or nil.
@@ -13697,11 +14720,16 @@ function G.SearchEntryAt(e, places)
     local _, zone = G.LocateWorld(Geo.Base(level), x, y)
     return zone and places[G.SearchLower(zone)] or false
   end
-  if e.shipped then
-    local sp = e.shipped.spawns
+  if e.shipped or e.mob then -- (a mob's camps the same: "defias westfall")
+    local sp = e.shipped and e.shipped.spawns or ns.Layers.MobSpawns(e.mob)
     for i = 1, #sp - 3, 4 do
       if named(sp[i], sp[i + 1], sp[i + 2]) then
         e.cont, e.x, e.y, e.z = sp[i], sp[i + 1], sp[i + 2], sp[i + 3]
+        if e.mob then
+          e.sub = G.MobSub(e.cont, e.x, e.y)
+          local px, py, pc = Geo.PlayerWorld()
+          e.yd = (px and pc and Geo.Base(pc) == Geo.Base(e.cont)) and math.sqrt((e.x - px) ^ 2 + (e.y - py) ^ 2) or nil
+        end
         return true
       end
     end
@@ -13835,6 +14863,8 @@ function G.SearchPlacesPlain(text, max)
     end
   end
   for _, e in ipairs(G.ShippedNpcEntries(class)) do all[#all + 1] = e end
+  -- (the enemy mobs, Data/Mobs.lua, 1.4.0: by name, each once; placed only when listed, below)
+  for _, e in ipairs(G.ShippedMobEntries()) do all[#all + 1] = e end
   local px, py, pc = Geo.PlayerWorld()
   local base = pc and Geo.Base(pc)
   local memo = {} -- (the kinds typed, worked out once each: G.EntryKindTyped)
@@ -13844,6 +14874,7 @@ function G.SearchPlacesPlain(text, max)
     local i = e.lower:find(q, 1, true)
     if not i and e.en then i = e.en:find(q, 1, true) end
     if e.shipped then e.sub = e.title or L["NPC"] end -- (its place, once shown: below)
+    if e.mob then e.sub = L["Enemy"] end
     local sells = sold and sold[e.shipped and e.id or e.seller or false]
     e.sells = nil
     local into
@@ -13872,8 +14903,10 @@ function G.SearchPlacesPlain(text, max)
       -- (a shipped NPC found: at its spawn nearest the player, only now)
       if e.shipped then G.PlaceShippedNpc(e, px, py, pc, learnedFor[e.id] or (ns.db and ns.db.npcs and ns.db.npcs[e.id])) end
     end
-    -- (the yards there in a straight line, on the player's continent; the index's entries are kept: set each time)
-    e.yd = (into and px and e.cont and Geo.Base(e.cont) == base) and math.sqrt((e.x - px) ^ 2 + (e.y - py) ^ 2) or nil
+    -- (the yards there in a straight line, on the player's continent; the index's entries are kept: set each time. A
+    -- mob's once it's listed: "de" finds hundreds, their spawns read only for the few shown)
+    e.yd = (into and not e.mob and px and e.cont and Geo.Base(e.cont) == base)
+      and math.sqrt((e.x - px) ^ 2 + (e.y - py) ^ 2) or nil
   end
   local FAR = math.huge
   local function order(a, b)
@@ -13897,6 +14930,10 @@ function G.SearchPlacesPlain(text, max)
   -- (a shipped NPC shown: its title and where it is, "Armorer, Brill", as one talked to; "Sells Sharp Arrow, Orgrimmar")
   for _, e in ipairs(out) do
     if e.shipped or e.sells then e.sub = G.SearchSub(e) end
+    if e.mob then -- (a mob shown: at its camp nearest the player, "Enemy, Elwynn Forest")
+      G.PlaceMob(e, px, py, pc)
+      e.yd = (px and e.cont and Geo.Base(e.cont) == base) and math.sqrt((e.x - px) ^ 2 + (e.y - py) ^ 2) or nil
+    end
   end
   return out
 end
@@ -14282,7 +15319,14 @@ function G.AddStopAt(x, y, name, stopCont, tex, z, exact, questID, npcId, npcNam
     n = n or G.NpcAtSpot(sc, x, y, z)
     if n then npcId, npcName = n.id, n.name end
   end
-  if tonumber(npcId) and not inst and not via then stop.npcId, stop.npcName = tonumber(npcId), npcName end
+  if tonumber(npcId) and not inst and not via then
+    stop.npcId, stop.npcName = tonumber(npcId), npcName
+    -- (no height given: its NPC's spawn there, Layers.NpcSpawnNear)
+    if stop.z == nil and ns.Layers and ns.Layers.NpcSpawnNear then
+      local sp = ns.Layers.NpcSpawnNear(stop.npcId, stop.cont, stop.x, stop.y)
+      if sp then stop.z = sp.z end
+    end
+  end
   -- (a quest's icon: the stop carries its quest, done by it and not by getting there; Nav.QuestStop)
   if questID and ns.Nav.QuestStop then ns.Nav.QuestStop(stop, questID) end
   if #ns.Nav.stops > 0 then
@@ -14311,7 +15355,57 @@ function G.AddPending(dxUI, dyUI)
   -- (on the seamless map's art, zoomed out over the other continent or an isle: a stop there, in its own yards)
   local oc, ox, oy = G.SeamSpotElsewhere(view.cont, x, y)
   if oc then return G.AddStopAt(ox, oy, nil, oc) end
-  G.AddStopAt(x, y)
+  -- (over a cave: the floor the click means, by what the map shows (item 84a, Kooki3z): its overlay up (hovered or
+  -- opened) and the spot in it, the cave's floor there, routed in by its way in; else the ground over it, never the
+  -- cave's floor guessed for a click on the land (item 82g: a stop north of Lushwater Oasis took the Wailing Caverns'
+  -- road under the hill))
+  local z = G.ClickFloorZ(view.cont, x, y)
+  G.AddStopAt(x, y, nil, nil, nil, z)
+end
+-- The height a click at (x, y) on continent `cont` means over a cave (G.CaveAt): the cave's floor there with its
+-- overlay shown (G.hoveredCave, or a cave's map opened: free.cave), else the ground's; nil off a cave.
+G.CAVE_UNDER_YD = 8 -- (a grid floor this far under the ground there is the cave's)
+function G.ClickFloorZ(cont, x, y)
+  local base = cont and Geo.Base(cont)
+  local cave = base == cont and G.CaveAt and G.CaveAt(cont, x, y) or nil
+  if not cave then return nil end
+  local N = ns.Nav
+  local ground = N and N.GroundAt and N.GroundAt(cont, x, y)
+  if not ground and ns.Ground and ns.Ground.Sample then
+    local ok, h = pcall(ns.Ground.Sample, cont, x, y)
+    ground = ok and type(h) == "number" and h or nil
+  end
+  local shown = G.hoveredCave == cave or (free and free.cave == cave)
+  if not shown then return ground end
+  return G.CaveFloorZ(cont, x, y, ground) or ground
+end
+-- The cave's floor under (x, y): the world grid's highest surface CAVE_UNDER_YD or more under the ground there.
+function G.CaveFloorZ(cont, x, y, ground)
+  local WG = ns.WorldGrid
+  local c = WG and WG.Cont and WG.Cont(cont)
+  if not (c and ground and WG.SurfacesAt) then return nil end
+  local best
+  for _, s in ipairs(WG.SurfacesAt(c, x, y)) do
+    if s.z <= ground - G.CAVE_UNDER_YD and (not best or s.z > best) then best = s.z end
+  end
+  return best
+end
+-- The cave the route's next stop is in (item 84b): one placed in it, or an NPC's spot under the ground in one.
+function G.RouteCave(cont)
+  local N = ns.Nav
+  local d = N and N.dest
+  if not (d and d.x and d.cont and Geo.Base(d.cont) == d.cont and (not cont or d.cont == cont)) then return nil end
+  local z = d.z or d.guessZ
+  if not z then return nil end
+  local cave = G.CaveAt and G.CaveAt(d.cont, d.x, d.y)
+  if not cave then return nil end
+  local ground = N.GroundAt and N.GroundAt(d.cont, d.x, d.y)
+  if not ground and ns.Ground and ns.Ground.Sample then
+    local ok, h = pcall(ns.Ground.Sample, d.cont, d.x, d.y)
+    ground = ok and type(h) == "number" and h or nil
+  end
+  if ground and z <= ground - G.CAVE_UNDER_YD then return cave end
+  return nil
 end
 -- A spot (x, y in `cont`'s yards) on the seamless map's art over another continent or an isle: that one and its yards
 -- there; else nil (the same continent, the sea, no art).
@@ -14345,7 +15439,12 @@ function G.AskRemove(pin)
         G.Redraw()
       elseif self.swim then -- (a swim: this trip goes round by land, Nav.SkipSwim)
         local N = ns.Nav
-        if self.swimPart then -- (its water banned for the trip: N.SwimStretch's points)
+        -- (with world routing on: for its stop only, N.AvoidLegSwim (item 42c); off, the Router's one water setting:
+        -- the trip's, N.SkipSwim)
+        local WG = ns.WorldGrid
+        if self.swimPart and WG and WG.On and WG.On() then
+          N.AvoidLegSwim(self.swimPart.stop or 1)
+        elseif self.swimPart then -- (its water banned for the trip: N.SwimStretch's points)
           N.SkipSwim(N.SwimStretch(self.swimPart, self.swimI, self.swimT1, self.swimT2))
         else
           N.SkipSwim()
@@ -14622,10 +15721,68 @@ function G.UseKey(t)
   return nil
 end
 
+-- The tutorial's spell-jump demo (Tutorial.lua, Kooki3z 2026-11-25: "the demo button must be an INSECURE look-alike"):
+-- a row with `demo` (FallSpells' demo Slow Fall) is shown on `b`'s twin, a plain Button (no secure template, no name,
+-- no attributes acted on) drawn and placed as `b` is, while `b` itself is hidden; its click is G.DemoCastClick (the
+-- tutorial's, G.onDemoCast). Nothing is cast or used by it.
+function G.DemoUseButton(b)
+  if b.twin then return b.twin end
+  local d = CreateFrame("Button", nil, UIParent)
+  d:SetSize(b:GetWidth() or 24, b:GetHeight() or 24)
+  d:RegisterForClicks("AnyUp")
+  d.icon = d:CreateTexture(nil, "ARTWORK")
+  d.icon:SetAllPoints()
+  d:SetHighlightTexture("Interface\\Buttons\\ButtonHilight-Square", "ADD")
+  d.cd = d:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmallOutline")
+  d.cd:SetPoint("CENTER")
+  d.panel, d.insecure, d.real = b.panel, true, b
+  d:Hide()
+  d:SetScript("OnEnter", b:GetScript("OnEnter"))
+  d:SetScript("OnLeave", GameTooltip_Hide)
+  d:SetScript("OnClick", function(self) G.DemoCastClick(self) end)
+  b.panel:HookScript("OnHide", function()
+    d:Hide()
+    d.key = nil
+  end)
+  b.twin = d
+  return d
+end
+function G.DemoCastClick(d)
+  if d and d:IsShown() and G.onDemoCast then pcall(G.onDemoCast, d) end
+end
+-- The demo's look-alike showing (either use button's), or nil.
+function G.DemoUseShown()
+  local arrow = rawget(_G, "AzerothGPSArrowUseButton")
+  for _, b in ipairs({ G.useBtn, arrow }) do
+    if b and b.twin and b.twin:IsShown() then return b.twin end
+  end
+  return nil
+end
+-- Whether use button `b` shows, as itself or as its demo look-alike.
+function G.UseShown(b)
+  return b ~= nil and (b:IsShown() or (b.twin ~= nil and b.twin:IsShown())) or false
+end
+
 -- Button `b` set for teleport row `t` (nil: hidden), put in its place by `place(b)` (cleared first).
 -- Not in combat (a secure button: hidden as combat starts, set again after).
 function G.SetUseButton(b, t, place)
-  if not b or (InCombatLockdown and InCombatLockdown()) then return end
+  if not b then return end
+  -- (the tutorial's demo row: its insecure look-alike instead, the secure one hidden; any other: the look-alike gone)
+  local demo = t and t.demo and CreateFrame and G.DemoUseButton(b) or nil
+  if b.twin and b.twin ~= demo and b.twin.key then
+    b.twin.key = nil
+    b.twin:Hide()
+  end
+  if demo then
+    if b.key and not (InCombatLockdown and InCombatLockdown()) then
+      b.key = nil
+      b:Hide()
+    end
+    demo.clearIcon = b.clearIcon
+    b = demo
+  elseif InCombatLockdown and InCombatLockdown() then
+    return
+  end
   local key = G.UseKey(t)
   if key ~= b.key then
     b.key = key
@@ -14660,8 +15817,19 @@ function G.UseWait(b, t)
   local wait = left > 0
   b.left = left
   if b.cd then b.cd:SetText(wait and T.FormatCooldown(left) or "") end
+  -- (a fall spell too early to cast, FallSpells.CastFor's `early`: dimmed, still clickable)
+  local early = t.early == true
+  if early ~= b.early then
+    b.early = early
+    if b.icon.SetDesaturated then b.icon:SetDesaturated(wait or early) end
+    G.UseIconAlpha(b)
+  end
   if wait == b.wait then return end
   b.wait = wait
+  if b.insecure then -- (the tutorial demo's look-alike: nothing to cast, G.DemoUseButton)
+    if b.icon.SetDesaturated then b.icon:SetDesaturated(wait or b.early == true) end
+    return
+  end
   if wait then
     b:SetAttribute("type", nil)
   elseif t.item then
@@ -14673,7 +15841,14 @@ function G.UseWait(b, t)
     b:SetAttribute("spell", ns.SpellName and ns.SpellName(t.spell) or t.spell)
     b:SetAttribute("item", nil)
   end
-  if b.icon.SetDesaturated then b.icon:SetDesaturated(wait) end
+  if b.icon.SetDesaturated then b.icon:SetDesaturated(wait or b.early == true) end
+end
+G.USE_EARLY_ALPHA = 0.6
+-- The use button's own icon: clear where another picture stands for it (the arrow window's hearthstone, `clearIcon`),
+-- dimmed while a fall spell is too early to cast (`early`), else shown.
+function G.UseIconAlpha(b)
+  if not (b and b.icon and b.icon.SetAlpha) then return end
+  b.icon:SetAlpha(b.clearIcon and 0 or b.early and G.USE_EARLY_ALPHA or 1)
 end
 function G.UseWaitText(b)
   local T = ns.Teleports
@@ -14919,7 +16094,7 @@ function G.TargetNpcSpot(panel)
     return (st and st:IsShown()) and "sprint" or "corner"
   end
   local u = G.useBtn
-  return (u and u:IsShown()) and "use" or "map"
+  return (u and G.UseShown(u)) and "use" or "map"
 end
 function G.PlaceTargetButton(b, panel, spot)
   if spot == "sprint" then
@@ -15566,6 +16741,8 @@ end
 -- side with more room (asked 2026-11-12 for 1.2.4: "when clicking reroute for quest route on directions and there is
 -- a elite quest question, it doesn't pop up when using just the mini map and the map isn't open and blocks the
 -- reroute. This should pop up next to the directions in this condition"; it was in the middle of the square).
+-- With the GPS map as the minimap (item 85, Kooki3z 2026-11-25): only on the map (the square opened out or the world
+-- map), never by the directions nor mid-screen; with the map closed only the glowing "?" over the logo shows it's there.
 G.ASK_DIR_GAP = 8
 function G.AskByDirections()
   local dir = ns.Arrow and ns.Arrow.dir
@@ -15582,9 +16759,66 @@ function G.PlaceByDirections(f, dir)
     f:SetPoint("TOPLEFT", dir, "TOPRIGHT", G.ASK_DIR_GAP, 0)
   end
 end
+-- A question asked on the map (item 85, Kooki3z on e96d80ee: "Take it?" showed as a dialog loose in the middle of the
+-- screen): held over the map's middle by G.askHolder, a frame of its own over everything (not in the map's own frames:
+-- item 93/93b, the too-high-zone question shown again later in a session, after a question closed with the map and the
+-- map's mode switched, had Yes and No as plain text that took no clicks; the map's frames are moved about and their
+-- levels set again as it goes into the world map and back, G.SetLevelTree). Shown while the map is open (the window,
+-- the square opened out, the world map with the GPS map in it), hidden with it unanswered: the glowing "?" above the
+-- minimap's logo then (G.AskWanted), the question back as the map opens.
+G.ASK_LEVEL = 50
+function G.AskHolder()
+  local h = G.askHolder
+  if h then return h end
+  h = CreateFrame("Frame", nil, UIParent)
+  h:SetSize(1, 1)
+  h:SetFrameStrata(ns.POPUP_OVER_STRATA)
+  h:SetFrameLevel(G.ASK_LEVEL)
+  h:Hide()
+  G.askHolder = h
+  -- (watched: the map opened or closed shows or hides it, the question with it)
+  local watch = CreateFrame("Frame", nil, UIParent)
+  watch.left = 0
+  watch:SetScript("OnUpdate", function(self, elapsed)
+    self.left = self.left - (elapsed or 0)
+    if self.left > 0 then return end
+    self.left = G.ASK_POLL_SECONDS / 2
+    G.SyncAskHolder()
+  end)
+  G.askHolderWatch = watch
+  return h
+end
+-- Whether the map a question goes on is open: the map's own layer over it shown (not the minimap square).
+function G.AskMapShown()
+  if not (frame and topLayer and canvas) then return false end
+  if G.MinimapMode and G.MinimapMode() then return false end
+  return G.ShownUp(topLayer)
+end
+-- The holder shown with the map, over its middle; returns whether it shows.
+function G.SyncAskHolder()
+  local h = G.askHolder
+  if not h then return false end
+  local on = G.AskMapShown()
+  if on then
+    h:ClearAllPoints()
+    h:SetPoint("CENTER", canvas, "CENTER", 0, 20)
+  end
+  if on ~= (h:IsShown() and true or false) then
+    h:SetShown(on)
+    local b = G.askBox
+    if on and b and b.GetParent and b:GetParent() == h and b:IsShown() then
+      b:Raise()
+      if b.Layer then b.Layer() end
+      if ns.AskKeys then ns.AskKeys(b) end
+    end
+  end
+  return on
+end
 function G.Ask(name, text, yes, no, onYes, onNo, opts)
   opts = opts or {}
-  local dir = G.AskByDirections()
+  -- (the GPS map as the minimap: on the map only, never loose on the screen; item 85)
+  local mm = G.mmState and G.mmState.on and not G.clone
+  local dir = not mm and G.AskByDirections()
   if dir then
     local o = {}
     for k, v in pairs(opts) do o[k] = v end
@@ -15594,24 +16828,15 @@ function G.Ask(name, text, yes, no, onYes, onNo, opts)
     if G.askBox then G.askBox.onMap, G.askBox.byDirections = nil, true end
     return G.askBox
   end
-  -- (in the game's world map window: over everything, not on the map, which is under the world map's own icons and its
-  -- canvas there: the question showed and its buttons took no clicks, 2026-11-15)
-  if frame and frame:IsShown() and G.WorldMapHosted and G.WorldMapHosted() then
+  if frame and topLayer and canvas and (mm or G.AskMapShown()) then
+    local h = G.AskHolder()
     local o = {}
     for k, v in pairs(opts) do o[k] = v end
-    o.strata = ns.POPUP_OVER_STRATA
-    o.key = name .. "@worldmap"
-    o.place = function(f) f:SetPoint("CENTER", canvas, "CENTER", 0, 20) end
+    o.parent, o.strata, o.level, o.key = h, ns.POPUP_OVER_STRATA, G.ASK_LEVEL + 2, name .. "@map"
+    o.place = function(f) f:SetPoint("CENTER", h, "CENTER", 0, 0) end
+    G.SyncAskHolder()
     G.askBox = ns.Ask(name, text, yes, no, onYes, onNo, o)
-    if G.askBox then G.askBox.onMap, G.askBox.byDirections = nil, nil end
-    return G.askBox
-  end
-  if frame and frame:IsShown() and topLayer then
-    local o = { parent = topLayer, strata = topLayer:GetFrameStrata(), level = topLayer:GetFrameLevel() + 20,
-      timeout = opts.timeout, check = opts.check, single = opts.single, key = name .. "@map",
-      place = function(f) f:SetPoint("CENTER", canvas, "CENTER", 0, 20) end }
-    G.askBox = ns.Ask(name, text, yes, no, onYes, onNo, o)
-    if G.askBox then G.askBox.onMap = true end
+    if G.askBox then G.askBox.onMap, G.askBox.byDirections = true, nil end
     return G.askBox
   end
   G.askBox = ns.Ask(name, text, yes, no, onYes, onNo, opts)
@@ -15662,6 +16887,33 @@ end
 -- HOSTILE_SLOWER): risk it? One popup, with the zones too high on either way (asked 2026-11-14: "If a safe route
 -- would 30% longer or more, ask the player if they want to risk going through enemy territory to save time"; "when
 -- routing through multiple higher level zones, just ask in 1 popup"). Yes: the way past them; no: the safe way.
+-- The route still through the other faction's guards with "Avoid the other faction's towns" on (Nav.CheckHostileRoute):
+-- "This route goes through <towns> (<their faction> guards). Take it?" `side`: the player's ("A", "H").
+function G.ConfirmHostile(names, side, onYes, onNo)
+  local towns = #names > 0 and table.concat(names, ", ") or "?"
+  local text = side == "A" and Format(L["This route goes through %s (Horde guards). Take it?"], towns)
+    or Format(L["This route goes through %s (Alliance guards). Take it?"], towns)
+  return G.Confirm(text, function()
+    onYes()
+    G.RouteChanged()
+  end, function()
+    onNo()
+    G.RouteChanged()
+  end)
+end
+-- "Take it?" -> No and no way round the guards found in time (Nav.GiveUpRefused, item 87): the way past them after all?
+-- `towns`: their names, one string, or nil. onNo(true) on No; the question let go unanswered (Escape is No): onNo().
+function G.ConfirmNoWayRound(towns, onYes, onNo)
+  local text = towns and towns ~= "" and Format(L["No way around the other faction's guards at %s was found.\n\nTake the way past them?"], towns)
+    or L["No way around the other faction's guards was found.\n\nTake the way past them?"]
+  return G.Confirm(text, function()
+    onYes()
+    G.RouteChanged()
+  end, function(clicked)
+    onNo(clicked)
+    G.RouteChanged()
+  end)
+end
 function G.ConfirmRisk(q, onYes, onNo)
   local names = {}
   for k, t in ipairs(q.towns or {}) do
@@ -15778,13 +17030,19 @@ function G.PumpSearches()
   local frameMs = lastPump and now - lastPump or 16
   lastPump = now
   -- (the warm-up's bigger slices for the road data after login, or built in a route's job (Router.Building), for a
-  -- route just asked for (Nav.Fresh), and for a reroute off the route, first in the queue till it lands (Nav.Rerouting))
-  local budget = G.PumpBudget(frameMs, (ns.Router.Warming and ns.Router.Warming())
+  -- route just asked for (Nav.Fresh), for a reroute off the route, first in the queue till it lands (Nav.Rerouting),
+  -- and with world routing on, for a route's first full answer till it lands (Nav.Landing; Kooki3z 2026-11-23))
+  local bigger = (ns.Router.Warming and ns.Router.Warming())
     or (ns.Router.Building and ns.Router.Building()) or (ns.Nav.Fresh and ns.Nav.Fresh())
-    or (ns.Nav.Rerouting and ns.Nav.Rerouting()))
+    or (ns.Nav.Landing and ns.Nav.Landing())
+  -- (a reroute's bigger slice only while its own jobs run: the searches queued after it go on at 1 ms. With the slice's
+  -- rest given to them, walking by Brill's buildings off the route searched about a third more a second, issue #322)
+  local rerouting = not bigger and ns.Nav.Rerouting and ns.Nav.Rerouting()
+  local budget = G.PumpBudget(frameMs, bigger or rerouting)
   local warm = ns.Router.Warming and ns.Router.Warming()
   local p0 = debugprofilestop()
-  local done, fixed = ns.Router.Pump(p0 + budget, debugprofilestop)
+  local done, fixed = ns.Router.Pump(p0 + budget, debugprofilestop, rerouting and ns.Nav.Rerouting or nil,
+    rerouting and p0 + G.PumpBudget(frameMs, false) or nil)
   -- (the slice for the stutter watch, Nav.RouteWork: route work in this frame; not the road data built after login, nor
   -- a road network a route's job built, Router.PumpBuilt: issue #841)
   local built = ns.Router.PumpBuilt and ns.Router.PumpBuilt()
@@ -15916,7 +17174,7 @@ function G.GlideFill(t)
   t[11], t[12] = G.drawVersion, ns.Nav.Version and ns.Nav.Version() or 0
   local ok, m = pcall(G.party.io.members)
   t[13] = ok and m and m[1] and true or false -- (party members move on their own: drawn at the rate)
-  t[14] = ns.Nav.Checking and ns.Nav.Checking() or false -- (the route's faded look while it's checked)
+  t[14] = G.RouteFaded() -- (the route's faded look while it's checked, or a stand-in)
   return t
 end
 -- True while a redraw can wait: the layers glided this frame, nothing but the player's spot and facing changed since
@@ -16085,6 +17343,7 @@ function G.Init()
   frame:SetScript("OnMouseDown", function(f, button)
     if G.NoteMapUse then G.NoteMapUse() end -- (the map editor's: in use, its tools' idle close)
     if removeAsk then removeAsk:Hide() end
+    if G.jumpAsk then G.jumpAsk:Hide() end -- (a jump's menu)
     -- a click on the map closes the map menu and the search panel
     if G.mapMenu then G.mapMenu:Hide() end
     if G.searchPanel then G.searchPanel:Hide() end
@@ -16111,6 +17370,7 @@ function G.Init()
     end
     if button == "RightButton" then
       if G.SwimClick() then return end -- (a swim on the route: "Remove?", asked for 1.3.10)
+      if G.JumpClick() then return end -- (a jump on the route: its menu, Kooki3z 2026-11-23)
       if G.NoMapWheel(-1) then return end -- (No map: a step out on the map under it)
       if G.IsMapStyle(G.Style()) then
         G.ZoomOut()
@@ -16570,12 +17830,12 @@ function G.Init()
     panel:Hide()
     local _, _, cont = Geo.PlayerWorld()
     local vc = ViewCont(cont)
-    local mine = e.pin or e.place or e.npc -- (a pin, a city place or an NPC: maybe on a city's or dungeon's level)
+    local mine = e.pin or e.place or e.npc or e.mob -- (a pin, a city place, an NPC or a mob: maybe on a city's level)
     if e.cont == vc or (mine and e.cont < 20000 and vc and Geo.Base(e.cont) == Geo.Base(vc)) then -- show it there
       free = { x = e.x, y = e.y, rot = view.rot, cross = true, cont = mine and Geo.Base(e.cont) or e.cont }
       recenter:Show()
     end
-    if e.pin or e.npc then -- (on the pin's level, at its height: as a double-click on it; an NPC's where it was talked to)
+    if e.pin or e.npc or e.mob then -- (on the pin's level, at its height: as a double-click on it; an NPC's where it was talked to)
       -- (an NPC's, or a pin of one: its creature id and name, the Target button's)
       G.AddStopAt(e.x, e.y, e.name, e.cont, e.tex, e.z, true, nil, e.npc and e.id or e.npcId, e.npc and e.name or e.npcName)
     elseif e.place then -- (a city place: its full name, icon and floor, as a double-click on it)
@@ -16663,8 +17923,7 @@ function G.Init()
       local pinnable = (e.npc or e.place) and not e.pin and true or false
       r.pin:SetShown(pinnable)
       r.text:SetPoint("RIGHT", pinnable and r.pin or r, pinnable and "LEFT" or "RIGHT", -4, 0)
-      r.text:SetText(string.format("%s%s  |cff9d9d9d%s|r%s", e.tex and ("|T" .. e.tex .. ":14:14|t ") or "", e.name, e.sub,
-        e.yd and ("  " .. ns.Nav.FormatDistance(e.yd)) or ""))
+      r.text:SetText(G.SearchRowText(e))
       r:Show()
     end
     for i = #results + 1, #rows do rows[i]:Hide() end
@@ -18181,6 +19440,7 @@ function G.Init()
           if not okN then G.LogError("route panel", errN) end
         end
         navShown = ns.Nav.dest ~= nil
+        if G.navWorking then G.WorkingDotsTick() end -- ("Working out the route...": its dots)
       end
       if ns.Nav.dest and not navShown and not (arrow and arrow:IsVisible()) then
         G.upkeepT = (G.upkeepT or 0) + (dt or 0)
@@ -18213,6 +19473,7 @@ function G.Init()
     if not G.extra then G.PumpSearches() end
     G.UpdateApproach(dt)
     G.GlidePan() -- (the laid layers slide with the player every frame; redraws refresh their content)
+    if G.navWorking then G.WorkingDotsTick() end -- ("Working out the route...": its dots)
     -- (every frame only while fading; settled, every G.SettledEvery(): issue #191, most of an idle map's frames)
     G.settleDt = (G.settleDt or 0) + dt
     if G.fading or G.settleDt >= G.SettledEvery() then
@@ -18222,6 +19483,7 @@ function G.Init()
       G.AreaTooltip(fdt)
       if G.RoadHover then G.RoadHover(fdt) end -- (the map editor's)
       G.SwimHover(fdt)
+      G.JumpHover(fdt)
       G.BuildingHover()
       G.UpdateFade(fdt)
       ns.PerfEnd("every frame: fade, tooltip", ft)
@@ -18380,8 +19642,11 @@ G.ZONE_LEVELS = {
   ["Silithus"] = { 55, 60 },
 }
 
--- A zone's levels: min, max (nil if unknown).
+-- A zone's levels: min, max (nil if unknown). WoW Forever's own zones by id first (Router's ZONE_LEVELS_BY_ID).
 function G.ZoneLevels(id, name)
+  local by = ns.Router and ns.Router.ZONE_LEVELS_BY_ID
+  local o = by and id and by[id]
+  if o then return o[1], o[2] end
   if C_Map and C_Map.GetMapLevels then
     local ok, lo, hi = pcall(C_Map.GetMapLevels, id)
     if ok and lo and hi and lo > 0 and hi > 0 then return lo, hi end

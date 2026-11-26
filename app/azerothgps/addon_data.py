@@ -370,6 +370,7 @@ def transports_lua(cd: ClientData) -> str:
     a, b = triggers.get(TRAM_TRIGGERS[0]), triggers.get(TRAM_TRIGGERS[1])
     if a and b:
         (x1, y1, z1), (x2, y2, z2) = a["Pos"][:3], b["Pos"][:3]
+        z1, z2 = TRAM_FLOOR_Z.get(TRAM_TRIGGERS[0], z1), TRAM_FLOOR_Z.get(TRAM_TRIGGERS[1], z2)
         rows.append(f'  {{ {a["ContinentID"]}, {x1:.1f}, {y1:.1f}, {b["ContinentID"]}, {x2:.1f}, {y2:.1f}, {TRAM_SECONDS:.0f}, '
                     f'"tram", "Stormwind City", "Ironforge", "Deeprun Tram", z1 = {z1:.1f}, z2 = {z2:.1f}, map1 = 1453, map2 = 1455 }},')
     # Portals (TELEPORTERS): each end where its trigger is, the first's height (`z1`: the walk to it on its floor); a room
@@ -398,6 +399,10 @@ def transports_lua(cd: ClientData) -> str:
 # each end), the wait for a train (two trains, one leaving each station every 71.7 s: 36 s on
 # average) and the ride (58.6 s between the stations; the cars' TransportAnimation: a 143.3 s loop).
 TRAM_TRIGGERS = (2173, 2175)
+# The floors at the tram's ways in (the triggers' heights are their boxes' middles, 5-6 yd up: a stop with the trigger's
+# height went to Stormwind's Royal Gallery over the way in). Stormwind's: Kooki3z standing at it, 2026-11-23,
+# (-8355.85, 525.93, 91.80); Ironforge's: the city grid's floor under its trigger.
+TRAM_FLOOR_Z = {2173: 91.8, 2175: 502.0}
 TRAM_SECONDS = 2 * 5 + 2 * 90 / 7 + 36 + 58.6
 # Portals within a continent, used like a lift (asked 2026-10-07: Darnassus's to the docks of Rut'theran Village, "treated
 # like a lift"): the AreaTrigger at each end (the client's; the server's areatrigger_teleport 527 "Teddrassil - Ruth

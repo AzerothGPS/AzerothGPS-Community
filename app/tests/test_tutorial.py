@@ -1,5 +1,5 @@
-"""The in-game tutorial (Tutorial.lua, 1.2.0; asked 2026-11-09): when it's offered, every section run from start to
-finish with the player's actions simulated (and with every step skipped), in English, German and Chinese; leaving at
+"""The in-game tutorial (Tutorial.lua, 1.2.0; asked 2026-11-09): only on request (2026-11-25: no popup offers it, a
+/reload that cut one short brings nothing up), every section run from start to finish with the player's actions simulated (and with every step skipped), in English, German and Chinese; leaving at
 any step puts everything back exactly as the player had it; a /reload in the middle restores from the saved snapshot;
 the example herbs and ore, the practice roads, walls and recorded walks never reach the saved variables; combat hides
 it and it goes on after; "Keep the GPS map as your minimap?" Yes keeps only that; Options > Help lists every section
@@ -12,7 +12,8 @@ import pytest
 from test_map_redraw import MM_SETUP
 
 ROOT = Path(__file__).resolve().parents[2]
-SECTIONS = ["minimap", "route", "quests", "arrow", "gather", "pins", "search", "dungeon", "window"]  # (roads: gone, 1.3.14)
+SECTIONS = ["minimap", "route", "quests", "arrow", "cities", "gather", "pins", "search", "dungeon", "window"]  # (roads: gone,
+# 1.3.14; cities: 1.4.0)
 
 # The player's side of the test, in Lua: a canonical text of any table (to compare before and after), the saved
 # variables as the game would write them, and what the player does at each step that waits for them.
@@ -247,9 +248,9 @@ def _start(locale=None, saved=None):
     ns.Nav.FUN = False
     lua.execute(SETUP)
     ns.Tutorial.DONE_PAUSE = 0  # (the next step at once, not after "Done!")
-    # (1.3.10: the setup, once for everyone, comes before the offer, Setup.lua; taken as seen here: the order is
-    # test_setup.py's)
+    # (1.3.10: a first install's setup, Setup.lua; taken as seen here: the popups at login are test_setup.py's)
     ns.db.setup.shown = ns.Setup.VERSION
+    ns.db.whatsNewSeen = ns.WhatsNew.VERSION  # (and What's New, item 34: test_whatsnew.py's)
     return lua, ns
 
 
@@ -260,7 +261,7 @@ def game():
 
 @pytest.fixture
 def tut(game):
-    """(lua, ns) with no tutorial running and none ever offered; the same again after."""
+    """(lua, ns) with no tutorial running and none ever played; the same again after."""
     lua, ns = game
     _reset(lua, ns)
     yield lua, ns
@@ -272,18 +273,14 @@ def _reset(lua, ns):
     lua.execute("InCombatLockdown = function() return false end AGPS_NS.inCombat = false AGPS_MOVING = nil")
     if T.run:
         T.Exit()
-    if T.prompt:
-        T.answered = True
-        T.prompt.Hide(T.prompt)
     lua.execute("""
       local ns = AGPS_NS
       local T = ns.Tutorial
-      T.run, T.prompted, T.resume, T.panelMoved = nil, nil, nil, nil
-      ns.db.tutorial = { seen = {}, ask = true, declined = 0, fresh = true }
-      -- (1.3.10: a first install's tips in the route panel stand in for the offer, Setup.lua; off here, the offer's
-      -- own tests: test_setup.py has the first install's path)
-      ns.db.tips = {}
+      T.run, T.panelMoved = nil, nil
+      ns.db.tutorial = { seen = {} }
+      ns.db.tips = {} -- (a first install's tips in the route panel, Setup.lua: off here)
       ns.db.setup.shown = ns.Setup.VERSION
+      ns.db.whatsNewSeen = AGPS_NS.WhatsNew.VERSION
       ns.Nav.Clear()
       ns.GPS.PendingStops({})
       ns.GPS.Follow()
@@ -355,109 +352,26 @@ def _play(lua, ns, act=True):
     raise AssertionError("the tutorial never ended")
 
 
-# ---------------------------------------------------------------- when it's offered
+# ---------------------------------------------------------------- only on request
 
-def test_a_first_install_is_offered_the_whole_tutorial(tut):
+def test_the_sections_and_no_offer_at_login(tut):
     lua, ns = tut
     T = ns.Tutorial
     assert [s.id for s in T.SECTIONS.values()] == SECTIONS
-    assert all(s.version == "1.2.0" for s in T.SECTIONS.values()) and T.Newest() == "1.2.0"
-    due, ids = T.PromptDue()
-    assert due is True and list(ids.values()) == SECTIONS
-    assert T.MaybePrompt() is True
-    f = T.prompt
-    assert f._shown and f._text == "" and str(f.text._text).startswith("Take a short tutorial?")
-    assert [str(b._text) for b in (f.start, f.later, f.never)] == ["Start Tutorial", "Not Now", "Don't Ask Again"]
-    assert T.MaybePrompt() is False  # (once a session)
-    lua.globals().AGPS_CLICK(f.start)
-    assert f._shown is False and _where(ns) == ("minimap", 1) and list(T.run.queue.values()) == SECTIONS
-    assert ns.db.tutorial.offered == "1.2.0"
-    T.Exit()
-    T.prompted = None
-    assert T.PromptDue() is False and T.MaybePrompt() is False  # (taken up: not offered again)
+    versions = {s.id: s.version for s in T.SECTIONS.values()}
+    assert versions == {s: ("1.4.0" if s == "cities" else "1.2.0") for s in SECTIONS}
+    # (2026-11-25: "Let's make the tutorials only on request from the Help section": the offer's code is gone)
+    for gone in ("MaybePrompt", "PromptDue", "OnEnteringWorld", "ShowPrompt", "NewSections", "Offered", "NotNow"):
+        assert T[gone] is None, gone
+    # an old offer's fields in the saved data (an update adding a section) bring nothing up at login
+    ns.db.tutorial.offered, ns.db.tutorial.ask, ns.db.tutorial.declined = "1.2.0", True, 0
+    lua.eval("AGPS_FIRE")("PLAYER_ENTERING_WORLD", True, False)
+    assert T.run is None and T.prompt is None
+    assert not any(w._shown and w._text and ("Take a short tutorial" in str(w._text) or "cut short" in str(w._text))
+                   for w in lua.eval("AGPS_WIDGETS").values())
 
 
-def test_the_window_says_welcome_at_a_first_install_and_whats_new_after_an_update():
-    # a first install: no saved variables at all; an update: saved variables from before the tutorial
-    lua, ns = _start()
-    assert ns.db.tutorial.fresh is True and ns.db.tutorial.ask is True and ns.db.tutorial.declined == 0
-    ns.Tutorial.ShowPrompt(ns.Tutorial.NewSections())
-    title = lua.eval("AGPS_NS.Tutorial.prompt.chrome and 'chrome' or 'plain'")
-    texts = [str(w._text) for w in lua.eval("AGPS_WIDGETS").values() if w._text]
-    assert "Welcome to AzerothGPS" in texts, title
-    lua, ns = _start(saved='AzerothGPSDB = { settings = { gps = { size = 400 } }, chars = {} }')
-    T = ns.Tutorial
-    assert ns.db.tutorial.fresh is None and ns.settings.gps.size == 400  # (older saved data: loads as it was)
-    due, ids = T.PromptDue()
-    assert due is True and list(ids.values()) == SECTIONS  # (for 1.2.0 every section is new)
-    T.ShowPrompt(ids)
-    texts = [str(w._text) for w in lua.eval("AGPS_WIDGETS").values() if w._text]
-    assert "What's new in 1.2.0" in texts and "Welcome to AzerothGPS" not in texts
-    assert str(T.prompt.text._text).startswith("Take a short tutorial of the new features?")
-    # (the addon's logo and name on it: "nothing tells the player this is for AGPS", 2026-11-10)
-    # (the headline with the minimap's section offered, asked 2026-11-10; without it, the addon's name)
-    assert str(T.prompt.name._text) == "AzerothGPS can now replace your minimap!"
-    T.ShowPrompt(lua.eval("{ 'route' }"))
-    assert str(T.prompt.name._text) == "AzerothGPS"
-
-
-def test_not_now_asks_again_next_login_three_times_at_most(tut):
-    lua, ns = tut
-    T = ns.Tutorial
-    for n in range(1, T.MAX_ASKS + 1):
-        T.prompted = None  # (the next login)
-        assert T.MaybePrompt() is True, n
-        lua.globals().AGPS_CLICK(T.prompt.later)
-        assert ns.db.tutorial.declined == (n if n < T.MAX_ASKS else 0) and T.run is None
-    T.prompted = None
-    assert T.MaybePrompt() is False and ns.db.tutorial.offered == "1.2.0"
-    # closed without an answer (Escape, the X) counts as Not Now
-    _reset(lua, ns)
-    assert T.MaybePrompt() is True
-    T.prompt.Hide(T.prompt)
-    T.prompt._scripts.OnHide(T.prompt)
-    assert ns.db.tutorial.declined == 1
-
-
-def test_dont_ask_again_turns_the_offer_off(tut):
-    lua, ns = tut
-    T = ns.Tutorial
-    assert T.MaybePrompt() is True
-    lua.globals().AGPS_CLICK(T.prompt.never)
-    assert ns.db.tutorial.ask is False and T.run is None
-    T.prompted = None
-    assert T.MaybePrompt() is False
-    ns.db.tutorial.offered = None  # (an update with new sections: still not asked)
-    assert T.PromptDue() is False
-
-
-def test_an_update_offers_only_the_sections_it_added(tut):
-    lua, ns = tut
-    T = ns.Tutorial
-    ns.db.tutorial.offered, ns.db.tutorial.fresh = "1.2.0", None
-    assert T.PromptDue() is False  # (nothing new for a seen version)
-    lua.execute("""
-      local T = AGPS_NS.Tutorial
-      AGPS_EXTRA = { id = "later", version = "1.3.0", title = "A later feature", steps = { { title = "t", text = "x" } } }
-      table.insert(T.SECTIONS, AGPS_EXTRA)
-      T.byId.later = AGPS_EXTRA
-    """)
-    try:
-        ns.db.tutorial.declined = 2  # (Not Now twice for 1.2.0's: the count starts again for the new ones)
-        due, ids = T.PromptDue()
-        assert due is True and list(ids.values()) == ["later"] and ns.db.tutorial.declined == 0
-        assert T.MaybePrompt() is True
-        texts = [str(w._text) for w in lua.eval("AGPS_WIDGETS").values() if w._text]
-        assert "What's new in 1.3.0" in texts
-        lua.globals().AGPS_CLICK(T.prompt.start)
-        assert _where(ns) == ("later", 1) and list(T.run.queue.values()) == ["later"]
-        T.NextClicked()
-        assert _where(ns) == "card" and ns.db.tutorial.seen.later == "1.3.0" and ns.db.tutorial.offered == "1.3.0"
-    finally:
-        lua.execute("table.remove(AGPS_NS.Tutorial.SECTIONS) AGPS_NS.Tutorial.byId.later = nil")
-
-
-def test_no_offer_and_no_start_in_combat_dead_on_a_flight_in_a_dungeon_or_during_a_game(tut):
+def test_no_start_in_combat_dead_on_a_flight_in_a_dungeon_or_during_a_game(tut):
     lua, ns = tut
     T, G = ns.Tutorial, ns.GPS
     cases = {
@@ -471,7 +385,6 @@ def test_no_offer_and_no_start_in_combat_dead_on_a_flight_in_a_dungeon_or_during
     for name, (on, off) in cases.items():
         lua.execute(on)
         try:
-            assert T.MaybePrompt() is False and T.prompted is None, name  # (asked the next time instead)
             ok, why = T.Start()
             assert ok is False and "can't start" in str(why) and T.run is None, name
         finally:
@@ -707,7 +620,8 @@ def test_the_sections_are_jumped_between_and_each_starts_from_the_players_own_st
     ns.db.tutorial.seen.route = "1.2.0"
     lua.globals().AGPS_CLICK(T.panel.list)
     rows = [str(b._text) for b in T.list.rows.values()]
-    assert T.list._shown and rows[1] == "Set a route (done)" and rows[2] == "Quest Route" and len(rows) == 9
+    assert T.list._shown and rows[1] == "Set a route (done)" and rows[2] == "Quest Route" and len(rows) == len(SECTIONS)
+    assert rows[4] == "Ground, stairs and jumps (new)"  # (added after the newest one played, 1.4.0)
     lua.globals().AGPS_CLICK(T.list.rows[4])
     assert _where(ns) == ("arrow", 1) and T.list._shown is False
     # played on from there to the end: the sections after it, in order
@@ -802,7 +716,7 @@ def test_keep_the_gps_map_as_your_minimap_yes_keeps_only_that(tut):
         G.ApplySettings()
 
 
-def test_a_reload_in_the_middle_restores_from_the_saved_snapshot_and_offers_to_go_on():
+def test_a_reload_in_the_middle_restores_from_the_saved_snapshot_and_nothing_pops_up():
     lua, ns = _start()
     T = ns.Tutorial
     lua.execute(OWN)
@@ -831,13 +745,20 @@ def test_a_reload_in_the_middle_restores_from_the_saved_snapshot_and_offers_to_g
     assert [str(d.name) for d in ns2.Nav.stops.values()][0] == "Mine" and len(list(ns2.Nav.stops.values())) == 2
     assert ns2.Layers.demoNodes is None and ns2.Record.practice is None and ns2.Record.rec is None
     assert lua2.eval("AGPS_NS.CharDB().recordOn") is None
-    # offered again from the section it was in
-    assert T2.resume.qi == SECTIONS.index("gather") + 1 and T2.MaybePrompt() is True
-    ask = next(w for w in lua2.eval("AGPS_WIDGETS").values()
-               if w._text and str(w._text).startswith("The tutorial was cut short"))
-    yes = ask._parent.yes
-    yes._scripts.OnClick(yes)
-    assert _where(ns2) == ("gather", 1) and list(T2.run.queue.values()) == SECTIONS
+    # nothing pops up at login (2026-11-25): no "carry on?"; Options > Help or /agps tutorial starts it again
+    lua2.execute("AGPS_AFTER_FNS = {} C_Timer.After = function(s, fn) AGPS_AFTER_FNS[#AGPS_AFTER_FNS + 1] = fn end")
+    lua2.eval("AGPS_FIRE")("PLAYER_ENTERING_WORLD", True, True)
+    for fn in list(lua2.eval("AGPS_AFTER_FNS").values()):
+        fn()
+    assert T2.run is None and T2.resume is None
+    assert not any(w._shown and str(w._text).startswith("The tutorial was cut short")
+                   for w in lua2.eval("AGPS_WIDGETS").values() if w._text)
+    assert lua2.eval("""(function()
+      for f in pairs(AGPS_NS.popups) do if f:IsShown() then return true end end
+      return false
+    end)()""") is False
+    lua2.eval("SlashCmdList.AZEROTHGPS")("tutorial gather")
+    assert _where(ns2) == ("gather", 1) and list(T2.run.queue.values()) == ["gather"]
 
 
 def test_a_tutorial_left_saved_by_a_crash_restores_whoever_logs_in(tut):
@@ -854,7 +775,7 @@ def test_a_tutorial_left_saved_by_a_crash_restores_whoever_logs_in(tut):
     lua.execute("AGPS_NS.Tutorial.run = nil")  # (the session gone)
     T.RestoreSaved()
     assert ns.db.tutorial.run is None and _diff(gps, lua.eval("AGPS_DUMP(AGPS_NS.settings.gps)")) is None
-    assert T.resume.qi == 1 and list(T.resume.queue.values()) == ["window"]
+    assert T.resume is None  # (nothing to offer: Options > Help starts it again)
     # a record that makes no sense is dropped without an error
     lua.execute("AGPS_NS.db.tutorial.run = { snapshot = 5, queue = 'x' }")
     T.RestoreSaved()
@@ -1030,17 +951,9 @@ def test_options_help_lists_every_section_and_play_starts_it(tut):
     lua.globals().AGPS_CLICK(play_all)
     assert _where(ns) == ("minimap", 1) and list(T.run.queue.values()) == SECTIONS
     T.Exit()
-    # the offer's switch: Don't Ask Again, and back
-    cb = T.helpCheck
-    assert ns.db.tutorial.ask is True
-    O.Refresh()
-    assert cb._checked is True
-    ns.db.tutorial.ask = False
-    O.Refresh()
-    assert cb._checked is False
-    cb._checked = True
-    cb._scripts.OnClick(cb)
-    assert ns.db.tutorial.ask is True
+    # (no offer's switch any more: the tutorial is only on request, 2026-11-25)
+    assert T.helpCheck is None
+    assert not any(w._text and "Offer the tutorial" in str(w._text) for w in ws.values())
     lua.execute("AzerothGPSOptions:Hide()")
 
 

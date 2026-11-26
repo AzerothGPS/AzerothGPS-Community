@@ -1,8 +1,10 @@
--- The tutorial (1.2.0, asked 2026-11-09): a short tour of the main features on the player's own map, offered at a
--- first install and once after an update that adds sections, replayed any time from Options > Help or /agps tutorial.
+-- The tutorial (1.2.0, asked 2026-11-09): a short tour of the main features on the player's own map. Only on request
+-- (Kooki3z, 2026-11-25: "Let's make the tutorials only on request from the Help section"): Options > Help's buttons or
+-- /agps tutorial start it; no popup ever offers it (not at a first install, not after an update, not after a /reload
+-- cut one short). A first install gets the setup (Setup.lua), an update What's New (WhatsNew.lua).
 --
--- A SECTION (T.SECTIONS, in order; its `id` is saved, never rename one; `version`: the release that added it, which is
--- what makes the prompt come up again after an update) is a list of STEPS. A step: `title`, `text` (a string, or a
+-- A SECTION (T.SECTIONS, in order; its `id` is saved, never rename one; `version`: the release that added it, for the
+-- (new) / (updated) marks in Help's list) is a list of STEPS. A step: `title`, `text` (a string, or a
 -- function giving one), and
 --   enter(run)   sets up everything the step needs, whatever came before (the player may have skipped, gone back or
 --                jumped here): steps never rely on the one before. Run in a pcall: a failure shows "can't be done
@@ -33,12 +35,10 @@ local Format = ns.Format or string.format
 local T = {}
 ns.Tutorial = T
 
-T.MAX_ASKS = 3 -- "Not Now" this many times: not offered again (until an update adds sections)
-T.PROMPT_DELAY = 8 -- seconds after the world is entered before the offer
 T.POLL = 0.1 -- seconds between looks at whether the player did the step
 T.DONE_PAUSE = 0.8 -- seconds "Done!" shows before the next step
 T.HOLD = "tutorial" -- G.mmHold's value: the map as the minimap held opened out
-T.ORDER = { "minimap", "route", "quests", "arrow", "gather", "pins", "search", "dungeon", "window" }
+T.ORDER = { "minimap", "route", "quests", "arrow", "cities", "gather", "pins", "search", "dungeon", "window" }
 T.RAGEFIRE = 389 -- Ragefire Chasm's map id (the dungeon map shown)
 T.FILL_MAX = 160 -- the glow fills what it points at up to this wide (UI units); wider, the outline alone
 -- the example across the sea, from each continent (world x, y, continent, the game's own name for the place's map)
@@ -159,6 +159,7 @@ end
 -- The tutorial's own things off the map: the practice, the examples, the tools, the search and the hold.
 function T.ClearDemo()
   local g, R, Lay = GPS(), ns.Record, ns.Layers
+  if T.JumpDemoStop then T.JumpDemoStop("left") end -- (the spell-jump demo: the player's own route and spot back)
   -- (the Record window, unless the player had it open before)
   if R and R.window and R.window:IsShown() and not (T.run and T.run.snapshot.recWindow) then R.window:Hide() end
   if Lay and Lay.demoNodes then
@@ -186,16 +187,7 @@ function T.RestoreLive(snap, tweak, keepOut)
     if tweak then tweak(S()) end
   end)
   T.Try("the route", N.Restore)
-  T.Try("the view", function()
-    local v = snap.view
-    if not v then
-      g.Follow()
-    elseif v.browseZoom and not v.browse then -- (a spot looked at, G.LookAt: its own zoom, which ApplyView lets go)
-      g.LookAt(v.cont, v.x, v.y, v.browseZoom)
-    else
-      g.ApplyView(Copy(v))
-    end
-  end)
+  T.Try("the view", function() T.ApplyView(snap.view) end)
   T.Try("the stops waiting", function() g.PendingStops(Copy(snap.pending or {})) end)
   T.Try("the map", function()
     -- (the map as the minimap, opened out: back in its corner, at once)
@@ -505,7 +497,7 @@ end
 function T.ArrowOn()
   local st = S()
   st.arrow, st.arrowLocked, st.dirLocked, st.dirShown = true, false, false, true
-  if st.arrowSide == "hide" then st.arrowSide = "left" end -- (the arrow hidden: shown for its steps, put back after)
+  st.arrowShown = true -- (the arrow hidden: shown for its steps, put back after)
   T.EnsureRoute(1)
   if ns.Arrow and ns.Arrow.Apply then ns.Arrow.Apply() end
 end
@@ -541,6 +533,270 @@ end
 function T.Sizing()
   local grip = GPS().sizeGrip
   return grip and grip.sizing and true or false
+end
+
+---------------------------------------------------------------------------
+-- The spell-jump demo (Kooki3z 2026-11-25: "in the tutorial's spell-jumping step, show a live, simulated example")
+---------------------------------------------------------------------------
+-- On the "Class spells for big drops" step: the player's route (and the stops waiting) set aside, and an example trip
+-- off Bluefen's ridge (test_world_grid's: from the Barrens' side of the ridge above Bluefen down into Dustwallow Marsh)
+-- planned for a simulated player standing at its start (Geo.override, as the dev tools' is) who is a mage with Slow
+-- Fall ready (FallSpells' FS.demo: the spell "known", Light Feathers "in the bags", nothing of the real character's
+-- read or changed). The map draws the trip with its jump's coil and the directions say the real step, with the cast
+-- button as it looks in play: an insecure look-alike in the secure button's place (GPSFrame's G.DemoUseButton, its
+-- click T.JumpDemoCast; the mouse or the controller's A, Pad.Run), which casts nothing: it moves the simulated player
+-- to the ledge, off it and gliding down (T.JumpDemoTick), and on to the stop, where the trip arrives as any does.
+-- While it runs nothing of the route is saved (Nav's N.demoRoute: the saved route stays as it was).
+-- All of it is undone at once (T.JumpDemoStop: the real position, the player's saved route and stops waiting, the
+-- view) when the step is left or the tutorial ends, the player moves (the game's own position, Geo.RealPlayerWorld),
+-- combat starts (PLAYER_REGEN_DISABLED), the map hides (or the game's world map closes, in world-map mode), or the
+-- game is left or reloaded (PLAYER_LOGOUT; and it's all in memory: a /reload ends it anyway).
+T.JUMP_DEMO = { cont = 1, start = { -2309.8, -3253.5 }, stop = { -2558.3, -3232.5 }, feathers = 5 }
+T.DEMO_MOVED_YD = 0.5 -- the player's own position this far from where they stood: the demo ends
+T.DEMO_LOOK = 0.1 -- seconds between looks at what ends it
+-- (the walk to the ledge and the walk from the landing: at these yards a second, within these seconds; the glide down
+-- in DEMO_GLIDE_SECS)
+T.DEMO_RUN_YPS, T.DEMO_RUN_SECS = 14, { 0.4, 2 }
+T.DEMO_GLIDE_SECS = 3
+T.DEMO_LAND_YPS, T.DEMO_LAND_SECS = 25, { 0.4, 2.5 }
+
+function T.JumpDemoOn() return T.jumpDemo ~= nil end
+
+-- The demo's fall spell row (FS.SPELLS' Slow Fall).
+function T.DemoSpellRow()
+  local FS = ns.FallSpells
+  for _, row in ipairs(FS.SPELLS) do
+    if row.ids and row.ids[1] == FS.DEMO_SPELL then return row end
+  end
+  return nil
+end
+
+-- A view as G.SaveView gave it put back (the map following the player when there's none).
+function T.ApplyView(v)
+  local g = GPS()
+  if not v then
+    g.Follow()
+  elseif v.browseZoom and not v.browse then -- (a spot looked at, G.LookAt: its own zoom, which ApplyView lets go)
+    g.LookAt(v.cont, v.x, v.y, v.browseZoom)
+  else
+    g.ApplyView(Copy(v))
+  end
+end
+
+-- The demo on (again from its start when it's on). False when it can't be (no position, combat).
+function T.JumpDemoStart()
+  if T.jumpDemo then T.JumpDemoStop("again") end
+  local g, N, FS, Geo = GPS(), ns.Nav, ns.FallSpells, ns.Geo
+  if ns.inCombat or (InCombatLockdown and InCombatLockdown()) then return false end
+  local rx, ry, rc = Geo.RealPlayerWorld()
+  local row = T.DemoSpellRow()
+  if not (rx and row) then return false end
+  local okView, view = pcall(g.SaveView)
+  local demo = { real = { rx, ry, rc }, override = Geo.override, pending = Copy(g.PendingStops()),
+    view = okView and view and Copy(view) or false }
+  T.jumpDemo = demo
+  N.demoRoute = true -- (before the trip's set: nothing of it saved)
+  FS.held, FS.fall, FS.fallArm = nil, nil, nil
+  FS.demo = { row = row, feathers = T.JUMP_DEMO.feathers }
+  local D = T.JUMP_DEMO
+  local sx, sy, tx, ty = D.start[1], D.start[2], D.stop[1], D.stop[2]
+  Geo.SetOverride({ x = sx, y = sy, cont = D.cont, facing = math.atan2(ty - sy, tx - sx), moving = false,
+    indoors = false, swimming = false })
+  FS.Refresh()
+  g.PendingStops({})
+  N.SetStops({ { x = tx, y = ty, cont = D.cont, name = L["Example stop"] } }, false, "red")
+  g.onDemoCast = T.JumpDemoCast
+  g.Follow()
+  g.Redraw()
+  demo.lookAt = GetTime()
+  T.DemoFrame():Show()
+  return true
+end
+
+-- The demo's look-alike buttons hidden (each use button's twin, G.DemoUseButton).
+function T.HideDemoButtons()
+  local g = GPS()
+  for _, b in ipairs({ g and g.useBtn or false, rawget(_G, "AzerothGPSArrowUseButton") or false }) do
+    local d = b and b.twin
+    if d then
+      d:Hide()
+      d.key = nil
+    end
+  end
+end
+
+-- Everything the demo changed put back at once. `why`: "left" (the step or the tutorial), "moved", "combat",
+-- "hidden", "logout", "again".
+function T.JumpDemoStop(why)
+  local demo = T.jumpDemo
+  if not demo then return false end
+  T.jumpDemo = nil
+  local g, N, FS = GPS(), ns.Nav, ns.FallSpells
+  if T.demoFrame then T.demoFrame:Hide() end
+  if g then g.onDemoCast = nil end
+  T.Try("the demo's player", function() ns.Geo.SetOverride(demo.override) end)
+  T.Try("the demo's spell", function()
+    FS.demo, FS.held, FS.fall, FS.fallArm = nil, nil, nil, nil
+  end)
+  T.HideDemoButtons()
+  T.Try("the demo's route", function()
+    N.demoRoute = nil
+    if ns.Router and ns.Router.DropBackground then ns.Router.DropBackground() end -- (the example trip's searches)
+    N.Restore()
+  end)
+  T.Try("the demo's fall spells", FS.Refresh)
+  T.Try("the demo's view", function() T.ApplyView(demo.view) end)
+  -- (after the view: following the player again lets go of the stops waiting, G.Follow)
+  T.Try("the demo's stops waiting", function() g.PendingStops(Copy(demo.pending or {})) end)
+  T.Try("the demo's redraw", g.Redraw)
+  -- (still on its step: it says the example stopped, Show Again plays it again)
+  local run = T.run
+  if why ~= "left" and why ~= "again" and run and run.step and run.step.jumpDemo and not run.card then
+    run.mark.demoEnded = why or true
+    if not run.paused then T.ShowStep() end
+  end
+  return true
+end
+
+-- The demo button clicked (G.DemoCastClick; the controller's A, Pad.Run): nothing cast; the simulated player walks to
+-- the ledge, off it and glides down to the ground, then on to the stop.
+function T.JumpDemoCast()
+  local demo = T.jumpDemo
+  if not demo or demo.anim then return false end
+  local path = T.DemoPath()
+  if not path then return false end
+  ns.FallSpells.demo.castAt = GetTime()
+  path.t0 = GetTime()
+  demo.anim = path
+  T.HideDemoButtons()
+  return true
+end
+
+-- The simulated player's way from where they stand along the route: { pts = { x, y, ... }, at = { seconds at each
+-- point }, total, drop = { first, last } point numbers of the fall }, or nil with no drop on the route.
+function T.DemoPath()
+  local N, R, Geo = ns.Nav, ns.Router, ns.Geo
+  local r = N.route
+  if not (r and r.parts) then return nil end
+  local pts, kinds = {}, {}
+  local o = Geo.override
+  if o then pts[1], pts[2] = o.x, o.y end
+  for _, part in ipairs(r.parts) do
+    local p, k = part.pts, part.kinds
+    if p and #p >= 4 and (part.stop == nil or part.stop == 1) then
+      for i = 1, #p / 2 do
+        local x, y = p[2 * i - 1], p[2 * i]
+        local n = #pts / 2
+        if n == 0 or (x - pts[2 * n - 1]) ^ 2 + (y - pts[2 * n]) ^ 2 > 0.01 then
+          if n > 0 then kinds[n] = i > 1 and k and k[i - 1] or 1 end
+          pts[#pts + 1], pts[#pts + 2] = x, y
+        end
+      end
+    end
+  end
+  local n = #pts / 2
+  local first, last
+  for i = 1, n - 1 do
+    if kinds[i] == R.KIND_DROP and (first == nil or last == i - 1) then
+      first = first or i
+      last = i
+    end
+  end
+  if not first then return nil end
+  local function Len(a, b)
+    local yd = 0
+    for i = a, b - 1 do
+      yd = yd + math.sqrt((pts[2 * i + 1] - pts[2 * i - 1]) ^ 2 + (pts[2 * i + 2] - pts[2 * i]) ^ 2)
+    end
+    return yd
+  end
+  local function Clamp(v, lim) return math.max(lim[1], math.min(lim[2], v)) end
+  -- (each phase's seconds shared out over its pieces by their yards)
+  local phases = {
+    { 1, first, Clamp(Len(1, first) / T.DEMO_RUN_YPS, T.DEMO_RUN_SECS) },
+    { first, last + 1, T.DEMO_GLIDE_SECS },
+    { last + 1, n, Clamp(Len(last + 1, n) / T.DEMO_LAND_YPS, T.DEMO_LAND_SECS) },
+  }
+  local at, t = { 0 }, 0
+  for _, ph in ipairs(phases) do
+    local a, b, secs = ph[1], ph[2], ph[3]
+    local yd = Len(a, b)
+    for i = a, b - 1 do
+      t = t + (yd > 0 and secs * Len(i, i + 1) / yd or secs / math.max(1, b - a))
+      at[i + 1] = t
+    end
+  end
+  return { pts = pts, at = at, total = t, drop = { first, last + 1 } }
+end
+
+-- Where the simulated player is `t` seconds into path `a`: x, y, facing, and whether it's in the glide.
+function T.DemoPathAt(a, t)
+  local pts, at = a.pts, a.at
+  local n = #pts / 2
+  for i = 1, n - 1 do
+    if t <= at[i + 1] or i == n - 1 then
+      local span = at[i + 1] - at[i]
+      local f = span > 0 and math.max(0, math.min(1, (t - at[i]) / span)) or 1
+      local x1, y1, x2, y2 = pts[2 * i - 1], pts[2 * i], pts[2 * i + 1], pts[2 * i + 2]
+      return x1 + (x2 - x1) * f, y1 + (y2 - y1) * f, math.atan2(y2 - y1, x2 - x1),
+        i >= a.drop[1] and i < a.drop[2]
+    end
+  end
+  return pts[1], pts[2], 0, false
+end
+
+-- Each frame while the demo runs: the glide moved on, and now and then a look at what ends it.
+function T.JumpDemoTick()
+  local demo = T.jumpDemo
+  if not demo then return end
+  local now = GetTime()
+  local a = demo.anim
+  local o = ns.Geo.override
+  if a and o then
+    local t = now - a.t0
+    local x, y, facing, gliding = T.DemoPathAt(a, t)
+    o.x, o.y, o.facing = x, y, facing
+    demo.gliding = gliding or nil
+    if t >= a.total then -- (down and walked on: at the stop, which the trip arrives at as any does)
+      local d = ns.Nav.dest
+      if d and d.x then o.x, o.y = d.x, d.y end
+      demo.anim, demo.gliding, demo.landed = nil, nil, true
+    end
+  end
+  if now - (demo.lookAt or 0) < T.DEMO_LOOK then return end
+  demo.lookAt = now
+  local why = T.JumpDemoEnds()
+  if why then T.JumpDemoStop(why) end
+end
+
+-- What ends the demo now, or nil.
+function T.JumpDemoEnds()
+  local demo = T.jumpDemo
+  if not demo then return nil end
+  local run = T.run
+  if not (run and not run.card and run.step and run.step.jumpDemo) then return "left" end
+  if ns.inCombat or (InCombatLockdown and InCombatLockdown()) then return "combat" end
+  local x, y, c = ns.Geo.RealPlayerWorld()
+  local r = demo.real
+  if not x or c ~= r[3] or (x - r[1]) ^ 2 + (y - r[2]) ^ 2 > T.DEMO_MOVED_YD ^ 2 then return "moved" end
+  local g, st = GPS(), S()
+  local f = T.MapFrame()
+  if st.shown == false or st.minimized or not (f and f:IsVisible()) then return "hidden" end
+  local wm = rawget(_G, "WorldMapFrame")
+  if g.WorldMapWanted and g.WorldMapWanted() and not (wm and wm:IsShown()) then return "hidden" end
+  return nil
+end
+
+function T.DemoFrame()
+  if T.demoFrame then return T.demoFrame end
+  local f = CreateFrame("Frame", nil, UIParent)
+  f:SetScript("OnUpdate", function()
+    local ok, err = pcall(T.JumpDemoTick)
+    if not ok and GPS().LogError then pcall(GPS().LogError, "tutorial demo", err) end
+  end)
+  f:Hide()
+  T.demoFrame = f
+  return f
 end
 
 ---------------------------------------------------------------------------
@@ -779,7 +1035,8 @@ function T.BuildSections()
         end,
         target = T.MapFrame },
     } },
-    { id = "search", version = "1.2.0", title = L["Search Places"], full = true, steps = {
+    -- (1.4.0: the enemies in the search and the Target button added, updated = "1.4.0": marked in the lists)
+    { id = "search", version = "1.2.0", updated = "1.4.0", title = L["Search Places"], full = true, steps = {
       { title = L["Open the search"], text = L["Click the magnifier, Search Places, in the map menu."],
         enter = function()
           T.ClearRoute()
@@ -812,6 +1069,14 @@ function T.BuildSections()
       { title = L["More to find"],
         text = L["The search also finds flight masters, inns, towns and zones. Type what you need and get a route to it."],
         enter = function() T.CloseSearch() end, target = T.Quick("search") },
+      -- (1.4.0: Options > General's Include enemies, on by default)
+      { title = L["Enemies too"],
+        text = L["Enemy mobs are found by name too, at their camp nearest you. Ones orange or red to you show their levels first."],
+        enter = function() T.CloseSearch() end, target = T.Quick("search") },
+      -- (1.3.14's Target button, Options > Directions: it marks the NPC solo, not in a group, by default)
+      { title = L["Target the NPC"],
+        text = L["Near an NPC stop, click the pulsing Target button under the directions: it targets the NPC and, when you're solo, marks it."],
+        enter = function() T.CloseSearch() end },
     } },
     { id = "dungeon", version = "1.2.0", title = L["Dungeon maps"], full = true, steps = {
       { title = L["A dungeon's map"],
@@ -872,6 +1137,55 @@ function T.BuildSections()
         target = function() return ns.Arrow.frame end, done = function() return S().arrowSnap == false end },
       { title = L["Size and lock"],
         text = L["After the tutorial, right-click the arrow or the panel to lock that one in place: each has its own lock. The arrow's size, the text size and both locks are in Options > Directions."],
+        enter = function() T.ArrowOn() end },
+    } },
+    -- (1.4.0, asked 2026-11-23: "update tutorials for 1.4.0 too"; the city grid, jumps, the class fall spells and the
+    -- other faction's ground. Told, not shown: no city or ledge is near every player, so the steps point at the arrow
+    -- and the directions they're said in, as the arrow section does)
+    { id = "cities", version = "1.4.0", title = L["Ground, stairs and jumps"], corner = true, steps = {
+      { title = L["The map's own ground"],
+        text = L["Routes walk the map's own ground, in the open world and the six capitals: every floor, stair, ramp and bridge. The directions say when to take the stairs, cross a bridge or board a lift."],
+        enter = function() T.ArrowOn() end, target = function() return ns.Arrow.dir end },
+      { title = L["Jumps"],
+        text = L["A coiled line on the map and an orange arrow mean a jump is coming up. Right-click a coil to avoid jumps on the way to that stop."],
+        enter = function() T.ArrowOn() end, target = function() return ns.Arrow.frame end },
+      -- (a live example, Kooki3z 2026-11-25: a mage's trip off Bluefen's ridge on the map, the cast button as in play,
+      -- an insecure look-alike that casts nothing; clicked, the glide down is shown. T.JumpDemoStart above)
+      { title = L["Class spells for big drops"], jumpDemo = true,
+        text = function(run)
+          if run.mark.demoEnded then
+            return L["The example stopped and your own route is back. Show Again plays it again."]
+          end
+          return L["With a spell that slows your fall ready, routes may take bigger drops. In this example as a mage, click the button beside the directions to watch the jump. Nothing is cast."]
+        end,
+        enter = function(run)
+          local st = S()
+          st.arrow, st.arrowLocked, st.dirLocked, st.dirShown, st.arrowShown = true, false, false, true, true
+          -- (the player's own map: in the game's world map when that's theirs, T.WorldMapPreview, put back on leaving)
+          if run.snapshot and run.snapshot.gps and run.snapshot.gps.useWorldMap == true then
+            run.mark.worldMap = true
+            T.WorldMapPreview(true)
+          end
+          if ns.Arrow and ns.Arrow.Apply then ns.Arrow.Apply() end
+          if not T.JumpDemoStart() then error("the spell-jump demo can't start here") end
+        end,
+        leave = function(run)
+          T.JumpDemoStop("left")
+          if run.mark.worldMap then T.WorldMapPreview(false) end
+        end,
+        target = function() return GPS().DemoUseShown and GPS().DemoUseShown() or ns.Arrow.dir end,
+        choices = function(run)
+          return { { L["Show Again"], function()
+            run.mark.demoEnded = nil
+            T.JumpDemoStart()
+            T.ShowStep()
+          end } }
+        end },
+      { title = L["The other faction's ground"],
+        text = L["Routes go around the other faction's guards (the red areas on the map). When the only way goes past them, the route asks you first: Take it?"],
+        enter = function() T.ArrowOn() end, target = function() return ns.Arrow.dir end },
+      { title = L["Your choice"],
+        text = L["Use class spells, Expert jumper and Safe drop are in Options > Routing."],
         enter = function() T.ArrowOn() end },
     } },
     { id = "window", version = "1.2.0", title = L["The map window"], full = true, steps = {
@@ -953,24 +1267,6 @@ function T.BuildSections()
   for _, sec in ipairs(T.SECTIONS) do T.byId[sec.id] = sec end
 end
 
--- The newest version a section was added in.
-function T.Newest()
-  local best
-  for _, sec in ipairs(T.SECTIONS) do
-    if not best or T.VersionNumber(sec.version) > T.VersionNumber(best) then best = sec.version end
-  end
-  return best
-end
--- The sections added since the tutorial was last offered (every one, at a first install), in order.
-function T.NewSections()
-  local tut = Tut()
-  local since = T.VersionNumber(tut and tut.offered)
-  local out = {}
-  for _, sec in ipairs(T.SECTIONS) do -- (a section only changed since, `updated`: marked in the lists, not offered)
-    if T.VersionNumber(sec.version) > since then out[#out + 1] = sec.id end
-  end
-  return out
-end
 -- A section's name in the lists (asked 2026-11-14: "if the player has done the tutorial we mark it (done) but if we
 -- update or add a new one we should show (new) or (updated)"): (done) played through as it is; (updated) played
 -- through before its `updated` release changed it (`seen[id]`: the release it was played at); (new) not played, and
@@ -1348,7 +1644,6 @@ function T.Start(ids, from)
   end
   local g, R = GPS(), ns.Record
   if _G.AzerothGPSOptions and _G.AzerothGPSOptions:IsShown() then _G.AzerothGPSOptions:Hide() end
-  if T.prompt then T.answered = true T.prompt:Hide() end
   local snap = T.Snapshot()
   -- (the dev addon's map editor's tools on: off for the tutorial, back on at its end)
   if g.roadMode then g.SetRoadMode(false) end
@@ -1646,144 +1941,12 @@ function T.Ticker()
 end
 
 ---------------------------------------------------------------------------
--- The offer, Options > Help and /agps tutorial
+-- Options > Help and /agps tutorial (the only ways in: no popup offers it)
 ---------------------------------------------------------------------------
-
--- Whether the offer may come up now (else next time): as starting, and nothing else of the player's in the way.
-function T.CanPrompt() return T.Blocked() == nil end
-
-function T.ShowPrompt(ids)
-  local tut = Tut()
-  local newest = T.Newest()
-  local f = T.prompt
-  if not f then
-    f = ns.Window("AzerothGPSTutorialPrompt", 440, 150, "", "DIALOG")
-    -- (the addon's name over the text, with the corner logo every popup has: nothing told the player whose window
-    -- this was, asked 2026-11-10)
-    f.name = f:CreateFontString(nil, "ARTWORK", "GameFontNormalLarge")
-    f.name:SetPoint("TOPLEFT", 16, f.top - 8)
-    f.name:SetPoint("RIGHT", f, "RIGHT", -16, 0)
-    f.name:SetJustifyH("LEFT")
-    f.name:SetWordWrap(true)
-    f.text = f:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
-    f.text:SetPoint("TOPLEFT", f.name, "BOTTOMLEFT", 0, -6)
-    f.text:SetPoint("RIGHT", f, "RIGHT", -16, 0)
-    f.text:SetJustifyH("LEFT")
-    f.text:SetWordWrap(true)
-    f.start = PanelButton(f, L["Start Tutorial"], function()
-      T.answered = true
-      f:Hide()
-      T.Offered()
-      T.Start(f.ids)
-    end)
-    f.later = PanelButton(f, L["Not Now"], function()
-      T.answered = true
-      f:Hide()
-      T.NotNow()
-    end)
-    f.never = PanelButton(f, L["Don't Ask Again"], function()
-      T.answered = true
-      f:Hide()
-      Tut().ask = false
-      T.Offered()
-      T.RefreshHelp()
-    end)
-    f.start:SetPoint("BOTTOMLEFT", 14, 14)
-    f.later:SetPoint("LEFT", f.start, "RIGHT", 6, 0)
-    f.never:SetPoint("LEFT", f.later, "RIGHT", 6, 0)
-    -- (closed without an answer, Escape or the X: not now)
-    f:SetScript("OnHide", function()
-      if not T.answered then
-        T.answered = true
-        T.NotNow()
-      end
-    end)
-    T.prompt = f
-  end
-  f.ids = ids
-  local first = tut.fresh and not tut.offered
-  f:SetWindowTitle(first and L["Welcome to AzerothGPS"] or Format(L["What's new in %s"], newest))
-  -- (the headline while the minimap's section is among those offered, a first install's too: asked 2026-11-10)
-  local headline = false
-  for _, id in ipairs(ids or {}) do
-    if id == "minimap" then headline = true end
-  end
-  f.name:SetText(headline and L["AzerothGPS can now replace your minimap!"] or "AzerothGPS")
-  f.text:SetText(first and L["Take a short tutorial? It shows the main features on your own map and puts everything back after. Options > Help plays it any time."]
-    or L["Take a short tutorial of the new features? It uses your own map and puts everything back after. Options > Help plays it any time."])
-  local w = 40
-  for _, b in ipairs({ f.start, f.later, f.never }) do w = w + (b:GetWidth() or 80) + 6 end
-  f:SetWidth(math.max(440, w, (f.name:GetStringWidth() or 0) + 40))
-  f:SetHeight(-f.top + (f.name:GetStringHeight() or 16) + 14 + (f.text:GetStringHeight() or 24) + 62)
-  f:ClearAllPoints()
-  f:SetPoint("CENTER", 0, 140)
-  T.answered = false
-  f:Show()
-  f:Raise()
-  return f
-end
--- The newest sections count as offered: no prompt again until an update adds more.
-function T.Offered()
-  local tut = Tut()
-  tut.offered, tut.declined = T.Newest(), 0
-end
-function T.NotNow()
-  local tut = Tut()
-  tut.declined = (tut.declined or 0) + 1
-  if tut.declined >= T.MAX_ASKS then T.Offered() end
-end
-
--- Whether the tutorial should be offered at this login, and which sections.
-function T.PromptDue()
-  local tut = Tut()
-  if not tut or tut.ask == false then return false end
-  local ids = T.NewSections()
-  if #ids == 0 then return false end
-  if tut.askedFor ~= T.Newest() then -- (sections added since it was last asked about: asked afresh)
-    tut.askedFor, tut.declined = T.Newest(), 0
-  end
-  if (tut.declined or 0) >= T.MAX_ASKS then return false end
-  return true, ids
-end
-
--- Once a session, some seconds after the world is entered: a tutorial a /reload cut short offered again, else the
--- tutorial offered when it's due. Not in combat, in a dungeon, dead or on a flight: next time.
-function T.MaybePrompt()
-  if T.prompted or T.run then return false end
-  if not T.CanPrompt() then return false end
-  -- (1.3.10: the setup first, Setup.lua; this offer after it's closed, never two popups at once)
-  if ns.Setup and ns.Setup.Holds and ns.Setup.Holds() then
-    T.afterSetup = true
-    return false
-  end
-  T.prompted = true
-  local resume = T.resume
-  if resume then
-    T.resume = nil
-    ns.Ask("AzerothGPSTutorialResume",
-      L["The tutorial was cut short, and everything is back as you had it. Carry on where you were?"], nil, nil,
-      function() T.Start(resume.queue, resume.qi) end)
-    return true
-  end
-  -- (1.3.10: a first install gets the setup and the tips in the route panel instead of this popup, Setup.lua; the
-  -- tutorial is still in Options > Help and /agps tutorial)
-  if ns.Setup and ns.Setup.TipsOn() then
-    T.Offered()
-    return false
-  end
-  local due, ids = T.PromptDue()
-  if not due then return false end
-  T.ShowPrompt(ids)
-  return true
-end
-function T.OnEnteringWorld()
-  if T.prompted or not (C_Timer and C_Timer.After) then return end
-  C_Timer.After(T.PROMPT_DELAY, function() pcall(T.MaybePrompt) end)
-end
 
 -- At login, before the map, the route and the arrow start: a tutorial that was running when the game was left
 -- (a /reload, a crash) has its snapshot saved; the settings and the route go back as the player had them, with the
--- minimap answer already given. It's offered again from where it was (T.MaybePrompt).
+-- minimap answer already given. Nothing pops up after: Options > Help or /agps tutorial starts it again.
 function T.RestoreSaved()
   local tut = Tut()
   local run = tut and tut.run
@@ -1795,10 +1958,9 @@ function T.RestoreSaved()
     T.ApplyKeep(run, true) -- (cut short by a /reload: what was ticked is kept, as at its end)
     ns.db.mapView = type(snap.view) == "table" and snap.view or nil -- (the view the map opens on: the player's own)
   end
-  if type(run.queue) == "table" then T.resume = { queue = run.queue, qi = tonumber(run.qi) or 1 } end
 end
 
--- Options > Help's section: Play All, a Play button a section (done ones marked), and the offer's own switch.
+-- Options > Help's section: Play All, and a Play button a section (done ones marked).
 function T.BuildHelp(ui)
   local tut = Tut()
   ui.note(L["A short tour of the main features on your own map. Everything goes back to how you had it after."])
@@ -1811,12 +1973,8 @@ function T.BuildHelp(ui)
     fs:SetText(T.SectionLabel(sec, tut.seen))
     T.helpRows[#T.helpRows + 1] = { id = sec.id, button = b, label = fs }
   end
-  T.helpCheck = ui.check(L["Offer the tutorial after big updates"],
-    L["Asks at login whether to take the tutorial when an update adds new sections to it."],
-    function() return Tut().ask ~= false end,
-    function(v) Tut().ask = v and true or false end)
 end
--- The Help section built again (a section done, the switch changed).
+-- The Help section built again (a section done).
 function T.RefreshHelp()
   local O = ns.Options
   if O and O.RegisterHelpSection then pcall(O.RegisterHelpSection, "tutorial", T.BuildHelp) end
@@ -1844,8 +2002,16 @@ function T.Init()
   local ev = CreateFrame("Frame")
   ev:RegisterEvent("PLAYER_REGEN_DISABLED")
   ev:RegisterEvent("PLAYER_REGEN_ENABLED")
+  ev:RegisterEvent("PLAYER_LOGOUT") -- (a /reload or logout: the spell-jump demo undone before the game saves)
   ev:SetScript("OnEvent", function(_, event)
-    if event == "PLAYER_REGEN_DISABLED" then pcall(T.Pause) else pcall(T.Resume) end
+    if event == "PLAYER_REGEN_DISABLED" then
+      pcall(T.JumpDemoStop, "combat")
+      pcall(T.Pause)
+    elseif event == "PLAYER_LOGOUT" then
+      pcall(T.JumpDemoStop, "logout")
+    else
+      pcall(T.Resume)
+    end
   end)
   T.events = ev
   T.RefreshHelp()

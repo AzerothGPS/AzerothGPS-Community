@@ -16,6 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-xdist", "pytest-rerunfailures", "lupa"]
+fast = ["numba"]  # (optional: the world grid's mesh walks compiled, worldgrid_nb.py; never required)
 
 [project.scripts]
 agps = "azerothgps.cli:main"

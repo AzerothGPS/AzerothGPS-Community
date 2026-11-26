@@ -677,6 +677,12 @@ function Pad.HintTargets()
     if b and b.IsShown and b:IsShown() and Pad.Key(id) then out[#out + 1] = { b, id, swap } end
   end
   local q = Pad.Question()
+  -- (asked on the map with the map closed: the "?" by the minimap's logo, item 54, Menu's icon over it)
+  if q and q.IsVisible and not q:IsVisible() then
+    local g0 = G()
+    add(g0 and g0.mmAsk, "menu")
+    return out
+  end
   if q then
     add(q.yes, "yes")
     add(q.no, "back")
@@ -717,6 +723,7 @@ function Pad.HintTargets()
   else
     add(Pad.StopAt(), "remove")
     add(Pad.IconAt(), "select")
+    add(g and g.DemoUseShown and g.DemoUseShown(), "select") -- (the tutorial's demo cast button, Pad.Run)
     -- (the map's bottom button by what it does now, one icon (asked 2026-11-16, "stop not set should only be the set
     -- stop button, if 1 or more stops are marked then its LB only"): stops marked, Confirm Route, Select's; none yet,
     -- Set Stop's, the way to mark one; a route up, Clear Route, its own buttons)
@@ -1190,6 +1197,9 @@ function Pad.Run(acts, down)
   end
   if has.select then
     if g.removeAsk and g.removeAsk:IsShown() then return Click(g.removeAsk) end
+    -- (the tutorial's spell-jump demo: its look-alike cast button, A as its click; Tutorial.lua)
+    local demo = g.DemoUseShown and g.DemoUseShown()
+    if demo then return Click(demo) end
     -- (searching: the row highlighted with the D-pad, as Enter; Kooki3z 2026-11-20)
     if g.SearchOpen and g.SearchOpen() then
       g.SearchPick()

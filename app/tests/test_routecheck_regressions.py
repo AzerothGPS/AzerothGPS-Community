@@ -473,11 +473,17 @@ def test_route_check_weighs_the_other_factions_guards_with_a_faction():
 def test_route_check_takes_a_way_round_the_other_factions_guards_for_no_detour():
     # (the overnight sweep, 2026-10-07) as an Alliance character, Western Plaguelands' trip round The Bulwark (Horde
     # guards) is twice the grid's walk, which goes past them: the addon's own option, not a detour. route-check measures
-    # the reference walk's yards within their reach (guard_yards) and doesn't flag a route longer for them
+    # the reference walk's yards within their reach (guard_yards) and doesn't flag a route longer for them.
+    # (The Deathguard patrol that closed the gap north of the ruins, three circles, left Data/Hostile.lua in the 1.4.0
+    # audit as a lone patrol: with the gap open there's no detour left to measure, so the test puts them back itself)
     from azerothgps.routecheck import _runtime, guard_yards
 
     lua, ns = _runtime("A")
     P, R = ns.Passability, ns.Router
+    guards = ns.Hostile[0].A
+    for v in (1713, 511, 45, 1729, 553, 45, 1751, 512, 45):
+        guards[len(guards) + 1] = v
+    R.HostileChanged()
     P.PATH_MAX_EXPANSIONS, P.PATH_MAX_CELLS = 400000, 900 * 900
     ref = P.FindPath(0, 937.1, -147.8, 2003.9, -298.9)
     assert isinstance(ref, tuple) and guard_yards(R, 0, ref, "A") >= 50

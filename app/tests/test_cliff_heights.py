@@ -321,32 +321,40 @@ def test_orgrimmars_ledge_is_jumped_down_with_the_health_hidden():
     """Kooki3z 2026-11-20 in Orgrimmar: "should be jumpable cliffside, you can safely jump down from areas in org". The
     client hides the player's health from addons (wowmock too), so Nav.SafeDrop was the free 14 yd and the city's
     22 yd ledges were never jumped: 325 yd up and round the flight master's tower. Out of combat it's taken as
-    FALL_SECRET_HEALTH of the most: down the ledge (a drop, "jump down"); in combat, the long way; never up one."""
+    FALL_SECRET_HEALTH of the most: down the ledge (a drop, "jump down"); in combat too (since 2026-11-23); never up one."""
     from azerothgps.gameharness import start
 
     lua, ns = start()
     R, N = ns.Router, ns.Nav
     assert N.SafeDrop() > 30  # (out of combat, health hidden)
+    # (Kooki3z 2026-11-23: in a city, no hop without Expert jumper: the way round walked; with it, down the ledge)
+    r = R.Route(1, *HALL_OF_LEGENDS, *VALLEY, lua.table(offroad=False))
+    if r.cityGrid is not None:
+        assert R.KIND_DROP not in [r.kinds[i] for i in range(1, len(r.pts) // 2)], r.length
+    ns.settings.gps.expertJumper = True
+    R.Reset()
     r = R.Route(1, *HALL_OF_LEGENDS, *VALLEY, lua.table(offroad=False))
     kinds = [r.kinds[i] for i in range(1, len(r.pts) // 2)]
     assert R.KIND_DROP in kinds and r.length < 250, r.length
     back = R.Route(1, *VALLEY, *HALL_OF_LEGENDS, lua.table(offroad=False))
     assert R.KIND_DROP not in [back.kinds[i] for i in range(1, len(back.pts) // 2)]  # (never up a ledge)
+    # (Kooki3z 2026-11-23, "ignore the in combat jumping distance rule": in combat the same safe drop, down the ledge)
+    out = N.SafeDrop()
     lua.execute("UnitAffectingCombat = function() return true end")
     try:
-        assert N.SafeDrop() == N.FALL_FREE
+        assert N.SafeDrop() == out
         R.Reset()
         r = R.Route(1, *HALL_OF_LEGENDS, *VALLEY, lua.table(offroad=False))
-        assert r.length > 300  # (the free drops only: round the tower)
+        assert R.KIND_DROP in [r.kinds[i] for i in range(1, len(r.pts) // 2)] and r.length < 250, r.length
     finally:
         lua.execute("UnitAffectingCombat = function() return false end")
+        ns.settings.gps.expertJumper = None
 
 
 def test_a_cliff_walls_drop_is_the_players_safe_drop():
     """Kooki3z 2026-11-20, Stonetalon Mountains: a ledge dropped off one way but never climbed back. A cliff wall's way
-    down was capped at the free 14 yd; now it's the player's safe drop, as the routes' (Nav.SafeDrop: 39 yd out of
-    combat with the health hidden, 14 in it): a 30 yd drop walked down out of combat, round its end in combat, and
-    never climbed."""
+    down was capped at the free 14 yd; now it's the player's safe drop, as the routes' (Nav.SafeDrop: Options' Safe drop,
+    39 yd by default, in combat too since 2026-11-23): a 30 yd drop walked down in and out of combat, and never climbed."""
     from azerothgps.gameharness import start
 
     lua, ns = start()
@@ -365,7 +373,7 @@ def test_a_cliff_walls_drop_is_the_players_safe_drop():
         assert route(high, low).length < 160  # (down: 30 yd, within the safe drop out of combat)
         assert route(low, high).length > 200  # (never up it)
         lua.execute("UnitAffectingCombat = function() return true end")
-        assert route(high, low).length > 200  # (in combat only the free 14 yd: round its end)
+        assert route(high, low).length < 160  # (in combat the same safe drop, Kooki3z 2026-11-23)
         assert route(low, high).length > 200
     finally:
         lua.execute("UnitAffectingCombat = function() return false end")
@@ -407,3 +415,62 @@ def test_the_stonetalon_ledge_is_walked_down_not_round_by_the_road():
     R.Reset()
     back = R.Route(1, *LEDGE_FOOT, *LEDGE_TOP, lua.table(offroad=False, maxDrop=maxDrop))
     assert back.length > 500, back.length  # (up: round by the road)
+
+
+# Drops in the open world (Kooki3z 2026-11-23, approved): a step down of Router.STEP_DOWN_YD or less always walked off;
+# one up to the free fall (14 yd, no damage) only where it saves Router.DROP_SAVE_YD (60) of walking; two or more such
+# in a row down one slope a chain, walked instead without Expert jumper. Cliff walls on the Barrens' open ground along
+# y = -2000 (drawn toward +x, their left, +y, the high side), the trip straight across them 150 yd.
+OW_HIGH, OW_LOW = (-1500.0, -1925.0), (-1500.0, -2075.0)
+
+
+def _cliffs(lua, ns, cliffs):
+    """Cliff walls [(half length, y, drop)], centered on x = -1500."""
+    items = []
+    for half, y, dz in cliffs:
+        xs = (-1500 - half, -1500, -1500 + half)
+        items.append("{ op = 'wall', drawn = true, continent = 1, time = 1, kind = 'cliff', pts = { %s }, cl = { %s }, "
+                     "cr = { 20, 20, 20 } }" % (", ".join(f"{x},{y}" for x in xs), ", ".join([str(20 + dz)] * 3)))
+    ns.db.tracks = lua.eval("{ " + ", ".join(items) + " }")
+    ns.Passability.RefreshWalls()
+    ns.Passability.ClearSegMemo()
+    ns.Router.Reset()
+
+
+@pytest.fixture
+def open_ground():
+    from azerothgps.gameharness import start
+
+    lua, ns = start()
+
+    def route():
+        ns.Router.Reset()
+        return ns.Router.Route(1, *OW_HIGH, *OW_LOW, lua.table(offroad=True)).length
+
+    yield lua, ns, route
+    ns.settings.gps.expertJumper = None
+    ns.db.tracks = lua.eval("{}")
+    ns.Passability.RefreshWalls()
+
+
+def test_an_open_world_six_yard_edge_is_dropped(open_ground):
+    lua, ns, route = open_ground
+    _cliffs(lua, ns, [(300, -2000, 6)])  # (its ends 300 yd off: round them is 500 yd more)
+    assert route() < 160  # (straight down the edge)
+
+
+def test_a_ten_yard_drop_is_taken_only_where_it_saves_sixty_yards(open_ground):
+    lua, ns, route = open_ground
+    _cliffs(lua, ns, [(50, -2000, 10)])  # (round its end: about 30 yd more than the drop)
+    assert route() > 170  # (walked round)
+    _cliffs(lua, ns, [(100, -2000, 10)])  # (round its end: about 100 yd more)
+    assert route() < 160  # (dropped)
+
+
+def test_a_chain_of_drops_down_a_slope_is_walked_unless_an_expert_jumper(open_ground):
+    lua, ns, route = open_ground
+    _cliffs(lua, ns, [(300, y, 8) for y in (-1980, -2000, -2020)])  # (three 8 yd drops 20 yd apart)
+    assert route() > 300  # (walked round their ends)
+    ns.settings.gps.expertJumper = True
+    ns.Passability.ClearSegMemo()
+    assert route() < 160  # (an Expert jumper hops down all three)

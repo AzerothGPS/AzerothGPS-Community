@@ -690,3 +690,154 @@ def test_route_work_on_a_slow_client_stays_in_its_slices_and_never_pauses_routin
         undo()
         N.STUTTER_WATCH, N.STUTTER_RESUME_GRACE = False, grace
         R.WARM, R.SYNC_WALKS = False, True
+
+
+# 1.4.0's world routing, being tested (WorldGrid.lua): its search, the regions it loads and the map tiles it decodes on the way run in the
+# background's slices, a short leg (searched anywhere) and a long one (in the corridor round the Router's own route).
+# (timing: Elwynn's leg runs 17-23 ms slices on a dev PC, about twice that on the loaded CI runner: 46 ms once, PR #977)
+@pytest.mark.timing
+@pytest.mark.parametrize("cont, sx, sy, tx, ty", [(1, 300.0, -4700.0, -600.0, -4250.0),
+                                                  (0, -9460.0, 60.0, -10500.0, 1000.0),
+                                                  (0, -5600.0, -500.0, -5380.0, -2950.0)])
+def test_the_world_grid_s_search_runs_in_short_slices(cont, sx, sy, tx, ty):
+    from azerothgps.gameharness import start
+    lua, ns = start()
+    R, WG = ns.Router, ns.WorldGrid
+    lua.execute("GetTime = function() return os.clock() end")
+    R.SYNC_WALKS = False
+    ns.settings.gps.worldGrid = True
+    try:
+        r = R.Route(cont, sx, sy, tx, ty, lua.table())
+        assert r.pending
+        clock = lua.eval("function() return os.clock() * 1000 end")
+        worst, n = 0.0, 0
+        while R.HasWork():
+            a = clock()
+            R.Pump(clock() + 1, clock)
+            worst = max(worst, clock() - a)
+            n += 1
+        assert worst < FRAME_MS, f"a slice of the world grid's search ran {worst:.0f} ms"
+        r = R.Route(cont, sx, sy, tx, ty, lua.table())
+        # (its regions' folders loaded and their tiles decoded in those slices: nothing of the grid at login)
+        assert r.worldGrid and not r.pending and WG.stats.tiles > 0 and WG.stats.regions > 0
+    finally:
+        R.SYNC_WALKS = True
+        ns.settings.gps.worldGrid = False
+
+
+# (Nav.Rerouting asked Router.Queued, which didn't exist: always false, so a reroute off the route got 1 ms a frame, not
+# the bigger slices its comment promised, and the route from where the player went came late. Found 2026-11-23)
+def test_a_reroute_off_the_route_pumps_with_the_warm_budget_till_it_lands():
+    pytest.importorskip("lupa.lua51")
+    from azerothgps.gameharness import start
+
+    lua, ns = start()
+    G, N, R = ns.GPS, ns.Nav, ns.Router
+    N.FUN = False
+    R.WARM, R.SYNC_WALKS = True, False
+    # (the frames' clock: 16 ms a frame plus the work done in it)
+    lua.execute("""
+      AGPS_DPS = 0
+      debugprofilestop = function() return AGPS_DPS + os.clock() * 1000 end
+      AGPS_BUDGETS = {}
+      local R = AGPS_NS.Router
+      local pump = R.Pump
+      R.Pump = function(deadline, now)
+        AGPS_BUDGETS[#AGPS_BUDGETS + 1] = deadline - now()
+        return pump(deadline, now)
+      end""")
+    budgets = lua.eval("AGPS_BUDGETS")
+    x, y = 2254.0, 293.0
+
+    def frame(px, py):
+        lua.execute(f"AGPS_T = AGPS_T + 1/60; AGPS_DPS = AGPS_DPS + 16; AGPS_POS[1], AGPS_POS[2] = {px}, {py}")
+        N.Status(px, py, 0)
+        G.PumpSearches()
+        return budgets[len(budgets)] if len(budgets) else None
+    try:
+        N.SetStops(lua.eval("{ { x = 1600, y = 240, cont = 0, name = 'Ruins' } }"), False, "red")
+        for _ in range(6000):  # (the route worked out, its searches done)
+            frame(x, y)
+            if N.route and not R.HasWork():
+                break
+        assert N.route and not R.HasWork()
+        lua.execute(f"AGPS_T = AGPS_T + {N.FRESH_SECONDS + 1}")  # (past Nav.Fresh: kept up at 1 ms)
+        assert not N.Fresh() and not N.Rerouting()
+        # (150 yd off the route, to the north: worked out again from there in the background, first in the queue)
+        y += 150
+        lua.execute(f"AGPS_T = AGPS_T + {N.RerouteTiming()[0] + 1}")
+        old, rerouting, warm = N.route, 0, []
+        for _ in range(600):
+            n0 = len(budgets)
+            b = frame(x, y)
+            if N.Rerouting():
+                rerouting += 1
+                if len(budgets) > n0:
+                    warm.append(b)
+            elif rerouting:
+                break
+        assert rerouting > 0, "no reroute queued"
+        assert warm and min(warm) > 1.5, warm  # (the warm-up's slices: a quarter of the frame, not 1 ms)
+        assert max(warm) <= G.WARM_MS + 0.01  # (its cap, unchanged)
+        assert N.route is not old  # (landed: the route from where the player went)
+        # (landed: 1 ms again while the route is kept up)
+        for _ in range(5):
+            b = frame(x, y)
+        assert not N.Rerouting()
+        if R.HasWork():
+            assert b <= 1.01
+    finally:
+        R.WARM, R.SYNC_WALKS = False, True
+
+
+# (2026-11-23, from the sand south of Gadgetzan to Uldum's entrance: the plan's leg from Steamwheedle Port searched on the
+# world grid in the corridor round the Router's own way and, none found, in the wide one, filled in one go: 170,000
+# buckets, a 15-25 ms slice on a test PC. Counted, not timed: the slices' clock is the Lua instructions the jobs ran
+# (100,000 a ms, about this PC's), so a slice is 400,000 of them and the worst job's run between two pauses is the same
+# on every PC; the wide corridor's fill ran 1,238,000, now 614,000 at most, a walk search's own)
+SAND_PORT = (1, -6933.0, -4951.0)
+SAND_ULDUM = (1, -9650.0, -2783.3)
+MOST_K_INSTRUCTIONS = 800  # (thousands between two pauses, the slice 400)
+
+
+def test_the_sand_trips_grid_leg_from_the_port_pauses_in_its_corridor():
+    pytest.importorskip("lupa.lua51")
+    from azerothgps.gameharness import start
+
+    lua, ns = start()
+    R, WG = ns.Router, ns.WorldGrid
+    lua.execute('UnitFactionGroup = function() return "Alliance", "Alliance" end; AGPS_LEVEL = 60')
+    ns.CharDB().faction = "Alliance"
+    R.Route(1, SAND_PORT[1] + 300, SAND_PORT[2] + 300, SAND_PORT[1] + 600, SAND_PORT[2] + 200, lua.table())  # (roads)
+    R.SYNC_WALKS = False
+    ns.settings.gps.worldGrid = True
+    lua.execute("""
+      AGPS_K = { worst = 0, where = "" }
+      local resume = coroutine.resume
+      AGPS_RESUME_WAS = resume
+      coroutine.resume = function(co, ...)
+        local k = 0
+        debug.sethook(co, function() k = k + 1 AGPS_TICK = AGPS_TICK + 0.01 end, "", 1000)
+        local r = { resume(co, ...) }
+        debug.sethook(co)
+        if k > AGPS_K.worst then AGPS_K.worst = k end
+        return unpack(r)
+      end
+      AGPS_TICK = 0
+      AGPS_NOW = function() return AGPS_TICK end -- (ms: the jobs' instructions, 100,000 a ms)""")
+    now = lua.eval("AGPS_NOW")
+    try:
+        r = R.Route(1, SAND_PORT[1], SAND_PORT[2], SAND_ULDUM[1], SAND_ULDUM[2], lua.table())
+        assert r.pending
+        for _ in range(1000000):
+            if not R.HasWork():
+                break
+            R.Pump(now() + 4, now)
+        assert not R.HasWork()
+        assert WG.stats.searches >= 1  # (the grid searched it: in its corridors)
+        worst = lua.eval("AGPS_K.worst")
+        assert worst <= MOST_K_INSTRUCTIONS, f"{worst}k instructions between two pauses"
+    finally:
+        lua.execute("coroutine.resume = AGPS_RESUME_WAS")
+        R.SYNC_WALKS = True
+        ns.settings.gps.worldGrid = False

@@ -495,10 +495,29 @@ function LK.Play(effect)
 end
 
 -- A stop reached (Nav's arrival hooks): the effect picked at the trip's last stop.
+-- (one that can't play yet, nowhere to show it: the map hidden by the loading screen into a dungeon (item 44), played
+-- once it's shown, within LK.PENDING_SECONDS)
+LK.PENDING_SECONDS = 15
 function LK.OnArrive(info)
   if type(info) ~= "table" or not info.last then return end
   local e = S().arrivalEffect
-  if e and e ~= "none" then LK.Play(e) end
+  if not e or e == "none" then return end
+  if LK.Play(e) then return end
+  LK.pending = { effect = e, at = GetTime() }
+  if not LK.waiter then
+    LK.waiter = CreateFrame("Frame")
+    LK.waiter.left = 0
+    LK.waiter:SetScript("OnUpdate", function(self, elapsed)
+      self.left = self.left - elapsed
+      if self.left > 0 then return end
+      self.left = 0.25
+      local p = LK.pending
+      if not p then self:Hide() return end
+      if GetTime() - p.at > LK.PENDING_SECONDS then LK.pending = nil self:Hide() return end
+      if LK.Play(p.effect) then LK.pending = nil self:Hide() end
+    end)
+  end
+  LK.waiter:Show()
 end
 
 -- Every frame while something's showing: each part moved, faded at its end, put away when done.

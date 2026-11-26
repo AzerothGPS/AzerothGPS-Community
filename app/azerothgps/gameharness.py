@@ -5,6 +5,7 @@ the tests (app/tests/test_map_redraw.py and the private dev repo's) and the trip
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from .paths import ADDON_DIR
@@ -59,6 +60,53 @@ def start(replace: dict | None = None, saved: str | None = None, locale: str | N
     ns = lua.table()
     lua.globals().AGPS_NS = ns
     loader = lua.eval("function(src, name) return assert(loadstring(src, '@' .. name)) end")
+    # (a load-on-demand addon next to AzerothGPS, C_AddOns.LoadAddOn: the world grid's regions, WorldGrid.lua. Its
+    # folder from AGPS_WG_ADDONS_DIR when set, a trial bake's)
+    import os as _os
+    root = Path(_os.environ.get("AGPS_WG_ADDONS_DIR") or ADDON_DIR.parent)
+    # (the region's files handed to Lua one string at a time: nothing here holds `lua`. A Python function kept in Lua that
+    # refers to its runtime is a cycle only Python's cycle collector frees, and that runs by Python's own allocations,
+    # blind to Lua's: every test's dead harness, its grids and searches, was kept until then, GBs a CI worker, 2026-11-23)
+    parts = {}
+
+    def read_addon(name, k=0):
+        """k 0: name's folder read, how many strings (a file's source, then its name, each file); 0 when it isn't there
+        or was loaded. k > 0: that string. k -1: the strings let go."""
+        name, k = str(name), int(k)
+        if k < 0:
+            parts[name] = []
+            return 0
+        if k > 0:
+            return parts[name][k - 1]
+        folder = root / name
+        toc = folder / f"{name}.toc"
+        if name in parts or not toc.is_file():
+            return 0
+        srcs = []
+        for line in toc.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and line.endswith(".lua"):
+                srcs.append((folder / line.replace("\\", "/")).read_text(encoding="utf-8"))
+                srcs.append(f"{name}/{line}")
+        parts[name] = srcs
+        return len(srcs)
+    lua.globals().AGPS_READ_ADDON = read_addon
+    # (any other addon goes to the LoadAddOn there before, a test's own mock in `pre`: GatherMate2_Data's)
+    lua.execute("""
+      local before = C_AddOns.LoadAddOn
+      C_AddOns.LoadAddOn = function(name)
+        local n = AGPS_READ_ADDON(name, 0)
+        if n == 0 then
+          if before then return before(name) end
+          return false, "MISSING"
+        end
+        local own = {}
+        for i = 1, n, 2 do assert(loadstring(AGPS_READ_ADDON(name, i), '@' .. AGPS_READ_ADDON(name, i + 1)))(name, own) end
+        AGPS_READ_ADDON(name, -1)
+        return true
+      end
+      LoadAddOn = C_AddOns.LoadAddOn
+    """)
     for name in toc_files():
         src = (replace or {}).get(name)
         loader(src if src is not None else (ADDON_DIR / name).read_text(encoding="utf-8"), name)("AzerothGPS", ns)
@@ -83,4 +131,15 @@ def start(replace: dict | None = None, saved: str | None = None, locale: str | N
     if errors:
         raise RuntimeError(f"the addon failed to start: {errors}")
     ns.Router.WARM, ns.Router.SYNC_WALKS = False, True
+    # (world routing is on by default for players since b17a8f8c; the tests were written for it off unless they turn it
+    # on, the Router's own routing (cliffs, enemy ground, caves, the leg provider) tested as such. Off here unless the
+    # saved variables given set it or AGPS_TEST_WORLD_GRID=1 (a run with the players' default))
+    if os.environ.get("AGPS_TEST_WORLD_GRID") != "1" and not (saved and "worldGrid" in saved):
+        ns.settings.gps.worldGrid = False
+        lua.globals().AGPS_TEST_KEEP_GRIDS = True  # (a reload's migration keeps it off: Core, item 74)
+        # (and in the saved table itself, not only the settings in use (a profile's): a test that loads the addon
+        # again, ADDON_LOADED, takes ns.settings from it, the migration's world routing on with it, for every test after)
+        if ns.db and ns.db.settings and ns.db.settings.gps:
+            ns.db.settings.gps.worldGrid = False
+            ns.db.settings.gps.worldGridDefaultOn = True  # (the migration done: not on again at the next load)
     return lua, ns

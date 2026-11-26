@@ -4,8 +4,9 @@
 -- `dirStopsOnly`). Snapped (`arrowSnap`) the arrow sits on a side of the directions (`arrowSide`) and the two move as
 -- one; apart, each is placed on its own (`arrowFreePoint`, `dirPoint`). Dragged, the arrow comes off the directions, and
 -- dropped against a side of them it snaps there (A.SnapSide; asked 2026-10-30: "support snapping and detaching").
--- Sizes: `arrowPx`, `dirTextScale`. Toggle: gps.arrow (both panels). The arrow alone hidden: `arrowSide` "hide" (asked
--- 2026-11-17), only while the directions show (A.Hidden); the directions alone hidden: `dirShown` false.
+-- Sizes: `arrowPx`, `dirTextScale`. Toggles: `arrowShown` the arrow, `dirShown` the directions text, each on its own
+-- (Kooki3z 2026-11-24); gps.arrow either of them (both off: no window). The arrow alone hidden while the directions show
+-- (A.Hidden).
 local _, ns = ...
 local L = ns.L or setmetatable({}, { __index = function(_, k) return k end }) -- (the game's language: Locales.lua)
 local Format = ns.Format or string.format
@@ -60,7 +61,7 @@ A.Snapped = Snapped
 -- hides the arrow"). Only while the directions show: with them hidden too the arrow shows, never an empty window (the
 -- whole of it off is "Show direction arrow"). Its panel stays shown (its OnUpdate keeps the text going) at alpha 0 and
 -- click-through, and shows anyway while the route's first step is a hearthstone or teleport: its button is there.
-local function Hidden() return S().arrowSide == "hide" and S().dirShown ~= false end
+local function Hidden() return S().arrowShown == false and S().dirShown ~= false end
 A.Hidden = Hidden
 -- The directions' least height: snapped on its left or right, the arrow's column
 local function MinHeight()
@@ -252,9 +253,7 @@ local function QuestText(px, py, cont)
     -- still leading to the spot: a smaller, fainter arrow (a little higher), "In quest
     -- area" and the yards to the spot under it; the "!" goes by the quest's title instead
     path = ns.Turns.Path(r)
-    arrow:Show()
-    arrow:SetSize(Px() / 2, Px() / 2)
-    arrow:SetAlpha(0.5)
+    A.SmallArrow()
     arrow:ClearAllPoints()
     arrow:SetPoint("CENTER", slot, "CENTER", 0, K(10))
     dist:SetText(L["|cffbfbfbfIn quest area|r"] .. "\n" .. N.FormatDistance(r.walkYards))
@@ -272,9 +271,27 @@ local function PlaceUse(b)
   b:SetSize(A.USE_PX, A.USE_PX)
   b:SetPoint("CENTER", frame, "CENTER") -- (the slot's middle)
 end
+-- (a fall spell's or item's, FallSpells.CastNow: placed and sized as the hearthstone's and the teleports', the one rule
+-- for every use button (Kooki3z 2026-11-23: "should be rendered at scale and the same size as the hearthstone and portal
+-- buttons", "for all these spells"), the arrow small above it as in a quest area (A.SmallArrow; "replace the arrow with
+-- the button and show the arrow tiny above it")
+local PlaceCast = PlaceUse
+-- The arrow small and faint: a quest area's (its spot round the slot set by the caller), and above a fall spell's button.
+A.SMALL_ARROW_ALPHA = 0.5
+function A.SmallArrow()
+  arrow:Show()
+  arrow:SetSize(Px() / 2, Px() / 2)
+  arrow:SetAlpha(A.SMALL_ARROW_ALPHA)
+end
+-- (the button's own icon is clear for a hearthstone or teleport, useIcon in the arrow's place being its picture; a fall
+-- spell's button beside the arrow has no picture under it, so its own icon shows. Kooki3z 2026-11-23: "it says cast
+-- slow fall, but I still don't have a spell button to click": it was there, clickable, and clear)
 local function SetUse(t)
   local G = ns.GPS
-  if useBtn and G and G.SetUseButton then G.SetUseButton(useBtn, t, PlaceUse) end
+  if not (useBtn and G and G.SetUseButton) then return end
+  useBtn.clearIcon = not (t and t.fall) or nil
+  G.SetUseButton(useBtn, t, t and t.fall and PlaceCast or PlaceUse)
+  if G.UseIconAlpha then G.UseIconAlpha(useBtn) end
 end
 A.SetUse = SetUse
 
@@ -285,7 +302,9 @@ local function UpdateText(px, py, cont)
   -- button where the arrow is (asked, 2026-10-01: the turns of the walk after it were shown instead,
   -- out of step with the steps), the walk after it next
   local use = N.route and N.dest and not N.route.flying and not (N.questing and N.dest) and N.UseNow and N.UseNow() or nil
-  SetUse(use)
+  -- (else a fall spell to cast now for a big drop ahead, FallSpells.CastNow: its button, the arrow kept)
+  local cast = not use and N.route and N.dest and not N.route.flying and ns.FallSpells and ns.FallSpells.CastNow() or nil
+  SetUse(use or cast)
   if not use then
     useIcon:Hide()
     useGlow:Hide()
@@ -297,6 +316,12 @@ local function UpdateText(px, py, cont)
   arrow:ClearAllPoints()
   arrow:SetPoint("CENTER", slot, "CENTER")
   arrow:Show()
+  if cast and useBtn and (ns.GPS.UseShown and ns.GPS.UseShown(useBtn) or useBtn:IsShown()) then -- (a fall spell's button in the arrow's place: the arrow small above it,
+    -- in the slot's top half, inside the window: anchored to the button over the window's edge it wasn't seen)
+    A.SmallArrow()
+    arrow:ClearAllPoints()
+    arrow:SetPoint("BOTTOM", slot, "CENTER", 0, A.USE_PX / 2 + K(1))
+  end
   useIcon:Hide()
   useGlow:Hide()
   bang:Hide()
@@ -309,8 +334,7 @@ local function UpdateText(px, py, cont)
     arrow:SetRotation(0)
     arrow:SetVertexColor(0.6, 0.8, 1)
     lastSet.rot, lastSet.color = nil, nil
-    line1:SetText(N.paused == "auto" and L["|cffffd100Routing paused: you're not following the route|r"]
-      or L["|cffffd100Routing is paused|r"])
+    line1:SetText(N.PausedHead and N.PausedHead() or L["|cffffd100Routing is paused|r"])
     line2:SetText(L["|cff9d9d9dResume Routing in the map menu, or /agps pause|r"])
     local dd = d.cont == cont and math.sqrt((d.x - px) ^ 2 + (d.y - py) ^ 2) or nil
     line3:SetText(dd and string.format("%s  |cffffffff%s|r", StopLabel(d, #N.stops), N.FormatDistance(dd))
@@ -320,6 +344,23 @@ local function UpdateText(px, py, cont)
     return true
   end
   if r and N.RedAsking and N.RedAsking() then r = nil end -- (asked "keep this route?": not followed yet)
+  if r and d and not r.flying and N.StandIn and N.StandIn() then
+    -- world routing's stand-in while its searches land (Nav.StandIn; Kooki3z 2026-11-23: a straight line through a
+    -- ridge followed for a minute): "Working out the route...", no turns, the arrow gray and up as when paused, the
+    -- stop as the crow flies
+    path, maneuvers = nil, {}
+    arrow:SetRotation(0)
+    arrow:SetVertexColor(0.6, 0.6, 0.6)
+    lastSet.rot, lastSet.color = nil, nil
+    line1:SetText("|cff9d9d9d" .. N.WorkingText() .. "|r")
+    line2:SetText("")
+    local dd = d.cont == cont and math.sqrt((d.x - px) ^ 2 + (d.y - py) ^ 2) or nil
+    line3:SetText(dd and string.format("%s  |cffffffff%s|r", StopLabel(d, #N.stops), N.FormatDistance(dd))
+      or StopLabel(d, #N.stops))
+    line4:SetText("")
+    for _, row in ipairs(rows) do row:Hide() end
+    return true
+  end
   if not d and N.areaQuests then
     -- no route, in a quest's area: its objectives, with the small "!" at the arrow's top right, as beside the arrow on
     -- a route (asked 2026-11-15: "change it to the same one we show when there is an arrow, the small one in the top
@@ -401,8 +442,14 @@ local function UpdateText(px, py, cont)
     local function yd(v) return "|cffffffff" .. N.FormatDistance(v) .. "|r" end
     line1:SetText(ns.Turns.NowText(m, yd))
     if line1:GetStringWidth() > line1:GetWidth() + 1 then line1:SetText(ns.Turns.NowText(m, yd, true)) end
-    -- (and the stop's height against yours, in a city: "Below you, 12 yd down")
-    local hint = N.HeightText(px, py, cont)
+    -- (and the stop's height against yours, in a city: "Below you, 12 yd down"; at a jump, its fall, not the slope's
+    -- few yards before it: Kooki3z 2026-11-23, "Cast Slow Fall, then jump down / 3 yd down")
+    local hint
+    if m.kind == "drop" or m.kind == "jump" then
+      hint = m.dropYd and ("|cff80c0ff" .. Format(L["%s down"], N.FormatDistance(m.dropYd, true)) .. "|r") or nil
+    else
+      hint = N.HeightText(px, py, cont)
+    end
     local toward = m.toward and Format(L["toward %s"], m.toward) or ""
     line2:SetText(hint and (toward ~= "" and toward .. "  " .. hint or hint) or toward)
   else
@@ -435,6 +482,26 @@ end
 -- by default): a jump of EASE_JUMP or more between two looks is eased over EASE_TIME for a half turn (shorter for less,
 -- EASE_MIN at least), smoothstep (slow, fast, slow); while it eases the way it heads for follows the route (the player
 -- turning meanwhile), not started again. Smaller changes, the player turning, are followed at once: never lagging.
+-- (a jump down or across coming up: the arrow orange this near it, the jump icon pulsing a little sooner)
+A.JUMP_ORANGE_YD, A.JUMP_ICON_YD = 12, 15
+-- The arrow's color for the next maneuver `m1` and the way's angle from the facing `rel` (radians): 1 green heading the
+-- right way, 2 white for a turn, 3 red when it's behind you, 4 orange at a jump coming up (a drop off a ledge, "Jump
+-- down here", or a running jump across a gap, "Jump across here": the city grid's); and whether the jump icon shows:
+-- never now (Kooki3z 2026-11-22: "remove the pulsing jump down here icon from directions, might confuse with spell casting
+-- slow fall"; the step's text and the orange arrow say it).
+-- (with a margin, A.COLOR_HOLD: a color holds till the angle is that far past its threshold, so a few yards beside the
+-- route don't flip it frame to frame; item 69)
+A.COLOR_HOLD = math.rad(10)
+function A.ColorFor(m1, rel, last)
+  local hopping = m1 and (m1.kind == "drop" or m1.kind == "jump")
+  local a = math.abs(rel or 0)
+  if hopping and m1.dist <= A.JUMP_ORANGE_YD then return 4, false end
+  local green, red = math.rad(20), math.rad(100)
+  if last == 1 then green = green + A.COLOR_HOLD end
+  if last == 3 then red = red - A.COLOR_HOLD end
+  local color = a < green and 1 or a < red and 2 or 3
+  return color, false
+end
 A.EASE_JUMP = math.rad(25)
 A.EASE_TIME = 0.45
 A.EASE_MIN = 0.2
@@ -537,13 +604,7 @@ local function Update(dt)
   local rel = ns.Turns.RelativeAngle(px, py, Geo.Facing(), tx, ty)
   local shown = A.EaseStep(A.easeState, rel, dt)
   if A.Easing() then A.still = false end -- (turning: every frame till it's there)
-  -- green when heading the right way, gold for a turn, red when it's behind you; orange at a
-  -- drop off a ledge coming up: jump down there
-  local a = math.abs(rel)
-  local m1 = maneuvers and maneuvers[1]
-  local drop = m1 and m1.kind == "drop" and m1.dist <= 12
-  local jump = (m1 and m1.kind == "drop" and m1.dist <= 15) and true or false
-  local color = drop and 4 or a < math.rad(20) and 1 or a < math.rad(100) and 2 or 3
+  local color, jump = A.ColorFor(maneuvers and maneuvers[1], rel, lastSet.color)
   -- (running straight, nothing changes: the rotation, color and jump icon aren't set again every
   -- frame — they were most of the arrow's cost with arrowHz 0, the 2026-10-07 idle profile)
   if math.abs(shown - (lastSet.rot or 99)) > A.SET_ROT or color ~= lastSet.color or jump ~= lastSet.jump then

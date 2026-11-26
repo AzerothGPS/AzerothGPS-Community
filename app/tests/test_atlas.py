@@ -51,7 +51,8 @@ def test_the_release_zip_takes_the_whole_folder_with_the_atlas_textures():
     if not release.is_file():
         pytest.skip("no release workflow in this repo (the maintainers' copy has it)")
     yml = release.read_text(encoding="utf-8")
-    assert "zip -r -q \"../dist/AzerothGPS-$VERSION.zip\" AzerothGPS -x '*/.*'" in yml
+    # (the world grid's load-on-demand region folders go in the zip beside it, 1.4.0)
+    assert "zip -r -q \"../dist/AzerothGPS-$VERSION.zip\" AzerothGPS $(ls -d AzerothGPS_WG* 2>/dev/null) -x '*/.*'" in yml
     textures = [p for p in (ATLAS / "Media" / "Textures").rglob("*") if p.is_file()]
     assert len(textures) > 800
     assert not [p for p in ATLAS.rglob("*") if any(part.startswith(".") for part in p.relative_to(ADDON).parts)]
@@ -113,6 +114,8 @@ def test_no_blizzard_art_outside_the_atlas_folder():
         # (the third exception, 2026-11-19, CLAUDE.md: the first-run setup's four card pictures, Kooki3z's in-game
         # screenshots made by setupart.py; only the names it makes)
         own = own or rel.parent == Path("Media/Setup") and p.stem in _setup_art()
+        # (the fourth, item 34 (2026-11-24, CLAUDE.md): What's New's picture of a spell jump, from Kooki3z's screenshot)
+        own = own or rel.parent == Path("Media/WhatsNew") and p.name == "spellJump.tga"
         if not own:
             stray.append(str(rel))
     assert not stray, stray
@@ -2381,6 +2384,305 @@ def test_the_map_in_the_world_map_has_the_terrain_round_a_building():
     # (its engine loaded when first asked: before, never on that small radius, so it drew as the Terrain style)
     assert c.Seamless() and c.shownView.interiorTerrain and c.shownView.interiorSpot is None
     assert any(q.terrain for q in c.laidTiles.quads.values())
+
+
+# The game's world map as it lays its art (Blizzard_MapCanvas): a pool of detail layers on its canvas, released and
+# acquired again on every SetMapID, a frame it has to make new at the canvas's level + 1 (as every frame made on a
+# parent is), at alpha 1.
+WORLD_MAP_ART = """
+  local box = WorldMapFrame.ScrollContainer
+  local child = NewWidget("Frame", "AGPSArtTestChild")
+  box.Child = child
+  child.GetWidth = function() return 1002 end
+  child.GetHeight = function() return 668 end
+  AGPS_WMS = { maps = {} }
+  AGPS_DL = { active = {}, free = {}, made = 0 }
+  local function Acquire()
+    local f = table.remove(AGPS_DL.free)
+    if not f then
+      f = CreateFrame("Frame", nil, child)
+      f._alpha = 1
+      f.GetAlpha = function(s) return s._alpha end
+      f.GetFrameLevel = function() return child:GetFrameLevel() + 1 end
+      f.SetMapAndLayer = function() end
+      AGPS_DL.made = AGPS_DL.made + 1
+    end
+    f:Show()
+    AGPS_DL.active[#AGPS_DL.active + 1] = f
+  end
+  WorldMapFrame.detailLayerPool = { EnumerateActive = function()
+    local i = 0
+    return function() i = i + 1 return AGPS_DL.active[i] end
+  end }
+  box.InstantPanAndZoom = function() end
+  box.SetHorizontalScroll = function(_, h) AGPS_WMS.h = h end
+  box.SetVerticalScroll = function(_, v) AGPS_WMS.v = v end
+  box.GetHorizontalScroll = function() return AGPS_WMS.h end box.GetVerticalScroll = function() return AGPS_WMS.v end
+  WorldMapFrame.GetMapID = function() return AGPS_WMS.map end
+  WorldMapFrame.SetMapID = function(_, id)
+    AGPS_WMS.map = id
+    table.insert(AGPS_WMS.maps, id)
+    for _, f in ipairs(AGPS_DL.active) do f:Hide() table.insert(AGPS_DL.free, f) end
+    AGPS_DL.active = {}
+    -- (a continent's art in one layer, a zone's in two: more than any map before, a new frame)
+    for _ = 1, (AGPS_NS.Maps[id] and AGPS_NS.Maps[id].type == 3) and 2 or 1 do Acquire() end
+  end
+"""
+
+
+def test_the_world_map_keeps_our_style_over_both_zones_at_every_zoom():
+    """Item 92 (Kooki3z's recording 2026-11-25, 1.4.0): in the game's world map with the OpenMap style, zooming and
+    panning between the Barrens and Dustwallow Marsh, the game's own painted zone and continent art came and went over
+    ours as the zone its world map showed changed (blurry close in, black where its tiles hadn't loaded): its art's
+    layers were at the level ours was, the canvas's + 1. Ours stays over every one of them and they're unseen, for
+    either zone at every zoom; the stitched art and the terrain ours all along; the game's art back once closed."""
+    from test_world_map_host import SETUP
+    lua, ns = _seamless()
+    G, A, st = ns.GPS, ns.Atlas, ns.settings.gps
+    lua.execute(SETUP + WORLD_MAP_ART)
+    st.shown, st.minimized = True, None
+    st.useWorldMap = True
+    G.ApplySettings()
+    lua.globals().AzerothGPS_ToggleMap()
+    assert G.WorldMapHosted() and G.Seamless()
+    f = lua.eval("AzerothGPSFrame")
+    layers = lambda: list(lua.eval("AGPS_DL.active").values())  # noqa: E731
+    barrens, dustwallow = ns.Maps[1413], ns.Maps[1445]
+    assert str(barrens.name) == "The Barrens" and str(dustwallow.name) == "Dustwallow Marsh"
+
+    def middle(m):
+        b = list(m.bounds.values())
+        return (b[0] + b[2]) / 2, (b[1] + b[3]) / 2
+
+    (bx, by), (dx, dy) = middle(barrens), middle(dustwallow)
+    shown, kinds = set(), set()
+    for zoom in (250.0, 800.0, 2500.0, 9000.0, 800.0, 250.0):
+        for i in range(5):  # (panned from one zone's middle to the other's, and back on the way out)
+            t = i / 4 if zoom <= 2500.0 else 1 - i / 4
+            G.LookAt(1, bx + (dx - bx) * t, by + (dy - by) * t, zoom)
+            lua.execute("AGPS_T = AGPS_T + 1")
+            G.Update(True)
+            G.WorldMapTick()
+            mid = lua.eval("AGPS_WMS.map")
+            shown.add(mid)
+            # the game's art: unseen, and under ours, whatever map it shows
+            assert layers(), mid
+            for layer in layers():
+                assert layer._alpha == 0, (zoom, i, mid)
+                assert f._level > layer.GetFrameLevel(layer), (zoom, i, mid)
+            # ours: the stitched art or the terrain laid, no gap where the game's would show through
+            terrain = str(G.laidTiles.laidSig).startswith("tiles:") and len(G.laidTiles.quads) > 0
+            art = A.artHost is not None and A.artHost.IsShown(A.artHost) and G.seamArt
+            assert terrain or art, (zoom, i, mid)
+            kinds.add(("terrain" if terrain else "") + ("art" if art else ""))
+            assert lua.eval("AzerothGPSFrame._bg[4]") > 0  # (our dark ground under it all)
+    assert {1413, 1445} <= shown and 1414 in shown  # (both zones and Kalimdor's map were the game's)
+    assert lua.eval("AGPS_DL.made") >= 2  # (a layer made new on the way, at the canvas's level + 1)
+    # closed: the game's art its own again
+    lua.globals().AzerothGPS_ToggleMap()
+    assert not G.WorldMapHosted()
+    for layer in layers():
+        assert layer._alpha == 1
+
+# The game's world map as this client lays its art (Blizzard_MapCanvas, Blizzard_MapCanvasDetailLayer in WoW Forever's
+# files): RefreshDetailLayers on every SetMapID (the pool released and acquired again), each layer at alpha 0 till its
+# tiles load, then its OnUpdate's RefreshAlpha sets its own alpha (1), as a zoom does (AdjustDetailLayerAlpha). `plain`:
+# no pool, the art plain textures on the canvas (its scroll child), made again on each map, set to alpha 1 by the game.
+WORLD_MAP_ART_GAME = """
+  hooksecurefunc = function(t, name, fn)
+    if type(t) ~= "table" then t, name, fn = _G, t, name end
+    local o = t[name]
+    t[name] = function(...) local r = { o(...) } fn(...) return unpack(r) end
+  end
+  local box = WorldMapFrame.ScrollContainer
+  local child = NewWidget("Frame", "AGPSArtTestChild")
+  box.Child = child
+  child.GetWidth = function() return 1002 end
+  child.GetHeight = function() return 668 end
+  AGPS_WMS = { maps = {} }
+  AGPS_DL = { active = {}, free = {}, made = 0, tex = {} }
+  local function Alpha(f)
+    f._alpha = 1
+    f.GetAlpha = function(s) return s._alpha end
+    f.SetAlpha = function(s, a) s._alpha = a end
+  end
+  local function Acquire()
+    local f = table.remove(AGPS_DL.free)
+    if not f then
+      f = CreateFrame("Frame", nil, child)
+      Alpha(f)
+      f.GetFrameLevel = function() return child:GetFrameLevel() + 1 end
+      -- (MapCanvasDetailLayerMixin's, copied onto the frame as the game's mixins are)
+      f.SetMapAndLayer = function(s) s.loading = true s:RefreshAlpha() end
+      f.IsFullyLoaded = function(s) return not s.loading end
+      f.GetLayerAlpha = function() return 1 end
+      f.GetGlobalAlpha = function() return 1 end
+      f.RefreshAlpha = function(s) s:SetAlpha(s.loading and 0 or 1) end
+      f:SetScript("OnUpdate", function(s) if s.loading then s.loading = nil s:RefreshAlpha() end end)
+      AGPS_DL.made = AGPS_DL.made + 1
+    end
+    f:Show()
+    f:SetMapAndLayer()
+    AGPS_DL.active[#AGPS_DL.active + 1] = f
+  end
+  if not AGPS_PLAIN then
+    WorldMapFrame.detailLayerPool = { EnumerateActive = function()
+      local i = 0
+      return function() i = i + 1 return AGPS_DL.active[i] end
+    end }
+    WorldMapFrame.RefreshDetailLayers = function(self)
+      for _, f in ipairs(AGPS_DL.active) do f:Hide() table.insert(AGPS_DL.free, f) end
+      AGPS_DL.active = {}
+      for _ = 1, (AGPS_NS.Maps[AGPS_WMS.map] and AGPS_NS.Maps[AGPS_WMS.map].type == 3) and 2 or 1 do Acquire() end
+    end
+    WorldMapFrame.AdjustDetailLayerAlpha = function(self)
+      for _, f in ipairs(AGPS_DL.active) do f:RefreshAlpha() end
+    end
+  else
+    child.GetRegions = function() return unpack(AGPS_DL.tex) end
+    WorldMapFrame.RefreshDetailLayers = nil
+    WorldMapFrame.AdjustDetailLayerAlpha = function() for _, t in ipairs(AGPS_DL.tex) do t:SetAlpha(1) end end
+  end
+  box.InstantPanAndZoom = function() WorldMapFrame:AdjustDetailLayerAlpha() end
+  box.SetHorizontalScroll = function(_, h) AGPS_WMS.h = h end
+  box.SetVerticalScroll = function(_, v) AGPS_WMS.v = v end
+  box.GetHorizontalScroll = function() return AGPS_WMS.h end box.GetVerticalScroll = function() return AGPS_WMS.v end
+  WorldMapFrame.GetMapID = function() return AGPS_WMS.map end
+  WorldMapFrame.SetMapID = function(self, id)
+    AGPS_WMS.map = id
+    table.insert(AGPS_WMS.maps, id)
+    if AGPS_PLAIN then
+      for _, t in ipairs(AGPS_DL.tex) do t:Hide() end
+      AGPS_DL.tex = {}
+      for k = 1, 6 do
+        local t = child:CreateTexture(nil, "BACKGROUND")
+        Alpha(t)
+        t.GetDrawLayer = function() return "BACKGROUND", -7 end
+        t.GetObjectType = function() return "Texture" end
+        AGPS_DL.tex[k] = t
+      end
+      AGPS_DL.made = AGPS_DL.made + 1
+    else
+      self:RefreshDetailLayers()
+    end
+  end
+"""
+
+
+@pytest.mark.parametrize("plain", [False, True])
+def test_the_world_maps_art_stays_unseen_as_the_game_sets_its_alpha_again(plain):
+    """Kooki3z on 6195a75c (item 92 again): in game the world map's painted zone art still showed as its zone changed.
+    The game sets a detail layer's alpha again by itself: once its tiles load (its OnUpdate's RefreshAlpha, after the
+    map changed), and on every zoom (AdjustDetailLayerAlpha). Kept at 0 through all of it, for the pool's layers and for
+    art laid as plain textures on the canvas; given back once the world map closes."""
+    from test_world_map_host import SETUP
+    lua, ns = _seamless()
+    G, st = ns.GPS, ns.settings.gps
+    lua.execute(f"AGPS_PLAIN = {'true' if plain else 'false'}")
+    lua.execute(SETUP + WORLD_MAP_ART_GAME)
+    st.shown, st.minimized = True, None
+    st.useWorldMap = True
+    G.ApplySettings()
+    lua.globals().AzerothGPS_ToggleMap()
+    assert G.WorldMapHosted() and G.Seamless()
+    arts = (lambda: list(lua.eval("AGPS_DL.tex").values())) if plain else         (lambda: list(lua.eval("AGPS_DL.active").values()))  # noqa: E731
+    barrens, dustwallow = ns.Maps[1413], ns.Maps[1445]
+
+    def middle(m):
+        b = list(m.bounds.values())
+        return (b[0] + b[2]) / 2, (b[1] + b[3]) / 2
+
+    (bx, by), (dx, dy) = middle(barrens), middle(dustwallow)
+    shown = set()
+    for zoom in (250.0, 800.0, 2500.0, 800.0, 250.0):
+        for i in range(5):
+            t = i / 4 if zoom <= 800.0 else 1 - i / 4
+            G.LookAt(1, bx + (dx - bx) * t, by + (dy - by) * t, zoom)
+            lua.execute("AGPS_T = AGPS_T + 1")
+            G.Update(True)
+            G.WorldMapTick()
+            shown.add(lua.eval("AGPS_WMS.map"))
+            assert arts()
+            # (the game's next frames: its tiles loaded, its alpha set again; or a zoom of its own)
+            for f in arts():
+                if not plain and f._scripts.OnUpdate:
+                    f._scripts.OnUpdate(f, 0.016)
+            lua.execute("WorldMapFrame:AdjustDetailLayerAlpha()")
+            if plain:
+                G.WorldMapTick()  # (a frame later: no hook on a plain texture, the tick's look)
+            for f in arts():
+                assert f._alpha == 0, (zoom, i, lua.eval("AGPS_WMS.map"), plain)
+    assert {1413, 1445} <= shown
+    assert lua.eval("AGPS_DL.made") >= 2
+    lua.globals().AzerothGPS_ToggleMap()
+    assert not G.WorldMapHosted()
+    for f in arts():
+        assert f._alpha == 1
+
+
+@pytest.mark.parametrize("world", [False, True])
+def test_the_map_holds_still_after_it_opens(world):
+    """Kooki3z on 62ac7ac2: after a /reload the map's parts wiggled as it opened and the game map's icons were jumpy.
+    Opened (the GPS window, and in the world map), with no input: the view's center and scale, the window's size,
+    place and level, the world map's scroll and zoom, and our icons' places stay put across 30 frames, while the game
+    releases its art's layers, fades its map and makes them again as it does on opening."""
+    from test_world_map_host import SETUP
+    lua, ns = _seamless()
+    G, st = ns.GPS, ns.settings.gps
+    lua.execute("AGPS_PLAIN = false")
+    lua.execute(SETUP + WORLD_MAP_ART_GAME + """
+      AGPS_PZ = {}
+      local box = WorldMapFrame.ScrollContainer
+      local pz = box.InstantPanAndZoom
+      box.InstantPanAndZoom = function(s, sc, u, v, ...)
+        AGPS_PZ[#AGPS_PZ + 1] = string.format("%.5f %.5f %.5f", sc, u, v)
+        return pz(s, sc, u, v, ...)
+      end
+      WorldMapFrame.SetGlobalAlpha = function(self) for _, f in ipairs(AGPS_DL.active) do f:RefreshAlpha() end end
+      AGPS_FN = 0
+      AGPS_STEP = function()
+        AGPS_T = AGPS_T + 1 / 60
+        AGPS_FN = AGPS_FN + 1
+        -- (the game's own: its layers released and its map faded, made again the next frame)
+        if AGPS_FN % 7 == 1 then
+          for _, f in ipairs(AGPS_DL.active) do f:Hide() table.insert(AGPS_DL.free, f) end
+          AGPS_DL.active = {}
+          WorldMapFrame:SetGlobalAlpha(1)
+        elseif AGPS_FN % 7 == 2 then
+          WorldMapFrame:RefreshDetailLayers()
+        end
+        local ws = {}
+        for _, w in ipairs(AGPS_WIDGETS) do ws[#ws + 1] = w end
+        for _, w in ipairs(ws) do
+          local f = w._scripts and w._scripts.OnUpdate
+          if f and w._shown then f(w, 1 / 60) end
+        end
+      end""")
+    st.shown, st.minimized = False, None
+    st.useWorldMap = world
+    G.ApplySettings()
+    lua.globals().AzerothGPS_ToggleMap()
+    assert G.WorldMapHosted() == world
+    f = lua.eval("AzerothGPSFrame")
+
+    def state():
+        v = G.shownView
+        icons = sorted((round(float(b._pt[4] or 0), 3), round(float(b._pt[5] or 0), 3))
+                       for b in G.poiButtons.values() if b._shown and b._pt and len(b._pt) >= 5)
+        pz = list(lua.eval("AGPS_PZ").values())
+        return (round(float(v.x), 3), round(float(v.y), 3), round(float(v.s), 8), f._w, f._h, f._level,
+                str(f._pt), lua.eval("AGPS_WMS.h"), lua.eval("AGPS_WMS.v"), pz[-1] if pz else None, tuple(icons))
+
+    lua.execute("AGPS_STEP()")
+    first = state()
+    assert first[-1] or not world, "no icons on the map"
+    for i in range(30):
+        lua.execute("AGPS_STEP()")
+        assert state() == first, i
+    if world:
+        assert len(list(lua.eval("AGPS_PZ").values())) <= 2  # (not zoomed again frame after frame)
+        for layer in lua.eval("AGPS_DL.active").values():
+            assert layer._alpha == 0  # (the art still unseen)
 
 
 # ------------------------------------------- the terrain round Undercity's level (asked 2026-11-14, the War Quarter)

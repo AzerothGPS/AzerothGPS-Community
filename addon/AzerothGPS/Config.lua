@@ -34,6 +34,8 @@ local HELP = {
   L["/agps replace on|off|small|medium|large|ground|mask|status  (the GPS map as the minimap)"],
   L["/agps tutorial [section|exit]  (the tutorial, or one of its sections: Options > Help lists them)"],
   L["/agps setup               (the first-time setup: minimap, map, directions, icons)"],
+  L["/agps whatsnew            (what's new in this version, its new options)"],
+  L["/agps faq                 (answers to common questions)"],
   L["/agps pad                (a controller: open and close the map with its Back button)"],
   L["/agps pad select|yes|remove|back|recenter | menu | zoom in|out | pan up|down|left|right  (the controller's controls, for macros)"],
   "/agps debug              (API probe; see `agps probes`)",
@@ -44,6 +46,8 @@ local HELP = {
 -- Words other addons add to /agps (the dev addon's map editor: `dev`, `draw`): ns.COMMANDS[word] = fn(b, msg), its
 -- help lines in ns.COMMAND_HELP.
 ns.COMMANDS, ns.COMMAND_HELP = {}, {}
+-- (debug: the fall spell's cast buttons as they are now, the map panel's and the arrow window's; FallSpells.DebugButtons)
+ns.COMMANDS.castbutton = function() if ns.FallSpells and ns.FallSpells.DebugButtons then ns.FallSpells.DebugButtons() end end
 
 local function OnOff(v, cur)
   if v == "on" then return true elseif v == "off" then return false end
@@ -150,6 +154,12 @@ Command = function(msg)
   elseif a == "setup" then -- (the first-run setup again, Setup.lua)
     if ns.Setup then ns.Setup.Open() end
     return
+  elseif a == "whatsnew" then -- (What's New again, WhatsNew.lua)
+    if ns.WhatsNew then ns.WhatsNew.Open() end
+    return
+  elseif a == "faq" then -- (the FAQ window, Faq.lua: item 48)
+    if ns.Faq then ns.Faq.Open() end
+    return
   elseif a == "tutorial" then -- (the tutorial: all of it, one section by its id, or out of it)
     if ns.Tutorial then ns.Tutorial.Slash(b) end
     return
@@ -192,6 +202,15 @@ Command = function(msg)
       ns.Print(gps.style == "seamless" and L["the seamless map is on: /agps seamless on|off|check|spots|explored"]
         or L["the seamless map is off: /agps seamless on|off|check|spots|explored"])
     end
+    return
+  elseif a == "route" then -- (what the route is waiting on, N.WaitReport: item 80c)
+    for _, line in ipairs(ns.Nav.WaitReport()) do ns.Print(line) end
+    return
+  elseif a == "worldgrid" then -- (1.4.0's world routing, being tested: WorldGrid.lua)
+    ns.WorldGrid.Slash(b)
+    return
+  elseif a == "citygrid" or a == "floor" then -- (1.4.0's city routing, being tested: CityGrid.lua; floor: its estimate)
+    ns.CityGrid.Slash(a, b)
     return
   elseif a == "arrow" then
     gps.arrow = OnOff(b, gps.arrow)
@@ -265,6 +284,14 @@ Command = function(msg)
     ns.Print("before: " .. e.before)
     if e.err then ns.Print("error: " .. e.err) end
     ns.Print("after: " .. e.after)
+  elseif a == "debug" and b == "speeds" then -- (the speeds kept: swim weight, and reset; item 63a)
+    local N, WG = ns.Nav, ns.WorldGrid
+    local rest = (msg or ""):match("speeds%s+(%S+)")
+    if rest == "reset" then N.ResetSpeeds() if N.Invalidate then N.Invalidate(true) end end
+    local _, run = N.Speeds()
+    ns.Print(string.format("run %.2f, swim %.2f, run/swim %s, the grid's swim weight %.2f%s", run or 0, N.SwimSpeed() or 0,
+      N.SwimRatio() and string.format("%.2f", N.SwimRatio()) or "not read yet", WG.SwimWeight(), rest == "reset" and " (reset)" or ""))
+    return
   elseif a == "debug" then
     if b == "route" then
       -- (for a bug report: where the player is and the route as it stands, saved for `agps probes`
