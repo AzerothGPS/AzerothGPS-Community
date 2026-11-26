@@ -694,33 +694,39 @@ def test_route_work_on_a_slow_client_stays_in_its_slices_and_never_pauses_routin
 
 # 1.4.0's world routing, being tested (WorldGrid.lua): its search, the regions it loads and the map tiles it decodes on the way run in the
 # background's slices, a short leg (searched anywhere) and a long one (in the corridor round the Router's own route).
-# (timing: Elwynn's leg runs 17-23 ms slices on a dev PC, about twice that on the loaded CI runner: 46 ms once, PR #977)
-@pytest.mark.timing
+# The slices go by the slow client's instruction clock (_VM_CLOCK, VM_PER_MS), as the test above's: by os.clock the
+# Dun Morogh leg failed every try on main and every PR after 1.4.0 merged (50-57 ms on the CI runner, 2026-11-26). Its
+# long slices were the collector's (8-18 MB freed or taken in one slice) and a region's folder loading (8 ms here for
+# WG0_4_5): neither is a step a pause can split. Counted, the search's own steps are as long on every machine and run:
+# a loop that doesn't pause still fails here.
 @pytest.mark.parametrize("cont, sx, sy, tx, ty", [(1, 300.0, -4700.0, -600.0, -4250.0),
                                                   (0, -9460.0, 60.0, -10500.0, 1000.0),
                                                   (0, -5600.0, -500.0, -5380.0, -2950.0)])
 def test_the_world_grid_s_search_runs_in_short_slices(cont, sx, sy, tx, ty):
+    pytest.importorskip("lupa.lua51")
     from azerothgps.gameharness import start
     lua, ns = start()
     R, WG = ns.Router, ns.WorldGrid
     lua.execute("GetTime = function() return os.clock() end")
     R.SYNC_WALKS = False
     ns.settings.gps.worldGrid = True
+    undo = lua.eval(_VM_CLOCK)(VM_PER_MS, VM_HOOK)
     try:
         r = R.Route(cont, sx, sy, tx, ty, lua.table())
         assert r.pending
-        clock = lua.eval("function() return os.clock() * 1000 end")
+        clock = lua.eval("function() return debugprofilestop() end")
         worst, n = 0.0, 0
         while R.HasWork():
             a = clock()
             R.Pump(clock() + 1, clock)
             worst = max(worst, clock() - a)
             n += 1
-        assert worst < FRAME_MS, f"a slice of the world grid's search ran {worst:.0f} ms"
+        assert worst < FRAME_MS, f"a slice of the world grid's search ran {worst:.0f} ms (counted) in {n} slices"
         r = R.Route(cont, sx, sy, tx, ty, lua.table())
         # (its regions' folders loaded and their tiles decoded in those slices: nothing of the grid at login)
         assert r.worldGrid and not r.pending and WG.stats.tiles > 0 and WG.stats.regions > 0
     finally:
+        undo()
         R.SYNC_WALKS = True
         ns.settings.gps.worldGrid = False
 
