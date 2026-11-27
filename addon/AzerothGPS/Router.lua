@@ -1167,6 +1167,9 @@ function R.WithTracks(roads, tracks, cont)
             local x, y = ax + (bx - ax) * k / m, ay + (by - ay) * k / m
             dense[#dense + 1], dense[#dense + 2] = x, y
             dal[#dal + 1] = along + L * k / m
+            -- (each point looks at every segment of the lines: a long road under a long drawn one, Ironforge's
+            -- recorded walk down to the Hall of Thanes, was a 90 ms slice on the slow-client clock; by the clock only)
+            if #dense % 16 == 0 and R.SliceOver and R.SliceOver() then coroutine.yield() end
             local u, sx, sy = under(x, y, bx - ax, by - ay)
             local f = u and onFloor(ed, sx, sy, along + L * k / m, reach)
             flag[#flag + 1] = f
@@ -3227,6 +3230,21 @@ function R.EliteTownsNear(cont, side, ...)
     if list.area[t] then
       out = out or {}
       out[t] = true
+    end
+  end
+  return out
+end
+-- The elite areas (their towns, R.HostileTowns') whose elites reach (x, y), a set, or nil (item 124: Nav.HostileOnRoute
+-- tells a walk's way into or out of the area its end is in from a crossing of it).
+function R.EliteTownsAt(cont, x, y, side)
+  local list = side and ns.Hostile and ns.Hostile[cont] and ns.Hostile[cont][side]
+  if not (list and list.area) then return nil end
+  local guardN, town, out = list.guardN or #list, nil, nil
+  for _, i in ipairs(HostileBuckets(cont, side)[math.floor(x / HB) * 65536 + math.floor(y / HB)] or EMPTY) do
+    if i > guardN and (list[i] - x) ^ 2 + (list[i + 1] - y) ^ 2 <= list[i + 2] ^ 2 then
+      town = town or R.HostileTowns(cont, side)
+      out = out or {}
+      out[town[i]] = true
     end
   end
   return out

@@ -14,6 +14,7 @@ from test_addon_lua import PRELUDE, load, route_pts  # noqa: E402
 
 DETOUR = {"offroad": (1.4, 150), "road": (2.5, 300)}  # as routecheck.py
 BLOCKED_RUN_YD, END_ALLOW_YD = 25, 60
+WALKED_YD = 30  # (blocked cells this near a road recorded in game: the grid is wrong there, #1007)
 
 
 @pytest.fixture(scope="module")
@@ -38,8 +39,21 @@ def grid_walk(ns, cont, sx, sy, tx, ty):
     return ref[0] if isinstance(ref, tuple) else ref
 
 
-def blocked_run(ns, cont, pts, kinds, start, stop):
-    """Longest run of impassable ground the route's off-road stretches cross."""
+def walked_points(ns, cont):
+    """The points of the roads with heights the player recorded or drew in game (ns.FloorTracks): truth."""
+    out = []
+    tracks = ns.FloorTracks and ns.FloorTracks[cont]
+    for t in (tracks.values() if tracks else ()):
+        if not t.pts:
+            continue
+        flat = list(t.pts.values())
+        out += [(flat[i], flat[i + 1]) for i in range(0, len(flat) - 1, 2)]
+    return out
+
+
+def blocked_run(ns, cont, pts, kinds, start, stop, walked=()):
+    """Longest run of impassable ground the route's off-road stretches cross (not within WALKED_YD of a
+    point in `walked`: ground walked in game is open, whatever the terrain grid says)."""
     worst = run = 0.0
     for i, k in enumerate(kinds):
         (x1, y1), (x2, y2) = pts[i], pts[i + 1]
@@ -48,7 +62,8 @@ def blocked_run(ns, cont, pts, kinds, start, stop):
         for j in range(n + 1):
             x, y = x1 + (x2 - x1) * j / n, y1 + (y2 - y1) * j / n
             near_end = min(math.hypot(x - start[0], y - start[1]), math.hypot(x - stop[0], y - stop[1])) < END_ALLOW_YD
-            if k == 1 and not near_end and ns.Passability.At(cont, x, y) == 2:
+            beside_walked = any(math.hypot(x - wx, y - wy) < WALKED_YD for wx, wy in walked)
+            if k == 1 and not near_end and not beside_walked and ns.Passability.At(cont, x, y) == 2:
                 run += seg / n
                 worst = max(worst, run)
             else:
@@ -108,7 +123,10 @@ def test_road_mode_still_keeps_to_roads_that_are_only_somewhat_longer(world):
 @pytest.mark.parametrize("cont, start, stop", [
     (0, (726.0, -579.9), (431.2, 207.7)),  # Alterac Mountains: over a ridge to the stop
     (0, (1039.2, -3791.9), (-73.4, -3558.4)),  # The Hinterlands: 360 yd over the hills
-    (0, (-8771.7, -2812.3), (-9692.5, -3239.2)),  # Redridge Mountains: 313 yd
+    # Redridge Mountains: 313 yd. (Since #1007 the roads-only route rides Kooki3z's recorded walk in the
+    # Riverglades 80 yd south, at 197 yd up on ground the terrain grid closes, and walks out of that closed
+    # pocket: walked ground, not counted. The trip as routed in game is unchanged.)
+    (0, (-8771.7, -2812.3), (-9692.5, -3239.2)),
 ])
 def test_blocked_legs_to_the_roads_are_walked_around(world, cont, start, stop):
     lua, ns = world
@@ -118,7 +136,7 @@ def test_blocked_legs_to_the_roads_are_walked_around(world, cont, start, stop):
         r = ns.Router.Route(cont, *start, *stop, lua.table(offroad=False))
         pts, kinds = route_pts(r)
         assert r.road > 0
-        assert blocked_run(ns, cont, pts, kinds, start, stop) < BLOCKED_RUN_YD
+        assert blocked_run(ns, cont, pts, kinds, start, stop, walked_points(ns, cont)) < BLOCKED_RUN_YD
     finally:
         ns.Router.ROAD_DIRECT_PENALTY = 2
 

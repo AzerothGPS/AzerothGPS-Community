@@ -3,7 +3,8 @@
  "tracks": {
   "0:1795319842:1": "Stormwind, a recorded walk's last step down 20 yd into the canal (the city's collision has the canal's floor at 73.9 there; a real drop)",
   "0:1795321468": "Ironforge, a recorded stairs piece starting 5 yd under its next point (the joint with the piece before it; the grid's cell has only the upper floor)",
-  "0:1795406608": "Ironforge, a recorded walk down under the city: 16 yd of it where the city grid has only the floor above (a grid gap; the walk's heights are right)"
+  "0:1795406608": "Ironforge, a recorded walk down under the city: 16 yd of it where the city grid has only the floor above (a grid gap; the walk's heights are right)",
+  "0:1795740878": "Ironforge, a recorded walk down to the Hall of Thanes' way in: 17.5 yd at (-4816, -1048, 438.6), the same stretch and height as 1795406608's, where the city grid has only the floor above (a grid gap; the walk's heights are right)"
  },
  "roads": {
   "Capitals:0:-4766,-1162,502>-4768,-1182,510": "jump 5.8 yd at (-4764.0, -1174.0, 506.3)",

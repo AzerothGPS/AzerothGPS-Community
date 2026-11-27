@@ -654,9 +654,17 @@ WG.CAVE_UNDER_Z = 6 -- yards: an indoors start (the game says so: opts.indoors) 
 -- Bay's docks: the deck 5-6 yd over the water's surface, the shipped ground the sea's bottom 11-30 yd under it, and the
 -- floor nearest the ground was the water's: the walk began with a swim from under the pier)
 WG.WADE_Z = 2 -- yards: a dry surface this far under the water's surface is its bottom, swum over (DrySplit)
+-- (item 123, 1.4.1: Booty Bay's plank up out of the water, its cell's surface 2.5 yd under the water's top: Kooki3z
+-- standing on its foot in the water, not swimming, was put on the deck 15 yd over him and routed along it, "Make a
+-- U-turn onto the road", "Above you, 26 yd up". A surface under the water's top by up to WADE_STAND_Z that stands
+-- WADE_OVER_GROUND or more over the shipped ground (the sea's bottom: so a model's, a plank's or a ramp's, not the
+-- bottom) is one a player not swimming stands on in the water: dry, and its water a start as near (Ends))
+WG.WADE_STAND_Z = 3.5
+WG.WADE_OVER_GROUND = 3
 -- The surfaces of `list` ({ z, f }) a player who isn't swimming stands on: those neither the water's (F_SWIM) nor under
--- it by more than WADE_Z; the rest second. With no water among them, or nothing dry, `list` itself.
-function WG.DrySplit(list)
+-- it by more than WADE_Z (or by up to WADE_STAND_Z over `ground`, the shipped ground's height there, when given); the
+-- rest second. With no water among them, or nothing dry, `list` itself. Third: the water's top.
+function WG.DrySplit(list, ground)
   local top
   for _, f in ipairs(list) do
     if f.f and Bit(f.f, F_SWIM) and (not top or f.z > top) then top = f.z end
@@ -664,10 +672,12 @@ function WG.DrySplit(list)
   if not top then return list, nil end
   local dry, wet = {}, {}
   for _, f in ipairs(list) do
-    if (f.f and Bit(f.f, F_SWIM)) or f.z < top - WG.WADE_Z then wet[#wet + 1] = f else dry[#dry + 1] = f end
+    local under = f.z < top - WG.WADE_Z
+    if under and ground and f.z >= top - WG.WADE_STAND_Z and f.z >= ground + WG.WADE_OVER_GROUND then under = false end
+    if (f.f and Bit(f.f, F_SWIM)) or under then wet[#wet + 1] = f else dry[#dry + 1] = f end
   end
   if not dry[1] then return list, nil end
-  return dry, wet
+  return dry, wet, top
 end
 -- Whether the cell at (x, y) has surfaces in a tile decoded already (Nav's status updates look only there: no load).
 function WG.Decoded(c, x, y)
@@ -688,6 +698,17 @@ end
 local function Ends(c, x, y, z, swimming, indoors, zs)
   local all = WG.SurfacesAt(c, x, y, z)
   local out = {}
+  -- (swimming: the water's surfaces there, with a height too: the lower deck 4 yd over Booty Bay's water is within
+  -- FLOOR_Z of its top, and a walk from under it began up on it, item 123)
+  if swimming and (z or not (zs and zs[1])) then
+    for _, f in ipairs(all) do
+      if Bit(f.f, F_SWIM) then
+        f.cost = Dist(x, y, f.x, f.y)
+        out[#out + 1] = f
+      end
+    end
+    if out[1] then return out end
+  end
   if not z and zs and zs[1] then
     for _, f in ipairs(all) do
       for _, cz in ipairs(zs) do
@@ -746,10 +767,10 @@ local function Ends(c, x, y, z, swimming, indoors, zs)
   if not pick[1] then pick = all end
   -- (not swimming, outdoors: the dry floors over the water first, a pier's deck; the water's after the ground's pick,
   -- dearer)
-  local wet
-  if not swimming and not indoors then pick, wet = WG.DrySplit(pick) end
-  -- (no height: the ground's, Data/Heights.lua's, picks among floors over floors; else every one, as the city grid)
+  local wet, top
   local GS = ns.Ground and ns.Ground.Sample
+  if not swimming and not indoors then pick, wet, top = WG.DrySplit(pick, GS and GS(c.cont, x, y)) end
+  -- (no height: the ground's, Data/Heights.lua's, picks among floors over floors; else every one, as the city grid)
   local gz = #pick > 1 and GS and GS(c.cont, x, y)
   local others
   if gz and indoors then
@@ -785,8 +806,11 @@ local function Ends(c, x, y, z, swimming, indoors, zs)
     f.cost = Dist(x, y, f.x, f.y) + WG.OTHER_FLOOR_YD
     out[#out + 1] = f
   end
+  -- (standing in the water on a plank's or a ramp's foot under its top, item 123: the water's as near as it, the way
+  -- out from there is the swim's; the decks over it dearer)
+  local wading = top and pick[1] and pick[1].z < top
   for _, f in ipairs(wet or {}) do
-    f.cost = Dist(x, y, f.x, f.y) + WG.OTHER_FLOOR_YD
+    f.cost = Dist(x, y, f.x, f.y) + ((wading and Bit(f.f, F_SWIM)) and 0 or WG.OTHER_FLOOR_YD)
     out[#out + 1] = f
   end
   return out
@@ -2316,6 +2340,38 @@ function WG.Line(c, id0, key0, ci0, x0, y0, x1, y1, id1, probe)
   return crossed or true
 end
 
+-- A straight piece's extra past guards and elite areas and in zones too high (WG.Extra a yard, sampled every 4 yd), by
+-- the search's costs `x`; 0 with none to weigh.
+local function LineExtra(x, ax, ay, bx, by)
+  if not (x and x.any) then return 0 end
+  local Rt = R()
+  local L = Dist(ax, ay, bx, by)
+  local m = max(1, math.ceil(L / 4))
+  local e = 0
+  for q = 0, m - 1 do
+    if q % 16 == 15 and Rt.SliceOver and Rt.SliceOver() then coroutine.yield() end -- (item 108, as WG.Clear's)
+    local f = (q + 0.5) / m
+    x.probe = (x.probe or 0) - 1
+    e = e + Extra(x, x.probe - 1e9, ax + (bx - ax) * f, ay + (by - ay) * f) * L / m
+  end
+  return e
+end
+WG.LineExtra = LineExtra
+-- Whether Pull's straight line from step a to step b is no dearer by the search's costs than the steps it replaces (+1
+-- yard's worth): never across an elite area or the guards the search went round. Item 132, Kooki3z 2026-11-27 in Tanaris:
+-- the refine's way hugged Sandsorrow Watch's elite areas, and the line pulled from step to step (up to LOOK_AHEAD, 400
+-- yd) went straight through them, three red stretches the first route had gone round, and no "Take it?".
+local function PullAllowed(x, P, a, b)
+  if not (x and x.any) then return true end
+  local before = 0
+  for m = a, b - 1 do
+    local p, q = P[m], P[m + 1]
+    before = before + Extra(x, q.id, q.x, q.y) * Dist(p.x, p.y, q.x, q.y)
+  end
+  return LineExtra(x, P[a].x, P[a].y, P[b].x, P[b].y) <= before + 1
+end
+WG.PullAllowed = PullAllowed
+
 -- The steps as a route: string-pulled between road links and drops, (sx, sy) to (tx, ty): { pts, kinds, length, road,
 -- fz, worldGrid }. A straight stretch over road ground alone is a road's kind (drawn and said as one); a drop off a
 -- ledge is the Router's KIND_DROP.
@@ -2354,7 +2410,8 @@ function WG.Pull(c, steps, sx, sy, tx, ty, x)
       k = k + 1
       if Rt.Breathe and k % 4 == 0 then Rt.Breathe(k, 4) end
       if WG.Line(c, P[a].id, P[a].key, P[a].ci, P[a].x, P[a].y, P[bb].x, P[bb].y, P[bb].id, true)
-        and not (x and x.lineWalls and ns.Passability.CrossesWall(c.cont, P[a].x, P[a].y, P[bb].x, P[bb].y)) then
+        and not (x and x.lineWalls and ns.Passability.CrossesWall(c.cont, P[a].x, P[a].y, P[bb].x, P[bb].y))
+        and WG.PullAllowed(x, P, a, bb) then
         best = bb
         break
       end
@@ -2446,6 +2503,10 @@ end
 -- cell, the 8.33 yd cells showing through)
 WG.CLEAR_YD = 1 -- a straightened line keeps this far off a cell side the grid has no link across (a wall's, a drop's)
 WG.CLEAR_STEP = 1 -- yards between the points it's checked at
+-- (item 123, 1.4.1: over the water a straightened line keeps within this of the water's top, the bake's SHORE_Z, a
+-- step up out of it: never cut from a swim up onto a deck or a ledge the water has no way up to. Booty Bay's piers: the
+-- swim's line went from under the lower deck straight onto it 4.5 yd up, past the plank that is the only way out)
+WG.SWIM_CLEAR_Z = 1.5
 WG.CLEAR_LOOSE = 0.7 -- (cells: WG.Clear's `loose` edge surfaces, item 57)
 WG.CLEAR_Z = 3 -- yards: its height within this of the floor it's over (never across a floor change or stairs)
 WG.STRAIGHT_AHEAD = 64 -- points a straight piece is tried toward, farthest first ...
@@ -2520,6 +2581,7 @@ function WG.Clear(c, x0, y0, z0, x1, y1, z1, loose)
       local px, py = Pt(c, t, s, ci)
       if (px - x) ^ 2 + (py - y) ^ 2 > edgeTol2 then return false end
     end
+    if z and Bit(Flags(t, s), F_SWIM) and abs(Z(c, t, s) - z) > WG.SWIM_CLEAR_Z then return false end
   end
   return true
 end
@@ -2543,19 +2605,7 @@ function WG.Straighten(c, pts, kinds, hs, onLink, bends, x)
   -- (the search's costs kept: a straight piece no dearer past guards or in zones too high than the pieces it replaces,
   -- and across none of the player's own walls)
   local Pa = ns.Passability
-  local function Dear(ax, ay, bx, by)
-    if not (x and x.any) then return 0 end
-    local L = Dist(ax, ay, bx, by)
-    local m = max(1, math.ceil(L / 4))
-    local e = 0
-    for q = 0, m - 1 do
-      if q % 16 == 15 and Rt.SliceOver and Rt.SliceOver() then coroutine.yield() end -- (item 108, as WG.Clear's)
-      local f = (q + 0.5) / m
-      x.probe = (x.probe or 0) - 1
-      e = e + Extra(x, x.probe - 1e9, ax + (bx - ax) * f, ay + (by - ay) * f) * L / m
-    end
-    return e
-  end
+  local function Dear(ax, ay, bx, by) return LineExtra(x, ax, ay, bx, by) end
   local function Allowed(i, jj)
     local ax, ay, bx, by = pts[2 * i - 1], pts[2 * i], pts[2 * jj - 1], pts[2 * jj]
     if x and x.lineWalls and Pa and Pa.CrossesWall and Pa.CrossesWall(c.cont, ax, ay, bx, by) then return false end
@@ -3186,6 +3236,17 @@ local function JoinOnto(c, r, sx, sy, sz, opts)
   end
   local jx, jy = pts[2 * bi - 1] + (pts[2 * bi + 1] - pts[2 * bi - 1]) * bt, pts[2 * bi] + (pts[2 * bi + 2] - pts[2 * bi]) * bt
   local jz = fz and fz[bi] and fz[bi + 1] and fz[bi] + (fz[bi + 1] - fz[bi]) * bt or (fz and fz[bi]) or nil
+  -- (never a straight join across the guards or an elite area the route went round, the towns at the leg's ends left out
+  -- as its search's (WG.Costs): a small search to it instead, by the costs, JoinBySearch. A route through them where it's
+  -- joined is joined as before. Item 132)
+  local Rt = R()
+  local side = best > 1 and Rt.HostileSide and Rt.HostileSide() or nil
+  if side then
+    local n = #pts
+    local hx = { cont = c.cont, side = side,
+      exempt = Rt.HostileTownsNear and Rt.HostileTownsNear(c.cont, side, sx, sy, pts[n - 1], pts[n]) or nil }
+    if WG.GuardsOnLine(hx, sx, sy, jx, jy) and not Rt.HostileAt(c.cont, jx, jy, side, hx.exempt) then return nil end
+  end
   -- (the straight join walked on the grid, from the start's surface, arriving on the route's floor there: a route
   -- found from a start on another floor, under the start's (a cave under the hill, a city's halls under its mountain),
   -- was joined straight down onto through the floor; the underground sweep, 2026-11-23: from the mountain over

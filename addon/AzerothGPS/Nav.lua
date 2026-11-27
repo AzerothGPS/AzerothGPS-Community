@@ -1172,8 +1172,94 @@ function N.EnemyZonesNearRoute(r, cont)
   return set
 end
 
+-- An elite area a walk starts or ends in (item 124, Kooki3z 2026-11-27: level 25 from Hearthglen's west edge, 23 yd
+-- out of its 55-63 Scarlet elites, to a stop at its north edge; the walk went straight through the middle with no
+-- "Take it?"). The router leaves such an area out (R.HostileTownsNear, R.ELITE_NEAR: the walk in or out isn't paid
+-- for, item 91), and so did the question. Now only the walk's way out from its start and in to its stop is left out of
+-- the question: from that end while the walk is in the area (or hasn't reached it yet, the first ELITE_WAY_YD), at most
+-- the end's own depth in it (the shortest way out, ELITE_DEPTH_DIRS directions) times ELITE_WAY_FACTOR plus
+-- ELITE_WAY_YD. The rest of the walk in it is a crossing, asked about as any other elite area's (the guards' towns at a
+-- walk's ends as before).
+N.ELITE_WAY_YD = 30
+N.ELITE_WAY_FACTOR = 1.5
+N.ELITE_DEPTH_DIRS, N.ELITE_DEPTH_STEP, N.ELITE_DEPTH_MAX = 16, 8, 600
+-- How far (x, y) is inside elite area `t` (the shortest way out found), 0 when it's not in it.
+function N.EliteDepth(c, side, t, x, y)
+  local R = ns.Router
+  local at = R.EliteTownsAt(c, x, y, side)
+  if not (at and at[t]) then return 0 end
+  local best = N.ELITE_DEPTH_MAX
+  for k = 0, N.ELITE_DEPTH_DIRS - 1 do
+    local a = 2 * math.pi * k / N.ELITE_DEPTH_DIRS
+    local dx, dy = math.cos(a), math.sin(a)
+    local d = N.ELITE_DEPTH_STEP
+    while d < best do
+      local s = R.EliteTownsAt(c, x + dx * d, y + dy * d, side)
+      if not (s and s[t]) then break end
+      d = d + N.ELITE_DEPTH_STEP
+    end
+    if d < best then best = d end
+  end
+  return best
+end
+-- Yards walk `pts` (kinds `kinds`) crosses of each elite area in `ends` (a set of towns, those its ends are in), its
+-- way out of the start's and in to the stop's left out: { [town] = { yards, x1, y1, x2, y2 (its piece most in it) } }.
+function N.EliteCrossing(c, side, pts, kinds, ends)
+  local R, n = ns.Router, #pts
+  local step = R.HOSTILE_STEP or 5
+  local st = {}
+  local nearS = R.HostileTownsNear(c, side, pts[1], pts[2]) or {}
+  local nearE = R.HostileTownsNear(c, side, pts[n - 1], pts[n]) or {}
+  local inS = R.EliteTownsAt(c, pts[1], pts[2], side) or {}
+  for t in pairs(ends) do
+    st[t] = { total = 0, lead = 0, run = 0, best = 0, leadOpen = nearS[t] == true, atEnd = nearE[t] == true,
+      seen = inS[t] == true,
+      capS = N.EliteDepth(c, side, t, pts[1], pts[2]) * N.ELITE_WAY_FACTOR + N.ELITE_WAY_YD,
+      capE = N.EliteDepth(c, side, t, pts[n - 1], pts[n]) * N.ELITE_WAY_FACTOR + N.ELITE_WAY_YD }
+  end
+  local walked = 0
+  for i = 1, n - 3, 2 do
+    if R.Breathe then R.Breathe((i + 1) / 2, 50) end
+    local x1, y1, x2, y2 = pts[i], pts[i + 1], pts[i + 2], pts[i + 3]
+    local d = math.sqrt((x2 - x1) ^ 2 + (y2 - y1) ^ 2)
+    local m = math.max(1, math.ceil(d / step))
+    local walk = N.HOSTILE_WALK_KINDS[kinds[(i + 1) / 2] or 0]
+    local piece = {}
+    for k = 0, m - 1 do
+      local u = (k + 0.5) / m
+      local in_ = walk and R.EliteTownsAt(c, x1 + (x2 - x1) * u, y1 + (y2 - y1) * u, side) or nil
+      walked = walked + d / m
+      for t, s in pairs(st) do
+        if in_ and in_[t] then
+          s.total, s.run, s.seen = s.total + d / m, s.run + d / m, true
+          if s.leadOpen then s.lead = s.lead + d / m end
+          piece[t] = (piece[t] or 0) + d / m
+        else
+          s.run = 0
+          -- (the way out ends where the walk leaves the area, or, not in it yet, past its first ELITE_WAY_YD)
+          if s.seen or walked > N.ELITE_WAY_YD then s.leadOpen = false end
+        end
+      end
+    end
+    for t, yd in pairs(piece) do
+      if yd > st[t].best then st[t].best, st[t].piece = yd, { x1, y1, x2, y2 } end
+    end
+  end
+  local out
+  for t, s in pairs(st) do
+    -- (a walk in it all the way, its way out and in the same yards: both caps off its yards)
+    local yd = s.total - math.min(s.lead, s.capS) - (s.atEnd and math.min(s.run, s.capE) or 0)
+    if yd > 0 and s.piece then
+      out = out or {}
+      out[t] = { yd, s.piece[1], s.piece[2], s.piece[3], s.piece[4] }
+    end
+  end
+  return out
+end
+
 -- The other faction's towns the route walks through: { { name, yards }, ... } most first, or nil. Not the towns at a
--- walk's own ends (a stop in one, the player in one: R.HostileTownsNear, as the router leaves them out).
+-- walk's own ends (a stop in one, the player in one: R.HostileTownsNear, as the router leaves them out); an elite area
+-- at a walk's end only for its way in or out (N.EliteCrossing, item 124).
 function N.HostileOnRoute(r)
   local side, R = N.EnemySide and N.EnemySide(), ns.Router
   if not (side and r and r.parts and R and R.HostileYards and R.HostileTownsNear and ns.Hostile) then return nil end
@@ -1184,6 +1270,19 @@ function N.HostileOnRoute(r)
     local n = pts and #pts or 0
     if list and kinds and n >= 4 then
       local exempt = R.HostileTownsNear(c, side, pts[1], pts[2], pts[n - 1], pts[n])
+      -- (the elite areas among them: only their way in and out left out, the rest counted, item 124)
+      local ends
+      for t in pairs(exempt or {}) do
+        if list.area and list.area[t] then
+          ends = ends or {}
+          ends[t] = true
+        end
+      end
+      for t, v in pairs(ends and R.EliteTownsAt and N.EliteCrossing(c, side, pts, kinds, ends) or {}) do
+        local key = c .. ":" .. t
+        yards[key] = (yards[key] or 0) + v[1]
+        if not at[key] or v[1] > at[key][7] then at[key] = { c, t, v[2], v[3], v[4], v[5], v[1] } end
+      end
       for i = 1, n - 3, 2 do
         if R.Breathe then R.Breathe((i + 1) / 2, 50) end -- (in a background job: a pause along a long route)
         if N.HOSTILE_WALK_KINDS[kinds[(i + 1) / 2] or 0] then
@@ -1231,6 +1330,32 @@ N.hostileSaid = {} -- [town's name] = said in chat this trip
 N.hostileAsking = nil -- ("Take it?" up: its question, N.CheckHostileRoute)
 local hostileChecked, hostileNames
 N.hostileElite = nil -- (the towns said were all elite areas, item 91: the elites' words)
+-- A later route of the same trip looked at again (item 132, Kooki3z 2026-11-27 in Tanaris: "routing was avoiding the
+-- elites, then the background recalculate came back and went through them without asking"; the trip was looked at
+-- once, on its first settled route): each settled route that isn't the one last looked at, at most every
+-- HOSTILE_RECHECK_SECONDS. The towns and elite areas a question was asked about this trip (N.HostileSeen) aren't asked
+-- about again; an elite area the trip's routes didn't cross before is, after a yes too.
+N.HOSTILE_RECHECK_SECONDS = 2
+-- (`route` the one last looked at, `at` when, `seq` the look's number; `seen`: { key = the trip's (stops, faction),
+-- names = { [town's name] = true } })
+N.hostileLook = { at = 0, seq = 0 } -- (a field, not a local: the main chunk is at Lua 5.1's 200)
+-- The towns and elite areas asked about this trip: { [name] = true }.
+function N.HostileSeenNames()
+  local tk = version .. ":" .. tostring(N.EnemySide and N.EnemySide())
+  local seen = N.hostileLook.seen
+  if not (seen and seen.key == tk) then
+    seen = { key = tk, names = {} }
+    N.hostileLook.seen = seen
+  end
+  return seen.names
+end
+-- The towns of a question answered (`towns`: N.HostileOnRoute's), seen this trip: not asked about again.
+function N.HostileSeen(towns)
+  local seen = N.HostileSeenNames()
+  for _, t in ipairs(towns or {}) do
+    if type(t) == "table" and t[1] then seen[t[1]] = true end
+  end
+end
 local hostileNoteRoute, hostileNoteHas -- (N.HostileNote: the route it was looked for on, and whether it passes guards)
 function N.CheckHostileRoute()
   local r, d = N.route, N.dest
@@ -1239,15 +1364,25 @@ function N.CheckHostileRoute()
   -- (avoiding them, unless the player said to risk it: N.riskOk)
   local avoiding = R and R.HostileSide and R.HostileSide() ~= nil and not (d and N.RiskAnswer(d))
   local key = version .. ":" .. tostring(N.EnemySide and N.EnemySide()) .. ":" .. tostring(avoiding)
-  if hostileChecked == key then return end
-  hostileChecked, hostileNames, N.hostileElite = key, nil, nil
+  local now = GetTime()
+  if hostileChecked == key then
+    -- (a later route of the trip: looked at again, item 132)
+    if N.hostileLook.route == r or now - N.hostileLook.at < N.HOSTILE_RECHECK_SECONDS then return end
+  else
+    hostileChecked, hostileNames, N.hostileElite = key, nil, nil
+  end
+  N.hostileLook.route, N.hostileLook.at, N.hostileLook.seq = r, now, N.hostileLook.seq + 1
+  local seq = N.hostileLook.seq
   -- (the elite areas, item 91, are listed only when avoided; the guards are listed avoided or not: asked about only
   -- with "Avoid the other faction's towns" on)
   local _, guardsOn = R.KeyFaction(R.HostileSide())
   local function Said(towns)
-    if hostileChecked ~= key then return end -- (the route changed meanwhile)
+    if hostileChecked ~= key or seq ~= N.hostileLook.seq then return end -- (the route changed meanwhile)
     towns = N.WithEnemyCapital(d, towns or nil)
-    if not towns then return end
+    if not towns then
+      hostileNames, N.hostileElite = nil, nil -- (a later route clear of them)
+      return
+    end
     local names, askNames, ask, allElite, askElite = {}, {}, {}, true, true
     for k, t in ipairs(towns) do
       if k <= 3 then names[k] = t[1] end
@@ -1265,7 +1400,21 @@ function N.CheckHostileRoute()
     -- ride check finds one (N.AnswerRisk), else said in chat as before. The trip's answer, N.riskOk.trip, as the ride
     -- check's own "Risk enemy territory?": one question a trip either way)
     -- (not with the ride check's own "Risk enemy territory?" up or coming: one question)
-    if avoiding and ask[1] and N.RiskAnswer(d) == nil and not N.hostileAsking and not N.riskQuestion
+    -- (and after a yes, an elite area the trip's routes didn't cross before: asked about, item 132; a later route of the
+    -- trip through the same ones isn't asked about again, N.HostileSeen)
+    local answer = N.RiskAnswer(d)
+    if answer == true and R.HostileSide() ~= nil then
+      local seen, fresh = N.HostileSeenNames(), {}
+      for _, t in ipairs(ask) do
+        if t[3] == true and not seen[t[1]] then fresh[#fresh + 1] = t end
+      end
+      if fresh[1] then
+        ask, askNames, askElite = fresh, {}, true
+        for k = 1, math.min(3, #fresh) do askNames[k] = fresh[k][1] end
+        answer = nil
+      end
+    end
+    if answer == nil and R.HostileSide() ~= nil and ask[1] and not N.hostileAsking and not N.riskQuestion
         and not N.riskAsking and ns.GPS and ns.GPS.ConfirmHostile then
       local q = { key = N.RiskKey(d), towns = ask }
       N.hostileAsking = q
@@ -1276,7 +1425,7 @@ function N.CheckHostileRoute()
         N.hostileAsking = nil
         N.AnswerRisk(q, false)
       end, askElite)
-      if not asked then N.hostileAsking = nil end
+      if asked then N.HostileSeen(ask) else N.hostileAsking = nil end
     end
     -- (and the chat line once a trip, as before)
     local new = false
@@ -1294,7 +1443,7 @@ function N.CheckHostileRoute()
     end
   end
   if R and R.Background then
-    R.Background("hostile:" .. key, function() return N.HostileOnRoute(r) or false end, Said)
+    R.Background("hostile:" .. key .. ":" .. seq, function() return N.HostileOnRoute(r) or false end, Said)
   else
     Said(N.HostileOnRoute(r))
   end
@@ -3074,11 +3223,19 @@ end
 -- ground under them; never the terrain in a capital, a building, a cave or an underground city, where it's the rock or
 -- the land over them (Kooki3z 2026-11-23, by Nissa Firestone on her balcony in Ironforge: "Below you, 251 yd down",
 -- the mountain's top at 760 over her 512.5). Nil when not known.
+N.GRID_OVER_GROUND_Z = 3
 function N.PlayerHeightNear(cont, px, py)
   if not (cont and px) then return nil end
   local fz = N.FollowedZ(cont)
   if fz then return fz end
   if ns.CityLevels and ns.CityLevels[cont] then return nil end
+  -- (the world grid's floor followed where it stands over the ground: in the water, on a plank or a pier over the sea's
+  -- bottom. Item 123, Kooki3z at Booty Bay's plank: "Above you, 26 yd up" by the sea's bottom 10 yd under him)
+  local gt = N.GridTrackZ(cont)
+  if gt then
+    local g = N.GroundAt(cont, px, py)
+    if g and gt > g + N.GRID_OVER_GROUND_Z then return gt end
+  end
   local R = ns.Router
   local hs = R and R.HeightsNear and R.HeightsNear(cont, px, py, N.TRACK_YD)
   if hs and hs[1] then
@@ -3624,8 +3781,8 @@ function N.GridStart(level, px, py, ss, swimming, indoors)
     -- (outdoors: the dry ones over the water's, then the one nearest the shipped ground's height and any as near (as
     -- WorldGrid's Ends), not every one: on a cliff's rim the cheapest start was the canyon's floor under it, and an
     -- unsure start there gave up the join onto the route kept, Tanaris' rim searched four times, test_no_spell_settle)
-    list = ns.WorldGrid.DrySplit(ss)
     local GS = ns.Ground and ns.Ground.Sample
+    list = ns.WorldGrid.DrySplit(ss, GS and GS(level, px, py)) -- (a plank's foot in the water too: item 123)
     local gz = #list > 1 and GS and GS(level, px, py)
     if gz then
       local d0
@@ -3926,6 +4083,7 @@ end
 -- The player's answer to "risk it?" (N.HostileRisk's popup): the route worked out again with it, the ride checks'
 -- answers forgotten (they're remembered per square), and the zones too high on the way chosen not asked about again.
 function N.AnswerRisk(q, yes)
+  N.HostileSeen(q.towns) -- (its towns not asked about again this trip, item 132)
   N.riskOk[q.key] = yes and true or false
   N.riskOk.trip = yes and true or false -- (and the rest of the trip's stops: asked once a trip)
   if N.SaveStops then N.SaveStops() end -- (kept over a /reload while the route is on)
@@ -4951,6 +5109,9 @@ local function Follow(r, px, py, ahead)
   local fz = full.fz
   local floors = fz or full.zs
   local tz = floors and N.FollowedZ(full.cont)
+  -- (swimming: the water's top, the world grid's floor followed; a deck over the water isn't where the player is, and
+  -- the route along it overhead was followed from under it, "Make a U-turn onto the road": item 123, Booty Bay)
+  if floors and not tz and N.Swimming() then tz = N.GridTrackZ(full.cont) end
   for i = r.followIdx, #pts / 2 - 1 do
     if upTo and cum[i] > upTo then break end -- (trimming only: the stretch just ahead)
     if hold and i > hold then break end -- (nothing past a jump not taken: the foot is near across, not along)
@@ -5565,8 +5726,11 @@ function N.StartFloor(cont, px, py)
   -- (indoors: item 45, a cave's stacked floors, looked up. Out on the land only the floor the status updates followed,
   -- N.GridStartZ: there its surface look-ups in the route's job held the sand-to-Uldum walk back from landing)
   local gridZ = N.Indoors and N.Indoors() and N.TrackGridZ(cont, px, py) or nil
-  local z = N.PlayerZ() or N.TrackCityZ(cont, px, py) or N.TrackRouteZ(cont, px, py) or N.TrackRaisedZ(cont, px, py)
-    or gridZ or N.GridStartZ(cont, px, py)
+  -- (swimming: the water's top the world grid followed, before the route's own heights by the player: under a deck the
+  -- route ran along, the walk began up on it, item 123)
+  local swimZ = N.Swimming() and N.GridTrackZ(cont) or nil
+  local z = N.PlayerZ() or N.TrackCityZ(cont, px, py) or swimZ or N.TrackRouteZ(cont, px, py)
+    or N.TrackRaisedZ(cont, px, py) or gridZ or N.GridStartZ(cont, px, py)
   -- (item 106: no floor known, the world grid's candidates followed (N.TrackGridZ): the walk starts from each of them
   -- and keeps the cheapest, WorldGrid's Ends)
   local zs = not z and N.GridCandidates(cont, px, py) or nil

@@ -100,6 +100,11 @@ HOME = {
     "Tools": "showRoads showWalls pinning",
     "Help": "copyRoads copyWalls copyRoutes copyPins",
 }
+# (item 125, Kooki3z 2026-11-27: "show only for their class": the immunity toggles a character of another class doesn't
+# get; the harness's player is a mage, wowmock's UnitClass)
+CLASS_ONLY = {"jumpDivineShield": "PALADIN", "jumpDivineProtection": "PALADIN", "jumpBlessingOfProtection": "PALADIN",
+              "jumpIceBlock": "MAGE"}
+NOT_MAGE = {k for k, c in CLASS_ONLY.items() if c != "MAGE"}
 # The room a page has in the window before it scrolls (the window 560 tall, less its title, footer and margins).
 VIEW_H = 480
 
@@ -141,11 +146,11 @@ def test_every_setting_has_one_control_on_the_page_it_belongs_to(game):
     for c in _controls(ns):
         found.setdefault(c.key, []).append(c.page)
     # none lost: every setting with a control before still has one, and the new ones
-    assert not [k for k in BEFORE + NEW if k not in found]
+    assert not [k for k in BEFORE + NEW if k not in found and k not in NOT_MAGE]
     # none doubled, and each on the page it's listed for
     assert not {k: p for k, p in found.items() if len(p) != 1}
     home = {k: page for page, keys in HOME.items() for k in keys.split()}
-    assert {k: p[0] for k, p in found.items()} == home
+    assert {k: p[0] for k, p in found.items()} == {k: p for k, p in home.items() if k not in NOT_MAGE}
     assert sorted(home) == sorted(BEFORE + NEW)
     # the second controls kept on purpose: the Quick buttons page's "On" column, for buttons that are a setting
     mirrors = sorted((c.key, c.page) for c in ns.Options.settingControls.values() if c.mirror)
@@ -174,7 +179,7 @@ def test_every_setting_the_options_change_is_named_for_its_control(game):
     # (`quick`: the Quick buttons table, a place per button, not a setting with a control of its own;
     # `seamExploredOnly` and `style` are set through their own functions; `arrow`, the window, either of the arrow's and
     # the directions text's own (arrowShown, dirShown) on, kept so by their checks, Kooki3z 2026-11-24)
-    assert set_in_code - known == {"quick", "arrow"}
+    assert set_in_code - known == {"quick", "arrow"} | NOT_MAGE  # (another class's toggles: not made for a mage)
     assert known - set_in_code == {"style", "seamExploredOnly", "stopsAhead", "copyRoads", "copyWalls", "copyRoutes",
                                    "copyPins", "layerCity"} - set_in_code
     # and every one of them is a real setting: in the defaults (or the two kept outside `gps`)
@@ -253,9 +258,10 @@ def test_a_dependent_option_is_gray_while_its_parent_is_off(game):
         for k, v in on.items():
             st[k] = v
         O.Refresh()
-        for child, _, _ in DEPENDENTS:
+        dependents = [d for d in DEPENDENTS if d[0] not in NOT_MAGE]
+        for child, _, _ in dependents:
             assert by_key[child].agpsOn is True, child
-        for child, parent, off in DEPENDENTS:
+        for child, parent, off in dependents:
             st[parent] = off
             O.Refresh()
             assert by_key[child].agpsOn is False, (child, parent)
@@ -275,6 +281,59 @@ def test_a_dependent_option_is_gray_while_its_parent_is_off(game):
         for k, v in saved.items():
             st[k] = v
         O.Refresh()
+
+
+@pytest.mark.parametrize("cls, shown", [
+    ("PALADIN", ["jumpDivineShield", "jumpDivineProtection", "jumpBlessingOfProtection"]),
+    ("MAGE", ["jumpIceBlock"]),
+    ("WARRIOR", []),
+])
+def test_the_immunity_toggles_show_only_for_their_class(cls, shown):
+    # (item 125, Kooki3z 2026-11-27: "Works, show only for their class": a paladin's three, a mage's Ice Block, none
+    # for another class, the rows below moved up with no gap; a toggle not shown keeps its saved value)
+    pytest.importorskip("lupa.lua51")
+    from azerothgps.gameharness import start
+    lua, ns = start(pre=f'UnitClass = function() return "{cls.title()}", "{cls}" end')
+    st = ns.settings.gps
+    for k in CLASS_ONLY:
+        st[k] = True  # (saved on, shown or not: not the default, off since item 125b)
+    ns.Options.Show()
+    ctl = {c.key: c for c in _controls(ns)}
+    assert [k for k in CLASS_ONLY if k in ctl] == shown
+    assert all(ctl[k].page == "Routing" for k in shown)
+    # one row after another, under Expert jumper and indented under it, then Safe drop straight after
+    rows = ["expertJumper"] + shown + ["safeDropYd"]
+    ys = [ctl[k].control.padY for k in rows]
+    assert [a - b for a, b in zip(ys, ys[1:])] == [26] * (len(rows) - 1)
+    for k in shown:
+        assert ctl[k].control._pt[2] == ctl["expertJumper"].control._pt[2] + 20, k
+    ns.Options.Refresh()
+    assert all(st[k] is True for k in CLASS_ONLY)  # (kept as saved)
+
+
+def test_the_immunity_toggles_are_off_by_default_and_a_saved_value_stays():
+    # (item 125b, Kooki3z: "Immunity toggles only for their class, off by default": nothing saved, all four off and
+    # Ice Block's box (the harness's mage) unchecked, nil too; a value saved before stays, on or off)
+    lua, ns = _start_saved(None)
+    st = ns.settings.gps
+    assert all(ns.DEFAULTS.gps[k] is False and st[k] is False for k in CLASS_ONLY)
+    ns.Options.Show()
+    cb = {c.key: c.control for c in _controls(ns)}["jumpIceBlock"]
+    st.expertJumper = True
+    ns.Options.Refresh()
+    assert not cb._checked
+    st.jumpIceBlock = None
+    ns.Options.Refresh()
+    assert not cb._checked
+    lua, ns = _start_saved("AzerothGPSDB = { settings = { gps = { jumpIceBlock = true, jumpDivineShield = true, "
+                           "jumpDivineProtection = false, expertJumper = true } } }")
+    st = ns.settings.gps
+    assert st.jumpIceBlock is True and st.jumpDivineShield is True
+    assert st.jumpDivineProtection is False and st.jumpBlessingOfProtection is False
+    ns.Options.Show()
+    cb = {c.key: c.control for c in _controls(ns)}["jumpIceBlock"]
+    ns.Options.Refresh()
+    assert cb._checked is True
 
 
 def test_the_world_map_option_says_why_its_gray_with_the_controller_ui(game):

@@ -6,7 +6,9 @@
 --     grid's surface there nearest the last height (only where its tiles are loaded already: nothing loaded for the
 --     strip), else the map's ground (Router.GroundZ). Worked out once per route part (the walk from the player kept
 --     whole by Nav, `r.fullFirst`); each redraw only moves the dot. A flat route (no rise of PROFILE_MIN_RISE, no jump),
---     a short one, the minimap square: no strip. Option `heightProfile` (Options > Map).
+--     a short one, the minimap square: no strip. Option `heightProfile` (Options > Map). A yellow X in its top right
+--     (item 122): a click hides it for this route, a Shift-click turns the option off (MX.CloseClick). Under every
+--     button on the map, and over the bottom row of round buttons when there is one (item 134).
 -- (b) The jump landing preview: hovering a planned jump on the map (GPSFrame's G.JumpHover) rings where it lands and
 --     says the drop in yards and whether it hurts at the Safe drop setting (MX.HurtLine). Yards only: the player's
 --     health is secret in WoW Forever.
@@ -260,10 +262,12 @@ function MX.ProfilePart(r)
   return r.parts[1], 0
 end
 
--- Whether map `G` shows the strip now: the option on, not the minimap square, a route with a profile.
+-- Whether map `G` shows the strip now: the option on, not the minimap square, not closed for this route (its X), a
+-- route with a profile.
 -- (the map sent back to the minimap square, G.MinimapMode: too small for it, as the square's own map)
 function MX.StripWanted(G, r)
   if G.square or S().heightProfile == false or (G.MinimapMode and G.MinimapMode()) then return nil end
+  if MX.ClosedForRoute() then return nil end -- (its X clicked, item 122)
   local part, at = MX.ProfilePart(r)
   local p = part and MX.Profile(part)
   if not p then return nil end
@@ -305,11 +309,14 @@ function MX.JumpLanding(part, i)
   return x, y, (z0 and z1) and (z0 - z1) or nil, a, b
 end
 
--- The landing ring for map `G` (on G.markLayer, its screen units round the layer's middle): a ring of RING_SIDES lines
--- RING_PX across round the jump's foot, and the drop in yards beside it. `sg`: the hovered jump's seg (G.jumpSegs'),
--- nil to hide it.
+-- The landing ring for map `G` (placed round G.markLayer's middle, in its screen units; drawn on G.ringLayer, over the
+-- route's lines and the stops' pins): a ring of RING_SIDES lines RING_PX across round the jump's foot, and the drop in
+-- yards beside it on a dark backing (LABEL_BACK), on the side away from the jump's top so it's off the coil. `sg`: the
+-- hovered jump's seg (G.jumpSegs'), nil to hide it.
 MX.RING_SIDES, MX.RING_PX = 10, 7
 MX.RING_COLOR = { 1, 0.82, 0.1 }
+MX.LABEL_BACK = { 0, 0, 0, 0.6 } -- (Kooki3z 2026-11-26: "text is under the route, can't see it": readable over any line)
+MX.LABEL_PAD = 2
 function MX.ShowLanding(G, sg, info)
   local st = G.mx
   if not st then return end
@@ -318,6 +325,7 @@ function MX.ShowLanding(G, sg, info)
     if ring and ring.shown then
       for _, l in ipairs(ring.lines) do l:Hide() end
       ring.label:Hide()
+      ring.back:Hide()
       ring.shown = false
     end
     return
@@ -325,22 +333,32 @@ function MX.ShowLanding(G, sg, info)
   -- (the run's foot on the screen: the end of its last piece's seg drawn, else straight on from this one's)
   local a, b = MX.JumpRun(sg.part, sg.i)
   if not a then return MX.ShowLanding(G, nil) end
-  local fx, fy
+  local fx, fy, tx
   for k = 1, G.jumpSegN or 0 do
     local o = G.jumpSegs[k]
     if o.part == sg.part and o.i == b then fx, fy = o[3], o[4] end
+    if o.part == sg.part and o.i == a then tx = o[1] end
   end
   if not fx then fx, fy = sg[3], sg[4] end
+  tx = tx or sg[1]
   if not ring then
-    ring = { lines = {} }
+    -- (G.ringLayer: over the route's lines; the map's own frame, made with the map. G.markLayer only anchors.)
+    local host = G.ringLayer or G.markLayer
+    ring = { lines = {}, host = host }
     for k = 1, MX.RING_SIDES do
-      local l = G.markLayer:CreateLine(nil, "OVERLAY", nil, 7)
+      local l = host:CreateLine(nil, "OVERLAY", nil, 7)
       l:SetThickness(2)
       l:SetColorTexture(MX.RING_COLOR[1], MX.RING_COLOR[2], MX.RING_COLOR[3], 1)
       ring.lines[k] = l
     end
-    ring.label = G.markLayer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    ring.back = host:CreateTexture(nil, "BACKGROUND")
+    ring.back:SetColorTexture(MX.LABEL_BACK[1], MX.LABEL_BACK[2], MX.LABEL_BACK[3], MX.LABEL_BACK[4])
+    ring.label = host:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmallOutline")
+    ring.label:SetShadowColor(0, 0, 0, 1)
     ring.label:SetShadowOffset(1, -1)
+    local pad = MX.LABEL_PAD
+    ring.back:SetPoint("TOPLEFT", ring.label, "TOPLEFT", -pad, pad)
+    ring.back:SetPoint("BOTTOMRIGHT", ring.label, "BOTTOMRIGHT", pad, -pad)
     st.ring = ring
   end
   local r = MX.RING_PX
@@ -353,9 +371,17 @@ function MX.ShowLanding(G, sg, info)
   end
   local dz = info and info.dz
   ring.label:ClearAllPoints()
-  ring.label:SetPoint("LEFT", G.markLayer, "CENTER", fx + r + 3, fy)
+  -- (beside the ring on the side away from the jump's top: the coil comes in from there)
+  local gap = r + 3 + MX.LABEL_PAD
+  ring.side = (tx > fx) and "left" or "right"
+  if ring.side == "left" then
+    ring.label:SetPoint("RIGHT", G.markLayer, "CENTER", fx - gap, fy)
+  else
+    ring.label:SetPoint("LEFT", G.markLayer, "CENTER", fx + gap, fy)
+  end
   ring.label:SetText(dz and Format(L["%s down"], Dist(dz)) or L["Lands here"])
   ring.label:Show()
+  ring.back:Show()
   ring.shown, ring.x, ring.y = true, fx, fy
 end
 
@@ -583,6 +609,65 @@ MX.STRIP_TEXT_H = 12 -- (its text's row over the line)
 MX.STRIP_SIDE = 44 -- UI units off each side of the map (the round buttons in its corners)
 MX.STRIP_MIN_W = 90 -- a map narrower than this leaves the strip out
 MX.STRIP_BOTTOM = 18 -- over the map's info line
+MX.STRIP_ROW_GAP = 3 -- UI units over the bottom row of round buttons (GPSFrame's G.BottomRowTop), when there is one
+MX.INFO_BOTTOM = 4 -- (GPSFrame's info line, up from the map's bottom; its dungeon note 2 over it)
+MX.CLOSE_SIZE = 14 -- the close X's button (UI units), in the strip's top right
+MX.CLOSE_ALPHA, MX.CLOSE_LIT_ALPHA = 0.6, 1 -- (subtle; full under the mouse)
+
+-- The strip's close X (item 122; Kooki3z 2026-11-26: "Left-click closes it for this route. Shift left-click closes it
+-- and turns it off in options."). Closed for the route: hidden on every map (the window, the extra one, the GPS map in
+-- the world map) while the trip (Nav.trip: a new one set, the route cleared) is the same and no stop is added that
+-- wasn't in it when closed (Nav.RiskKey); the route worked out again to the same stops, or a stop reached, keeps it
+-- closed. Not kept over a /reload.
+MX.closed = nil -- { trip, keys = { [Nav.RiskKey] = true } }
+function MX.ClosedForRoute()
+  local c, N = MX.closed, ns.Nav
+  if not c then return false end
+  local fresh = not N or N.trip ~= c.trip
+  for _, d in ipairs(not fresh and N.stops or {}) do
+    if d.x and not c.keys[N.RiskKey(d)] then fresh = true end
+  end
+  if fresh then MX.closed = nil end
+  return not fresh
+end
+-- Every map drawn again now (the strip shown or hidden at once).
+local function RedrawAll()
+  for _, g in ipairs({ ns.GPS or false, ns.mapClone or false }) do
+    if g and g.Redraw then g.Redraw() end
+  end
+end
+-- The X clicked on map G: hidden for this route; `shift`: the option off as well (Options > Map, shown so if open).
+function MX.CloseClick(G, shift)
+  local N = ns.Nav
+  local st = G and G.mx
+  if st and st.strip then st.strip:Hide() end
+  if GameTooltip_Hide then GameTooltip_Hide() end
+  if shift then
+    local s = ns.settings and ns.settings.gps
+    if s then s.heightProfile = false end
+    MX.closed = nil
+    if ns.Options and ns.Options.Refresh then ns.Options.Refresh() end
+  elseif N then
+    local keys = {}
+    for _, d in ipairs(N.stops or {}) do
+      if d.x then keys[N.RiskKey(d)] = true end
+    end
+    MX.closed = { trip = N.trip, keys = keys }
+  end
+  RedrawAll()
+end
+function MX.LightClose(b, lit)
+  b.lit = lit and true or false
+  b:SetAlpha(lit and MX.CLOSE_LIT_ALPHA or MX.CLOSE_ALPHA)
+  if lit then b.x:SetTextColor(1, 0.95, 0.45) else b.x:SetTextColor(1, 0.82, 0) end
+end
+function MX.CloseTip(owner)
+  GameTooltip:SetOwner(owner, "ANCHOR_TOP")
+  GameTooltip:SetText(L["Height profile"], 1, 1, 1)
+  GameTooltip:AddLine(L["Click: hide it for this route."], nil, nil, nil, true)
+  GameTooltip:AddLine(L["Shift-click: turn it off (Options > Map)."], nil, nil, nil, true)
+  GameTooltip:Show()
+end
 MX.COLORS = { up = { 0.45, 1, 0.45 }, down = { 1, 0.65, 0.25 }, flat = { 0.75, 0.85, 1 }, jump = { 1, 0.4, 0.15 } }
 
 -- Map G's widgets, made once: the strip on `top` (the layer over the map), the floor picker beside the dungeon floor
@@ -593,6 +678,10 @@ function MX.Make(G, top, below)
   if not st or st.strip or G.square then return end
   st.below = below or {}
   local f = CreateFrame("Frame", nil, top)
+  -- (at the layer's own level, under every button on it (each one over it): item 134, Kooki3z 2026-11-26, the map's
+  -- buttons showed the strip through them, "buttons should always go over this". In the game's world map too: the
+  -- layer's frames keep their places over it there, GPSFrame's SetLevelTree.)
+  f:SetFrameLevel(top:GetFrameLevel())
   f:SetHeight(MX.STRIP_H)
   f:Hide()
   f:EnableMouse(true)
@@ -601,8 +690,32 @@ function MX.Make(G, top, below)
   bg:SetColorTexture(0, 0, 0, 0.45)
   f.bg = bg
   f.fills, f.lines, f.jumps = {}, {}, {}
+  -- (the close X, item 122: top right, in the text's row over the line; the text kept clear of it)
+  local close = CreateFrame("Button", nil, f)
+  close:SetSize(MX.CLOSE_SIZE, MX.CLOSE_SIZE)
+  close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -1, 0)
+  close:RegisterForClicks("LeftButtonUp")
+  local x = close:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall") -- (the game's own yellow)
+  x:SetPoint("CENTER", 0, 0)
+  x:SetShadowOffset(1, -1)
+  x:SetText("X")
+  close.x = x
+  MX.LightClose(close, false)
+  close:SetScript("OnClick", function() MX.CloseClick(G, IsShiftKeyDown and IsShiftKeyDown()) end)
+  close:SetScript("OnEnter", function(self)
+    MX.LightClose(self, true)
+    MX.CloseTip(self)
+  end)
+  close:SetScript("OnLeave", function(self)
+    MX.LightClose(self, false)
+    GameTooltip_Hide()
+  end)
+  f.close = close
   local text = f:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   text:SetPoint("TOPLEFT", MX.STRIP_PAD + 1, -1)
+  text:SetPoint("RIGHT", close, "LEFT", -2, 0)
+  text:SetJustifyH("LEFT")
+  text:SetWordWrap(false)
   text:SetShadowOffset(1, -1)
   f.text = text
   local dotEdge = f:CreateTexture(nil, "OVERLAY", nil, 6)
@@ -798,18 +911,32 @@ function MX.OnRedraw(G, r, level, x, y, zoom)
       -- (over the info line, the dungeon's note when it shows, Confirm Route when it shows)
       local b = st.below
       local over = b[1]
-      if b[2] and b[2]:IsShown() then over = b[2] end
-      if b[3] and b[3]:IsShown() then over = b[3] end
-      if f.over ~= over or f.overW ~= w then
+      local note = b[2] and b[2]:IsShown()
+      if note then over = b[2] end
+      local btn = b[3] and b[3]:IsShown()
+      if btn then over = b[3] end
+      -- (and over the bottom row of round buttons going right from the map button, item 134: its line and its text
+      -- clear of them, and still over the info line and the note; Confirm Route / Clear Route, when it shows, is over
+      -- that row already)
+      local row = not btn and G.BottomRowTop and G.BottomRowTop() or nil
+      local lift = nil
+      if row then
+        local function Tall(fs) return fs and fs.GetStringHeight and tonumber(fs:GetStringHeight()) or 12 end
+        local lineTop = MX.INFO_BOTTOM + Tall(b[1]) + (note and (2 + Tall(b[2])) or 0)
+        lift = floor(max(row + MX.STRIP_ROW_GAP, lineTop + 3) + 0.5)
+      end
+      if f.over ~= over or f.overW ~= w or f.lift ~= lift then
         f:ClearAllPoints()
         -- (the info line, the note and the button are all centered on the map)
-        if over then
+        if lift then
+          f:SetPoint("BOTTOM", parent, "BOTTOM", 0, lift)
+        elseif over then
           f:SetPoint("BOTTOM", over, "TOP", 0, 3)
         else
           f:SetPoint("BOTTOM", parent, "BOTTOM", 0, MX.STRIP_BOTTOM)
         end
         f:SetWidth(w - 2 * MX.STRIP_SIDE)
-        f.over, f.overW = over, w
+        f.over, f.overW, f.lift = over, w, lift
       end
       if not f:IsShown() then f:Show() end
       MX.LayStrip(f, p, at)

@@ -267,3 +267,152 @@ def test_undo_takes_the_last_avoid_back_first_and_skips_a_stop_gone(game):  # no
         assert N.CanUndoAvoid() is False and N.UndoAvoid() is False
     finally:
         N.Clear()
+
+
+# --- The crosshair on a jump or swim (item 121, Kooki3z 2026-11-26: "add crosshair hover for spell jumps and swimming to
+# press X like how we do with stops to remove them for controller"): the mouse's own hit-tests at the crosshair, shown as
+# a stop under it is (a ring, its tooltip with X's avoid, X's icon over it); X asks the right-click's question, A takes
+# it, Y takes it back while the crosshair is still there. LB + A's picking is as it was.
+
+def _look(lua, ns, it):
+    """The crosshair on route item `it` (Pad.AvoidItems'): the view's middle there, redrawn, the hover looked at."""
+    G, P = ns.GPS, ns.Pad
+    G.PadLookAt(it.cont, it.x, it.y)
+    for _ in range(2):
+        lua.execute("AGPS_T = AGPS_T + 0.5")
+        G.Update()
+    P.Tick(0.2)
+
+
+def test_the_crosshair_on_a_jump_shows_it_x_avoids_it_and_y_undoes(game, jump_trip, pad):  # noqa: F811
+    lua, ns = game
+    N, G, P = ns.Nav, ns.GPS, ns.Pad
+    r = jump_trip()
+    _jumping(ns, r)
+    G.Update()
+    assert P.Apply()
+    it = P.AvoidItems()[1]
+    assert str(it.kind) == "jump"
+    _look(lua, ns, it)
+    h = P.routeHover
+    assert h is not None and str(h.kind) == "jump"
+    # (the mouse's own hit-test at that spot: the same jump its right-click would take)
+    sg = G.JumpAt(*G.CrosshairSpot())[2]
+    assert _same(lua, sg, h.sg) and _same(lua, G.JumpInfo(sg).stop, G.JumpInfo(h.sg).stop)
+    # (shown as a stop under it is: the ring, its tooltip with X's avoid, X's icon over it)
+    assert P.pickMark._shown and _same(lua, lua.eval("GameTooltip")._owner, P.pickMark)
+    tip = _tip(lua)
+    assert tip[0].startswith("Spell jump") and tip[-1] == "X: avoid spell jumps for this stop", tip
+    assert any(_same(lua, b, P.pickMark) and i == "remove" for b, i in _hints(lua, ns))
+    assert not P.Picking()
+    # X: the right-click's question there; A takes it
+    _tap(lua, "PAD3")
+    ask = G.jumpAsk
+    assert ask._shown and str(ask["items"][1].text) == "Avoid Spell Jumps"
+    _tap(lua, "PAD1")
+    assert not ask._shown and N.stops[1].avoidJumps == "spell"
+    jump_trip.settle()
+    assert ns.Router.KIND_DROP not in _route_kinds(N.route)
+    # Y, the crosshair still there: taken back (not the map menu), and its hint is Y's
+    P.Tick(0.2)
+    assert P.routeHover is None and P.UndoHere()
+    assert any(_same(lua, b, P.pickMark) and i == "menu" for b, i in _hints(lua, ns))
+    assert _tip(lua)[0] == "Y: Undo"
+    _tap(lua, "PAD4")
+    assert N.stops[1].avoidJumps is None and not P.MenuOpen()
+    jump_trip.settle()
+    assert ns.Router.KIND_DROP in _route_kinds(N.route)
+    # (nothing left to take back: Y is the map menu's again)
+    assert not P.UndoHere()
+    # LB + A still picks them one by one, the hover giving way
+    _look(lua, ns, P.AvoidItems()[1])
+    assert P.routeHover is not None
+    _pair(lua, "PADLSHOULDER", "PAD1")
+    assert P.Picking() and P.pick.at == 1
+    P.Tick(0.2)
+    assert P.routeHover is None and P.pickMark._shown and "1/" in _tip(lua)[0]
+    _tap(lua, "PAD2")
+    assert not P.Picking()
+    # (panned off it: nothing hovered, the ring gone)
+    G.PadPan(400, 400)
+    lua.execute("AGPS_T = AGPS_T + 0.5")
+    G.Update()
+    P.Tick(0.2)
+    assert P.routeHover is None and not P.pickMark._shown
+    assert P.Press("X", True) is False  # (nothing under it: nothing happens)
+
+
+def test_the_crosshair_on_a_swim_x_avoids_it_and_y_undoes(game, trip, pad):  # noqa: F811
+    lua, ns = game
+    N, G, P = ns.Nav, ns.GPS, ns.Pad
+    r = trip(ISLE, SHORE)
+    swum = r.swimYards
+    assert swum > 200
+    G.Update()
+    assert P.Apply()
+    it = next(i for i in P.AvoidItems().values() if str(i.kind) == "swim")
+    _look(lua, ns, it)
+    h = P.routeHover
+    assert h is not None and str(h.kind) == "swim"
+    assert _same(lua, G.SwimAt(*G.CrosshairSpot())[2], h.sg)
+    tip = _tip(lua)
+    assert tip[0].startswith("Swim") and tip[-1] == "X: avoid swimming for this stop", tip
+    assert any(_same(lua, b, P.pickMark) and i == "remove" for b, i in _hints(lua, ns))
+    _tap(lua, "PAD3")
+    ask = G.removeAsk
+    assert ask._shown and ask.swim
+    _tap(lua, "PAD1")
+    trip.settle()
+    assert N.noSwim or N.stops[1].avoidSwim
+    assert N.route.swimYards < swum / 3, N.route.swimYards
+    P.Tick(0.2)
+    assert P.UndoHere()
+    _tap(lua, "PAD4")  # (Y: taken back)
+    trip.settle()
+    assert not N.noSwim and not N.stops[1].avoidSwim and len(N.swimBans) == 0
+    assert N.route.swimYards == pytest.approx(swum, rel=0.05)
+
+
+def test_b_lets_the_crosshairs_question_go(game, jump_trip, pad):  # noqa: F811
+    lua, ns = game
+    N, G, P = ns.Nav, ns.GPS, ns.Pad
+    _jumping(ns, jump_trip())
+    G.Update()
+    assert P.Apply()
+    _look(lua, ns, P.AvoidItems()[1])
+    _tap(lua, "PAD3")
+    assert G.jumpAsk._shown
+    _tap(lua, "PAD2")
+    assert not G.jumpAsk._shown and N.stops[1].avoidJumps is None and not P.UndoHere()
+
+
+def test_the_crosshair_on_a_jump_works_in_the_world_map_too(game, jump_trip, pad):  # noqa: F811
+    lua, ns = game
+    N, G, P, st = ns.Nav, ns.GPS, ns.Pad, ns.settings.gps
+    _jumping(ns, jump_trip())
+    lua.execute(WM_SETUP)
+    was = {k: st[k] for k in ("useWorldMap", "replaceMinimap", "shown", "minimized")}
+    try:
+        st.shown, st.minimized, st.useWorldMap = True, None, True
+        G.ApplySettings()
+        lua.globals().AzerothGPS_ToggleMap()
+        assert G.WorldMapHosted()
+        lua.execute("AGPS_T = AGPS_T + 0.5")
+        G.Update()
+        assert P.Apply()
+        _look(lua, ns, P.AvoidItems()[1])
+        assert P.routeHover is not None and str(P.routeHover.kind) == "jump"
+        assert P.pickMark._shown and _same(lua, P.pickMark._parent, G.Canvas())
+        _tap(lua, "PAD3")
+        assert G.jumpAsk._shown
+        _tap(lua, "PAD1")
+        assert N.stops[1].avoidJumps == "spell"
+        P.Tick(0.2)
+        _tap(lua, "PAD4")
+        assert N.stops[1].avoidJumps is None
+    finally:
+        lua.execute("WorldMapFrame:Hide() ToggleWorldMap = nil")
+        for k, v in was.items():
+            st[k] = v
+        G.WorldMapChanged()
+        G.ApplySettings()
