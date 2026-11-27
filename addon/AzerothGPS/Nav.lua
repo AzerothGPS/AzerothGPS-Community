@@ -5234,6 +5234,31 @@ end
 -- the stretches themselves stay until replaced).
 N.LATER_PER_CALL = 1
 
+-- A stretch worked out while its searches were still running (`pending`: provisional, a line straight across meanwhile)
+-- is done again once the Router has no work left: the searches it waited on are in by then. Nav.SearchDone redoes them
+-- too, when the pump reports a search between fixed points; this doesn't hang on that (issue #1008: a stretch stored
+-- provisional stayed so, the trip's total by how fast the slices ran: 2106 yd straight across where the searches, once
+-- in, said no way). Asked from Status, never from the `later:` job (its own job is work). At most LATER_REDOS times a
+-- stretch till the stretches are invalidated: one still provisional with nothing to wait on stays as it is. (On N:
+-- Nav.lua's main chunk is at Lua 5.1's 200 locals)
+N.LATER_REDOS = 3
+function N.RedoProvisional()
+  local R = ns.Router
+  if not later.key or not later.done or (R and R.HasWork and R.HasWork()) then return false end
+  local any = false
+  for i = 2, N.PlannedStops() do
+    local st = later[i]
+    if later.done[i] and st and st.pending then
+      later.redos = later.redos or {}
+      if (later.redos[i] or 0) < N.LATER_REDOS then
+        later.redos[i] = (later.redos[i] or 0) + 1
+        later.done[i], any = nil, true
+      end
+    end
+  end
+  return any
+end
+
 local function LaterMissing()
   if not later.key then return false end
   for i = 2, N.PlannedStops() do
@@ -5784,8 +5809,10 @@ function N.Route(px, py, cont)
   -- stretches between stops still to work out: one more, same route from the player. In the game, in the
   -- background (they don't depend on the player; a far pair of stops was 40 to 85 ms in the frame, the
   -- overnight sweeps' replay); in the tests, in the frame as before.
-  if r and not r.flying and r.firstStretch and r.version == version and r.offroad == offroad and not N.degraded
-      and later.key == version .. ":" .. tostring(offroad) .. ":" .. tostring(later.here) and LaterMissing() then
+  local laterOn = r and not r.flying and r.firstStretch and r.version == version and r.offroad == offroad
+    and not N.degraded and later.key == version .. ":" .. tostring(offroad) .. ":" .. tostring(later.here)
+  if laterOn then N.RedoProvisional() end -- (a stretch stored provisional, its searches since in: again, issue #1008)
+  if laterOn and LaterMissing() then
     if ns.Router.WARM and not ns.Router.SYNC_WALKS then
       ns.Router.Background("later:" .. version .. ":" .. tostring(offroad), function()
         local _, walk = N.Speeds()
@@ -6160,7 +6187,7 @@ end
 -- without comparing it with the current one (see KeepOld).
 function N.Invalidate(all, fresh)
   N.route = nil -- (kept stays, to compare the recalculation with)
-  if all ~= false then later.done = {} end -- redone a few a frame; shown until replaced
+  if all ~= false then later.done, later.redos = {}, nil end -- redone a few a frame; shown until replaced
   if fresh then pairCosts, pairCount = {}, 0 end
   -- (fresh == "costs": the planned costs only, the ride check's answers kept: "Take it?" -> No, item 63b)
   if fresh == true then kept, rideCheck, ridePlan, rideLast, N.noWalk, N.walkKept, rideSpot = nil, {}, {}, {}, {}, {}, {} end

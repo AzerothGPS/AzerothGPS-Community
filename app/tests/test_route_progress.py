@@ -153,18 +153,18 @@ def _trip(ns):
     return [str(N.stops[i].name) for i in range(1, len(N.stops) + 1)], round(r.totalYards), round(r.totalRide)
 
 
-def _game_trip(first_stop_first, look=None):
-    """The trip worked out the game's way (its work in background slices), the roads built first."""
+def _game_trip(first_stop_first, look=None, budget_ms=10):
+    """The trip worked out the game's way (its work in background slices of `budget_ms`), the roads built first."""
     lua, ns = _start()
     N, R = ns.Nav, ns.Router
     N.FIRST_STOP_FIRST = first_stop_first
     R.WARM, R.SYNC_WALKS = True, False
     try:
         N.SetStops(lua.eval("{ { x = 2000, y = 300, cont = 0 } }"), False, "red")
-        _settle(lua, ns)  # (the roads built)
+        _settle(lua, ns, budget_ms)  # (the roads built)
         N.Clear()
         N.SetStops(lua.eval(FIVE), True, "red")
-        _settle(lua, ns, on_frame=look and (lambda f: look(ns, f)))
+        _settle(lua, ns, budget_ms, frames=20000, on_frame=look and (lambda f: look(ns, f)))
         return lua, ns, _trip(ns)
     finally:
         R.WARM, R.SYNC_WALKS = False, True
@@ -194,3 +194,24 @@ def test_a_trip_draws_the_way_to_its_first_stop_before_the_rest_and_ends_with_th
     _, _, want = _game_trip(False)
     assert got[0] == want[0]
     assert abs(got[1] - want[1]) <= max(20, want[1] * 0.01) and got[2] == want[2], (got, want)
+
+
+def _stretches(ns):
+    r = ns.Nav.route
+    out = []
+    for i in range(2, ns.Nav.PlannedStops() + 1):
+        st = r.stretches[i]
+        out.append(False if not st else (round(st.walk), round(st.ride), bool(st.pending)))
+    return out
+
+
+def test_a_trips_later_stretches_come_out_the_same_whatever_the_slice_length():
+    # (issue #1008: a stretch worked out while its searches still ran was kept provisional once they were in, so the
+    # trip's total went by the machine's speed: 3440 yd with short slices, 1334 with long ones. Fields to B is no way
+    # once searched, B up a cliff: the Router's own answer, synchronously)
+    got = {}
+    for ms in (10, 2):
+        lua, ns, trip = _game_trip(True, budget_ms=ms)
+        got[ms] = trip, _stretches(ns)
+        assert not any(st and st[2] for st in got[ms][1]), got[ms]  # (none left provisional)
+    assert got[10] == got[2], got
