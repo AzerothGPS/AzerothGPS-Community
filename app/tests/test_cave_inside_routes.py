@@ -216,3 +216,102 @@ def test_a_routes_cave_shows_its_inside_at_any_zoom(style):
         assert G.shownView.cave is None
     finally:
         N.dest = None
+
+
+# ---------------------------------------------------------------- item 133: the route's cave from Darnassus
+# (Kooki3z 2026-11-27, a level 15 night elf in Darnassus, the route into Ban'ethil Barrow Den: in Darnassus the
+# seamless style's view was gone. The route's cave (item 84d, any zoom) put the den's view up over the whole map: the
+# terrain's tiles round it laid out to the continent's zoom, Teldrassil black, no stitched art anywhere; with the den
+# out of view, its view still up over the city and the land round the player gone in the Terrain style)
+DARNASSUS = (9947.0, 2482.0)  # (.go xyz 9947 2482 1316 1; UnitPosition's z is always 0 in this client)
+DEN = "cave173805"  # (Ban'ethil Barrow Den, Teldrassil: four floors)
+DEN_STOP = (9704.0, 1544.0)  # (a spot on the den's own cells, its lowest floor)
+
+
+def _darnassus(style, world_map=False):
+    from test_atlas import _seamless
+    from test_world_map_host import SETUP
+    lua, ns = _seamless(on=style == "seamless")
+    G, st = ns.GPS, ns.settings.gps
+    lua.execute(f"AGPS_POS[1], AGPS_POS[2], AGPS_POS[3], AGPS_POS[4] = {DARNASSUS[0]}, {DARNASSUS[1]}, 1, 0 "
+                "IsIndoors = function() return false end AGPS_T = (AGPS_T or 0) + 1000")
+    lua.execute("AGPS_NS.GPS.CursorWorld = function() return nil end")
+    if world_map:
+        lua.execute(SETUP)
+        st.shown, st.minimized, st.useWorldMap = True, None, True
+        G.ApplySettings()
+        lua.globals().AzerothGPS_ToggleMap()
+        assert G.WorldMapHosted()
+    return lua, ns
+
+
+def _at(lua, ns, zoom):
+    G = ns.GPS
+    ns.settings.gps.zoom = zoom
+    G.Follow()
+    lua.execute("AGPS_T = (AGPS_T or 0) + 1")
+    G.Update()
+    tiles = [q for q in lua.eval("AGPS_NS.GPS.laidTiles.quads").values()]
+    return G.shownView, tiles
+
+
+@pytest.mark.parametrize("world_map", [False, True])
+def test_the_routes_cave_from_darnassus_keeps_the_stitched_art(world_map):
+    lua, ns = _darnassus("seamless", world_map)
+    G, N, A = ns.GPS, ns.Nav, ns.Atlas
+    G.hoveredCave = G.CaveAt(1, *DEN_STOP)
+    assert G.hoveredCave == DEN
+    z = G.ClickFloorZ(1, *DEN_STOP)
+    G.hoveredCave = None
+    N.dest = lua.eval(f"{{ x = {DEN_STOP[0]}, y = {DEN_STOP[1]}, cont = 1, z = {z} }}")
+    try:
+        assert G.RouteCave(1) == DEN
+        fl = G.FloorBar()
+        n = len(G.InstanceFloors(G.CaveArt(1, DEN)))
+        assert n == 4
+        for zoom in (600.0, 1200.0, 3000.0):
+            for step in range(2):  # (the floor bar on "All", then one floor)
+                view, tiles = _at(lua, ns, zoom)
+                assert view.cave is not None and G.hoveredCave == DEN, zoom  # (its view up, as item 84d)
+                assert fl.bar.IsShown(fl.bar) and fl.text.IsShown(fl.text)
+                assert ("all 4 floors" in fl.text.GetText(fl.text)) == (step == 0), (zoom, fl.text.GetText(fl.text))
+                assert tiles  # (the den's own art)
+                if zoom > G.TilesMaxZoom(True):
+                    # past the terrain's tiles: the stitched map's art whole under it, not black; no terrain laid round
+                    # it, no world map's parchment, the den outlined over the art
+                    assert A.artHost and A.artHost.IsShown(A.artHost) and G.seamArt == 1, (zoom, step)
+                    assert not any(q.terrain for q in tiles) and view.interiorMap is None, zoom
+                    assert view.caveOverArt and view.interiorEdge
+                else:  # (closer in: the terrain's own tiles round it, as a cave's map opened from its icon)
+                    assert view.interiorTerrain and any(q.terrain for q in tiles) and not view.caveOverArt, zoom
+                if step == 0:
+                    assert G.FloorStep(False)
+            assert G.FloorStep(True)  # (back to all of them)
+    finally:
+        N.dest = None
+        if world_map:
+            lua.execute("WorldMapFrame:Hide() ToggleWorldMap = nil")
+
+
+@pytest.mark.parametrize("style", ["seamless", "minimap"])
+def test_the_routes_cave_out_of_view_leaves_the_land_round_the_player(style):
+    lua, ns = _darnassus(style)
+    G, N = ns.GPS, ns.Nav
+    G.hoveredCave = G.CaveAt(1, *DEN_STOP)
+    z = G.ClickFloorZ(1, *DEN_STOP)
+    G.hoveredCave = None
+    N.dest = lua.eval(f"{{ x = {DEN_STOP[0]}, y = {DEN_STOP[1]}, cont = 1, z = {z} }}")
+    try:
+        for zoom in (80.0, 300.0):  # (the den some 950 yd west: out of view)
+            view, tiles = _at(lua, ns, zoom)
+            assert view.cave is None and G.laidTiles.laidSig == "tiles:1" and tiles, (style, zoom)
+            fl = G.FloorBar()
+            assert not fl.bar.IsShown(fl.bar)
+        # with no route, standing in Darnassus: the land, the art past the tiles
+        N.dest = None
+        view, tiles = _at(lua, ns, 3000.0)
+        assert view.cave is None
+        if style == "seamless":
+            assert view.artOnly and ns.Atlas.artHost.IsShown(ns.Atlas.artHost)
+    finally:
+        N.dest = None

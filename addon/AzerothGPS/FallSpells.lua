@@ -88,6 +88,9 @@
 -- landing (or as much as its duration allows). Not taken (checked): Disengage (doesn't leap here, Kooki3z 2026-11-26);
 -- Hand of Protection isn't in this client. A few items share category 37 with physical immunity (Limited Invulnerability
 -- Potion's 3169, Light of Elune's 6724): not done yet.
+-- They're the fallback (item 125c, Kooki3z 2026-11-27): a normal fall spell or item castable now (Slow Fall with a
+-- Light Feather, Levitate, a racial, an item) is the step's and the trip's (FS.Prefer, FS.Budget's ties); an immunity
+-- only where none is: no reagent, not known, on its cooldown, or a drop it can't make safe.
 --
 -- What's ready is looked at again on the bags, the spells, a level, the cooldowns, the auras and combat (and every
 -- TICK_SECONDS for a cooldown running out): a change (the last feather used, the racial on its cooldown, the option)
@@ -143,12 +146,13 @@ FS.SPELLS = {
 }
 FS.FORBEARANCE = 25771
 FS.IMMUNE_CUE_S = 3 -- seconds before the landing an immunity's cue comes (or less, as its duration allows)
--- Whether row may be used now: an immunity only for an Expert jumper with its own option on (FS.Expert).
+-- Whether row may be used now: an immunity only for an Expert jumper with its own option on (FS.Expert); the option
+-- off by default, nil off too (item 125b).
 function FS.RowAllowed(row)
   if not row.immune then return true end
   if not FS.Expert() then return false end
   local st = ns.settings and ns.settings.gps
-  return not (st and st[row.option] == false)
+  return st ~= nil and st[row.option] == true
 end
 -- A row's key (Nav.PickFallSpell's): its English name, an item's "item:<id>".
 function FS.RowKey(row)
@@ -389,19 +393,40 @@ function FS.ReadyRows()
   end
   return out
 end
+-- Whether source c must wait for its cooldown (or a debuff stopping it): not castable now, its buff not up.
+local function Waits(c) return not c.up and FS.RowCooldown(c.row) > 0 end
+-- A normal fall spell or item first, an immunity the fallback (item 125c, Kooki3z 2026-11-27: "On a mage if slow fall
+-- reagents are available then this should be the priority spell to jump with, immunities are fallbacks"): of `normal`
+-- (the best of the rows without `immune`) and `immune` (the best immunity), the immunity only when there's no normal
+-- one ready (no reagent, not known, its option off), it must wait for its cooldown while the immunity needn't, or the
+-- immunity makes a bigger drop safe than it does.
+function FS.Prefer(normal, immune)
+  if not immune then return normal end
+  if not normal then return immune end
+  if immune.drop > normal.drop + 0.5 then return immune end
+  if Waits(normal) and not Waits(immune) then return immune end
+  return normal
+end
 -- The spell to use for big drops now: { row, id, drop, up }, or nil (none ready, or the option off). The one the trip
--- picked on a jump's right-click (Nav.PickFallSpell, by its row's name) while it's ready; else the one making the
--- biggest drop safe. Cached; FS.Refresh looks again.
+-- picked on a jump's right-click (Nav.PickFallSpell, by its row's name) while it's ready (an immunity only where one
+-- would be taken anyway: FS.Prefer); else the one making the biggest drop safe, a normal one before an immunity.
+-- Cached; FS.Refresh looks again.
 local current, looked
 function FS.Look()
   local N = ns.Nav
   if N and N.spellJumpsOff then return nil end -- (the trip is faster without: Nav.CheckSpellJumps)
   local pick = N and N.fallPick
-  local best
+  local normal, immune, picked
   for _, c in ipairs(FS.ReadyRows()) do
-    if pick and FS.RowKey(c.row) == pick then return c end
-    if not best or c.drop > best.drop then best = c end
+    if pick and FS.RowKey(c.row) == pick then picked = picked or c end
+    if c.row.immune then
+      if not immune or c.drop > immune.drop then immune = c end
+    elseif not normal or c.drop > normal.drop then
+      normal = c
+    end
   end
+  local best = FS.Prefer(normal, immune)
+  if picked and (not picked.row.immune or (best and best.row.immune)) then return picked end
   return best
 end
 function FS.Current()
@@ -464,7 +489,8 @@ end
 -- The jumps a trip needs, each survivable with what the player has (spell jumping)? `jumps`: { { t = seconds from
 -- now, dz = yards, key = }, ... } in order; `plain`: the player's own safe drop; `waits`: { [key] = true } jumps the
 -- trip waits at for a source's cooldown. Each jump past `plain` takes a source with the reach, uses left and ready by
--- then (the one ready soonest; ties: no cooldown, then the trip's pick, then the most uses); using it starts its
+-- then (the one ready soonest; ties: a normal one before an immunity, no cooldown, the trip's pick, the most uses: an
+-- immunity only for a jump no normal source can take by then, FS.Prefer); using it starts its
 -- cooldown (and its category's) and spends a use. Returns nil and the seconds waited in all when every one is; else k
 -- (the first that isn't) and the wait it needs there (math.huge: no source left at all).
 function FS.Budget(jumps, plain, waits)
@@ -499,7 +525,9 @@ function FS.Budget(jumps, plain, waits)
           local better = not best or w < bw - 0.01
           if not better and math.abs(w - bw) <= 0.01 then
             local a, b = (s.row.cd or 0) == 0, (best.row.cd or 0) == 0
-            if a ~= b then
+            if (s.row.immune == true) ~= (best.row.immune == true) then
+              better = not s.row.immune -- (a normal fall spell before an immunity, FS.Prefer)
+            elseif a ~= b then
               better = a
             elseif pick and (FS.RowKey(s.row) == pick) ~= (FS.RowKey(best.row) == pick) then
               better = FS.RowKey(s.row) == pick

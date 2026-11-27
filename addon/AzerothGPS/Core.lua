@@ -147,8 +147,9 @@ ns.DEFAULTS = {
     allowSwim = true, -- routes may swim (Passability.avoidSwim off: Nav.SyncSwim); off, they go round by land
     useClassSpells = true, -- big drops with Slow Fall, Levitate or a racial ready (FallSpells.lua)
     expertJumper = false, -- spell jumping, any height: cast just before landing (FallSpells.lua, under useClassSpells)
-    -- (item 102: immunities an Expert jumper may land with, each its own; FallSpells.SPELLS' `option`)
-    jumpDivineShield = true, jumpDivineProtection = true, jumpBlessingOfProtection = true, jumpIceBlock = true,
+    -- (item 102: immunities an Expert jumper may land with, each its own; FallSpells.SPELLS' `option`; item 125b,
+    -- Kooki3z: off by default, and nil is off (FallSpells.RowAllowed), a value saved stays)
+    jumpDivineShield = false, jumpDivineProtection = false, jumpBlessingOfProtection = false, jumpIceBlock = false,
     safeDropYd = 39, -- the drop routes take out of combat without a fall spell (Nav.PlainSafeDrop, Options' Safe drop)
     cityKeepOrder = true, -- ... except stops down in a city: in the order placed
     importKeepOrder = true, -- stops imported (Import and Share, /way lists, shared routes) in the order listed (Nav.keepOrder)

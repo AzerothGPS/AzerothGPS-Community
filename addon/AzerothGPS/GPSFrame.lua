@@ -2104,8 +2104,12 @@ G.INTERIOR_TERRAIN_SHADE = 1 -- the terrain round a building: its color times th
 G.INTERIOR_TERRAIN_FEATHER_YD = 6 -- yards over which a building's dark ground fades out onto the terrain (a knob)
 G.INTERIOR_TERRAIN_LAYER = "BACKGROUND" -- (under the rooms' ground, BORDER, and their art, ARTWORK)
 -- whether inside map `place` (an ns.Interiors row) or cave map `cave` (G.CaveArt's) gets the terrain round it, in a
--- view where `artA` is the seamless blend's art alpha (nil: not the seamless style, or browsing)
-function G.InteriorTerrain(place, artA, cave)
+-- view where `artA` is the seamless blend's art alpha (nil: not the seamless style, or browsing), at `zoom`: a cave's
+-- only out to the terrain tiles' zoom (G.TilesMaxZoom). Past it (a route's cave, shown at any zoom, item 84d) the cave
+-- over the stitched map's art, as anything that far out (G.InteriorArtSpot): the terrain laid out that far was Teldrassil
+-- all black in Darnassus, no OpenMap art anywhere, with the route going into Ban'ethil Barrow Den (item 133)
+function G.InteriorTerrain(place, artA, cave, zoom)
+  if cave and zoom and zoom > G.TilesMaxZoom(true) then return false end
   return artA ~= nil and (place ~= nil or cave ~= nil) or false
 end
 -- The terrain tiles round a building on `cont` (an underground city's level: its base continent's), as the terrain
@@ -4102,14 +4106,32 @@ function G.SwimSegStays(sg)
   local y = pts[2 * i] + (pts[2 * i + 2] - pts[2 * i]) * t
   return ns.Nav.SwimStays and ns.Nav.SwimStays(part.cont, x, y) or false
 end
--- A swim on the map at the cursor (within SWIM_HOVER_PX): its spot round G.markLayer's middle, or nil.
-function G.SwimAtCursor()
-  if G.square or G.swimSegN == 0 or not (G.markLayer and GetCursorPosition) then return nil end
+-- The cursor round G.markLayer's middle (the route's swims and jumps are drawn round it), or nil.
+function G.CursorSpot()
+  if not (G.markLayer and GetCursorPosition) then return nil end
   local mx, my = GetCursorPosition()
   local sc = G.markLayer:GetEffectiveScale()
   local lx, ly = G.markLayer:GetCenter()
   if not (lx and sc and sc > 0) then return nil end
-  local x, y = mx / sc - lx, my / sc - ly
+  return mx / sc - lx, my / sc - ly
+end
+-- The controller's crosshair (the map's middle, Pad.lua's reticle) round G.markLayer's middle, or nil: where the pad
+-- looks for what the mouse's hover and right-click find under the cursor (item 121).
+function G.CrosshairSpot()
+  if not (G.markLayer and canvas) then return nil end
+  local cx, cy = canvas:GetCenter()
+  local lx, ly = G.markLayer:GetCenter()
+  local cs, ls = canvas:GetEffectiveScale(), G.markLayer:GetEffectiveScale()
+  if not (cx and lx and cs and ls and ls > 0) then return nil end
+  return cx * cs / ls - lx, cy * cs / ls - ly
+end
+-- A swim on the map at the cursor (within SWIM_HOVER_PX): its spot round G.markLayer's middle, or nil.
+function G.SwimAtCursor()
+  return G.SwimAt(G.CursorSpot())
+end
+-- A swim on the map at (x, y) round G.markLayer's middle (the cursor's spot, or the crosshair's): the spot and its seg.
+function G.SwimAt(x, y)
+  if G.square or G.swimSegN == 0 or not x then return nil end
   local r2 = G.SWIM_HOVER_PX ^ 2
   for i = 1, G.swimSegN do
     local sg = G.swimSegs[i]
@@ -4166,9 +4188,10 @@ function G.SwimHover(dt)
   end
   GameTooltip:Show()
 end
--- A right-click on the map over a swim: "Remove?" there (G.AskRemove); true when it was one.
-function G.SwimClick()
-  local x, y, sg = G.SwimAtCursor()
+-- A right-click on the map over a swim: "Remove?" there (G.AskRemove); true when it was one. (`x`, `y`, `sg`: the
+-- swim at the controller's crosshair, Pad.lua's, instead of the cursor's)
+function G.SwimClick(x, y, sg)
+  if not sg then x, y, sg = G.SwimAtCursor() end
   if not x then return false end
   if G.SwimSegStays(sg) then return false end -- (no way round it by land: the map's own click)
   G.AskRemove({ swim = true, swimX = x, swimY = y, swimPart = sg.part, swimI = sg.i, swimT1 = sg.t1, swimT2 = sg.t2 })
@@ -4228,12 +4251,11 @@ end
 -- A jump on the map at the cursor (within JUMP_HOVER_PX of it, or of the coil drawn round a short one): the spot round
 -- G.markLayer's middle and its seg, or nil.
 function G.JumpAtCursor()
-  if G.square or G.jumpSegN == 0 or not (G.markLayer and GetCursorPosition) then return nil end
-  local mx, my = GetCursorPosition()
-  local sc = G.markLayer:GetEffectiveScale()
-  local lx, ly = G.markLayer:GetCenter()
-  if not (lx and sc and sc > 0) then return nil end
-  local x, y = mx / sc - lx, my / sc - ly
+  return G.JumpAt(G.CursorSpot())
+end
+-- A jump on the map at (x, y) round G.markLayer's middle (the cursor's spot, or the crosshair's): the spot and its seg.
+function G.JumpAt(x, y)
+  if G.square or G.jumpSegN == 0 or not x then return nil end
   local r2 = G.JUMP_HOVER_PX ^ 2
   for i = 1, G.jumpSegN do
     local sg = G.jumpSegs[i]
@@ -4319,7 +4341,9 @@ function G.JumpHover(dt)
   if not on then
     if owned and G.jumpTip then GameTooltip:Hide() end
     G.jumpTip = nil
-    if MX then MX.ShowLanding(G, nil) end
+    -- (the controller's crosshair on a jump shows its landing ring, Pad.lua's route hover: left up)
+    local P = ns.Pad
+    if MX and not (P and P.routeHover and P.routeHover.kind == "jump") then MX.ShowLanding(G, nil) end
     return
   end
   local info = G.JumpInfo(on)
@@ -4342,9 +4366,10 @@ function G.JumpHover(dt)
   end
   GameTooltip:Show()
 end
--- A right-click on the map over a jump: its menu there (G.AskJump); true when it was one.
-function G.JumpClick()
-  local x, y, sg = G.JumpAtCursor()
+-- A right-click on the map over a jump: its menu there (G.AskJump); true when it was one. (`x`, `y`, `sg`: the jump at
+-- the controller's crosshair, Pad.lua's, instead of the cursor's)
+function G.JumpClick(x, y, sg)
+  if not sg then x, y, sg = G.JumpAtCursor() end
   if not x then return false end
   local info = G.JumpInfo(sg)
   if not info then return false end
@@ -10601,7 +10626,7 @@ function G.Update()
     local routed = false
     if not (h and h.cave) then
       local rc = G.RouteCave(viewCont)
-      if rc then h, hk, routed = { cave = rc, cont = viewCont }, "route-cave:" .. tostring(rc), true end
+      if rc and G.CaveInView(viewCont, rc, cx, cy, zoom) then h, hk, routed = { cave = rc, cont = viewCont }, "route-cave:" .. tostring(rc), true end
     end
     -- (none of those, the view on the player standing in a cave or building with no art: its map drawn from its cells,
     -- zoomed in to INTERIOR_MAX_ZOOM, as the inside maps show; item 115)
@@ -10777,12 +10802,15 @@ function G.Update()
     and G.SeamArt(viewCont, cx, cy, s, edge and 1 or artA) or false
   -- (a building's inside map, an underground city's or a cave's, 2026-11-14: the terrain round it, a little darker, at
   -- any turn; G.InteriorTerrain)
-  view.interiorTerrain = not inst and G.InteriorTerrain(not view.cave and place or nil, artA, view.cave) or nil
+  view.interiorTerrain = not inst and G.InteriorTerrain(not view.cave and place or nil, artA, view.cave, zoom) or nil
   view.instTerrain = inst and not browse and G.InstanceTerrainSpot(inst, viewCont, artA) or nil
   -- (the interiors' edge blend, issue #85: a dungeon's, a cave's or an inside map north up, the art whole under its
   -- rooms' dark ground, where it lies on the continent: G.InteriorArtSpot; shown once its art is laid, below)
   view.interiorSpot = artA ~= nil and rot == 0 and not browse and (inst or view.cave or place)
     and not view.interiorTerrain and not view.instTerrain and G.InteriorArtSpot(inst, viewCont) or nil
+  -- (a cave's map past the terrain's tiles, G.InteriorTerrain: over the stitched map's art, outlined as over the terrain,
+  -- no world map's parchment; the art drawn even with the cave out of view, item 133)
+  view.caveOverArt = view.cave and artA ~= nil and not view.interiorTerrain or nil
   view.interiorEdge = nil
   if not artShown then
     if not view.interiorSpot then G.SeamArt(nil) end
@@ -10902,7 +10930,7 @@ function G.Update()
   end
   if view.interiorSpot then -- (the interiors' edge blend: the art under its ground; none without its art, as before)
     local sp = view.interiorSpot
-    view.interiorEdge = instArt and G.SeamArt(sp[1], cx + sp[2], cy + sp[3], s, 1) or nil
+    view.interiorEdge = (instArt or view.caveOverArt) and G.SeamArt(sp[1], cx + sp[2], cy + sp[3], s, 1) or nil
     if not view.interiorEdge then G.SeamArt(nil) end
   end
   if quads ~= (lt and lt.quads) then -- (laid out afresh: drawn, round this center)
@@ -13658,17 +13686,19 @@ function G.LayoutCaveMap(cx, cy, rot, zoom, half, kept, ground, terrain)
   -- (its world map, another WoW version's where its rooms are laid out alike: Data/InteriorMaps.lua)
   -- (over the terrain, none: the art alone with its black outline, not on its world map's parchment; asked 2026-11-15,
   -- Gol'Bolar Quarry Mine: "any cave doing this should be changed to do the black outline trick")
-  local f = not terrain and G.InteriorMapFor(art.cont, art.list, band, cx, cy) or nil
+  -- (over the stitched map's art, past the terrain's tiles: outlined as over the terrain, item 133)
+  local overArt = not terrain and view.caveOverArt
+  local f = not terrain and not overArt and G.InteriorMapFor(art.cont, art.list, band, cx, cy) or nil
   view.interiorMap, view.interiorMapOnly = f, f and G.IsMapStyle(G.Style()) or nil
   local quads = kept("cave:" .. art.key .. ":" .. tostring(band and band[1]) .. ":" .. tostring(f and f.ui)
-      .. ":" .. tostring(view.interiorMapOnly) .. (terrain and ":terrain" or ground and ":ground" or ""))
+      .. ":" .. tostring(view.interiorMapOnly) .. (terrain and ":terrain" or overArt and ":art" or ground and ":ground" or ""))
   if not quads and art.auto then -- (item 115: no art, drawn from its walkable cells, the floor shown full)
     quads = G.LayoutAutoMap({}, cx, cy, art, k > 0 and #floors - k + 1 or nil, rot, zoom, half, terrain ~= nil or ground)
     if terrain then G.LayoutInteriorTerrain(quads, cx, cy, terrain, rot, zoom, half) end
   elseif not quads then
     quads = G.LayoutUnderMap(f, view.interiorMapOnly, cx, cy, rot, zoom, half, function()
       local q = G.LayoutInstanceArt(cx, cy, art, rot, zoom, half, band)
-      if terrain and #q > 0 then
+      if (terrain or overArt) and #q > 0 then
         G.InteriorOutline(q) -- (as a building's: the thin black edge round its art, not dark squares; asked 2026-11-14)
       elseif ground and #q > 0 then
         G.InteriorGround(q, cx, cy, art.list, band, rot, zoom, half, nil, nil)
@@ -15587,12 +15617,53 @@ function G.AddPending(dxUI, dyUI)
   -- opened) and the spot in it, the cave's floor there, routed in by its way in; else the ground over it, never the
   -- cave's floor guessed for a click on the land (item 82g: a stop north of Lushwater Oasis took the Wailing Caverns'
   -- road under the hill))
-  local z = G.ClickFloorZ(view.cont, x, y)
-  -- (item 114c: a floor picked on the map's floor picker near: the stop on it, MapExtras.lua)
+  -- (the controller's Select comes here too, at the crosshair, `dxUI`, `dyUI` 0: a stop the same as a double-click
+  -- there, on the floor the map shows; item 121)
+  G.AddStopAt(x, y, nil, nil, nil, G.MapStopZ(view.cont, x, y))
+end
+-- The height a stop placed at (x, y) on continent `cont` on the map takes (a double-click, the controller's Select):
+-- the floor the map shows there, or nil (the stop's own rules). A cave's floor under its overlay (G.ClickFloorZ), the
+-- floor picked on a cave's or building's map, its own art or one drawn from its cells (G.ShownFloorZ, item 121), the
+-- floor picked on the map's floor picker near (item 114c, MapExtras.lua), each over the one before.
+function G.MapStopZ(cont, x, y)
+  local z = G.ClickFloorZ(cont, x, y)
+  local fz = G.ShownFloorZ(cont, x, y)
+  if fz then z = fz end
   local MX = ns.MapExtras
-  local pz = G.mx and MX and MX.ClickZ(G.mx, G.shownLevel or view.cont, x, y)
+  local pz = G.mx and MX and MX.ClickZ(G.mx, G.shownLevel or cont, x, y)
   if pz then z = pz end
-  G.AddStopAt(x, y, nil, nil, nil, z)
+  return z
+end
+-- With a cave's or building's map up one floor at a time (view.cave, its floor bar's + and -: view.floor; a map drawn
+-- from its cells, item 115, too), the height of a stop at (x, y) on it: the walkable ground on that floor there (the
+-- grids' surfaces, MapExtras' GridHeights, the one nearest the floor's bottom), else the floor's bottom where its own
+-- cells cover the spot; nil with all its floors shown, or off it. Kooki3z 2026-11-26 (item 121): a stop set in a
+-- building or cave "should count the same as double clicking ... to route inside it".
+function G.ShownFloorZ(cont, x, y)
+  local art, k = view.cave, view.floor
+  if not (art and art.key and k and k > 0 and cont and x and y) then return nil end
+  local base = Geo.Base(cont)
+  if base ~= cont or (art.cont and art.cont ~= base) then return nil end
+  if (G.CaveAt(base, x, y) or G.AutoMapAt(base, x, y, true)) ~= art.key then return nil end
+  local floors = G.InstanceFloors(art)
+  local i = #floors - k + 1
+  local band = floors[i]
+  if not band then return nil end
+  local MX = ns.MapExtras
+  local best, bd
+  for _, h in ipairs(MX and MX.GridHeights and (MX.GridHeights(base, x, y)) or {}) do
+    if h >= band[1] - 1 and h <= band[2] + 1 then
+      local d = math.abs(h - band[1])
+      if not bd or d < bd then best, bd = h, d end
+    end
+  end
+  if best then return best end
+  for _, q in ipairs(art.auto and art.auto[i] and { art.auto[i] } or {}) do
+    for j = 1, #q - 3, 4 do
+      if math.abs(x - q[j]) <= q[j + 2] / 2 and math.abs(y - q[j + 1]) <= q[j + 3] / 2 then return band[1] end
+    end
+  end
+  return nil
 end
 -- The height a click at (x, y) on continent `cont` means over a cave (G.CaveAt): the cave's floor there with its
 -- overlay shown (G.hoveredCave, or a cave's map opened: free.cave), else the ground's; nil off a cave.
@@ -15649,6 +15720,15 @@ function G.RouteCave(cont)
   end
   if ground and z <= ground - G.CAVE_UNDER_YD then return cave end
   return nil
+end
+-- Whether cave `key`'s map on continent `cont` reaches into a view centered on (cx, cy) at `zoom` (1.5 x the zoom round
+-- it, as the layouts lay out): the route's cave shows only then (item 133: from Darnassus, the route into Ban'ethil
+-- Barrow Den put the den's view up over the city, the land round the player gone).
+function G.CaveInView(cont, key, cx, cy, zoom)
+  local art = G.CaveArt(cont, key)
+  if not art then return false end
+  local r = zoom * 1.5
+  return cx >= art.x0 - r and cx <= art.x1 + r and cy >= art.y0 - r and cy <= art.y1 + r
 end
 -- A spot (x, y in `cont`'s yards) on the seamless map's art over another continent or an isle: that one and its yards
 -- there; else nil (the same continent, the sea, no art).
@@ -17908,10 +17988,25 @@ function G.Init()
   keepLayer = CreateFrame("Frame", nil, canvas) -- stop markers (don't fade), clipped
   keepLayer:SetAllPoints(canvas)
   keepLayer:SetFrameLevel(canvas:GetFrameLevel() + 4)
+  -- (a hovered jump's landing ring and its "213 yd down", MapExtras.ShowLanding: over the route's lines (lineLayer)
+  -- and the stops' pins (keepLayer's, up to 2 over it), still clipped; on G.markLayer they were under the route's
+  -- line, Kooki3z 2026-11-26: "text is under the route, can't see it". A frame of the map's own from the start, so
+  -- the world map's SetLevelTree keeps it over them there too.)
+  G.RING_LEVEL = 7 -- (over the canvas's)
+  G.ringLayer = CreateFrame("Frame", nil, canvas)
+  G.ringLayer.agpsNoLook = true
+  G.ringLayer:SetAllPoints(canvas)
+  G.ringLayer:SetFrameLevel(canvas:GetFrameLevel() + G.RING_LEVEL)
+  G.lineLayer, G.keepLayer = lineLayer, keepLayer -- (the tests check the ring's over them)
 
+  -- (the layer of the map's buttons and panels: over the landing ring (RING_LEVEL), its buttons one more, so the ring
+  -- and the height profile strip (MapExtras, at this layer's own level) are under every button; item 134, Kooki3z
+  -- 2026-11-26: "buttons should always go over this")
+  G.TOP_LEVEL = 8 -- (over the canvas's)
   local top = CreateFrame("Frame", nil, frame) -- above the map tiles
   top:SetAllPoints(canvas)
-  top:SetFrameLevel(canvas:GetFrameLevel() + 5)
+  top:SetFrameLevel(canvas:GetFrameLevel() + G.TOP_LEVEL)
+  G.topLayer = top -- (the tests check the buttons are over the strip and the ring)
   topLayer = top
 
   arrow = lineLayer:CreateTexture(nil, "OVERLAY", nil, 7) -- clipped: may leave the view in free mode
@@ -19227,6 +19322,13 @@ function G.Init()
     end
     if not search:IsShown() then panel:Hide() end
     G.RefreshQuick()
+  end
+  -- How high the bottom row (the buttons going right from the map button: always shown, or in the menu opening that
+  -- way) reaches, in UI units up from the map's bottom; nil with none in it. The height profile strip sits over it
+  -- (MapExtras.OnRedraw; item 134).
+  function G.BottomRowTop()
+    if pinnedRight > 0 or #menuRight > 0 then return 3 + MAP_BUTTON end
+    return nil
   end
   function G.QuickMouseOver()
     if drawer <= 0 then return false end

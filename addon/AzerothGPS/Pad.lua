@@ -388,6 +388,7 @@ local reticle, legend
 function Pad.ShowMarks(on)
   on = on and Pad.used
   if not on and Pad.hovered then Pad.SetHovered(nil) end
+  if not on and (Pad.routeHover or Pad.routeTip) then Pad.SetRouteHover(nil) end
   local g = G()
   local canvas = g and g.Canvas and g.Canvas()
   local f = rawget(_G, "AzerothGPSFrame")
@@ -754,6 +755,13 @@ function Pad.HintTargets()
   else
     add(Pad.StopAt(), "remove")
     add(Pad.IconAt(), "select")
+    -- (the crosshair on a jump or swim: X's icon over its ring, as over a stop; an avoid just taken there: Y's, its
+    -- undo; item 121)
+    if Pad.routeHover then
+      add(Pad.pickMark, "remove")
+    elseif Pad.UndoHere() then
+      add(Pad.pickMark, "menu")
+    end
     add(g and g.DemoUseShown and g.DemoUseShown(), "select") -- (the tutorial's demo cast button, Pad.Run)
     -- (the map's bottom button by what it does now, one icon (asked 2026-11-16, "stop not set should only be the set
     -- stop button, if 1 or more stops are marked then its LB only"): stops marked, Confirm Route, Select's; none yet,
@@ -1217,6 +1225,11 @@ function Pad.Run(acts, down)
     local r = PK.Run(has, down)
     if r ~= nil then return r end
   end
+  -- (an avoid just taken at the crosshair, the crosshair still there: Y takes it back, as while picking; item 121)
+  if has.menu and down and not searching and not Pad.MenuOpen() and Pad.UndoHere() then
+    Pad.routeUndo = nil
+    return Pad.PickUndo()
+  end
   -- (the map menu open, or opened: its own controls, Pad.MenuRun)
   if (Pad.MenuOpen() and not searching) or (has.menu and down) then return Pad.MenuRun(has, down) end
   local held = false
@@ -1235,14 +1248,14 @@ function Pad.Run(acts, down)
   if has.yes then
     local q = Pad.Question()
     if q then return Click(q.yes) end
-    if jumpAsk then return Click(jumpAsk) end
+    if jumpAsk then return Pad.TakeAsk(jumpAsk) end
     -- (a stop's "Remove?" is a yes too, wherever the crosshair is; asked 2026-11-16: "if player removes a stop and
     -- doesn't move crosshair to the remove? button but presses the "Yes on a question" key consider that still a yes")
-    if g.removeAsk and g.removeAsk:IsShown() then return Click(g.removeAsk) end
+    if g.removeAsk and g.removeAsk:IsShown() then return Pad.TakeAsk(g.removeAsk) end
   end
   if has.select then
-    if g.removeAsk and g.removeAsk:IsShown() then return Click(g.removeAsk) end
-    if jumpAsk then return Click(jumpAsk) end
+    if g.removeAsk and g.removeAsk:IsShown() then return Pad.TakeAsk(g.removeAsk) end
+    if jumpAsk then return Pad.TakeAsk(jumpAsk) end
     -- (the tutorial's spell-jump demo: its look-alike cast button, A as its click; Tutorial.lua)
     local demo = g.DemoUseShown and g.DemoUseShown()
     if demo then return Click(demo) end
@@ -1263,8 +1276,16 @@ function Pad.Run(acts, down)
   if has.back then
     local q = Pad.Question()
     if q then return Click(q.no) end
-    if g.removeAsk and g.removeAsk:IsShown() then g.removeAsk:Hide() return true end
-    if jumpAsk then g.jumpAsk:Hide() return true end
+    if g.removeAsk and g.removeAsk:IsShown() then
+      Pad.routeAsk = nil
+      g.removeAsk:Hide()
+      return true
+    end
+    if jumpAsk then
+      Pad.routeAsk = nil
+      g.jumpAsk:Hide()
+      return true
+    end
     local menu = (g.mapMenu and g.mapMenu:IsShown()) or (g.searchPanel and g.searchPanel:IsShown())
     if menu then g.CloseMapMenus() return true end
     if g.quickFindOpen and g.SetQuickFindOpen then g.SetQuickFindOpen(false) return true end
@@ -1280,7 +1301,14 @@ function Pad.Run(acts, down)
   end
   if has.remove then
     local pin = Pad.StopAt()
-    if pin then g.AskRemove(pin) return true end
+    if pin then
+      Pad.routeAsk = nil
+      g.AskRemove(pin)
+      return true
+    end
+    -- (a jump or swim on the route under the crosshair: the mouse's right-click question there; item 121)
+    local h = Pad.RouteAt()
+    if h then return Pad.AskRouteAvoid(h) end
     return false
   end
   if has.clear then
@@ -1359,8 +1387,11 @@ function Pad.HoverTick(dt)
   Pad.hoverWait = (Pad.hoverWait or 0) - (dt or 0)
   if Pad.hoverWait > 0 then return end
   Pad.hoverWait = Pad.HOVER_EVERY
-  local want = Pad.bound and Pad.used and not Pad.MenuOpen() and not Pad.pick and (Pad.StopAt() or Pad.IconAt()) or nil
+  local on = Pad.bound and Pad.used and not Pad.MenuOpen() and not Pad.pick
+  local want = on and (Pad.StopAt() or Pad.IconAt()) or nil
   Pad.SetHovered(want)
+  -- (none of those: a jump or swim on the route under it, item 121)
+  Pad.SetRouteHover(on and not want and not Pad.Drawing() and Pad.RouteAt() or nil)
 end
 function Pad.SetHovered(b)
   local old = Pad.hovered
@@ -1374,6 +1405,128 @@ function Pad.SetHovered(b)
     local enter = b.GetScript and b:GetScript("OnEnter")
     if enter then pcall(enter, b) end
   end
+end
+-- The crosshair on a jump or swim of the route (Kooki3z 2026-11-26, item 121: "add crosshair hover for spell jumps and
+-- swimming to press X like how we do with stops to remove them for controller"): the mouse's own hit-tests at the
+-- crosshair (G.SwimAt, G.JumpAt at G.CrosshairSpot, the swim first as the right-click looks), shown as picking
+-- shows one (Pad.PickMark's ring, its tooltip with the pad's X for the avoid, a jump's landing ring), X asks the
+-- right-click's question there (G.SwimClick, G.JumpClick), A takes it; Y then takes it back (Nav.UndoAvoid) while the
+-- crosshair stays where it was taken. Picking (LB + A) is as it was.
+Pad.routeHover, Pad.routeAsk, Pad.routeUndo = nil, nil, nil
+-- { kind = "swim" | "jump", x, y (round G.markLayer's middle), sg } at the crosshair, or nil
+function Pad.RouteAt()
+  local g = G()
+  if not (g and g.CrosshairSpot and g.SwimAt and g.JumpAt) then return nil end
+  local cx, cy = g.CrosshairSpot()
+  if not cx then return nil end
+  local x, y, sg = g.SwimAt(cx, cy)
+  if sg then return { kind = "swim", x = x, y = y, sg = sg } end
+  x, y, sg = g.JumpAt(cx, cy)
+  if sg then return { kind = "jump", x = x, y = y, sg = sg } end
+  return nil
+end
+-- what a route hover is on: the same one again in another redraw (the segs are reused, their pieces aren't)
+local function RouteKey(h)
+  local sg = h and h.sg
+  if not sg then return nil end
+  return h.kind .. tostring(sg.part) .. ":" .. tostring(sg.i) .. ":" .. tostring(sg.t1)
+end
+-- X on it: the right-click's question there; a swim with no way round by land stays (said)
+function Pad.AskRouteAvoid(h)
+  local g = G()
+  local vx, vy, vc = g.PadView()
+  local ok
+  if h.kind == "swim" then
+    if g.SwimSegStays(h.sg) then
+      if ns.Print then ns.Print(L["No way round by land: this swim stays."]) end
+      return true
+    end
+    ok = g.SwimClick(h.x, h.y, h.sg)
+  else
+    ok = g.JumpClick(h.x, h.y, h.sg)
+  end
+  Pad.routeAsk = ok and vx and { cont = vc, x = vx, y = vy } or nil
+  return ok and true or false
+end
+-- A question up taken (A, or Yes): one asked at the crosshair for a jump or swim marks the spot for Y's undo
+function Pad.TakeAsk(b)
+  local ok = Click(b)
+  if ok and Pad.routeAsk then Pad.routeUndo = Pad.routeAsk end
+  Pad.routeAsk = nil
+  return ok
+end
+-- an avoid taken at the crosshair, the crosshair still on its spot (NEAR_UI) and it can still be taken back
+function Pad.UndoHere()
+  local u = Pad.routeUndo
+  if not u then return false end
+  local N = ns.Nav
+  if not (N and N.CanUndoAvoid and N.CanUndoAvoid()) then
+    Pad.routeUndo = nil
+    return false
+  end
+  local g = G()
+  local vx, vy, vc, s = g.PadView()
+  if not (vx and s) or vc ~= u.cont then return false end
+  return math.sqrt((vx - u.x) ^ 2 + (vy - u.y) ^ 2) * s <= Pad.NEAR_UI
+end
+-- the hover's tooltip, owned by the ring: as the mouse's hover (G.JumpTip, G.SwimTip), the avoid by the pad's X in the
+-- stop hover's color (G.PadTipLine); the undo's, Y's
+function Pad.RouteTip(m, h)
+  local g = G()
+  GameTooltip:SetOwner(m, "ANCHOR_RIGHT")
+  if not h then
+    GameTooltip:SetText((ns.Format or string.format)(L["%s: %s"], Pad.ActionIcon("menu"), L["Undo"]), 0.4, 0.8, 1)
+    GameTooltip:Show()
+    return
+  end
+  local key = Pad.Key("remove") and Pad.ActionIcon("remove") or nil
+  local tip = h.kind == "jump" and g.JumpTip(h.info or g.JumpInfo(h.sg), key) or g.SwimTip(h.sg, key)
+  GameTooltip:SetText(tip.title, 1, 1, 1)
+  local colors = tip.lines.colors or {}
+  for k, l in ipairs(tip.lines) do
+    local c = colors[k]
+    if k == #tip.lines then
+      GameTooltip:AddLine(l, 0.4, 0.8, 1, true)
+    elseif c then
+      GameTooltip:AddLine(l, c[1], c[2], c[3], true)
+    else
+      GameTooltip:AddLine(l, nil, nil, nil, true)
+    end
+  end
+  GameTooltip:Show()
+end
+-- each hover look: the jump or swim under the crosshair (or none), its ring, tooltip and landing; while picking,
+-- picking's own (Pad.PickTick)
+function Pad.SetRouteHover(h)
+  local g = G()
+  local old = Pad.routeHover
+  Pad.routeHover = h
+  local MX = ns.MapExtras
+  if h and h.kind == "jump" then
+    h.info = g.JumpInfo(h.sg)
+    if MX and MX.ShowLanding then MX.ShowLanding(g, h.sg, h.info) end -- (the map may have moved: each look)
+  elseif old and old.kind == "jump" and MX and MX.ShowLanding then
+    MX.ShowLanding(g, nil)
+  end
+  if Pad.pick then
+    Pad.routeTip = nil
+    return
+  end
+  local undo = not h and Pad.UndoHere()
+  local m = (h or undo) and Pad.PickMark() or Pad.pickMark
+  if m then
+    m:SetShown((h or undo) and true or false)
+    m:SetAlpha(1)
+  end
+  local asked = (g.jumpAsk and g.jumpAsk:IsShown()) or (g.removeAsk and g.removeAsk:IsShown())
+  local want = not asked and (h and RouteKey(h) or undo and "undo") or nil
+  local own = m and GameTooltip and GameTooltip:IsShown() and GameTooltip:GetOwner() == m
+  if want and (want ~= Pad.routeTip or not own) then
+    Pad.RouteTip(m, h)
+  elseif not want and Pad.routeTip and own then
+    GameTooltip:Hide()
+  end
+  Pad.routeTip = want
 end
 Pad.SEARCH_REPEAT_FIRST, Pad.SEARCH_REPEAT = 0.35, 0.1 -- (seconds: held, the search's next row after these)
 -- The player moving their character (the game's own movement, the left stick or the keys; never the D-pad panning the

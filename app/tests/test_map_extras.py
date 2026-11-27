@@ -193,6 +193,175 @@ def test_the_map_redraws_with_the_strip_on_a_real_route(mx):
         ns.Router.Reset()
 
 
+# --- (a) the strip's close X (item 122) -----------------------------------------------------------------------------
+
+def _click_x(lua, G, shift=False):
+    lua.execute(f"AGPS_SHIFT_WAS = IsShiftKeyDown IsShiftKeyDown = function() return {'true' if shift else 'false'} end")
+    try:
+        b = G.mx.strip.close
+        b.GetScript(b, "OnClick")(b, "LeftButton", False)
+    finally:
+        lua.execute("IsShiftKeyDown = AGPS_SHIFT_WAS")
+
+
+def _stops(lua, *spots):
+    return lua.eval("{ " + ", ".join(f"{{ x = {x}, y = {y}, cont = 0 }}" for x, y in spots) + " }")
+
+
+def test_the_x_is_a_yellow_letter_in_the_top_right_clear_of_the_text(mx):
+    lua, ns = mx
+    G, MX = ns.GPS, ns.MapExtras
+    f = G.mx.strip
+    b = f.close
+    same = lua.eval("rawequal")
+    assert b._kind == "Button" and same(b._parent, f)
+    assert b._pts["TOPRIGHT"][1] == "TOPRIGHT" and b._w == MX.CLOSE_SIZE <= MX.STRIP_TEXT_H + 2
+    assert b.x._text == "X"
+    # (the text "Up 25 yd, down 96 yd" ends before it)
+    assert same(f.text._pts["RIGHT"][2], b) and f.text._pts["RIGHT"][3] == "LEFT" and f.text._pts["TOPLEFT"] is not None
+    # (subtle; lit under the mouse, with its tooltip)
+    assert b._alpha == MX.CLOSE_ALPHA and not b.lit
+    lua.execute("AGPS_TIP = {} local o = GameTooltip.AddLine GameTooltip.AddLine = function(s, t, ...) "
+                "AGPS_TIP[#AGPS_TIP + 1] = t return o(s, t, ...) end AGPS_TIP_WAS = o")
+    try:
+        b.GetScript(b, "OnEnter")(b)
+        assert b.lit and b._alpha == MX.CLOSE_LIT_ALPHA
+        tip = [lua.eval("AGPS_TIP")[i] for i in range(1, len(lua.eval("AGPS_TIP")) + 1)]
+        assert "Click: hide it for this route." in tip and "Shift-click: turn it off (Options > Map)." in tip
+    finally:
+        lua.execute("GameTooltip.AddLine = AGPS_TIP_WAS")
+    b.GetScript(b, "OnLeave")(b)
+    assert not b.lit and b._alpha == MX.CLOSE_ALPHA
+
+
+def test_a_click_hides_the_strip_till_a_new_destination(mx):
+    lua, ns = mx
+    G, N, MX = ns.GPS, ns.Nav, ns.MapExtras
+    fz = [0, 10, 20, 30, 30, 30, 20, 10]
+    p = _part(lua, [(OPEN[0] + 20 * k, OPEN[1]) for k in range(len(fz))], 0, fz=fz)
+    f = G.mx.strip
+    try:
+        N.SetStops(_stops(lua, (OPEN[0] + 140, OPEN[1])), False, "red")
+        MX.OnRedraw(G, _route(lua, p), 0, OPEN[0], OPEN[1], 200)
+        assert f._shown
+        _click_x(lua, G)
+        assert not f._shown and ns.settings.gps.heightProfile is not False
+        MX.OnRedraw(G, _route(lua, p, 30), 0, OPEN[0], OPEN[1], 200)
+        assert not f._shown
+        # a reroute to the same stop (the route worked out again; the same stop set again): still hidden
+        N.route = None
+        N.SetStops(_stops(lua, (OPEN[0] + 140, OPEN[1])), False, "red")
+        p2 = _part(lua, [(OPEN[0] + 20 * k, OPEN[1] + 1) for k in range(len(fz))], 0, fz=fz)
+        MX.OnRedraw(G, _route(lua, p2), 0, OPEN[0], OPEN[1], 200)
+        assert not f._shown
+        # a new destination: back
+        N.SetStops(_stops(lua, (OPEN[0] + 300, OPEN[1])), False, "red")
+        MX.OnRedraw(G, _route(lua, p2), 0, OPEN[0], OPEN[1], 200)
+        assert f._shown
+        # a stop added to the route closed: back
+        _click_x(lua, G)
+        MX.OnRedraw(G, _route(lua, p2), 0, OPEN[0], OPEN[1], 200)
+        assert not f._shown
+        N.AddStop(lua.eval(f"{{ x = {OPEN[0] + 500}, y = {OPEN[1]}, cont = 0 }}"), False, "red")
+        MX.OnRedraw(G, _route(lua, p2), 0, OPEN[0], OPEN[1], 200)
+        assert f._shown
+        # the route cleared and the same one set again: back
+        _click_x(lua, G)
+        MX.OnRedraw(G, _route(lua, p2), 0, OPEN[0], OPEN[1], 200)
+        assert not f._shown
+        N.Clear()
+        N.SetStops(_stops(lua, (OPEN[0] + 300, OPEN[1]), (OPEN[0] + 500, OPEN[1])), False, "red")
+        MX.OnRedraw(G, _route(lua, p2), 0, OPEN[0], OPEN[1], 200)
+        assert f._shown
+        # a stop reached (the rest of the same route): still hidden
+        _click_x(lua, G)
+        N.RemoveStop(1)  # (as Nav.CheckArrival takes a stop reached off)
+        assert len(N.stops) == 1
+        MX.OnRedraw(G, _route(lua, p2), 0, OPEN[0], OPEN[1], 200)
+        assert not f._shown
+    finally:
+        N.Clear()
+        MX.closed = None
+
+
+def test_a_shift_click_turns_the_option_off_and_options_shows_it(mx):
+    lua, ns = mx
+    G, N, MX, O = ns.GPS, ns.Nav, ns.MapExtras, ns.Options
+    fz = [0, 10, 20, 30, 30, 30, 20, 10]
+    p = _part(lua, [(OPEN[0] + 20 * k, OPEN[1]) for k in range(len(fz))], 0, fz=fz)
+    f = G.mx.strip
+    O.Show()
+    cb = next(c.control for c in O.settingControls.values() if c.key == "heightProfile" and not c.mirror)
+    try:
+        O.Refresh()
+        assert cb.GetChecked(cb)
+        N.SetStops(_stops(lua, (OPEN[0] + 140, OPEN[1])), False, "red")
+        MX.OnRedraw(G, _route(lua, p), 0, OPEN[0], OPEN[1], 200)
+        assert f._shown
+        _click_x(lua, G, shift=True)
+        assert not f._shown and ns.settings.gps.heightProfile is False
+        assert not cb.GetChecked(cb)  # (the open options panel shows it off)
+        # (off for every route now, a new destination too)
+        N.SetStops(_stops(lua, (OPEN[0] + 300, OPEN[1])), False, "red")
+        MX.OnRedraw(G, _route(lua, p), 0, OPEN[0], OPEN[1], 200)
+        assert not f._shown
+        # (turned on again in Options: it shows on this route)
+        ns.settings.gps.heightProfile = True
+        MX.OnRedraw(G, _route(lua, p), 0, OPEN[0], OPEN[1], 200)
+        assert f._shown
+    finally:
+        N.Clear()
+        MX.closed = None
+        ns.settings.gps.heightProfile = True
+        if O.IsShown():
+            O.Toggle()
+
+
+def test_the_x_works_in_the_world_map_too(mx):
+    """The GPS map in the game's world map (Options > Map): the same map's strip, hidden by its X there, on a real
+    route (Brill up to the Ruins of Lordaeron, as test_the_map_redraws_with_the_strip_on_a_real_route)."""
+    from test_world_map_host import SETUP as WM_SETUP
+
+    lua, ns = mx
+    G, N, MX, st = ns.GPS, ns.Nav, ns.MapExtras, ns.settings.gps
+    st.worldGrid = True
+    ns.Router.Reset()
+    lua.execute(WM_SETUP)
+    was = {k: st[k] for k in ("useWorldMap", "replaceMinimap", "shown", "minimized")}
+    try:
+        st.shown, st.minimized, st.useWorldMap = True, None, True
+        G.ApplySettings()
+        lua.globals().AzerothGPS_ToggleMap()
+        assert G.WorldMapHosted()
+        N.SetStops(lua.eval("{ { x = 1800, y = 250, cont = 0 } }"), False, "red")
+        for t in range(3):
+            lua.execute(f"AGPS_T = {9100 + t}")
+            G.Update()
+        assert N.route is not None and G.mx.strip._shown
+        _click_x(lua, G)
+        lua.execute("AGPS_T = 9110")
+        G.Update()
+        assert not G.mx.strip._shown and st.heightProfile is not False
+        # (a new destination there: back)
+        N.SetStops(lua.eval("{ { x = 1810, y = 240, cont = 0 } }"), False, "red")
+        for t in range(3):
+            lua.execute(f"AGPS_T = {9120 + t}")
+            G.Update()
+        if G.mx.profile is not None:
+            assert G.mx.strip._shown
+        assert MX.closed is None
+    finally:
+        N.Clear()
+        MX.closed = None
+        lua.execute("WorldMapFrame:Hide() ToggleWorldMap = nil")
+        for k, v in was.items():
+            st[k] = v
+        G.WorldMapChanged()
+        G.ApplySettings()
+        st.worldGrid = False
+        ns.Router.Reset()
+
+
 # --- (b) jumps ------------------------------------------------------------------------------------------------------
 
 def test_the_hurt_line_goes_by_the_safe_drop_setting_in_yards(mx):
@@ -262,6 +431,268 @@ def test_the_landing_ring_sits_on_the_jumps_foot_on_the_map(mx):
     finally:
         G.jumpSegN = was
 
+
+
+
+# (each frame's level as the game has it: the one set, else one over its parent's; the stand-in's GetFrameLevel is 5
+# whatever was set, so levels set from another's would all be 5 and a bit. Run before the addon's files load: every
+# widget made after has it.)
+_REAL_LEVELS = """
+  AGPS_LEVEL_OF = function(w)
+    local n = 0
+    while w and not w._level and n < 50 do w, n = w._parent, n + 1 end
+    return ((w and w._level) or 5) + n
+  end
+  local made = NewWidget
+  NewWidget = function(...)
+    local w = made(...)
+    w.GetFrameLevel = AGPS_LEVEL_OF
+    return w
+  end
+"""
+
+
+def _ring_over_the_route(lua, G, MX):
+    """The landing ring's label, its backing and its lines are on a frame over the route's lines and the stops' pins."""
+    level = lua.eval("AGPS_LEVEL_OF")
+    D = lua.eval("AGPS_NS.Router.KIND_DROP")
+    p = _part(lua, [(OPEN[0] + 15 * k, OPEN[1]) for k in range(6)], 0, fz=[40, 40, 40, 40, 15, 15],
+              kinds=[0, 0, D, D, 0])
+    G.jumpSegN = 0
+    G.AddJumpSeg(10, 0, 20, 0, p, 3)
+    G.AddJumpSeg(20, 0, 32, -4, p, 4)
+    MX.ShowLanding(G, G.jumpSegs[1], lua.eval("{ dz = 213 }"))
+    ring = G.mx.ring
+    route = level(G.lineLayer)
+    for w in [ring.label, ring.back] + [ring.lines[k] for k in range(1, len(ring.lines) + 1)]:
+        assert w is not None
+        assert level(w["_parent"]) > route, (level(w["_parent"]), route)
+        assert level(w["_parent"]) > level(G.keepLayer) + 2  # (the stops' pins: up to 2 over keepLayer)
+    assert lua.eval("function(a, b) return a == b end")(ring.host, G.ringLayer)
+    assert ring.label._text == "213 yd down" and ring.label._shown and ring.back._shown
+    assert ring.back._tex.startswith("color:0.00,0.00,0.00")  # (a dark backing: readable over any line's color)
+    # (off the coil: the jump's top is left of its foot, so the label's right of the ring; the other way, left)
+    assert ring.side == "right" and ring.label._pts["LEFT"][3] == "CENTER" and ring.label._pts["LEFT"][4] > 32
+    G.jumpSegN = 0
+    G.AddJumpSeg(60, 0, 50, 0, p, 3)
+    G.AddJumpSeg(50, 0, 38, -4, p, 4)
+    MX.ShowLanding(G, G.jumpSegs[1], lua.eval("{ dz = 213 }"))
+    assert ring.side == "left" and ring.label._pts["RIGHT"][4] < 38
+    MX.ShowLanding(G, None)
+    assert not ring.label._shown and not ring.back._shown
+
+
+def test_the_landing_label_is_over_the_route_line_in_both_map_modes():
+    """Kooki3z 2026-11-26 (item 131): "text is under the route, can't see it": the "213 yd down" by a spell jump's
+    landing ring was on G.markLayer, a level under the route's lines. Over them (and the stops' pins), on a dark
+    backing, in the GPS window and in the game's world map. (An addon of its own: the frames' levels as the game's.)"""
+    pytest.importorskip("lupa.lua51")
+    from azerothgps.gameharness import start
+    from test_world_map_host import SETUP as WM_SETUP
+
+    lua, ns = start(pre=_REAL_LEVELS)
+    G, st = ns.GPS, ns.settings.gps
+    G.Update()
+    _ring_over_the_route(lua, G, ns.MapExtras)
+    # (the world map: the window's frames moved to its levels, each kept where it was over the window's own)
+    lua.execute(WM_SETUP)
+    st.shown, st.minimized, st.useWorldMap = True, None, True
+    G.ApplySettings()
+    lua.globals().AzerothGPS_ToggleMap()
+    assert G.WorldMapHosted()
+    lua.execute("AGPS_T = (AGPS_T or 0) + 0.5")
+    G.Update()
+    assert lua.eval("AGPS_LEVEL_OF")(G.ringLayer) > lua.eval("AGPS_LEVEL_OF")(G.lineLayer) > 100  # (moved up there)
+    _ring_over_the_route(lua, G, ns.MapExtras)
+
+
+# --- the map's buttons over the strip and the ring (item 134) -------------------------------------------------------
+
+_BUTTONS_UNDER = """
+  return function(G)
+    local L = AGPS_LEVEL_OF
+    local strip, ring = G.mx.strip, G.ringLayer
+    local bad, n = {}, 0
+    local own = AzerothGPSFrame:GetFrameStrata()
+    local function Walk(f)
+      for _, k in ipairs(f._kids or {}) do
+        -- (a dropdown's list, the search's panel: in a strata of their own, over everything by that)
+        if k ~= strip and not (k._strata and k._strata ~= own) then
+          if k._kind == "Button" or k._kind == "CheckButton" then
+            n = n + 1
+            if L(k) <= L(strip) or L(k) <= L(ring) then
+              bad[#bad + 1] = string.format("%s %s at %d (strip %d, ring %d)", k._kind, tostring(k._text), L(k),
+                L(strip), L(ring))
+            end
+          end
+          Walk(k)
+        end
+      end
+    end
+    Walk(G.topLayer)
+    -- (the strip's own X over it)
+    if L(strip.close) <= L(strip) then bad[#bad + 1] = "the X" end
+    return n, table.concat(bad, "; ")
+  end
+"""
+
+
+def _buttons_over_the_strip(lua, G):
+    n, bad = lua.execute(_BUTTONS_UNDER)(G)
+    assert n > 20, n  # (the map menu, search, the quick buttons, the floor bars' + and -, Clear Route, ...)
+    assert bad == "", bad
+
+
+def test_every_map_button_is_over_the_strip_and_the_ring_in_both_map_modes():
+    """Kooki3z 2026-11-26 (item 134): "buttons should always go over this": the height profile strip (item 114) was
+    at the buttons' level and the landing ring's layer (item 131) over them, so the strip's line showed through the
+    round buttons. Every button on the map's button layer (search, the map menu, the quick buttons and their flyouts,
+    the floor bars' + and -, Clear Route, the corner buttons) is over both, in the GPS window and in the world map;
+    the ring still over the route's lines and the stops' pins."""
+    pytest.importorskip("lupa.lua51")
+    from azerothgps.gameharness import start
+    from test_world_map_host import SETUP as WM_SETUP
+
+    lua, ns = start(pre=_REAL_LEVELS)
+    G, st = ns.GPS, ns.settings.gps
+    G.Update()
+    level = lua.eval("AGPS_LEVEL_OF")
+    strip = G.mx.strip
+    assert lua.eval("rawequal")(strip._parent, G.topLayer) and level(strip) == level(G.topLayer)
+    assert level(G.ringLayer) > level(G.keepLayer) + 2 and level(G.ringLayer) < level(G.topLayer)
+    _buttons_over_the_strip(lua, G)
+    lua.execute(WM_SETUP)
+    st.shown, st.minimized, st.useWorldMap = True, None, True
+    G.ApplySettings()
+    lua.globals().AzerothGPS_ToggleMap()
+    assert G.WorldMapHosted()
+    lua.execute("AGPS_T = (AGPS_T or 0) + 0.5")
+    G.Update()
+    assert level(strip) > 100  # (moved up there)
+    _buttons_over_the_strip(lua, G)
+    _ring_over_the_route(lua, G, ns.MapExtras)
+
+
+_POINT = {"BOTTOMLEFT": (0, 0), "BOTTOM": (0.5, 0), "BOTTOMRIGHT": (1, 0), "LEFT": (0, 0.5), "CENTER": (0.5, 0.5),
+          "RIGHT": (1, 0.5), "TOPLEFT": (0, 1), "TOP": (0.5, 1), "TOPRIGHT": (1, 1)}
+
+
+def _rect(lua, w, top, W, H):
+    """(left, bottom, right, top) of widget `w` on the map's button layer (`top`, W x H), from its first anchor and
+    its size as set; None when it isn't placed on the layer."""
+    same = lua.eval("rawequal")
+    if same(w, top):
+        return (0.0, 0.0, float(W), float(H))
+    pts = w._pts
+    ww, wh = w._w, w._h
+    if w._kind == "FontString":  # (the info line: as tall and wide as its text)
+        ww, wh = w.GetStringWidth(w), w.GetStringHeight(w)
+    if pts is None or ww is None or wh is None:
+        return None
+    a = None
+    for p in _POINT:
+        if pts[p] is not None:
+            a = [pts[p][i] for i in range(1, len(pts[p]) + 1)]
+            break
+    if a is None:
+        return None
+    p, parent = a[0], w._parent
+    if len(a) == 1:
+        rel, rp, x, y = parent, p, 0, 0
+    elif isinstance(a[1], (int, float)):
+        rel, rp, x, y = parent, p, a[1], a[2] if len(a) > 2 else 0
+    else:
+        rel = a[1] if a[1] is not None else parent
+        rp = a[2] if len(a) > 2 and a[2] is not None else p
+        x, y = (a[3] if len(a) > 3 else 0) or 0, (a[4] if len(a) > 4 else 0) or 0
+    r = _rect(lua, rel, top, W, H)
+    if r is None:
+        return None
+    fx, fy = _POINT[rp]
+    ax, ay = r[0] + (r[2] - r[0]) * fx + x, r[1] + (r[3] - r[1]) * fy + y
+    px, py = _POINT[p]
+    left, bottom = ax - ww * px, ay - wh * py
+    return (left, bottom, left + ww, bottom + wh)
+
+
+def _overlap(a, b):
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def _shown_buttons(lua, G):
+    out = []
+    strip = G.mx.strip
+    own = lua.eval("AzerothGPSFrame:GetFrameStrata()")
+
+    def walk(f):
+        kids = f._kids
+        for i in range(1, len(kids or []) + 1):
+            k = kids[i]
+            if lua.eval("rawequal")(k, strip) or not k._shown or (k._strata and k._strata != own):
+                continue
+            if k._kind in ("Button", "CheckButton"):
+                out.append(k)
+            walk(k)
+    walk(G.topLayer)
+    return out
+
+
+@pytest.mark.parametrize("size", ["default", "wide", "smallest strip", "smallest"])
+def test_the_strip_and_its_text_are_clear_of_the_bottom_left_buttons(mx, size):
+    """Item 134 (Kooki3z's shot: the map menu, the magnifier and a row of round teleport buttons with the strip's
+    line through them and "Up 11 yd, down 0 yd" beside them): the strip sits over the bottom row of round buttons
+    going right from the map menu button, its text and its line on no button, at the map's default size, a wide one,
+    the smallest that has the strip and the smallest there is (no strip)."""
+    lua, ns = mx
+    G, MX, st = ns.GPS, ns.MapExtras, ns.settings.gps
+    W, H = {"default": G.MapSize(), "wide": (700, 500), "smallest strip": (2 * MX.STRIP_SIDE + MX.STRIP_MIN_W,) * 2,
+            "smallest": (G.SIZE_MIN, G.SIZE_MIN)}[size]
+    top = G.topLayer
+    quick_was = st.quick
+    route_btn = G.confirmRouteBtn
+    btn_was = route_btn._shown
+    lua.eval("function(f, w, h) f.GetWidth = function() return w end f.GetHeight = function() return h end end")(top, W, H)
+    try:
+        # (the teleports and the hearthstone in the row, as in the shot)
+        st.quick = lua.eval("{ hearth = 'barRight', questRoute = 'barRight', pauseRoute = 'barRight' }")
+        G.LayoutQuick()
+        fz = [0, 10, 20, 30, 30, 30, 20, 10]
+        p = _part(lua, [(OPEN[0] + 20 * k, OPEN[1]) for k in range(len(fz))], 0, fz=fz)
+        f = G.mx.strip
+        # (over the info line, then over Confirm Route / Clear Route)
+        for confirm in (False, True):
+            route_btn._shown = confirm
+            MX.OnRedraw(G, _route(lua, p, 0), 0, OPEN[0], OPEN[1], 200)
+            if size == "smallest":
+                assert not f._shown  # (too narrow for it)
+                continue
+            assert f._shown
+            sr = _rect(lua, f, top, W, H)
+            assert sr is not None and sr[0] == MX.STRIP_SIDE and sr[2] == W - MX.STRIP_SIDE
+            close = sr[2] - 1 - MX.CLOSE_SIZE
+            text = (sr[0] + MX.STRIP_PAD + 1, sr[3] - 1 - MX.STRIP_TEXT_H, close - 2, sr[3] - 1)
+            rects = [(b, _rect(lua, b, top, W, H)) for b in _shown_buttons(lua, G)]
+            rects = [(b, r) for b, r in rects if r is not None]
+            assert any(lua.eval("rawequal")(b, G.mapButton) for b, _ in rects)
+            row = [r for b, r in rects if MAP_RIGHT < r[0] < W / 2 and r[3] <= MAP_TOP]
+            if size != "smallest strip":
+                assert row, "no round buttons in the bottom row to test against"
+                assert G.BottomRowTop() is not None
+            if confirm:
+                assert any(lua.eval("rawequal")(b, route_btn) for b, _ in rects)
+            for b, r in rects:
+                assert not _overlap(text, r), (size, confirm, b._text, r, text)
+                assert not _overlap(sr, r), (size, confirm, b._text, r, sr)
+            # (and over the info line)
+            assert sr[1] > _rect(lua, G.mx.below[1], top, W, H)[3]
+    finally:
+        route_btn._shown = btn_was
+        st.quick = quick_was
+        lua.execute("AGPS_NS.GPS.topLayer.GetWidth, AGPS_NS.GPS.topLayer.GetHeight = nil, nil")
+        G.LayoutQuick()
+
+
+MAP_RIGHT, MAP_TOP = 3 + 32, 3 + 32  # (GPSFrame's map menu button: 32 across, 3 in from the corner)
 
 # --- (c) the floor picker -------------------------------------------------------------------------------------------
 

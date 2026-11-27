@@ -351,16 +351,15 @@ O.LANGUAGES = { { "enUS", "English" }, { "deDE", "Deutsch" }, { "esES", "Espa\19
 -- prep, like the toc's version (Kooki3z 2026-11-20: "part of release prep like how we update the version number in
 -- the addon in game should be the What's New section in help"): test_options checks it's never older than the toc,
 -- release.yml that it's the tag's.
-O.WHATS_NEW_VERSION = "1.4.0"
+O.WHATS_NEW_VERSION = "1.4.1"
 O.WHATS_NEW = {
-  L["- Grid routing: routes walk the map's own ground in the open world and the capitals, every floor, stair and bridge."],
-  L["- Spell jumping: with a fall spell or item ready, routes jump down cliffs; the step says when to cast (Options > Routing: Use class spells)."],
-  L["- Options > Routing: Safe drop sets how far routes drop without a fall spell; Expert jumper casts just before landing."],
-  L["- Jumps are drawn as a coil on the map; right-click one to avoid spell jumps (or all jumps) on the way to that stop."],
-  L["- With no way on foot, the directions say so instead of drawing a line through walls."],
-  L["- Search: enemy mobs by name, at their nearest camp; orange or red ones show their levels."],
-  L["- The direction arrow and the directions text turn on and off on their own (Options > Directions)."],
-  L["- What's New window with the new options: Options > Help or /agps whatsnew."],
+  L["- Routes go around elite enemy areas near your level, shown in gold (Options > Routing: Avoid elite enemy areas)."],
+  L["- Directions from the ground: ramps, jumps with their height, and the way into and out of caves."],
+  L["- Height profile: the climbs and drops to your next stop along the bottom of the map (Options > Map)."],
+  L["- Floor picker: where floors stack, + and - on the map pick the floor shown."],
+  L["- Maps for caves, tunnels and buildings the game has no map for."],
+  L["- Lifts: the directions say when the next car arrives."],
+  L["- OpenXP Route follows each step of your OpenXP 2.0 guide."],
 }
 -- A page's old id, still asked for by other code and addons (API.ShowOptions): the page it's on now.
 O.PAGE_ALIASES = { ["Help improve"] = "Help" }
@@ -2638,8 +2637,8 @@ local function BuildWindow()
       if ns.FallSpells then ns.FallSpells.Refresh() end
       ns.Nav.OptionsChanged()
     end, function() return GPS().useClassSpells ~= false end, 20)
-  -- (item 102, Kooki3z: immunities that survive the landing, an Expert jumper's, each its own option under it, on by
-  -- default; FallSpells.SPELLS' `immune` rows. Named as the game names the spell.)
+  -- (item 102, Kooki3z: immunities that survive the landing, an Expert jumper's, each its own option under it, off by
+  -- default (item 125b; nil is off, FallSpells.RowAllowed); FallSpells.SPELLS' `immune` rows. Named as the game names the spell.)
   local function expertOn() return GPS().useClassSpells ~= false and GPS().expertJumper == true end
   local function immune(id, english)
     local name = ns.SpellName and ns.SpellName(id) or english
@@ -2650,32 +2649,39 @@ local function BuildWindow()
     if ns.FallSpells then ns.FallSpells.Refresh() end
     ns.Nav.OptionsChanged()
   end
-  Key("jumpDivineShield")
-  local dsName, dsTip = immune(642, "Divine Shield")
-  check(dsName, dsTip, function() return GPS().jumpDivineShield ~= false end, function(v)
-    GPS().jumpDivineShield = v and true or false
-    immuneChanged()
-  end, expertOn, 40)
-  Key("jumpDivineProtection")
-  local dpName, dpTip = immune(498, "Divine Protection")
-  check(dpName, dpTip, function() return GPS().jumpDivineProtection ~= false end, function(v)
-    GPS().jumpDivineProtection = v and true or false
-    immuneChanged()
-  end, expertOn, 40)
-  Key("jumpBlessingOfProtection")
-  local bopName, bopTip = immune(1022, "Blessing of Protection")
-  check(bopName, bopTip .. " " .. L["Cast on yourself, whatever you have targeted."],
-    function() return GPS().jumpBlessingOfProtection ~= false end, function(v)
-      GPS().jumpBlessingOfProtection = v and true or false
+  -- (item 125, Kooki3z 2026-11-27: "show only for their class": a toggle only for its own class, made only then, so the
+  -- rows below close up; another class's keeps its saved value, and the router passes over spells not known anyway)
+  local class = UnitClass and select(2, UnitClass("player"))
+  if class == "PALADIN" then
+    Key("jumpDivineShield")
+    local dsName, dsTip = immune(642, "Divine Shield")
+    check(dsName, dsTip, function() return GPS().jumpDivineShield == true end, function(v)
+      GPS().jumpDivineShield = v and true or false
       immuneChanged()
     end, expertOn, 40)
-  Key("jumpIceBlock")
-  local ibName, ibTip = immune(11958, "Ice Block")
-  check(ibName, ibTip .. " " .. L["Always cast in the air: it holds you in place."],
-    function() return GPS().jumpIceBlock ~= false end, function(v)
-      GPS().jumpIceBlock = v and true or false
+    Key("jumpDivineProtection")
+    local dpName, dpTip = immune(498, "Divine Protection")
+    check(dpName, dpTip, function() return GPS().jumpDivineProtection == true end, function(v)
+      GPS().jumpDivineProtection = v and true or false
       immuneChanged()
     end, expertOn, 40)
+    Key("jumpBlessingOfProtection")
+    local bopName, bopTip = immune(1022, "Blessing of Protection")
+    check(bopName, bopTip .. " " .. L["Cast on yourself, whatever you have targeted."],
+      function() return GPS().jumpBlessingOfProtection == true end, function(v)
+        GPS().jumpBlessingOfProtection = v and true or false
+        immuneChanged()
+      end, expertOn, 40)
+  end
+  if class == "MAGE" then
+    Key("jumpIceBlock")
+    local ibName, ibTip = immune(11958, "Ice Block")
+    check(ibName, ibTip .. " " .. L["Always cast in the air: it holds you in place."],
+      function() return GPS().jumpIceBlock == true end, function(v)
+        GPS().jumpIceBlock = v and true or false
+        immuneChanged()
+      end, expertOn, 40)
+  end
   -- (Kooki3z 2026-11-23: the plain drop limit, Nav.PlainSafeDrop)
   Key("safeDropYd")
   slider(L["Safe drop"], ns.Nav.SAFE_DROP_MIN, ns.Nav.SAFE_DROP_MAX, 1, function(v) return ns.Nav.FormatDistance(v) end,
