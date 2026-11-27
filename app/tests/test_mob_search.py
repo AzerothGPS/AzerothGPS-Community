@@ -199,6 +199,7 @@ def test_a_mob_and_a_place_typed_together_finds_its_camp_there(horde):
         assert e.cont == 0 and str(zone) == "Westfall", (str(e.name), str(zone))
 
 
+@pytest.mark.timing  # (40 ms by os.clock: 48 on a busy CI runner, 2026-11-27)
 def test_the_first_mob_search_reads_only_whats_listed_within_a_frame(horde):
     lua, ns = horde
     Lay, G = ns.Layers, ns.GPS

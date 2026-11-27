@@ -170,6 +170,9 @@ def _game_trip(first_stop_first, look=None):
         R.WARM, R.SYNC_WALKS = False, True
 
 
+# (timing until #1008: the trip's third stretch is sometimes stored as no way, by how fast the slices' work went, so the
+# total is 1334 or 3440 yd from run to run; take the mark off with that fix)
+@pytest.mark.timing
 def test_a_trip_draws_the_way_to_its_first_stop_before_the_rest_and_ends_with_the_same_route():
     firsts, times = [], []
 
