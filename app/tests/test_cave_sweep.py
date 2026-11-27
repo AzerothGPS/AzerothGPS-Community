@@ -18,8 +18,15 @@ import pytest
 pytest.importorskip("lupa.lua51")
 
 from test_cave_inside_routes import settle  # noqa: E402
+from test_frame_budget import VM_HOOK, _VM_CLOCK  # noqa: E402
 
 NODE_BUDGET = 150000  # (test_common_trips_settle's: about 10 s of the game's searching)
+# (2026-11-27) The frames' slices go by the Lua VM's instructions (test_frame_budget's _VM_CLOCK), not the CPU's clock:
+# by the CPU's, a known no way's settling was as many frames as the machine was slow. Woodpaw Den's two searches
+# (284,844 nodes since 1.4.1's Feralas walks) took 721 of the 1,200 frames on the reference dev PC and never settled on
+# the CI runners (2-4x slower a CPU millisecond), every node the same. Route work's own rate on the reference dev PC:
+# 114,000-126,000 instructions a millisecond (Woodpaw Den, Plaguewood and Kalimdor's at 1832, 277).
+VM_PER_MS = 120000
 MOUTH_YD = 60  # (the route passes this near one of the cave's ways in)
 
 # Lua: each cave of continent `cont` with its ways in, and a stop on its inside path (on its floor under the ground: the
@@ -154,7 +161,10 @@ def game():
     ns.CityGrid.Set(True)
     lua.execute("AGPS_LEVEL = 60; UnitFactionGroup = function() return 'Horde' end")
     ns.CharDB().faction = "Horde"
+    lua.execute("AGPS_T = AGPS_T or 0")
+    undo = lua.eval(_VM_CLOCK)(VM_PER_MS, VM_HOOK)
     yield lua, ns
+    undo()
     st.worldGrid, st.cityGrid = False, False
 
 
@@ -205,12 +215,13 @@ def _points(r):
 @pytest.mark.parametrize("cont,key,name,start,stop,ways", CASES, ids=[f"{c[0]}-{c[1]}" for c in CASES])
 def test_a_stop_inside_every_cave_settles_in_by_its_mouth(game, cont, key, name, start, stop, ways):
     lua, ns = game
-    ticks, r, nodes = settle(lua, ns, start, stop[:2], stop[2], cont=cont)
+    ticks, r, nodes = settle(lua, ns, start, stop[:2], stop[2], cont=cont,
+                             now=lua.eval("function() return debugprofilestop() end"))
     if ticks is None:
         _report(f"{cont} {key} {name!r}: never settled ({nodes} nodes)")
     assert ticks is not None, f"{key} {name}: never settled ({nodes} nodes)"
     if r is None:
-        _report(f"{cont} {key} {name!r}: No way found yet ({nodes} nodes, start turned {TURNED.get(key)})")
+        _report(f"{cont} {key} {name!r}: No way found yet ({nodes} nodes, {ticks} frames, start turned {TURNED.get(key)})")
         if key in KNOWN_NO_WAY:  # (its budget not weighed: a known no way's two searches, round the guards and
             # through, may go a little past it, 150.2k for the Kalimdor cave at 1832, 277)
             pytest.xfail(f"{key} {name}: no way to its mouth on the grid (KNOWN_NO_WAY)")
@@ -219,7 +230,7 @@ def test_a_stop_inside_every_cave_settles_in_by_its_mouth(game, cont, key, name,
     assert nodes <= NODE_BUDGET, f"{key} {name}: {nodes} nodes"
     assert key not in KNOWN_NO_WAY, f"{key} {name}: routed now; out of KNOWN_NO_WAY"
     near = min(math.hypot(x - wx, y - wy) for x, y in _points(r) for wx, wy in ways)
-    _report(f"{cont} {key} {name!r}: route {r.totalYards:.0f} yd, {near:.0f} yd from a way in, {nodes} nodes"
+    _report(f"{cont} {key} {name!r}: route {r.totalYards:.0f} yd, {near:.0f} yd from a way in, {nodes} nodes, {ticks} frames"
             f" (start turned {TURNED.get(key)})")
     if near > MOUTH_YD and key in KNOWN_ELSEWHERE:
         pytest.xfail(f"{key} {name}: in {near:.0f} yd from its listed ways in (KNOWN_ELSEWHERE)")

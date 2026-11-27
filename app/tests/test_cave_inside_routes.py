@@ -38,12 +38,12 @@ def game():
     st.worldGrid, st.cityGrid = False, False
 
 
-def settle(lua, ns, start, stop, z, cont=1, ticks=MAX_TICKS):
+def settle(lua, ns, start, stop, z, cont=1, ticks=MAX_TICKS, now=None):
     """The trip worked out as the game does (in slices between frames): (ticks till settled, a route or no way, or
-    None; the route or None; nodes searched)."""
+    None; the route or None; nodes searched). `now`: the slices' clock in ms (a Lua function; the CPU's by default)."""
     R, N, WG = ns.Router, ns.Nav, ns.WorldGrid
     WG.Reset()
-    now = lua.eval("function() return os.clock() * 1000 end")
+    now = now or lua.eval("function() return os.clock() * 1000 end")
     R.Reset()
     R.SYNC_WALKS = False
     N.Clear()
