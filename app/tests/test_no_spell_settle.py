@@ -14,6 +14,10 @@ from test_stand_in import WARRIOR_SANDS, WARRIOR_STOP, _ride
 NODE_BUDGET = 90000
 
 
+# (timing: _ride gives the background SLICE_MS of the CPU's clock a tick, so a slower CPU gets less of a search done
+# per game second and the route is searched again: 110k nodes in 4 searches with a 5 ms slice, here and on a busy
+# CI runner, 41k in 2 with 15 ms)
+@pytest.mark.timing
 @pytest.mark.parametrize("spells", [False, True], ids=["class_spells_off", "spell_on_expert_off"])
 def test_the_way_round_settles_within_the_node_budget(game, spells):  # noqa: F811
     lua, ns = game
