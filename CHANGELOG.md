@@ -4,6 +4,8 @@ Each version's section is its release notes (GitHub and CurseForge).
 
 ## 1.4.2 (in progress)
 
+- Roads: new roads in Feralas and Stonetalon Mountains.
+
 ## 1.4.1
 
 ### New
