@@ -68,8 +68,17 @@ NEW = ["showAvoided",  # (1.4.0: the guard zones a route goes around, drawn; ite
        "searchEnemies",  # (1.4.0, Kooki3z 2026-11-22: enemy mobs in the search)
        "avoidElites", "eliteOffset",  # (1.4.1, item 91: elite enemy areas avoided, from which level)
        "replaceMinimapNoBorder",  # (1.4.1, item 103: the minimap square without its border)
+       "replaceMinimapLogo",  # (1.4.2, Kooki3z: the logo button on the minimap square hidden)
+       "replaceMinimapLogoUnlocked",  # (1.4.2, Kooki3z: the logo dragged round the square's edge, locked by default)
+       "replaceMinimapLogoKeep",  # (1.4.2, Kooki3z: the logo kept in its original spot over the corner)
        "usePartyPortals", "useWaterWalking",  # (1.4.1, item 109: a party mage's portals; water walking turned off)
-       "heightProfile", "floorPicker"]  # (1.4.1, item 114: the route's height profile strip, the floor picker)
+       "heightProfile", "floorPicker",  # (1.4.1, item 114: the route's height profile strip, the floor picker)
+       "buildingGrid",  # (1.4.2, item 119: building routing, being tested in a few towns)
+       "waypointUI",  # (1.4.2: the next stop as the Waypoint UI addon's waypoint)
+       "waypointUIPins",  # (1.4.2: the player's Waypoint UI pins added as stops)
+       "dirTextStyle",  # (1.4.2, Kooki3z: the directions in a supported UI's text style, UIFont.lua)
+       "layerRoute", "layerStops", "layerDocks", "layerNpcs",  # (1.4.2: Map Layers' four with no switch before)
+       "companionsInMenu"]  # (1.4.2: companions' map buttons in the map menu's column)
 # Where each setting's control is: the page a player would look on.
 HOME = {
     "General": "shown showCoords distanceUnits language quietChat searchCommonNpcs searchEnemies",
@@ -81,21 +90,21 @@ HOME = {
            "useWorldMap escClosesMap extraWindow",
     # (2026-11-19: a Minimap page again, the GPS map in its place and the game's own)
     "Minimap": "replaceMinimap replaceMinimapSize replaceMinimapCollapseOnMove replaceMinimapCollapseOnCombat "
-               "replaceMinimapIdle replaceMinimapKeepSquare replaceMinimapRoute replaceMinimapResume replaceMinimapNoBorder "
+               "replaceMinimapIdle replaceMinimapKeepSquare replaceMinimapRoute replaceMinimapResume replaceMinimapNoBorder replaceMinimapLogo replaceMinimapLogoUnlocked replaceMinimapLogoKeep "
                "minimap.hide minimapRoute minimapIcons minimapShape",
     "Window": "locked size width lockSize freeSize navPanelWidth navPanelAlign navPanelDetached navPanelHideButtons "
               "navPanelAlpha navPanelWrap navPanelLocked windowFrame windowTint "
               "windowClose windowButtons charm charmSwing arrivalEffect",
-    "Layers": "iconSize roundIcons layerQuests layerQuestAreas layerQuestAreasMinimap poiTaxi poiPoi poiLabels layerCity layerInstances layerCaves layerHerbs "
+    "Layers": "iconSize roundIcons layerRoute layerStops layerDocks layerNpcs layerQuests layerQuestAreas layerQuestAreasMinimap poiTaxi poiPoi poiLabels layerCity layerInstances layerCaves layerHerbs "
               "layerOre showCustomPins otherAddonPins showParty iconYdQuests iconYdTaxi iconYdPoi iconYdCity iconYdInstances "
               "iconYdCaves iconYdHerbs iconYdOre iconYdPins",
     "Opacity": "alpha fadeMoving movingAlpha combatHideMap combatAlpha combatHideArrow arrowCombatAlpha "
                "clickThroughMoving clickThroughCombat",
-    "Routing": "useFlights flightMapRing useHearthstone useTeleports usePartyPortals avoidHighZones avoidHostile avoidElites eliteOffset showAvoided allowSwim useWaterWalking useClassSpells expertJumper jumpDivineShield jumpDivineProtection jumpBlessingOfProtection jumpIceBlock safeDropYd roadTolerance fastestOrder "
+    "Routing": "useFlights flightMapRing useHearthstone useTeleports usePartyPortals avoidHighZones avoidHostile avoidElites eliteOffset showAvoided buildingGrid allowSwim useWaterWalking useClassSpells expertJumper jumpDivineShield jumpDivineProtection jumpBlessingOfProtection jumpIceBlock safeDropYd roadTolerance fastestOrder "
                "cityKeepOrder importKeepOrder questZoneOnly questTrackedOnly questTurninsOnly questObjectivesOnly questLevelOrder questAutoReroute questPickRoute navCloseClears acceptWay acceptMapPins acceptShared",
-    "Directions": "arrowShown arrowLocked arrowEase arrowPx arrowBg dirShown dirLocked dirStopsOnly arrowSnap arrowSide dirTextScale dirBg "
-                  "questing targetNpcButton targetNpcMarkSolo targetNpcMarkGroup",
-    "Quick buttons": "keyBlockedInCombat",  # (2026-11-19: the keys with the buttons)
+    "Directions": "arrowShown arrowLocked arrowEase arrowPx arrowBg dirShown dirLocked dirStopsOnly arrowSnap arrowSide dirTextScale dirTextStyle dirBg "
+                  "questing targetNpcButton targetNpcMarkSolo targetNpcMarkGroup waypointUI waypointUIPins",
+    "Quick buttons": "companionsInMenu keyBlockedInCombat",  # (2026-11-19: the keys with the buttons)
     "Performance": "hz rerouteSeconds stopsAhead autoPauseRouting autoPauseSeconds stutterPause gentleBackground arrowHz",
     "Tools": "showRoads showWalls pinning",
     "Help": "copyRoads copyWalls copyRoutes copyPins",
@@ -209,7 +218,8 @@ DEPENDENTS = [
     ("replaceMinimapSize", "replaceMinimap", False), ("replaceMinimapCollapseOnMove", "replaceMinimap", False),
     ("replaceMinimapCollapseOnCombat", "replaceMinimap", False), ("replaceMinimapIdle", "replaceMinimap", False),
     ("replaceMinimapKeepSquare", "replaceMinimap", False), ("replaceMinimapRoute", "replaceMinimap", False),
-    ("replaceMinimapNoBorder", "replaceMinimap", False),
+    ("replaceMinimapNoBorder", "replaceMinimap", False), ("replaceMinimapLogo", "replaceMinimap", False),
+    ("replaceMinimapLogoUnlocked", "replaceMinimap", False), ("replaceMinimapLogoKeep", "replaceMinimap", False),
     ("movingAlpha", "fadeMoving", False), ("combatAlpha", "combatHideMap", True),
     ("arrowCombatAlpha", "combatHideArrow", True),
     ("lockSize", "locked", True), ("freeSize", "locked", True), ("freeSize", "lockSize", True),

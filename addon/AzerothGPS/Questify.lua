@@ -39,7 +39,7 @@ function Q.On()
     local g = ns[k]
     if g and g.On and g.On() then return false end
   end
-  return Q.Available() and cdb.aprFollow ~= true and cdb.openxpFollow ~= true
+  return Q.Available() and cdb.aprFollow ~= true and cdb.openxpFollow ~= true and cdb.flowupFollow ~= true
 end
 
 -- The place Questify is guiding to, if it's its guide's: { mapId, x, y, title }, else nil (none, or picked by hand).
@@ -140,7 +140,7 @@ function Q.Toggle()
     ns.Print(L["Questify Route: off."])
     return
   end
-  for _, k in ipairs({ "RestedXP", "Zygor", "Polestar", "AzerothPilot", "OpenXP" }) do -- (one guide at a time)
+  for _, k in ipairs({ "RestedXP", "Zygor", "Polestar", "AzerothPilot", "OpenXP", "FlowUp" }) do -- (one guide at a time)
     local g = ns[k]
     if g and g.On and g.On() then g.Toggle() end
   end

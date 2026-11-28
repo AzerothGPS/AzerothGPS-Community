@@ -2300,7 +2300,7 @@ end
 -- none nearby. `road1`/`road2`: that end is a road's point (a walk onto or off the roads), which keeps END_SLACK
 -- even in blocked ground: the road is walkable along its line, not the slope round it (Ironforge's gate road on its
 -- mountain shelf, all blocked cells: STOP_SLACK took a walk up the cliff from Misty Pine Refuge, 2026-10-08).
-local function Search(cont, x1, y1, x2, y2, road1, road2, priceRed)
+local function Search(cont, x1, y1, x2, y2, road1, road2, priceRed, townEnds)
   EnsureWalls()
   local g = ns.Terrain and ns.Terrain[cont]
   if not g then return nil end
@@ -2324,9 +2324,30 @@ local function Search(cont, x1, y1, x2, y2, road1, road2, priceRed)
   -- (the other faction's guards: their reach costs Router.HOSTILE_FACTOR a step)
   local Rt = ns.Router
   local side = Rt and Rt.HostileSide and Rt.HostileSide()
-  -- (the elite areas the walk starts or ends in, item 91: not paid for, as the Router's legs and the world grid leave
-  -- them out; the guards' towns here as before)
+  -- (the elite areas the walk starts or ends in, item 91: their way out from its ends not paid for, the rest as any
+  -- other's (Router.EliteFree, items 142 and 130), as the Router's legs and the world grid; the guards' towns as before)
   local eliteExempt = side and Rt.EliteTownsNear and Rt.EliteTownsNear(cont, side, x1, y1, x2, y2) or nil
+  -- (item 135c, 1.4.2; the idea from Polestar, GPL-3, our own code: a walk from the trip's own start or to its own stop
+  -- inside the other faction's town, `townEnds` "s", "t" or "st", prices that town as if the player had no faction, as
+  -- the Router's legs and the world grid do (Router.HostileTownsNear): the town's own gate and road, not the guard-free
+  -- ground round its edge. Only that town's guards, only for that walk; another town's are priced as ever)
+  if side and townEnds and Rt.HostileTownsNear then
+    -- (the guards' towns only: an elite area near that end keeps its free stretches from Router.EliteTownsNear, its
+    -- way in or out, item 142; set to true here it was all free again, and a walk into Silithus' Alliance town at the
+    -- edge of the elite area round it went straight across 278 yd of elites instead of round them)
+    local area = ns.Hostile and ns.Hostile[cont] and ns.Hostile[cont][side]
+    area = area and area.area
+    local function Add(x, y)
+      for t, v in pairs(Rt.HostileTownsNear(cont, side, x, y) or {}) do
+        if v == true and not (area and area[t]) then
+          eliteExempt = eliteExempt or {}
+          eliteExempt[t] = true
+        end
+      end
+    end
+    if townEnds:find("s", 1, true) then Add(x1, y1) end
+    if townEnds:find("t", 1, true) then Add(x2, y2) end
+  end
   local hostileCell = {} -- (by row: Row)
   local function hostile(c, r)
     if not side then return false end
@@ -2585,8 +2606,9 @@ end
 -- hills into Alterac, and a level 20 walk to Light's Hope took 2k yd of it, 800 yd shorter and 556 s slower than the way
 -- by Tirisfal. (Priced always, walks crossing a zone they can't avoid wandered along its border: the zones' 33 yd grid.)
 P.RED_SEARCH_YD = 100
-function P.FindPath(cont, x1, y1, x2, y2, road1, road2)
-  local c, path = Search(cont, x1, y1, x2, y2, road1, road2, false)
+-- `townEnds`: "s", "t" or "st", the walk's start or end is the trip's own, in the other faction's town (Search).
+function P.FindPath(cont, x1, y1, x2, y2, road1, road2, townEnds)
+  local c, path = Search(cont, x1, y1, x2, y2, road1, road2, false, townEnds)
   if c == nil then return nil end -- (one value, as before: callers count them)
   local Rt = ns.Router
   local g = ns.Terrain and ns.Terrain[cont]
@@ -2604,7 +2626,7 @@ function P.FindPath(cont, x1, y1, x2, y2, road1, road2)
   end
   local ry = RedYards(path)
   if ry < P.RED_SEARCH_YD then return c, path end
-  local c2, path2 = Search(cont, x1, y1, x2, y2, road1, road2, true)
+  local c2, path2 = Search(cont, x1, y1, x2, y2, road1, road2, true, townEnds)
   if not (c2 and path2) then return c, path end
   local LF = Rt.LEVEL_FACTOR or 1
   if c2 + RedYards(path2) * (LF - 1) < c + ry * (LF - 1) then return c2, path2 end

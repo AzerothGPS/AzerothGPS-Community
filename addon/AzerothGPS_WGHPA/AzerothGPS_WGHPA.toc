@@ -1,0 +1,12 @@
+## Interface: 16001
+## Title: |cff2680ffAzerothGPS map data: ways between map tiles|r
+## Notes: Part of AzerothGPS, loaded automatically when needed. Keep it enabled.
+## Author: AzerothGPS
+## Group: AzerothGPS
+## IconTexture: Interface\AddOns\AzerothGPS\Media\Device
+## LoadOnDemand: 1
+## Dependencies: AzerothGPS
+
+Hpa0.lua
+Hpa1.lua
+Hpa2991.lua

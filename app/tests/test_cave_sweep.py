@@ -130,20 +130,37 @@ end
 # (the grid has no way from the sweep's start to these caves' mouths, or into them: "No way found yet", the gap logged.
 # Gone through one by one for 1.4.1 (2026-11-26); by why:
 KNOWN_NO_WAY = {
-    # - the mouth on a ledge the grid's links leave only by a drop down, and no way up on the mesh either (or the
-    #   ledge's piece already big: worldbake.stop_links leaves it, cave_spots too); a recorded walk in. (Nine more such
-    #   were joined by the bake of 2026-11-26: Loch Modan, Beren's Peril, the Crypt at -6570, -3483, Rethban Caverns,
-    #   Drywhisker Gorge, Gordunni Outpost, Demon Fall Ridge, Rage Scar Hold, Bolgan's Hole)
-    "cave463649", "cave66784274", "cave83293", "cave337455",  # (Plaguewood, the one at -8759, -2898, Mo'grosh
-    "cave70612836",  # Stronghold's west, Woodpaw Den; Kalimdor's at 1832, 277)
+    # (Mouths on a ledge the grid's links leave only by a drop down: nine were joined by the bake of 2026-11-26, Loch
+    # Modan, Beren's Peril, the Crypt at -6570, -3483, Rethban Caverns, Drywhisker Gorge, Gordunni Outpost, Demon Fall
+    # Ridge, Rage Scar Hold, Bolgan's Hole; Plaguewood by its regions' bake for 1.4.2, RECORDED_WALKS_IN)
+    # Item 136 (1.4.2): Kooki3z's recorded walks into these four (1.4.1's roads) walk through mouths the grid already
+    # joined (their walks route on the grid end to end, before the bake too: test_the_walked_mouths_join_the_grid);
+    # what's missing is elsewhere:
+    # - the walk's mouth on a ledge no way on the grid reaches from the land round it, nor the mesh: a walk recorded
+    #   from the valley up to the mouth is needed (Woodpaw Den, its mouth at 139 over the start's 58; Kalimdor's at
+    #   1832, 277, its mouth at 228, the slope under it at 163)
+    "cave337455", "cave70612836",
+    # - the stop on the cave's upper floor (312-318), reached only by the west way in on a ledge; the walk went in by
+    #   the north mouth on the lower floor (300), which the grid doesn't join to the upper (Mo'grosh Stronghold's west)
+    "cave83293",
+    # - the Router's own way in to the stop is the cave's other way in (-8760, -2940), which the grid can't reach;
+    #   the walked mouth (-8754, -2887) is reached and walks on to the stop, but WorldGrid.CaveLeg tries only the one
+    #   (the cave at -8759, -2898)
+    "cave66784274",
     # - its mouth high in Dun Morogh's peaks (z 639): no way there from the start, nor back, on the grid
     "cave363311",
-    # - the start on a rise left only by drops: the walk down and round to the mouth is 7.7k yd (76k nodes, past a
-    #   leg's budget), and none back
-    "cave24646308",
+    # (cave24646308, the start on a rise left only by drops, its walk down and round to the mouth 7.7k yd: past a leg's
+    # budget till item 139, 1.4.2, gave a short leg to a stop cut short the whole budget once: routed now)
     # - the cave and its mouth an island of ~700 surfaces on the grid, nothing joining them to the land round it
     "cave360783",
 }
+# (item 136, 1.4.2: the caves Kooki3z recorded walks into, 2026-11-26, that route in since their regions' bake; the
+# other four are in KNOWN_NO_WAY with why)
+RECORDED_WALKS_IN = {"cave463649": "Plaguewood"}
+# (each recorded walk into a cave, 1.4.1's roads: (cont, time), walked on the grid from its first point outside to its
+# last inside)
+WALKS_INTO_CAVES = {"cave463649": (0, 1795747278), "cave66784274": (0, 1795747315), "cave83293": (0, 1795747334),
+                    "cave337455": (1, 1795747151), "cave70612836": (1, 1795747193)}
 # (a route settles, but not by one of the listed ways in: none since 2026-11-26 (Dreadmaul Rock went through the next
 # cave's tunnel, WorldGrid.CaveLeg's mouth; Mo'grosh Stronghold's and the Dawning Wood Catacombs' stops were on the
 # ground over them, G.CaveFloorZ))
@@ -244,3 +261,39 @@ def test_the_caves_left_out_are_the_listed_ones():
     assert len(LEFT_OUT) <= 140, len(LEFT_OUT)
     for cont, key, why in LEFT_OUT:
         _report(f"{cont} {key}: left out ({why})")
+
+
+@pytest.mark.parametrize("key", sorted(RECORDED_WALKS_IN))
+def test_the_caves_walked_into_route_in_by_their_mouths(game, key):
+    """Item 136 (1.4.2): a cave Kooki3z recorded a walk into settles in by one of its ways in, within the budget."""
+    case = next((c for c in CASES if c[1] == key), None)
+    assert case is not None, f"{key}: no stop inside it picked (its inside path or way in lost?)"
+    cont, key, name, start, stop, ways = case
+    lua, ns = game
+    ticks, r, nodes = settle(lua, ns, start, stop[:2], stop[2], cont=cont)
+    assert ticks is not None, f"{key} {RECORDED_WALKS_IN[key]}: never settled ({nodes} nodes)"
+    assert r is not None, f"{key} {RECORDED_WALKS_IN[key]}: No way found yet ({nodes} nodes)"
+    assert nodes <= NODE_BUDGET, f"{key}: {nodes} nodes"
+    near = min(math.hypot(x - wx, y - wy) for x, y in _points(r) for wx, wy in ways)
+    assert near <= MOUTH_YD, f"{key}: {near:.0f} yd from its ways in"
+    assert key not in KNOWN_NO_WAY
+
+
+@pytest.mark.parametrize("key", sorted(WALKS_INTO_CAVES))
+def test_the_walked_mouths_join_the_grid(game, key):
+    """Item 136 (1.4.2): each recorded walk into a cave is walked on the grid, from its first point outside the mouth to
+    its last inside, at the walk's height."""
+    import json
+    from azerothgps.paths import REPO
+    cont, t = WALKS_INTO_CAVES[key]
+    feats = json.loads((REPO / "overrides" / f"roads_{cont}.geojson").read_text(encoding="utf-8"))["features"]
+    parts = sorted((f["properties"].get("part") or 0, f) for f in feats if f["properties"].get("time") == t)
+    assert parts, (key, t)
+    a = parts[0][1]["geometry"]["coordinates"][0]
+    last = parts[-1][1]
+    b, bz = last["geometry"]["coordinates"][-1], last["properties"]["zs"][-1]
+    lua, ns = game
+    ns.Router.Reset()
+    r = ns.Router.Route(cont, a[0], a[1], b[0], b[1], lua.table_from({"tz": bz}))
+    assert r is not None and not r.noWay, (key, r and r.noWay)
+    assert r.length < 3 * math.dist(a, b) + 30, (key, r.length)

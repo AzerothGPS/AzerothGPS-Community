@@ -13,9 +13,14 @@ INN, R_INN = (-402.0, -2644.0), 35  # (The Crossroads: orcinn)
 def _route(lua, ns, a, b, tz):
     R, WG, st = ns.Router, ns.WorldGrid, ns.settings.gps
     st.worldGrid, st.cityGrid = True, True
+    # (the older indoor roads, the building grids' fallback: 1.4.2's own grids are test_building_routing.py's)
+    was, st.buildingGrid = st.buildingGrid, False
     WG.Set(True)
     R.Reset()
-    return R.Route(1, a[0], a[1], b[0], b[1], lua.table(tz=tz))
+    try:
+        return R.Route(1, a[0], a[1], b[0], b[1], lua.table(tz=tz))
+    finally:
+        st.buildingGrid = was
 
 
 @pytest.mark.parametrize("start", [(-441.8, -2596.1), (-360.0, -2700.0)], ids=["flight_master", "south_east"])

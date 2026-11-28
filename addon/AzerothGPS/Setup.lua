@@ -44,7 +44,7 @@ S.PAD_KEYS = { PADDUP = "up", PADDDOWN = "down", PADDLEFT = "left", PADDRIGHT = 
   PADLSHOULDER = "lb", PADRSHOULDER = "rb" }
 S.TIP_OWNER = "AzerothGPS tips" -- (Nav.arriveHooks)
 -- The settings the setup can change: taken as it opens, put back by Skip / closing.
-S.KEYS = { "replaceMinimap", "replaceMinimapSize", "useWorldMap",
+S.KEYS = { "replaceMinimap", "replaceMinimapSize", "replaceMinimapSizePicked", "useWorldMap",
   -- (and the What's New page's, WhatsNew.lua: item 34, a first install's last page)
   "useClassSpells", "expertJumper", "safeDropYd" }
 S.SIZES = { { "small", L["Small"] }, { "medium", L["Medium"] }, { "large", L["Large"] } }
@@ -406,8 +406,15 @@ end
 -- A card picked: applied at once (the live preview).
 function S.Pick(key, value)
   if not S.open then return false end
+  local was = GPS()[key]
   GPS()[key] = value
+  -- (a size picked: the player's from now on, also under another UI's minimap, GPSFrame's G.SquareFitSide)
+  if key == "replaceMinimapSize" then GPS().replaceMinimapSizePicked = true end
   S.ApplyAll()
+  -- (the world map card: the No Map switch, GPSFrame's G.UseWorldMapPicked)
+  if key == "useWorldMap" and (was == true) ~= (value == true) and ns.GPS and ns.GPS.UseWorldMapPicked then
+    ns.GPS.UseWorldMapPicked(value == true)
+  end
   S.Refresh()
   return true
 end

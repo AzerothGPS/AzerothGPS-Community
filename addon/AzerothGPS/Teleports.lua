@@ -276,9 +276,16 @@ end
 -- (item or spell: what the use button uses).
 local function Row(c, cont, px, py)
   local dest = c[2]
-  return { cont, px, py, dest.cont, dest.x, dest.y, c.ask and T.PARTY_SECONDS or T.CAST_SECONDS, c[1], "", dest.name,
+  return { cont, px, py, dest.cont, dest.x, dest.y, (c.ask and T.PARTY_SECONDS or T.CAST_SECONDS) + (c.spare or 0), c[1], "", dest.name,
     c[1], use = true, item = c.item, spell = c.spell, ask = c.ask }
 end
+
+-- Astral Recall's name in the game's language. Whether the character knows it (a shaman from level 30): the directions,
+-- the use button and the map menu's hearth button name it then (GPSFrame's G.SyncHearthQuick).
+function T.RecallName() return ns.SpellName and ns.SpellName(ASTRAL_RECALL) or "Astral Recall" end
+function T.RecallKnown() return SpellKnown(ASTRAL_RECALL) and true or false end
+-- (seconds added to the hearthstone's row while Astral Recall is ready: T.Available)
+T.RECALL_FIRST_SECONDS = 1
 
 local cache, cacheAt = nil, -100
 -- The teleports the character has that were on their cooldown as the list was built: { name, item = | spell = }.
@@ -305,13 +312,20 @@ function T.Available(cont, px, py)
     end
     local home = hearth and T.Home()
     if home then
-      -- (a shaman's Astral Recall first: it goes home as fast, and keeps the hearthstone for later; the
-      -- route takes the first of equals. Asked, 2026-10-01)
+      -- (a shaman's Astral Recall first: it goes home as fast, and keeps the hearthstone for later. Asked, 2026-10-01;
+      -- again 2026-11-27, Kooki3z: "When you are on a Shaman ... recommend Astral Recall". The plan doesn't take the
+      -- first of equals: Nav.Plan's next place is the nearest by `pairs`, whose order is the table's own, so with both
+      -- ready the hearthstone was taken about as often. With Astral Recall ready, the hearthstone costs RECALL_FIRST_SECONDS
+      -- more: never the one picked, still there for a later stretch. On its cooldown: the hearthstone, as before)
+      local recall = SpellKnown(ASTRAL_RECALL) and SpellReady(ASTRAL_RECALL)
       if SpellKnown(ASTRAL_RECALL) then
-        Add(SpellReady(ASTRAL_RECALL), ns.SpellName and ns.SpellName(ASTRAL_RECALL) or "Astral Recall", home, nil, ASTRAL_RECALL)
+        Add(recall, T.RecallName(), home, nil, ASTRAL_RECALL)
       end
       local stone, ready = Hearthstone()
-      if stone then Add(ready, L["your Hearthstone"], home, stone) end
+      if stone then
+        Add(ready, L["your Hearthstone"], home, stone)
+        if ready and recall then cache[#cache].spare = T.RECALL_FIRST_SECONDS end
+      end
     end
     for _, it in ipairs(teleports and T.ITEMS or {}) do -- (an engineer's teleporter: its specialization to use it)
       if (not it[6] or SpellKnown(it[6])) and ItemCount(it[1]) > 0 and (not it.worn or Worn(it[1])) and Usable(it[1]) then
@@ -438,6 +452,7 @@ function T.Init()
       C_Timer.After(1, T.LearnBind)
       return
     end
+    if event == "SPELLS_CHANGED" and ns.GPS and ns.GPS.SyncHearthQuick then ns.GPS.SyncHearthQuick() end -- (Astral Recall learned)
     if event ~= "UNIT_SPELLCAST_SUCCEEDED" then
       C_Timer.After(1, T.LearnHome)
       return

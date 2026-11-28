@@ -238,7 +238,7 @@ function NowText(m, fmt, short)
   if cue then return cue end
   local d = m.dist or 0
   if m.kind == "stairs" then -- ("Stairs up in 10 yd, then turn left"; on them, "Take the stairs up, then turn left")
-    if d <= T.NOW_YD then
+    if d <= T.NowYd(m) then
       if not m.after then return m.text end
       return Format(m.up and L["Take the stairs up, then %s"] or L["Take the stairs down, then %s"], m.after)
     end
@@ -270,7 +270,7 @@ function NowText(m, fmt, short)
     local w = T.MOUNT_WORDS[m.place]
     if w then text, mid = w[1], w[2] end
   end
-  if d <= T.NOW_YD then
+  if d <= T.NowYd(m) then
     if m.kind == "turn" or m.kind == "join" or m.kind == "leave" then return m.now or (m.text .. " now") end
     return text
   end
@@ -355,6 +355,10 @@ function T.Stairs(path, horizon)
       if st and h1 and h2 and math.abs(h2 - h1) >= 1 then st = h2 > h1 and 1 or -1 end -- (the way the walk climbs)
     elseif leap then
       st = nil
+    elseif not z1 and not z2 and path.fz and T.BuildingStairs(path, j, len) then
+      -- (1.4.2, item 119: a walk on a building's own grid (BuildingGrid.lua): its heights are its floors and stairs)
+      dz = path.fz[j + 1] - path.fz[j]
+      st = dz > 0 and 1 or -1
     elseif not z1 and not z2 and path.fz and T.GridWalks() and (path.kinds[j] == 1 or path.kinds[j] == 0)
         and T.GridStairs(path, j, len) then
       -- (the open world's grid: its heights are the route's floors, fz; stairs only where steep over a building's floor,
@@ -1187,6 +1191,7 @@ function T.AheadFull(route, stopLabel)
     end
     path.swimRuns = path.swimRuns or T.Swims(path)
     for _, m in ipairs(ms) do m.x, m.y = T.PointAt(path, m.dist) end -- (where it is: T.Steady)
+    T.MarkScale(path, ms) -- ("now" by its spot's grid: T.NowYd)
     k = { route, full, c, path, ms, stopLabel or "", horizon, moved = {}, thin = ahead(ms) <= 1 }
     fullKept = k
     T.aheadRuns = (T.aheadRuns or 0) + 1 -- (the tests count them)
@@ -1274,6 +1279,7 @@ function T.Ahead(route, stopLabel)
       horizon = horizon * 2
       ms = T.Maneuvers(path, stopLabel, horizon)
     end
+    T.MarkScale(path, ms) -- ("now" by its spot's grid: T.NowYd)
     aheadKept = { route, first, path, ms, key, labels = { [key] = ms } }
     T.aheadRuns = (T.aheadRuns or 0) + 1 -- (the tests count them)
     return path, ms
@@ -1284,6 +1290,174 @@ function T.Ahead(route, stopLabel)
     aheadKept.labels[key] = ms
   end
   return aheadKept[3], ms
+end
+
+-- The arrow's distances scaled to the grid's cell size (1.4.2, item 144, Kooki3z 2026-11-27: "in cities (make it
+-- anywhere using the smaller grid size tiles) the arrow distance for correcting should be halved or scaled to the tile
+-- size, the forecast is too far for cities"). The look-ahead (OPEN_LOOKAHEAD, the corner rule's LOOKAHEAD, JUMP_AIM_YD),
+-- "now" (NOW_YD), Nav's off-the-route distance and Unstuck's way on were tuned for the world grid's 8.33 yd cells; on a
+-- stretch of the route over a finer grid (a capital's, 3 yd, 2 in Undercity and Thunder Bluff; a cave's, 2; a building's)
+-- each is CellScale of it: the cell's share of the world's, at most GRID_SCALE_MAX (at least halved). Decided along the
+-- route (CellAt, every SCALE_BUCKET_YD, kept on the path), so a route out of a city looks further as it leaves: the
+-- look-ahead is counted in cells (AheadAlong: a yard on a 3 yd grid's stretch costs 8.33 / 3 of the world's), which grows
+-- smoothly over a gate, no jump. Only with the city or world grid on (T.GridWalks): their walks are the grids'.
+T.WORLD_CELL_YD = 25 / 3
+T.GRID_SCALE_MAX = 0.5
+T.SCALE_BUCKET_YD = 2
+T.SCALE_SMOOTH_YD = 8 -- (each bucket's scale the mean of its grid's this far either side: a gate's change eased over 16 yd)
+T.SCALE_BLEND_YD = 15 -- (T.ScaleAt: a spot's scale averaged over this far either side along the route)
+T.NOW_SCALE_MIN = 0.5 -- ("now" no nearer than half NOW_YD: a run's reaction time, whatever the grid; and the aim past a
+-- jump's foot no nearer than half JUMP_AIM_YD: past the landing, not at it)
+-- The cell size (yards) of the finer grid at (x, y, z) on `cont`, or nil (the world grid's): a building's
+-- (WorldGrid.BuildingCellAt, the building grids' when they're read in game), a capital's (CityGrid.CityFor), a cave's
+-- (WorldGrid.InCave: under its ground, its grid's cell).
+function T.CellAt(cont, x, y, z)
+  if not (cont and x and y and T.GridWalks()) then return nil end
+  local WG = ns.WorldGrid
+  if WG and WG.BuildingCellAt then
+    local c = WG.BuildingCellAt(cont, x, y, z)
+    if c then return c end
+  end
+  local CG = ns.CityGrid
+  local name = CG and CG.CityFor and CG.CityFor(cont, x, y)
+  if name then
+    local d = ns.CityGridData and ns.CityGridData[name]
+    return d and d.cell or nil
+  end
+  if z and WG and WG.InCave then
+    local cave = WG.InCave(cont, x, y, z, WG.CAVE_DOOR_Z)
+    local g = cave and ns.Terrain and ns.Terrain[cave]
+    if g and g.cell then return g.cell end
+  end
+  return nil
+end
+function T.CellScale(cell)
+  if not cell or cell >= T.WORLD_CELL_YD then return 1 end
+  return math.min(T.GRID_SCALE_MAX, cell / T.WORLD_CELL_YD)
+end
+-- (the point `s` along the path and its height there, if the path has them: its floors', `fz`, else `zs`)
+local function PointZAt(path, s)
+  local pts, cum = path.pts, path.cum
+  local n = #cum
+  local zf = path.fz or path.zs or {}
+  local function Z(i) local v = zf[i] if type(v) ~= "number" then v = path.zs and path.zs[i] end return type(v) == "number" and v or nil end
+  if n < 2 or s <= 0 then return pts[1], pts[2], Z(1) end
+  if cum[n] <= s then return pts[2 * n - 1], pts[2 * n], Z(n) end
+  local lo, hi = 2, n
+  while lo < hi do
+    local mid = math.floor((lo + hi) / 2)
+    if cum[mid] >= s then hi = mid else lo = mid + 1 end
+  end
+  local i = lo
+  local seg = cum[i] - cum[i - 1]
+  local t = seg > 0 and (s - cum[i - 1]) / seg or 0
+  local za, zb = Z(i - 1), Z(i)
+  return pts[2 * i - 3] + (pts[2 * i - 1] - pts[2 * i - 3]) * t, pts[2 * i - 2] + (pts[2 * i] - pts[2 * i - 2]) * t,
+    za and zb and za + (zb - za) * t or za or zb
+end
+-- (bucket b's grid, SCALE_BUCKET_YD of the path from b * SCALE_BUCKET_YD, looked up at its middle; and its scale, the
+-- mean of the buckets' within SCALE_SMOOTH_YD, the path's ends clamped. Both kept on the path)
+local function RawK(path, b)
+  local kb = path.scaleRaw
+  if not kb then
+    kb = {}
+    path.scaleRaw = kb
+  end
+  local k = kb[b]
+  if not k then
+    local s = math.min((b + 0.5) * T.SCALE_BUCKET_YD, path.total or 0)
+    local x, y, z = PointZAt(path, math.max(0, s))
+    k = T.CellScale(T.CellAt(path.cont, x, y, z))
+    kb[b] = k
+  end
+  return k
+end
+local function KAt(path, b)
+  local kb = path.scaleBuckets
+  if not kb then
+    kb = {}
+    path.scaleBuckets = kb
+  end
+  local k = kb[b]
+  if not k then
+    local B = T.SCALE_BUCKET_YD
+    local r = math.ceil(T.SCALE_SMOOTH_YD / B)
+    local last = math.max(0, math.floor(math.max(0, (path.total or 0) - 0.001) / B))
+    local sum, n = 0, 0
+    for j = math.max(0, b - r), math.min(last, b + r) do sum, n = sum + RawK(path, j), n + 1 end
+    k = n > 0 and sum / n or RawK(path, b)
+    kb[b] = k
+  end
+  return k
+end
+-- How far along the path `yd` world yards of look-ahead from `s0` reach: each stretch's yards cost 1 / its scale. Past
+-- the path's end, on at its last stretch's scale (the callers clamp; a look-ahead past the end is told by it).
+function T.AheadAlong(path, s0, yd)
+  if not T.GridWalks() then return s0 + yd end
+  -- (from the path's start, kept: the arrow's aim asks for the same few every frame)
+  local memo = s0 == 0 and path.aheadMemo
+  if s0 == 0 and not memo then
+    memo = {}
+    path.aheadMemo = memo
+  end
+  if memo and memo[yd] then return memo[yd] end
+  local got = T.AheadAlongRaw(path, s0, yd)
+  if memo then memo[yd] = got end
+  return got
+end
+function T.AheadAlongRaw(path, s0, yd)
+  local total, B = path.total or 0, T.SCALE_BUCKET_YD
+  local s, left = math.max(0, s0), yd
+  local k = 1
+  while s < total do
+    local b = math.floor(s / B)
+    local e = math.min((b + 1) * B, total)
+    k = KAt(path, b)
+    local cost = (e - s) / k
+    if cost >= left then return s + left * k end
+    left, s = left - cost, e
+  end
+  if total > 0 then k = KAt(path, math.floor(math.max(0, total - 0.001) / B)) end
+  return s + left * k
+end
+-- The scale at `s` along the path, averaged over SCALE_BLEND_YD either side (NOW_YD's; Nav's off-the-route distance).
+function T.ScaleAt(path, s)
+  if not (path and T.GridWalks()) then return 1 end
+  local total, B = path.total or 0, T.SCALE_BUCKET_YD
+  local b0 = math.floor(math.max(0, math.min(total, s - T.SCALE_BLEND_YD)) / B)
+  local b1 = math.floor(math.max(0, math.min(total, s + T.SCALE_BLEND_YD)) / B)
+  local sum = 0
+  for b = b0, b1 do sum = sum + KAt(path, b) end
+  return sum / (b1 - b0 + 1)
+end
+-- The scale on a route's part (Nav's `fullFirst`, its running lengths `cum`; worked out here without) at its piece `i`,
+-- `t` of the way along it.
+local partPaths = setmetatable({}, { __mode = "k" })
+function T.ScaleOnPart(part, cum, i, t)
+  if not (part and part.pts and T.GridWalks()) then return 1 end
+  local p = partPaths[part]
+  if not (p and (not cum or p.cum == cum)) then
+    local pts = part.pts
+    if not cum then
+      cum = { 0 }
+      for j = 2, #pts / 2 do cum[j] = cum[j - 1] + Dist(pts[2 * j - 3], pts[2 * j - 2], pts[2 * j - 1], pts[2 * j]) end
+    end
+    p = { pts = pts, cum = cum, total = cum[#cum] or 0, cont = part.cont, zs = part.zs, fz = part.fz }
+    partPaths[part] = p
+  end
+  local c = p.cum
+  local a = c[i] or 0
+  return T.ScaleAt(p, a + ((c[i + 1] or a) - a) * (t or 0))
+end
+-- (each maneuver's "now" scale, at its spot on the path: T.NowText)
+function T.MarkScale(path, ms)
+  if not (path and ms) then return end
+  for _, m in ipairs(ms) do
+    if m.dist then m.nowK = T.ScaleAt(path, m.dist) end
+  end
+end
+function T.NowYd(m)
+  return T.NOW_YD * math.max(T.NOW_SCALE_MIN, m and m.nowK or 1)
 end
 
 -- Where the direction arrow points: the route OPEN_LOOKAHEAD yards ahead (or its end). Indoors on a building's or a city's
@@ -1326,7 +1500,7 @@ function T.CornerTarget(path, px, py, cap)
   local pts, cum = path.pts, path.cum
   local s0 = T.AlongNear(path, px, py)
   local ox, oy = T.PointAt(path, s0)
-  local limit = math.min(s0 + T.LOOKAHEAD, path.total, cap or math.huge)
+  local limit = math.min(T.AheadAlong(path, s0, T.LOOKAHEAD), path.total, cap or math.huge) -- (in cells: T.AheadAlong)
   local first = math.min(s0 + T.CORNER_MIN_YD, path.total)
   local best = first
   local s = first
@@ -1369,6 +1543,22 @@ end
 -- both ends GRID_STAIR_OVER yards or more over the terrain's ground there (a building's floor, a dock, a tower: not the
 -- land's own slope, whose sampled ground can read a few yards under a steep hill's one end).
 T.GRID_STAIR_SLOPE, T.GRID_STAIR_OVER, T.GRID_STAIR_MAX_YD = 0.6, 2, 12
+-- Whether piece j of the path is a flight of a building's stairs on its own grid (BuildingGrid.lua): both its ends on a
+-- building grid's floor (one building's, or two joined ones: an inn and its porch), climbing BUILDING_STAIR_SLOPE or
+-- more (stairs; Booty Bay's built ramps down to the docks, gentler, are ramps: T.Ramps).
+T.BUILDING_STAIR_SLOPE = 0.5
+function T.BuildingStairs(path, j, len)
+  local BG = ns.BuildingGrid
+  local f1, f2 = path.fz[j], path.fz[j + 1]
+  if not (BG and BG.At) or type(f1) ~= "number" or type(f2) ~= "number" or len <= 0 then return false end
+  if math.abs(f2 - f1) / len < T.BUILDING_STAIR_SLOPE or math.abs(f2 - f1) < 0.5 then return false end
+  if path.kinds[j] ~= 1 and path.kinds[j] ~= 0 then return false end
+  local pts = path.pts
+  local a = BG.At(path.cont, pts[2 * j - 1], pts[2 * j], f1)
+  local b = a and BG.At(path.cont, pts[2 * j + 1], pts[2 * j + 2], f2)
+  return a ~= nil and b ~= nil
+end
+
 function T.GridStairs(path, j, len)
   local f1, f2 = path.fz[j], path.fz[j + 1]
   if type(f1) ~= "number" or type(f2) ~= "number" or len <= 0 then return false end
@@ -1442,8 +1632,9 @@ function T.JumpAhead(path, sp)
   local R = ns.Router
   if not (R and path.kinds) then return nil end
   local kinds, cum = path.kinds, path.cum
+  local reach = T.AheadAlong(path, sp, T.OPEN_LOOKAHEAD)
   for i = 1, #cum - 1 do
-    if cum[i] > sp + T.OPEN_LOOKAHEAD then return nil end
+    if cum[i] > reach then return nil end
     if (kinds[i] == R.KIND_DROP or kinds[i] == R.KIND_JUMP) and cum[i + 1] >= sp - 1 then
       local f = i
       while kinds[f + 1] == kinds[i] do f = f + 1 end
@@ -1456,7 +1647,10 @@ function T.Target(path, px, py)
   if not path or not path.total then return nil end
   local sp = px and py and T.AlongNear(path, px, py) or 0
   local foot = T.JumpAhead(path, sp)
-  if foot then return T.PointAt(path, math.min(path.total, foot + T.JUMP_AIM_YD)) end
+  if foot then
+    local s = math.max(T.AheadAlong(path, foot, T.JUMP_AIM_YD), foot + T.JUMP_AIM_YD * T.NOW_SCALE_MIN)
+    return T.PointAt(path, math.min(path.total, s))
+  end
   local cap = T.StairCap(path, sp)
   -- (the corners' aim only indoors or in a capital's city grid; out in the open world the look-ahead averaged below:
   -- on the world grid's paths through woods the corner seen came and went as the player walked a few yards beside it,
@@ -1464,12 +1658,17 @@ function T.Target(path, px, py)
   if px and py and T.OnFloors(path) and (T.Indoors() or (T.GridWalks() and T.InCityGrid(path, px, py))) then
     return T.CornerTarget(path, px, py, cap)
   end
+  -- (the look-ahead's yards counted in cells, T.AheadAlong: a capital's stretch a third as far)
   local ahead = T.OPEN_LOOKAHEAD
-  if cap and (cap < ahead * 0.6 or (path.total <= ahead and cap < path.total)) then return T.PointAt(path, cap) end -- (the stairs' end, not past it)
-  if path.total <= ahead then return T.PointAt(path, path.total) end
+  local aheadS, nearS = T.AheadAlong(path, 0, ahead), T.AheadAlong(path, 0, ahead * 0.6)
+  if cap and (cap < nearS or (path.total <= aheadS and cap < path.total)) then return T.PointAt(path, cap) end -- (the stairs' end, not past it)
+  if path.total <= aheadS then return T.PointAt(path, path.total) end
   -- (averaged over the stretch around it: a kink there doesn't swing the arrow)
   local sx, sy, n = 0, 0, 0
-  for s = ahead * 0.6, math.min(ahead * 1.4, path.total, cap or math.huge), ahead * 0.2 do
+  local lim = math.min(path.total, cap or math.huge)
+  for f = 3, 7 do -- (0.6 to 1.4 of the look-ahead)
+    local s = f == 3 and nearS or T.AheadAlong(path, 0, ahead * f * 0.2)
+    if s > lim then break end
     local x, y = T.PointAt(path, s)
     sx, sy, n = sx + x, sy + y, n + 1
   end

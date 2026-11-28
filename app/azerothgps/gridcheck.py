@@ -260,10 +260,22 @@ def _floors(level: int, x: float, y: float) -> tuple:
             return [z for _q, z in surfs], "city", (g, surfs)
     w = world_grid(level) if level in (0, 1, 2991) else None
     if w:
-        zs = w.zs_round(x, y)
+        # (and the buildings' grids there, 1.4.2: their floors the world grid's 8.33 yd cells lack, Thandol Span's)
+        zs = w.zs_round(x, y) + building_floors(level, x, y)
         if zs:
             return zs, "world", None
     return [], None, None
+
+
+@lru_cache(maxsize=1)
+def _buildings():
+    from . import buildinggrid as BG
+    return BG.shipped()
+
+
+def building_floors(level: int, x: float, y: float) -> list:
+    from . import buildinggrid as BG
+    return BG.floors_at(level, x, y, _buildings(), r=1)
 
 
 # --------------------------------------------------------------------------------------------------- (a) the tracks

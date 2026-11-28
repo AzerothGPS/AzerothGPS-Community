@@ -54,13 +54,20 @@ def test_zoomed_in_over_a_city_youre_not_in_its_whole_map_shows(game, city, x, y
     try:
         G.Follow()
         shown = {}
-        for zoom in (2000, 450):
+        # (item 143, 2026-11-27: zoomed in to the terrain's own stage, the terrain alone; the city's map as the terrain
+        # gives way, G.TerrainAlone, G.SEAM_TILES_OUT)
+        between = (G.SEAM_TILES_OUT[1] + G.SEAM_TILES_OUT[2]) / 2 * G.ZoomScale()
+        for zoom in (2000, between, 300):
             G.LookAt(0, x, y, zoom)
             lua.execute("AGPS_T = (AGPS_T or 1000) + 0.5")
             G.Update()
             shown[zoom] = G.zoomedInside
         assert shown[2000] is None, f"{city}'s map zoomed out at the zone's view"
-        assert shown[450] == model, f"{city}'s map didn't show zoomed in over it"
+        assert shown[300] is None, f"{city}'s map over the land zoomed in to the terrain's own stage"
+        G.LookAt(0, x, y, between)
+        lua.execute("AGPS_T = (AGPS_T or 1000) + 0.5")
+        G.Update()
+        assert shown[between] == model, f"{city}'s map didn't show zoomed in over it"
         assert str(G.laidTiles.laidSig).startswith(f"in:{model}:")
     finally:
         lua.execute("AGPS_NS.GPS.Seamless = AGPS_REAL_SEAMLESS")

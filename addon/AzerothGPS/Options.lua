@@ -19,6 +19,7 @@ end
 
 local function Apply()
   ns.GPS.ApplySettings()
+  if ns.GPS.RefreshQuick then ns.GPS.RefreshQuick() end -- (Map Layers' buttons: lit or gray as the options say)
   if ns.Arrow then ns.Arrow.Apply() end
   if ns.Looks then ns.Looks.Apply() end
   if O.button then O.UpdateButton() end
@@ -351,15 +352,15 @@ O.LANGUAGES = { { "enUS", "English" }, { "deDE", "Deutsch" }, { "esES", "Espa\19
 -- prep, like the toc's version (Kooki3z 2026-11-20: "part of release prep like how we update the version number in
 -- the addon in game should be the What's New section in help"): test_options checks it's never older than the toc,
 -- release.yml that it's the tag's.
-O.WHATS_NEW_VERSION = "1.4.1"
+O.WHATS_NEW_VERSION = "1.4.2"
 O.WHATS_NEW = {
-  L["- Routes go around elite enemy areas near your level, shown in gold (Options > Routing: Avoid elite enemy areas)."],
-  L["- Directions from the ground: ramps, jumps with their height, and the way into and out of caves."],
-  L["- Height profile: the climbs and drops to your next stop along the bottom of the map (Options > Map)."],
-  L["- Floor picker: where floors stack, + and - on the map pick the floor shown."],
-  L["- Maps for caves, tunnels and buildings the game has no map for."],
-  L["- Lifts: the directions say when the next car arrives."],
-  L["- OpenXP Route follows each step of your OpenXP 2.0 guide."],
+  L["- Map Layers in the map menu: show or hide each thing the map draws."],
+  L["- Waypoint UI: your next stop becomes its waypoint, and a Ctrl-click pin becomes a stop (Options > Directions)."],
+  L["- FlowUp Route follows each step of your FlowUp guide."],
+  L["- DaylightUI's square minimap is supported like EllesmereUI's, and the directions can use your UI's font."],
+  L["- The GPS minimap's logo can be hidden, or dragged anywhere along the minimap's edge (Options > Minimap)."],
+  L["- As a ghost, the directions show the run to your body and what the Spirit Healer would cost."],
+  L["- Long walks are worked out much faster, and Search Places lists the nearest matches first."],
 }
 -- A page's old id, still asked for by other code and addons (API.ShowOptions): the page it's on now.
 O.PAGE_ALIASES = { ["Help improve"] = "Help" }
@@ -1482,13 +1483,32 @@ local function BuildWindow()
     end
     col.y = col.y - 2
   end
-  local function note(text)
+  -- (`shown`: a note only some players need, Kooki3z 2026-11-27 for the OpenMap addon's: in the gold of a warning, it
+  -- stands out. No room is kept for it: while `shown` returns true, O.ApplyFolds shows it and moves what's under it
+  -- down (each time the window opens, and when the controls see it change); hidden otherwise, the search too)
+  local function note(text, shown)
     StartGroup("note", text)
-    local nt = page:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+    local nt = page:CreateFontString(nil, "ARTWORK", shown and "GameFontNormalSmall" or "GameFontDisableSmall")
     nt:SetWidth(PAGE_W - 48)
     nt:SetJustifyH("LEFT")
     nt:SetText(text)
-    place(nt, nt:GetStringHeight() + 8, 4)
+    local h = nt:GetStringHeight() + 8
+    place(nt, h, 4)
+    if shown and lastRow and lastRow.w == nt then
+      local p, row = pinfo, lastRow
+      col.y = col.y + h
+      row.when, row.whenH, p.whens = shown, h, true
+      nt.agpsFoldHid = true -- (hidden until O.ApplyFolds shows it)
+      nt:Hide()
+      controls[#controls + 1] = function()
+        local on, was = shown() and true or false, row.whenOn
+        row.whenOn = on
+        if was ~= nil and was ~= on and O.ApplyFolds and not search.on then O.ApplyFolds(p) end
+      end
+    elseif shown then -- (not a page the search knows: shown or hidden where it is)
+      controls[#controls + 1] = function() nt:SetShown(shown() and true or false) end
+    end
+    return nt
   end
   -- (`enabled`: gray while it returns false; `indent`: under its parent)
   local function check(label, tip, get, set, enabled, indent)
@@ -1940,7 +1960,11 @@ local function BuildWindow()
   -- (asked 2026-11-10: the GPS map in the game's own world map window, GPSFrame's G.WorldMapHosted)
   Key("useWorldMap")
   local worldMapBox = check(L["Show the GPS map in the game's world map"], L["The GPS map shows in the game's own world map window (M) instead of a window of its own, with its route, buttons and map styles. The show/hide key, and the logo on the minimap square, open the world map."],
-    function() return GPS().useWorldMap == true end, function(v) GPS().useWorldMap = v and true or false end,
+    function() return GPS().useWorldMap == true end, function(v)
+      local was = GPS().useWorldMap == true
+      GPS().useWorldMap = v and true or false
+      if was ~= GPS().useWorldMap then ns.GPS.UseWorldMapPicked(GPS().useWorldMap) end -- (OpenMap: No Map)
+    end,
     -- (gray with the game's controller UI on: GPSFrame's G.WorldMapWanted)
     function() return not (ns.GPS and ns.GPS.ControllerUI and ns.GPS.ControllerUI()) end)
   -- (asked 2026-11-22: say why it's gray. With the controller UI on, the game blames an addon that touched its world
@@ -1957,9 +1981,17 @@ local function BuildWindow()
   check(L["Extra map window"], L["A second GPS map window you can leave open, on a second monitor for one. Escape never closes it. Route from either window: the route, stops and settings are the same in both; its place, size and zoom are its own. Double-click its logo to minimize it."],
     function() return GPS().extraWindow == true end, function(v) GPS().extraWindow = v and true or false end)
   O.worldMapPictures = pictures({ "window", L["GPS map window"] }, { "worldMap", L["In the world map"] },
-    function() return GPS().useWorldMap == true end, function(v) GPS().useWorldMap = v and true or false end,
+    function() return GPS().useWorldMap == true end, function(v)
+      local was = GPS().useWorldMap == true
+      GPS().useWorldMap = v and true or false
+      if was ~= GPS().useWorldMap then ns.GPS.UseWorldMapPicked(GPS().useWorldMap) end -- (OpenMap: No Map)
+    end,
     function() return not (ns.GPS and ns.GPS.ControllerUI and ns.GPS.ControllerUI()) end)
   header(L["Map style"])
+  -- (Kooki3z 2026-11-27: "make it more clear that No Map is what players want to use when using openmap": the OpenMap
+  -- addon's players told so first, only when it's installed; our own style is named OpenMap too)
+  O.openMapNote = note(L["Using the OpenMap addon? Pick No Map so your route draws on its map. No Map needs \"Show the GPS map in the game's world map\" above."],
+    function() return ns.GPS and ns.GPS.OpenMapInstalled and ns.GPS.OpenMapInstalled() or false end)
   -- (issue #75: the four map styles, as the Map Style buttons; the OpenMap style (issue #91, Seamless before) once the seamless map's option)
   Key("style")
   -- (No Map, Kooki3z 2026-11-20: "a No Map option ... using the world map": listed only while the GPS map is in the
@@ -1970,7 +2002,7 @@ local function BuildWindow()
     { value = "zone", text = L["World Map"] },
     { value = "nospoiler", text = L["No Spoiler Map"] },
   }
-  local noMapStyle = { value = "none", text = L["No Map"], tip = L["Only the route, stops and icons, over the game's world map or another map addon's that replaces it. Only with the GPS map in the game's world map (Options > Map)."] }
+  local noMapStyle = { value = "none", text = L["No Map"], tip = L["Only the route, stops and icons, over the game's world map or the map another addon like OpenMap puts there: the one to use with OpenMap. Only with the GPS map in the game's world map (Options > Map)."] }
   local function WorldMapOn() return ns.GPS and ns.GPS.WorldMapWanted and ns.GPS.WorldMapWanted() or false end
   local function SyncStyles()
     local on = WorldMapOn()
@@ -1985,13 +2017,30 @@ local function BuildWindow()
     if v == "none" and not WorldMapOn() then v = ns.GPS.NoMapFallback() end
     return v
   end, function(v) ns.GPS.SetStyle(v) end)
+  -- (Kooki3z 2026-11-27 for 1.4.2: "add a red notice when no map is selected and using game map that the viewing NPCs in
+  -- buildings and routing to places inside caves are not supported"; checked in GPSFrame: G.Update drops the inside,
+  -- city and cave maps on No Map (their NPCs and floors with them), G.BuildingHover needs the OpenMap style, so a
+  -- double-click over a cave is the ground's (G.ClickFloorZ). Over OpenMap's map (G.NoMapView) the view is OpenMap's:
+  -- not following, no zoom near a stop, and a controller's pan (G.PadPan) taken back by the next redraw (Kooki3z:
+  -- "controller panning doesn't work when not using our OpenMap"; every other style pans). Shown only while No Map is
+  -- picked with the GPS map in the world map, its OpenMap line only with the OpenMap addon too. Then "For the No Map
+  -- notice section just put "NOTICE:" in red the rest of the info can be in grey": "NOTICE:" once, at the first line's
+  -- start, in the warnings' red (`O.WARN_RED`), the rest in the other notes' gray (GameFontDisableSmall))
+  O.WARN_RED = "|cffff4040" -- (the red of Options' other warnings: the size's and the quick buttons')
+  local function NoMapPicked() return GPS().style == "none" and WorldMapOn() end
+  O.noMapNotice = note(O.WARN_RED .. L["NOTICE:"] .. "|r " .. L["No Map can't show building and cave maps and their floors, the NPCs inside them, or stops placed inside caves."],
+    NoMapPicked)
+  O.noMapOpenMapNotice = note(L["Over the OpenMap addon's map, it also can't follow you, zoom in near a stop or pan with a controller."],
+    function() return NoMapPicked() and ns.GPS.OpenMapInstalled and ns.GPS.OpenMapInstalled() or false end)
+  O.noMapNotice:SetFontObject("GameFontDisableSmall")
+  O.noMapOpenMapNotice:SetFontObject("GameFontDisableSmall")
   Key("seamExploredOnly")
   check(L["Show only explored areas"], L["The OpenMap style's zone art shows only the areas this character has explored, as the game's own world map does; the rest is the zone's blank parchment. The terrain close in is never changed."],
     function() return GPS().seamExploredOnly == true end, function(v) ns.Atlas.SetExploredOnly(v) end,
     function() return (GPS().style or "seamless") == "seamless" end, INDENT)
-  note(L["OpenMap (the default): the ground seen from above, and the mouse wheel zooms on out past the land, through zones and continents to the whole world on a stitched world map, and back in to the roads. Right-click zooms out a few steps on the same spot, up to the whole world. Picked again after another style, it loads once the UI is reloaded (a prompt offers it); in the other styles nothing of it is loaded."])
-  note(L["Terrain: the ground alone, as far out as the land. World Map: the world map, fully explored. No Spoiler Map: the world map as your character has explored it."])
-  note(L["No Map (with the GPS map in the game's world map): none of the GPS map's own ground, only its route, stops and icons, over the world map, or over the map another addon puts in it, lined up with it at every zoom. North stays up."])
+  note(L["OpenMap (the default, AzerothGPS's own style, not the OpenMap addon): the ground from above, and the wheel zooms out to the whole world. Picked again after another style, it needs a /reload."])
+  note(L["Terrain: the ground alone. World Map: the world map, fully explored. No Spoiler Map: the world map as you've explored it."])
+  note(L["No Map (with the GPS map in the game's world map): only the route, stops and icons, over the game's world map or the OpenMap addon's. The one to use with the OpenMap addon."])
   Key("routeColor")
   Dropdown(L["Route color"], { { value = "blue", text = L["Blue"] },
     { value = "rainbow", text = L["Rainbow"], tip = L["The colors of the rainbow along the route."] } },
@@ -2157,6 +2206,14 @@ local function BuildWindow()
   header(L["What the map shows"])
   note(L["Map style and layers: the round button at the map's bottom-left."])
   note(L["Double-click one to add it as a stop."])
+  -- (1.4.2: the map's layers one by one, also the Map Layers button's menu, GPSFrame's G.MAP_LAYERS; these four had no
+  -- switch before)
+  Key("layerRoute")
+  check(L["Route line"], L["The route's line on the map. Off: you're still routed and the directions go on as ever; the line just isn't drawn."],
+    function() return GPS().layerRoute ~= false end, function(v) GPS().layerRoute = v end)
+  Key("layerStops")
+  check(L["Stops and destination"], L["The markers of your stops and destination on the map."],
+    function() return GPS().layerStops ~= false end, function(v) GPS().layerStops = v end)
   Key("layerQuests")
   check(L["Quests"], L["Your quests' objectives and turn-ins."],
     function() return GPS().layerQuests end, function(v) GPS().layerQuests = v end)
@@ -2174,6 +2231,9 @@ local function BuildWindow()
   Key("poiPoi")
   check(L["Points of interest"], L["Places marked on the world map."],
     function() return GPS().poiPoi end, function(v) GPS().poiPoi = v end)
+  Key("layerDocks")
+  check(L["Boats, zeppelins and the tram"], L["Their docks on the map, with the next departure. Double-click one for a stop there."],
+    function() return GPS().layerDocks ~= false end, function(v) GPS().layerDocks = v end)
   Key("poiLabels")
   check(L["Place names"], L["Town and area names, when zoomed in."],
     function() return GPS().poiLabels end, function(v) GPS().poiLabels = v end)
@@ -2181,6 +2241,9 @@ local function BuildWindow()
   Key("layerCity")
   check(L["City locations"], L["Places guards pointed out to you (trainers, bank, ...), for all your characters."],
     function() return GPS().layerCity ~= false end, function(v) GPS().layerCity = v end)
+  Key("layerNpcs")
+  check(L["NPCs in buildings"], L["Trainers, vendors and other NPCs drawn in a building's inside map when you zoom in on it."],
+    function() return GPS().layerNpcs ~= false end, function(v) GPS().layerNpcs = v end)
   Key("layerInstances")
   check(L["Dungeons and raids"], L["Their entrances, on every map style. Click one for its map, with its bosses in the usual order; right-click goes back out."],
     function() return GPS().layerInstances ~= false end, function(v) GPS().layerInstances = v end)
@@ -2273,12 +2336,51 @@ local function BuildWindow()
     { value = "small", text = L["Small"] },
     { value = "medium", text = L["Medium"] },
     { value = "large", text = L["Large"] },
-  }, function() return GPS().replaceMinimapSize or "small" end, function(v) GPS().replaceMinimapSize = v end, Replacing, INDENT)
+  }, function() return GPS().replaceMinimapSize or "small" end, function(v)
+    GPS().replaceMinimapSize = v
+    ns.GPS.SquareSizePicked() -- (under another UI's minimap too: GPSFrame's G.SquareFitSide)
+  end, Replacing, INDENT)
   -- (Kooki3z 2026-11-26 for 1.4.1: the square without its border; GPSFrame's G.SquareHidesBorder)
   Key("replaceMinimapNoBorder")
   check(L["Hide the minimap square's border"], L["Only the map shows in the minimap corner, with no metal border around it. The map keeps its size and place. The GPS map opened out of it keeps its usual border."],
-    function() return GPS().replaceMinimapNoBorder == true end, function(v) GPS().replaceMinimapNoBorder = v end,
+    -- (always off under DaylightUI's or EllesmereUI's minimap, grayed with a note: theirs is the border; the player's
+    -- own setting untouched meanwhile, GPSFrame's G.SquareHidesBorder)
+    function() return ns.GPS.SquareHidesBorder() end, function(v) GPS().replaceMinimapNoBorder = v end,
+    function() return Replacing() and ns.GPS.SupportedMinimapUI() == nil end, INDENT)
+  local borderNote
+  borderNote = note(Format(L["Off while %s's minimap is in use."], "DaylightUI"), function()
+    local ui = ns.GPS.SupportedMinimapUI()
+    if ui and borderNote then borderNote:SetText(Format(L["Off while %s's minimap is in use."], ui)) end
+    return ui ~= nil and Replacing()
+  end)
+  -- (Kooki3z 2026-11-27 for 1.4.2: "add option to hide minimap logo button"; GPSFrame's G.SquareLogoShown)
+  Key("replaceMinimapLogo")
+  check(L["Show the AzerothGPS logo on the minimap"], L["The logo button in the minimap square's corner: click it to open the GPS map, right-click for options. Off: open the map with your Show/Hide GPS key or /agps show, and the options with /agps."],
+    function() return GPS().replaceMinimapLogo ~= false end, function(v) GPS().replaceMinimapLogo = v and true or false end,
     Replacing, INDENT)
+  -- (Kooki3z 2026-11-27 for 1.4.2: "make the AzerothGPS logo on the minimap movable around the minimap like the buttons
+  -- do", "locked by default"; GPSFrame's G.LogoDragStart)
+  Key("replaceMinimapLogoUnlocked")
+  check(L["Unlock the minimap logo"], L["Drag the logo along the minimap's edge to move it. It stays where you drop it. Lock it again to keep it in place."],
+    function() return GPS().replaceMinimapLogoUnlocked == true end,
+    function(v) GPS().replaceMinimapLogoUnlocked = v and true or false end,
+    function() return Replacing() and GPS().replaceMinimapLogo ~= false end, INDENT)
+  -- (Kooki3z 2026-11-28: its original spot over the corner, on by default, unticked by a drag, gray while unlocked;
+  -- GPSFrame's G.LogoKept)
+  Key("replaceMinimapLogoKeep")
+  check(L["Keep the logo in its original spot"], L["The logo sits over the minimap's bottom-left corner. Dragging it while it's unlocked unticks this; lock it, then tick this to put it back."],
+    function() return ns.GPS.LogoKept() end,
+    function(v) GPS().replaceMinimapLogoKeep = v and true or false end,
+    -- (gray while unlocked, and under DaylightUI's or EllesmereUI's minimap, off there with a note: Kooki3z 2026-11-28)
+    function() return Replacing() and GPS().replaceMinimapLogo ~= false and GPS().replaceMinimapLogoUnlocked ~= true
+      and ns.GPS.SupportedMinimapUI() == nil end,
+    INDENT)
+  local keepNote
+  keepNote = note(Format(L["Off while %s's minimap is in use."], "DaylightUI"), function()
+    local ui = ns.GPS.SupportedMinimapUI()
+    if ui and keepNote then keepNote:SetText(Format(L["Off while %s's minimap is in use."], ui)) end
+    return ui ~= nil and Replacing() and GPS().replaceMinimapLogo ~= false
+  end)
   -- (asked 2026-11-17: "add option to not show the route on our minimap replacement"; GPSFrame's G.SquareHidesRoute)
   Key("replaceMinimapRoute")
   check(L["Route on the minimap square"], L["Your route's line on the GPS map in the minimap corner. Off: only the stops' markers there. The GPS map opened out of it, and the one in the world map, still show the route."],
@@ -2340,7 +2442,8 @@ local function BuildWindow()
     for _, t in ipairs(LK.TINTS) do out[#out + 1] = { value = t.key, text = t.name, tip = t.tip } end
     return out
   end
-  local function Framed() return GPS().windowFrame ~= false end
+  -- (off by itself under DaylightUI or EllesmereUI until set here, GPSFrame's G.WindowFramed)
+  local function Framed() return ns.GPS.WindowFramed() end
   header(L["Position and size"])
   Key("locked")
   check(L["Lock map position"], L["Locks the map in place. Unlocked: drag the window frame's title bar (or the Move tab without the frame, or Shift+drag the map) to move it."],
@@ -2443,13 +2546,16 @@ local function BuildWindow()
     function() return GPS().navPanelWrap == true end, function(v) GPS().navPanelWrap = v and true or false end,
     Detached, 20)
   Key("navPanelLocked")
-  check(L["Lock the panel"], L["While the panel is detached, it can't be dragged, resized, or put back on the map with a right-click. Its buttons still work. The lock button on the panel turns this on and off too."],
+  check(L["Lock the panel"], L["While the panel is detached, it stays where it is and ignores the mouse: clicks go through it to the game world, as with the locked directions text. Its use and target buttons still work. Turn this off to drag, resize, or click it again. The lock button on the panel locks it too."],
     function() return GPS().navPanelLocked == true end, function(v) GPS().navPanelLocked = v and true or false end,
     Detached, 20)
   header(L["Frame and buttons"], L["Other windows keep the game's own look."])
   Key("windowFrame")
   check(L["Window frame"], L["The game-style window frame around the map: title bar, logo and close button. Off: just the map."],
-    Framed, function(v) GPS().windowFrame = v end)
+    Framed, function(v)
+      GPS().windowFrame = v
+      ns.GPS.WindowFramePicked()
+    end)
   Key("windowTint")
   Dropdown(L["Frame color"], Tints({ { value = "default", text = L["AzerothGPS's own"] } }),
     function() return GPS().windowTint or "default" end, function(v) GPS().windowTint = v end, Framed)
@@ -2588,6 +2694,13 @@ local function BuildWindow()
   Key("showAvoided")
   check(L["Show enemy areas"], L["Red areas on the map where the other faction's guards stand, gold where elite enemies routes avoid are."],
     function() return GPS().showAvoided ~= false end, function(v) GPS().showAvoided = v end, nil, INDENT)
+  -- (item 119, 1.4.2: the buildings' own grids, being tested in a few towns; BuildingGrid.lua)
+  Key("buildingGrid")
+  check(L["Building routing (test)"], L["Routes walk inside buildings on their own floors and stairs, in and out through their doors. Being tested in a few towns first: Brill, Goldshire, Kharanos, Sentinel Hill, Booty Bay, Lakeshire, Darkshire, Theramore, the Crossroads and Astranaar."],
+    function() return GPS().buildingGrid ~= false end, function(v)
+      GPS().buildingGrid = v
+      ns.Nav.OptionsChanged()
+    end)
   Key("allowSwim")
   check(L["Allow swimming"], L["Routes may swim across rivers, lakes and the sea near the shore when that's faster, timed at swimming speed. Swims show as a wavy line; right-click one to go round by land on that trip. Off: routes go round by land wherever there's a way (an island is still swum to)."],
     function() return GPS().allowSwim ~= false end, function(v)
@@ -2919,6 +3032,16 @@ local function BuildWindow()
   Key("dirTextScale")
   slider(L["Text size"], 70, 160, 5, "%d%%",
     function() return math.floor((GPS().dirTextScale or 1) * 100 + 0.5) end, function(v) GPS().dirTextScale = v / 100 end, DirOn)
+  -- (Kooki3z for 1.4.2: "can we by default for directions use the UI's themed text style?": UIFont.lua; gray without
+  -- DaylightUI or EllesmereUI, and the map's route panel, info line and height strip follow it too)
+  Key("dirTextStyle")
+  Choice(L["Directions text style"], {
+    { value = "ui", text = L["Match my UI (DaylightUI/EllesmereUI)"],
+      tip = L["The directions, the map's route panel, its info line and the height strip use your UI's font with its outline or shadow. Their size and colors stay AzerothGPS's."] },
+    { value = "agps", text = L["AzerothGPS default"], tip = L["The game's font, as without that UI."] },
+  }, function() return GPS().dirTextStyle == "agps" and "agps" or "ui" end, function(v)
+    if ns.UIFont then ns.UIFont.SetStyle(v) else GPS().dirTextStyle = v end
+  end, function() return ns.UIFont ~= nil and ns.UIFont.Source() ~= nil end)
   Key("dirBg")
   slider(L["Directions background"], 0, 100, 5, "%d%%",
     function() return math.floor((GPS().dirBg or GPS().arrowBg or 0) * 100 + 0.5) end, function(v) GPS().dirBg = v / 100 end, DirOn,
@@ -2935,6 +3058,17 @@ local function BuildWindow()
   Key("targetNpcMarkGroup")
   check(L["Mark the NPC in a party or raid"], L["The same in a group. Everyone in it sees the mark, so it's off by default. In a raid it marks only while you're the leader or an assistant."],
     function() return GPS().targetNpcMarkGroup == true end, function(v) GPS().targetNpcMarkGroup = v and true or false end, TargetOn, INDENT)
+  -- (Kooki3z for 1.4.2: "do WaypointUI too": WaypointUI.lua; gray without that addon)
+  Key("waypointUI")
+  check(L["Send the next stop to Waypoint UI"], L["With the Waypoint UI addon: your route's next stop is its waypoint, with its map pin and distance, and it moves on to each stop in turn. A waypoint you set yourself, or a quest you're tracking, is never replaced."],
+    function() return GPS().waypointUI ~= false end, function(v) GPS().waypointUI = v and true or false end,
+    function() return ns.WaypointUI ~= nil and ns.WaypointUI.Available() end)
+  -- (Kooki3z for 1.4.2: "when user uses ctrl-click and sets a pin, auto add that as a stop": WaypointUI.lua's
+  -- W.OnUserWaypoint; its own, not the next stop's sending, so not grayed with that one off)
+  Key("waypointUIPins")
+  check(L["Add my Waypoint UI pins as stops"], L["With the Waypoint UI addon: a pin you set with Ctrl-click is added to your route as its last stop, or starts a route to it. Clearing the pin leaves the stop."],
+    function() return GPS().waypointUIPins ~= false end, function(v) GPS().waypointUIPins = v and true or false end,
+    function() return ns.WaypointUI ~= nil and ns.WaypointUI.Available() end, INDENT)
   header(L["How it works"], nil, true)
   note(L["The arrow points along the route: |cff73ff73green|r straight ahead, |cffffffffwhite|r for a turn coming up, |cffff7359red|r when the route is behind you. On a flight it shows where you land and when."])
   note(L["The directions' lines: the next turn and its distance, the road or place you're heading toward, the stop with its distance and ETA, then the turn after that. With List the stops only, just the stops."])
@@ -2954,6 +3088,10 @@ local function BuildWindow()
   place(KeyBind(page, L["Quick search key"], O.QUICK_SEARCH_BINDING,
     L["Click, then press a key (Shift, Ctrl or Alt with it if you like). It opens the map with its search box ready, so you can type a place at once. Escape cancels, right-click clears it. Also in the game's Key Bindings, under AddOns."]))
   -- (issue #20: an accidental press mid-fight can't pop the map up)
+  -- (1.4.2, Kooki3z 2026-11-27: StreetView's buttons and other companions' in the map menu, GPSFrame's G.SyncCompanions)
+  Key("companionsInMenu")
+  check(L["Show StreetView's buttons in the Map Menu pop-out"], L["StreetView's buttons (and other companion addons' map buttons) at the end of the Map Menu's pop-out column instead of always shown on its row going right."],
+    function() return GPS().companionsInMenu == true end, function(v) GPS().companionsInMenu = v end)
   Key("keyBlockedInCombat")
   check(L["Key doesn't show the map in combat"], L["In combat, pressing the show/hide key doesn't show the map, so a press by mistake can't pop it up mid-fight. It can still hide the map, and a map already showing stays. The minimap button and /agps toggle work as usual."],
     function() return GPS().keyBlockedInCombat ~= false end, function(v) GPS().keyBlockedInCombat = v end)
@@ -3036,8 +3174,10 @@ local function BuildWindow()
     b:SetScript("OnLeave", GameTooltip_Hide)
   end
   local slots = {}
+  if ns.GPS.SyncHearthQuick then ns.GPS.SyncHearthQuick() end -- (a shaman's Use Astral Recall, its name and icon)
   for _, t in ipairs(ns.GPS.QuickSlots and ns.GPS.QuickSlots() or {}) do
-    if not t.custom then slots[#slots + 1] = t end -- (the searches: their own section, below)
+    if not t.custom and not t.companion then slots[#slots + 1] = t end -- (the searches: their own section, below; the
+    -- companions' buttons: by the option above)
   end
   for _, t in ipairs(slots) do
     local row = CreateFrame("Frame", nil, page)
@@ -3768,7 +3908,7 @@ local function BuildWindow()
     return saved
   end
   function O.ApplyFolds(p, open)
-    if not (p and p.folds) or p.whole then return end
+    if not (p and (p.folds or p.whens)) or p.whole then return end
     local shift, folded = 0, false
     local rows = p.rows
     for i, row in ipairs(rows) do
@@ -3776,7 +3916,7 @@ local function BuildWindow()
         folded = not open and row.foldKey ~= nil and O.Folded(row) or false
         if row.foldButton then row.foldButton.sign:SetText(folded and "+" or "-") end
       end
-      local hide = folded and not row.header
+      local hide = (folded and not row.header) or (row.when ~= nil and not row.when())
       local y = row.y + shift
       for k = 0, #(row.extras or {}) do
         local w = k == 0 and row.w or row.extras[k]
@@ -3795,9 +3935,10 @@ local function BuildWindow()
       end
       if hide then
         local nxt = rows[i + 1]
-        shift = shift + math.max(0, nxt and (row.y - nxt.y) or row.h)
+        if not row.whenH then shift = shift + math.max(0, nxt and (row.y - nxt.y) or row.h) end
       else
         row.w:SetPoint("TOPLEFT", row.x, y)
+        if row.whenH then shift = shift - row.whenH end -- (a note `shown` lets in: no room was kept for it)
       end
     end
     if p.child.agpsFullH then p.child:SetHeight(math.max(10, p.child.agpsFullH - shift)) end
@@ -3887,6 +4028,7 @@ local function BuildWindow()
           for _, row in ipairs(p.rows) do
             local g = row.group
             local vis = g.show or (row.header and g.some) or false
+            if row.when and not row.when() then vis = false end
             SetShownFor(row.w, vis)
             for _, e in ipairs(row.extras or {}) do SetShownFor(e, vis) end
             local to = on and vis and resultsChild or p.child

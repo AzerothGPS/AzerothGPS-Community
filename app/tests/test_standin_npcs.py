@@ -32,8 +32,12 @@ def test_the_stand_ins_ship_flagged_and_match_their_overrides():
         n, o = npcs[i], doc["npcs"][str(i)]
         assert n["from"] == "standin" and n["name"] == o["name"]
         assert o["source"] == "wowhead-standin" and o["verified"] is False and o["url"].endswith(f"npc={i}")
-    # every stand-in in the overrides ships, unless real data has that NPC
-    assert set(map(int, doc["npcs"])) - ids <= {i for i, n in npcs.items() if n.get("from") != "standin"}
+    # every stand-in in the overrides ships, unless real data has that NPC or it's a camp NPC players put down
+    # (npcs.camp_npc: Pexmit, "Someone's Minion")
+    from azerothgps.npcs import camp_npc
+    camp = {int(i) for i, o in doc["npcs"].items() if camp_npc(int(i), o["name"], o.get("sub", ""))}
+    assert 266901 in camp and not camp & ids
+    assert set(map(int, doc["npcs"])) - ids - camp <= {i for i, n in npcs.items() if n.get("from") != "standin"}
     # the file reads back to itself (`agps standin-npcs --write` and `agps npc-spots --write` keep the flag)
     assert lua_text(npcs) == text
     h = npcs[HARLAN]

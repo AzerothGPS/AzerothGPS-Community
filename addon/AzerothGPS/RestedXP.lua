@@ -29,7 +29,7 @@ function X.On()
   local cdb = CDB()
   if not cdb then return false end
   if cdb.rxpFollow ~= nil then return cdb.rxpFollow == true end
-  return X.Available() and cdb.zygorFollow ~= true and cdb.polestarFollow ~= true and cdb.questifyFollow ~= true and cdb.aprFollow ~= true and cdb.openxpFollow ~= true
+  return X.Available() and cdb.zygorFollow ~= true and cdb.polestarFollow ~= true and cdb.questifyFollow ~= true and cdb.aprFollow ~= true and cdb.openxpFollow ~= true and cdb.flowupFollow ~= true
 end
 
 -- The waypoint RestedXP's arrow points at, if it's a step's place to go: the element, else nil.
@@ -218,7 +218,7 @@ function X.Toggle()
     ns.Print(L["RestedXP Route: off."])
     return
   end
-  for _, k in ipairs({ "Zygor", "Polestar", "Questify", "AzerothPilot", "OpenXP" }) do -- (one guide at a time)
+  for _, k in ipairs({ "Zygor", "Polestar", "Questify", "AzerothPilot", "OpenXP", "FlowUp" }) do -- (one guide at a time)
     local g = ns[k]
     if g and g.On and g.On() then g.Toggle() end
   end

@@ -106,6 +106,21 @@ function API.MapButton(name)
   local b = GPS() and GPS().mapButtons
   return b and b[name] or nil
 end
+-- (1.4.2) A button of yours in the map menu, on its row going right after Import and Share (or at the end of its
+-- column with the player's option, Options > Keys and buttons): made on API.MapButtonParent(), any size near 28; the map
+-- places it, shows it with the menu's buttons and lets the controller press it. `label`, `tip`: its name and line for
+-- the controller's tooltip (its own OnEnter shows as ever). Returns true once it's in.
+function API.MapMenuButton(button, label, tip)
+  local g = GPS()
+  if not (g and g.AddCompanionButton and button) then return false end
+  return g.AddCompanionButton(button, label, tip) ~= nil
+end
+-- (1.4.2) Your map menu button shown with the menu's buttons (`shown` true, as it starts) or not at all: the map shows and
+-- hides the buttons it places, so hide yours through this, not with :Hide().
+function API.MapMenuButtonShown(button, shown)
+  local g = GPS()
+  return (g and g.SetCompanionShown and g.SetCompanionShown(button, shown)) or false
+end
 function API.MapShown() return GPS() and GPS().IsVisible() or false end
 -- The last drawn view: center x, y, continent, rotation (radians), scale (UI units per
 -- yard), half the map's width (UI units).

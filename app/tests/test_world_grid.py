@@ -147,7 +147,9 @@ def test_the_regions_are_load_on_demand_addons_of_azerothgps():
             assert "## LoadOnDemand: 1" in t and "## Dependencies: AzerothGPS" in t, folder.name
             assert f"## Interface: {iface}" in t, folder.name
             # (and its landmark fields, item 33: test_world_grid_alt.py)
-            assert [ln for ln in t.splitlines() if ln and not ln.startswith("#")] == ["Data.lua", "Alt.lua"]
+            # (and its buildings' grids where it has buildings, 1.4.2: test_building_grid.py)
+            bld = ["Buildings.lua"] if (folder / "Buildings.lua").is_file() else []
+            assert [ln for ln in t.splitlines() if ln and not ln.startswith("#")] == ["Data.lua", "Alt.lua"] + bld
     # (none of it loads with AzerothGPS: its toc lists only the headers)
     assert "AzerothGPS_WG" not in toc
 
@@ -1061,7 +1063,12 @@ def test_the_town_stopgap_is_gone_where_the_grid_has_no_way_the_router_s_walk_th
     WG.Search = lua.eval("function() return nil end")
     try:
         WG.routes, WG.order = lua.table(), lua.table()
-        r = _route(lua, ns, (0, -14444.0, 434.0, 4.0), (0, -14459.0, 503.0, 26.0))  # (Booty Bay's walkways)
+        # (the world grid's own: Booty Bay's walkways are a building's grid since 1.4.2, BuildingGrid.lua)
+        ns.settings.gps.buildingGrid = False
+        try:
+            r = _route(lua, ns, (0, -14444.0, 434.0, 4.0), (0, -14459.0, 503.0, 26.0))  # (Booty Bay's walkways)
+        finally:
+            ns.settings.gps.buildingGrid = True
         assert r.noWay and r.gridGap
     finally:
         WG.Search = was

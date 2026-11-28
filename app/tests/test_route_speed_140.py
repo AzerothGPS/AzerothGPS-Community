@@ -95,13 +95,18 @@ def test_the_best_way_is_searched_in_a_corridor_and_lands(grid, a, b, budget, ga
 
 def test_a_long_walk_s_refine_is_the_bounded_one(grid):
     """WorldGrid.Walk's own (the walks worked out at once, as the bake and the tests do): the refine's search counted,
-    never cut, and within its budget."""
+    never cut, and within its budget. (The grid's own search, HPA* off: since item 127 a long leg is searched tile to
+    tile first, with no refine after it, test_world_hpa.py; this is its fallback)"""
     lua, ns = grid
     WG = ns.WorldGrid
     c = WG.Cont(1)
     ns.Router.SYNC_WALKS = True
+    WG.hpaOff = True
     n0, r0, c0 = WG.stats.nodes, WG.stats.refineNodes or 0, WG.stats.refineCut or 0
-    r = WG.Walk(c, TAURAJO[0], TAURAJO[1], None, UNGORO[0], UNGORO[1], None, lua.table())
+    try:
+        r = WG.Walk(c, TAURAJO[0], TAURAJO[1], None, UNGORO[0], UNGORO[1], None, lua.table())
+    finally:
+        WG.hpaOff = None
     assert r and 9000 < r.length < 10500, r and r.length
     refine = (WG.stats.refineNodes or 0) - r0
     assert 0 < refine <= 160000 and (WG.stats.refineCut or 0) == c0, refine
@@ -220,6 +225,7 @@ def test_the_ride_check_s_side_walk_is_searched_to_its_cap_at_most(grid):
       return WG.Walk(WG.Cont(1), sx, sy, nil, tx, ty, nil, { side = true })
     end""")
     was = WG.SIDE_WALK_CAP
+    WG.hpaOff = True  # (the grid's own search's cap: HPA*, item 127, finds these in a few thousand nodes)
     try:
         assert WG.SIDE_WALK_CAP == 60000
         WG.SIDE_WALK_CAP = 2000
@@ -246,7 +252,7 @@ def test_the_ride_check_s_side_walk_is_searched_to_its_cap_at_most(grid):
         caps = list(lua.eval("AGPS_SIDE.caps").values())
         assert caps and caps[0] > 2000, caps
     finally:
-        WG.SIDE_WALK_CAP = was
+        WG.SIDE_WALK_CAP, WG.hpaOff = was, None
         lua.execute("AGPS_NS.WorldGrid.Search = AGPS_SIDE.real")
         while R.HasWork():
             R.Pump(now() + 50, now)
@@ -279,6 +285,7 @@ def test_with_the_walk_known_the_ride_check_s_walk_to_the_stop_is_a_side_walk(gr
       return WG.Walk(WG.Cont(1), sx, sy, nil, tx, ty, nil, { side = true, sideStop = known or nil })
     end""")
     was = WG.SIDE_WALK_CAP
+    WG.hpaOff = True  # (the grid's own search's cap: HPA*, item 127, finds these in a few thousand nodes)
     try:
         WG.SIDE_WALK_CAP = 2000
 
@@ -303,7 +310,7 @@ def test_with_the_walk_known_the_ride_check_s_walk_to_the_stop_is_a_side_walk(gr
         run(True)
         assert lua.eval("AGPS_SIDE.refined") == 0
     finally:
-        WG.SIDE_WALK_CAP = was
+        WG.SIDE_WALK_CAP, WG.hpaOff = was, None
         lua.execute("AGPS_NS.WorldGrid.Search = AGPS_SIDE.real; AGPS_NS.WorldGrid.Refine = AGPS_SIDE.refine")
         while R.HasWork():
             R.Pump(now() + 50, now)

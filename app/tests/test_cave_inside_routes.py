@@ -123,16 +123,26 @@ def test_a_stop_the_grid_cant_reach_settles_as_no_way_found_yet(game):
     z = floor_inside(ns, *STOP)
     lua.execute("AGPS_CAVELEG = AGPS_NS.WorldGrid.CaveLeg; AGPS_NS.WorldGrid.CaveLeg = function() return nil end")
     gaps0 = len(WG.gaps)
+    # (the frames' slices by the Lua VM's instructions, the cave sweep's clock (#1016), not the CPU's: its no way's
+    # searches, 318k nodes since 1.4.2's whole budget (item 139) and tile-to-tile proof (item 127), settle in ~1,050 of
+    # the 1,200 frames on the reference dev PC and never on the 2-4x slower CI runners, every node the same)
+    VM_PER_MS = 120000  # (test_cave_sweep's: route work's rate on the reference dev PC)
+    from test_frame_budget import VM_HOOK, _VM_CLOCK
+    lua.execute("AGPS_T = AGPS_T or 0")
+    undo = lua.eval(_VM_CLOCK)(VM_PER_MS, VM_HOOK)
     try:
-        ticks, r, nodes = settle(lua, ns, START, STOP, z)
+        ticks, r, nodes = settle(lua, ns, START, STOP, z, now=lua.eval("function() return debugprofilestop() end"))
     finally:
+        undo()
         lua.execute("AGPS_NS.WorldGrid.CaveLeg = AGPS_CAVELEG")
     assert ticks is not None, f"never settled ({nodes} nodes)"
     assert r is None and N.noWayGrid, "not no way"
     assert WG.StopUnreached(1, *STOP)
-    # (the leg's own search, round the guards and through them, and nothing more: no flight master's walk searched)
+    # (the leg's own search, round the guards and through them, then once with the whole budget (item 139, 1.4.2: a
+    # short leg to a stop, cut short, WG.MAX_NODES; cut short again, no way for good), and nothing more: no flight
+    # master's walk searched)
     budget = WG.NODES_BASE + WG.NODES_PER_YD * math.dist(START, STOP)
-    assert nodes <= 2 * budget + 1000, nodes
+    assert nodes <= 2 * budget + WG.MAX_NODES + 1000, nodes
     assert len(WG.gaps) > gaps0 or any(abs(g.x2 - STOP[0]) < 1 for g in WG.gaps.values())
 
 

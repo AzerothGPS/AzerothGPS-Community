@@ -39,6 +39,14 @@ R.SOURCE_LIFT, R.KIND_LIFT_DOWN, R.KIND_LIFT_UP = 5, 5, 6
 -- them); else as the data's lifts are laid, from the top to the foot (forward: down). (Kooki3z 2026-11-20: a lift drawn
 -- from its foot up said "Take the lift down": the edit's heights rise along it, the old rule took its start for the top.)
 R.LIFT_APART_Z = 2
+-- The yards a lift road `ei` of graph `g` on `cont` costs over its own length, taken from node `n` (`forward`: along
+-- it): its wait by the cars' phase when known (Lifts.CostYards, item 135a), else 0. Never below 1 yard in all (`cost`).
+function R.LiftYards(g, cont, ei, forward, n, cost)
+  local LT = ns.Lifts
+  if not (LT and LT.CostYards) then return 0 end
+  local floor = R.LiftKind(g, ei, forward) == R.KIND_LIFT_UP and "bottom" or "top"
+  return LT.CostYards(cont, g.n[n * 2 - 1], g.n[n * 2], floor, (cost or 0) - 1)
+end
 function R.LiftKind(g, ei, forward)
   local e = g.e[ei]
   local hz = g.z or g.nz
@@ -64,8 +72,20 @@ R.DROP_SAVE_YD = 60
 R.CHAIN_YD = 40
 R.CHAIN_COST = 300 -- yards a chain's next drop costs: walked round, unless there's no way round worth the name
 function R.ExpertJumper()
+  if R.Ghost() then return true end -- (a ghost: no fall damage, any drop; item 126)
   local st = ns.settings and ns.settings.gps
   return st ~= nil and st.expertJumper == true
+end
+-- Whether the player is a ghost (released, on a corpse run): no fall damage, so the routes take any drop, as an Expert
+-- jumper's with a fall spell ready do, with no limit (item 126, 1.4.2: "A ghost takes no fall damage"). Nav.SafeDrop
+-- is already unlimited for one; R.ExpertJumper (chains of drops), R.JumpDrops (the straight jump shortcuts,
+-- SpellJumpStraight and SpellJumpVia) and the city grid's drops (no hurt fall's cost) follow it here.
+R.GHOST_DROP = 1000 -- yards: a ghost's drop for the jump shortcuts (FallSpells.EXPERT_DROP's: any ledge in the data)
+function R.Ghost()
+  if not UnitIsGhost then return false end
+  local ok, g = pcall(UnitIsGhost, "player")
+  if not ok or (ns.IsSecret and ns.IsSecret(g)) then return false end
+  return g and true or false
 end
 -- A drop of `fall` yards' extra cost in the open world; `chained`: another past STEP_DOWN_YD
 -- up to the free fall just before it, down the same slope.
@@ -83,6 +103,63 @@ end
 -- Whether a drop of `fall` yards counts toward a chain (R.DropExtra's `chained`).
 function R.ChainDrop(fall)
   return fall ~= nil and fall > R.STEP_DOWN_YD and fall <= ((ns.Nav and ns.Nav.FALL_FREE) or 14)
+end
+-- Lift first (1.4.2, Kooki3z 2026-11-27: "nearby lift should take priority over spell jump option unless its like 30
+-- more seconds to get to the lift"): a spell jump (a drop past the player's own safe drop, Nav.PlainSafeDrop: one a fall
+-- spell or item makes safe) with a lift's car (Data/LiftTimes.lua's ns.LiftCars, every lift the client has) within
+-- LIFT_FIRST_REACH_YD of its top, and the drop within the lift's own climb (its top and its foot within LIFT_FIRST_Z_TOL
+-- of the car's span), costs LIFT_FIRST_S seconds more, as yards at the lifts' own rate (Lifts.YD_PER_SECOND: their wait
+-- and ride are priced so): the searches take the lift, its wait, its ride and the walk to it and from it, unless that
+-- way is LIFT_FIRST_S or more slower. Every search that prices a spell drop adds it (the world grid's falls and drop
+-- links, the city grid's drop links, the Router's road drops and its spell jumping ways). Plain drops, a ghost's (no
+-- spell needed) and drops with no lift near cost what they did; with no fall spell ready there's no spell drop at all.
+R.LIFT_FIRST_S = 30
+R.LIFT_FIRST_REACH_YD = 300
+R.LIFT_FIRST_Z_TOL = 15
+function R.LiftOnLevel(c, level) return level == c.cont or (c.city ~= nil and level == c.city) end
+-- The fall past which a drop on `level` is weighed for a lift near (the player's plain safe drop), or nil when none
+-- is: a ghost, no fall spell ready (`maxDrop`, the search's, no bigger than the plain drop), no lift on that level.
+function R.LiftFirstFloor(level, maxDrop)
+  local N = ns.Nav
+  if level == nil or not (N and N.PlainSafeDrop and N.SafeDrop) or R.Ghost() then return nil end
+  local plain = N.PlainSafeDrop()
+  if (maxDrop or N.SafeDrop()) <= plain + 0.5 then return nil end
+  for _, c in ipairs(ns.LiftCars or {}) do
+    if R.LiftOnLevel(c, level) then return plain + 0.5 end
+  end
+  return nil
+end
+-- The yards more a drop of `fall` yards whose top is (x, y) on `level` (at height `ztop` when known) costs: a lift's
+-- LIFT_FIRST_S when one is near for the same climb, else 0. `floor`: R.LiftFirstFloor's (worked out here when nil).
+function R.LiftFirstYards(level, x, y, fall, ztop, floor)
+  floor = floor or R.LiftFirstFloor(level)
+  if not (floor and fall and x and y) or fall <= floor then return 0 end
+  local reach2, tol = R.LIFT_FIRST_REACH_YD ^ 2, R.LIFT_FIRST_Z_TOL
+  for _, c in ipairs(ns.LiftCars or {}) do
+    if R.LiftOnLevel(c, level) and (c.x - x) ^ 2 + (c.y - y) ^ 2 <= reach2 and c.lo and c.hi then
+      local fits
+      if ztop then fits = ztop <= c.hi + tol and ztop - fall >= c.lo - tol else fits = fall <= c.hi - c.lo + tol end
+      if fits then
+        local LT = ns.Lifts
+        return R.LIFT_FIRST_S * ((LT and LT.YD_PER_SECOND) or 7)
+      end
+    end
+  end
+  return 0
+end
+-- The lift-first yards of route r's drops on `cont` (the spell jumping ways' weighing: SpellJumpStraight and the like).
+function R.LiftFirstRoute(cont, r, opts)
+  local floor = R.LiftFirstFloor(cont, opts and opts.maxDrop)
+  if not (floor and r and r.pts and r.kinds) then return 0 end
+  local hs = r.zs or r.fz
+  local sum = 0
+  for i = 1, #r.kinds do
+    if r.kinds[i] == R.KIND_DROP and r.kinds[i - 1] ~= R.KIND_DROP then
+      local z = hs and tonumber(hs[i]) or nil
+      sum = sum + R.LiftFirstYards(cont, r.pts[2 * i - 1], r.pts[2 * i], R.DropFall(r.pts, r.kinds, i), z, floor)
+    end
+  end
+  return sum
 end
 R.OFFROAD_LINKS = 24 -- offroad mode: straight links tried from start/destination to road nodes
 R.OFFROAD_LINK_MAX = 3000 -- yards
@@ -249,6 +326,84 @@ R.RAMP_END_YD = 12
 -- Darnassus's spiral's stairs start 0.5 yd off the piece before's end, and joined there the route from partway down
 -- climbed back to its top first
 R.TRACK_WALK_JOIN = 0.1
+-- yards: a recorded walk's heights this far off the straight line between its nodes put a node at its point there
+-- (R.ZBends; the heights on a road are its nodes', straight between: R.EdgeZ, R.RoadFloor)
+R.TRACK_Z_BEND = 2
+-- Only where floors stack: on a walk whose turns lie over each other (R.TurnsOver), or one in a capital or on a
+-- building's or a layered cave's floors (R.FloorsAt); there the floor followed takes the road's heights (Nav.TrackCityZ)
+-- and the roads join by floor. On the open land the bends' nodes moved the junctions: the land's roads by them took
+-- their floors from the walk's new heights (attach's LandHeightOK), and a shipped walk by Lariss Pavilion (Feralas,
+-- over a hill) no longer joined the road at its end: route-quality's level 40 Horde trip from Satyrnaar 1,206 s ->
+-- 1,217 s, 71 yd round by a road and a gap link. (Stormwind's walk from the gate, 1795319842, keeps them: without, the
+-- hpa-bench's Fargodeep Mine to Thelsamar lost the tram, 941 s -> 2,623 s by the boats)
+-- yards: two points of a walk this near across, TRACK_OVER_ALONG or more apart along it, R.LAYER_Z or more apart in height
+R.TRACK_OVER_YD, R.TRACK_OVER_ALONG = 6, 20
+-- Whether any of a drawn line's points (every FLOORS_STEP-th, and its last) is in a capital or on stacked floors.
+R.FLOORS_STEP = 4
+function R.FloorsAt(cont, dx, dy, M)
+  for q = 1, M do
+    if (q % R.FLOORS_STEP == 1 or q == M) and (R.CapitalAt(cont, dx[q], dy[q]) or R.OnFloors(cont, dx[q], dy[q])) then
+      return true
+    end
+  end
+  return false
+end
+-- Whether a drawn line (dx, dy, dz, `along`: its yards to each point) passes over or under itself (R.TRACK_OVER_YD).
+function R.TurnsOver(dx, dy, dz, along, M)
+  local B, cells = R.TRACK_OVER_YD, {}
+  for q = 1, M do
+    local cx, cy = math.floor(dx[q] / B), math.floor(dy[q] / B)
+    for ix = cx - 1, cx + 1 do
+      for iy = cy - 1, cy + 1 do
+        for _, p in ipairs(cells[ix * 65536 + iy] or EMPTY) do
+          if along[q] - along[p] >= R.TRACK_OVER_ALONG and math.abs(dz[q] - dz[p]) >= R.LAYER_Z
+              and (dx[q] - dx[p]) ^ 2 + (dy[q] - dy[p]) ^ 2 <= B * B then return true end
+        end
+      end
+    end
+    local k = cx * 65536 + cy
+    local c = cells[k]
+    if not c then
+      c = {}
+      cells[k] = c
+    end
+    c[#c + 1] = q
+  end
+  return false
+end
+-- The points of a drawn line (dx, dy, dz: every 2 yd or so, `own`: the walk's own points) a node goes at so the heights
+-- straight between the nodes stay within TRACK_Z_BEND of the walk's (its own points only; the ends are nodes anyway):
+-- { [index] = true }, none off stacked floors (R.TurnsOver, R.FloorsAt; `cont` its level). Douglas-Peucker on the
+-- height along the line.
+function R.ZBends(dx, dy, dz, own, M, cont)
+  local out = {}
+  if M < 3 or not (dz[1] and dz[M]) then return out end
+  local along = { 0 }
+  for q = 2, M do
+    along[q] = along[q - 1] + math.sqrt((dx[q] - dx[q - 1]) ^ 2 + (dy[q] - dy[q - 1]) ^ 2)
+    if not dz[q] then return out end
+  end
+  if not (R.TurnsOver(dx, dy, dz, along, M) or (cont and R.FloorsAt(cont, dx, dy, M))) then return out end
+  local stack = { 1, M }
+  while #stack > 0 do
+    local b, a = table.remove(stack), table.remove(stack)
+    local span = along[b] - along[a]
+    local worst, wq = R.TRACK_Z_BEND, nil
+    for q = a + 1, b - 1 do
+      if own[q] then
+        local f = span > 0 and (along[q] - along[a]) / span or 0
+        local off = math.abs(dz[q] - (dz[a] + (dz[b] - dz[a]) * f))
+        if off > worst then worst, wq = off, q end
+      end
+    end
+    if wq then
+      out[wq] = true
+      stack[#stack + 1], stack[#stack + 2] = a, wq
+      stack[#stack + 1], stack[#stack + 2] = wq, b
+    end
+  end
+  return out
+end
 -- A drawn or recorded road's kind, set afterwards with the road tools' Edit Road (asked 2026-11-18 for 1.3.10: "pick the
 -- floor level that would be on", a bridge in Thunder Bluff and a road under it): saved as the track's `kind`, with its
 -- heights (`zs`) and a stairs stretch on part of it (`stairs` = { first point, last point }). An edit is a new track that
@@ -1367,12 +1522,20 @@ function R.WithTracks(roads, tracks, cont)
         -- ends are kept (a bridge rising from the land and level over a road under it: one road end to end was at the
         -- land's height all the way, its ends', and joined that road)
         local ownSplit -- (those: the next piece goes on from the node the one before ended at)
-        if t.kind and tzs then
+        -- (a recorded walk with its heights and no kind: a node only at its own points where its heights leave the
+        -- straight line between the nodes, R.TRACK_Z_BEND: a ramp that climbs and falls, a switchback whose turns lie
+        -- over each other. Kooki3z 2026-11-27, Blackrock Mountain's switchback down to Blackrock Depths: walk 474 was one
+        -- road from 259 at its top to 213 at its foot, its heights straight between; the floor followed down its turns
+        -- (TrackCityZ) was that line's, 8-12 yd under the turn walked, and the route from it said "Jump down here (31
+        -- yd)" and "Make a U-turn"). Not a stairs piece: a stairs road from its foot to its top, as the data's (Ironforge's
+        -- First Aid balcony: its flight split was a floor road, and Nissa Firestone's floor lost)
+        local bends = not t.kind and not t.stair and tzs and R.ZBends(dx, dy, dz, own, M, cont) or nil
+        if (t.kind and tzs) or (bends and next(bends)) then
           local set = {}
           ownSplit = {}
           for _, sq in ipairs(splits) do set[sq] = true end
           for qq = 2, M - 1 do
-            if own[qq] and not set[qq] then set[qq], ownSplit[qq] = true, true end
+            if own[qq] and not set[qq] and (t.kind or bends[qq]) then set[qq], ownSplit[qq] = true, true end
           end
           splits = {}
           for sq in pairs(set) do splits[#splits + 1] = sq end
@@ -1685,6 +1848,36 @@ local function FloorsNear(nz, a, b, d2)
   local za, zb = nz and nz[a], nz and nz[b]
   return not (za and zb) or math.abs(za - zb) <= R.LAYER_Z + math.sqrt(d2) * R.BRIDGE_FLOOR_SLOPE
 end
+-- The floors' heights for the gap links (Bridges, DeadEndLinks), with a node that has none taking the height of a
+-- node with one that it's joined to where it stands (a road JOIN_SAME_YD long or less: a capital's join onto the
+-- land's road split there, a drawn road's end on a floor's). Item 141 (1.4.2), Thunder Bluff's north lift: the land's
+-- road split at the lift's foot had no height, and gap links went from it 80 yd up the mesa's cliff to the city's road
+-- 27 yd across, so routes from Mulgore climbed the cliff instead of taking the lift. Returns `nz` itself when none is
+-- added, else a copy.
+R.JOIN_SAME_YD = 1
+function R.JoinedHeights(edges, nz)
+  local out = nz
+  for _ = 1, 4 do -- (a few rounds: a chain of joins)
+    local added = false
+    for ei, e in ipairs(edges) do
+      Breathe(ei, 2000)
+      if (e[3] or math.huge) <= R.JOIN_SAME_YD then
+        local za, zb = out[e[1]], out[e[2]]
+        if (za == nil) ~= (zb == nil) then
+          if out == nz then
+            out = {}
+            for k, v in pairs(nz) do out[k] = v end
+          end
+          if za then out[e[2]] = za else out[e[1]] = zb end
+          added = true
+        end
+      end
+    end
+    if not added then break end
+  end
+  return out
+end
+
 -- `short`: the short links' reach (0 for none: a city's own level, joined by its stairs);
 -- `nearOverlay(x, y)`: whether a spot is inside a city's ruins (short links shorter there);
 -- `skip[n]`: nodes left out (true: inside a cave, joined to the rest by its way out), or
@@ -2851,6 +3044,7 @@ function BuildGraph(cont)
   P1("router: build roads: costs", pt)
   pt = P0()
   local nzB = not zs and next(nodeZ) and nodeZ or nil
+  if nzB then nzB = R.JoinedHeights(edges, nzB) end
   -- (a raised road's nodes along it, a bridge's: no gap link onto them from the roads under them, only its ends)
   local skipB = noBridge
   if trackInfo and next(trackInfo.raisedNode) then
@@ -3149,6 +3343,7 @@ local hostileTowns = {}
 -- The guards changed (ns.Hostile): their buckets and towns built again, and the graphs (their roads' costs).
 function R.HostileChanged()
   hostileIdx, hostileTowns = {}, {}
+  R.DropEliteExits()
   R.DropEliteLists() -- (the elite areas' lists, made from the guards')
   if R.Reset then R.Reset() end
 end
@@ -3201,7 +3396,9 @@ function R.HostileTowns(cont, side)
   hostileTowns[key] = town
   return town
 end
--- The towns (a set) whose guards stand within TOWN_NEAR of their reach of any of the points (x, y, ...).
+-- The towns whose guards stand within TOWN_NEAR of their reach of any of the points (x, y, ...): { [town] = true }.
+-- An elite area's (within ELITE_NEAR) isn't all left out (items 142, 130): its value is its free stretches (R.EliteFree),
+-- the shortest way out of it from each of those points, and the rest of it is paid for as any other's.
 function R.HostileTownsNear(cont, side, ...)
   local list = side and ns.Hostile and ns.Hostile[cont] and ns.Hostile[cont][side]
   if not list then return nil end
@@ -3209,27 +3406,70 @@ function R.HostileTownsNear(cont, side, ...)
   local near, guardN = R.TOWN_NEAR, list.guardN or #list
   for p = 1, #pts - 1, 2 do
     local x, y = pts[p], pts[p + 1]
+    local done -- (the elite areas this point's way out is in already)
     for i = 1, #list - 2, 3 do
       local d = i > guardN and R.ELITE_NEAR or near -- (an elite area's circle, item 91: ELITE_NEAR)
       if (list[i] - x) ^ 2 + (list[i + 1] - y) ^ 2 <= (list[i + 2] + d) ^ 2 then
         out = out or {}
-        out[town[i]] = true
+        local t = town[i]
+        if i <= guardN then
+          out[t] = true
+        elseif out[t] ~= true and not (done and done[t]) then
+          done = done or {}
+          done[t] = true
+          local ex, ey = R.EliteExit(cont, side, t, x, y)
+          if R.EliteWalled(cont, side, t, x, y) then
+            out[t] = true -- (no straight way out at all, a stop in a walled keep: all of it, as item 91's; R.EliteExit)
+          else
+            local f = out[t] or {}
+            f[#f + 1], f[#f + 2], f[#f + 3], f[#f + 4] = x, y, ex, ey
+            out[t] = f
+          end
+        end
       end
     end
   end
   return out
 end
--- Of R.HostileTownsNear's, the elite areas only (item 91), or nil: for the terrain search (Passability.FindPath), which
--- leaves the elite area a walk starts or ends in out as the legs do, the guards' towns there priced as before.
-function R.EliteTownsNear(cont, side, ...)
-  local near = R.HostileTownsNear(cont, side, ...)
+-- A walk (x1, y1)-(x2, y2) of the trip from (sx, sy) to (tx, ty): "s" when it starts at the trip's own start in the other
+-- faction's town (R.HostileTownsNear), "t" when it ends at the stop in one, "st" both, else nil. Passability.FindPath's
+-- `townEnds` (item 135c): that town priced as if the player had no faction, as the legs already price it.
+local townEndsMemo = {}
+function R.WalkTownEnds(cont, sx, sy, tx, ty, x1, y1, x2, y2)
+  local side = HostileSide()
+  if not side then return nil end
+  local s = x1 == sx and y1 == sy
+  local t = x2 == tx and y2 == ty
+  if not (s or t) then return nil end
+  local m = townEndsMemo
+  if not (m.side == side and m.cont == cont and m.sx == sx and m.sy == sy and m.tx == tx and m.ty == ty
+      and m.list == (ns.Hostile and ns.Hostile[cont] and ns.Hostile[cont][side])) then
+    m = { side = side, cont = cont, sx = sx, sy = sy, tx = tx, ty = ty,
+      list = ns.Hostile and ns.Hostile[cont] and ns.Hostile[cont][side],
+      s = R.HostileTownsNear(cont, side, sx, sy) ~= nil, t = R.HostileTownsNear(cont, side, tx, ty) ~= nil }
+    townEndsMemo = m
+  end
+  local out = ((s and m.s) and "s" or "") .. ((t and m.t) and "t" or "")
+  return out ~= "" and out or nil
+end
+-- Of R.EndsExempt's for a piece of walk from (x1, y1) to (x2, y2), the elite areas only (item 91), or nil: for the
+-- terrain search (Passability.FindPath), which leaves the elite areas at a walk's ends out as the legs do, the guards'
+-- towns there priced as before. The walk's start: the search's (R.SearchStartAt) when it's one of the two, neither when
+-- it's known and isn't, else (x1, y1).
+function R.EliteTownsNear(cont, side, x1, y1, x2, y2)
+  local near
+  if R.SearchStartAt(x2, y2) and not R.SearchStartAt(x1, y1) then
+    near = R.EndsExempt(cont, side, x2, y2, x1, y1)
+  else
+    near = R.EndsExempt(cont, side, x1, y1, x2, y2, R.SearchStartAt(x1, y1) == false)
+  end
   local list = near and ns.Hostile[cont][side]
   if not (list and list.area) then return nil end
   local out
-  for t in pairs(near) do
+  for t, v in pairs(near) do
     if list.area[t] then
       out = out or {}
-      out[t] = true
+      out[t] = v -- (its free stretches, R.EliteFree)
     end
   end
   return out
@@ -3249,6 +3489,137 @@ function R.EliteTownsAt(cont, x, y, side)
   end
   return out
 end
+-- An elite area a walk ends in (item 91: within ELITE_NEAR of it) is free only along the shortest way into it to the
+-- stop (item 142, Kooki3z 2026-11-27: a level 25 from the Barrens to a stop at the west edge of an elite area west of
+-- Sandsorrow Watch was routed in from its east side, across all of it: the whole area was the walk's own, and item
+-- 124's rule only trimmed the question's count). The way in: the straight line from the nearest point out of the area
+-- to the stop (ELITE_EXIT_DIRS directions, ELITE_EXIT_STEP yards apart, ELITE_EXIT_MAX at most; the shortest walkable
+-- one within ELITE_EXIT_SLACK times the shortest, else the shortest), and ELITE_FREE_YD round that line. The rest of the
+-- area costs as any other elite area's: the way round outside is taken when it's cheaper than the crossing, and a
+-- crossing is asked about ("Take it?"). The area a walk starts in stays the walk's own (the player is in it already, and
+-- the ride check walks from the player's spot rounded, test_elite_areas' Dire Maul) until the trip's "Take it?" is
+-- answered No: from then on it's free only along its shortest way out, as the stop's (item 130: No re-planned with the
+-- start's area free, and the stop's, found the same way through and asked again; now it looks for the way round, at
+-- WorldGrid.REFUSED_FACTOR, and finds it or says there's none, Nav.GiveUpRefused).
+-- An end with no straight walkable line out in any of the directions (`walled`: the Tower of Arathor in Stromgarde, its
+-- keep's walls all round, the way in by the gate across the area) has no way in to tell by a line: its area is all the
+-- end's own, as item 91 made it (R.HostileTownsNear). Priced but for a line through the walls, the search round the
+-- elites for the hpa-bench's Kharanos to the Tower of Arathor ran into its cap (150,000 nodes, then the way through:
+-- 417k nodes, settled at 49.7 s; 1.4.1's 137k at 14.5 s), the crossing needed either way.
+R.ELITE_FREE_YD = 30
+R.ELITE_EXIT_DIRS, R.ELITE_EXIT_STEP, R.ELITE_EXIT_MAX, R.ELITE_EXIT_SLACK = 16, 8, 600, 1.5
+local eliteExits, eliteExitN = {}, 0 -- [key] = { ex, ey, depth, walled } (R.EliteExit)
+function R.DropEliteExits() eliteExits, eliteExitN = {}, 0 end
+-- The nearest point out of elite area `t` (a town, R.HostileTowns') from (x, y), and its distance (0: (x, y) not in it).
+-- (R.EliteExitRecord: its record, { ex, ey, depth, walled }, R.EliteWalled's too)
+function R.EliteExitRecord(cont, side, t, x, y)
+  local key = cont .. side .. ":" .. t .. ":" .. math.floor(x) .. ":" .. math.floor(y)
+  local v = eliteExits[key]
+  if v then return v end
+  local at = R.EliteTownsAt(cont, x, y, side)
+  local ex, ey, depth, walled = x, y, 0, false
+  if at and at[t] then
+    local cand = {}
+    for k = 0, R.ELITE_EXIT_DIRS - 1 do
+      local a = 2 * math.pi * k / R.ELITE_EXIT_DIRS
+      local dx, dy = math.cos(a), math.sin(a)
+      local d = R.ELITE_EXIT_STEP
+      while d < R.ELITE_EXIT_MAX do
+        local s = R.EliteTownsAt(cont, x + dx * d, y + dy * d, side)
+        if not (s and s[t]) then break end
+        d = d + R.ELITE_EXIT_STEP
+      end
+      cand[#cand + 1] = { d, x + dx * d, y + dy * d }
+    end
+    table.sort(cand, function(a, b) return a[1] < b[1] end)
+    local pick = cand[1]
+    -- (the shortest walkable one, not a line into a cliff: a way out the walk can't take forces a crossing)
+    local P = ns.Passability
+    if P and P.SegmentCost then
+      local near = false
+      for _, c in ipairs(cand) do
+        if c[1] > cand[1][1] * R.ELITE_EXIT_SLACK + R.ELITE_EXIT_STEP then break end
+        if P.SegmentCost(cont, x, y, c[2], c[3], 0) then
+          pick, near = c, true
+          break
+        end
+      end
+      -- (none near: the shortest still, unless there's no walkable one at all, `walled`)
+      walled = not near
+      for _, c in ipairs(near and EMPTY or cand) do
+        if P.SegmentCost(cont, x, y, c[2], c[3], 0) then
+          walled = false
+          break
+        end
+      end
+    end
+    depth, ex, ey = pick[1], pick[2], pick[3]
+  end
+  if eliteExitN >= 4000 then eliteExits, eliteExitN = {}, 0 end
+  v = { ex, ey, depth, walled }
+  eliteExits[key], eliteExitN = v, eliteExitN + 1
+  return v
+end
+function R.EliteExit(cont, side, t, x, y)
+  local v = R.EliteExitRecord(cont, side, t, x, y)
+  return v[1], v[2], v[3]
+end
+-- Whether no straight line out of elite area `t` from (x, y) is walkable (Passability.SegmentCost) in any of
+-- R.EliteExit's directions: `walled`, its area all the end's own.
+function R.EliteWalled(cont, side, t, x, y)
+  return R.EliteExitRecord(cont, side, t, x, y)[4]
+end
+-- Whether the trip's "Take it?" was answered No (Nav.riskOk.trip): the start's elite area charged too (item 130).
+function R.EliteStartCharged()
+  local N = ns.Nav
+  return N and N.riskOk and N.riskOk.trip == false or false
+end
+-- The towns a walk from (sx, sy) to (tx, ty) doesn't pay for (R.HostileTownsNear's, `exempt` of R.HostileAt and
+-- R.HostileYards): the guards' towns at either end, the stop's elite area but on its way in (R.EliteFree), the start's
+-- elite area all of it, or after a No only on its way out (R.EliteStartCharged). `noStart`: neither end is the walk's
+-- start (a piece between two of its points): both priced as a stop's.
+function R.EndsExempt(cont, side, sx, sy, tx, ty, noStart)
+  local out = R.HostileTownsNear(cont, side, sx, sy, tx, ty)
+  if not out or noStart or R.EliteStartCharged() then return out end
+  for t, v in pairs(R.HostileTownsNear(cont, side, sx, sy) or EMPTY) do
+    if v ~= true then out[t] = true end
+  end
+  return out
+end
+-- Whether (x, y) is the start of the search under way (R.SetLightEnds), nil when none is known.
+function R.SearchStartAt(x, y)
+  local e = lightEnds[coroutine.running() or false]
+  if not e then return nil end
+  return (e[1] - x) ^ 2 + (e[2] - y) ^ 2 <= 25
+end
+-- Whether (x, y) is on one of the free stretches `f` (R.HostileTownsNear's { x, y, ex, ey, ... }): within ELITE_FREE_YD
+-- of the line from an end to its way out.
+function R.EliteFree(f, x, y)
+  local w2 = R.ELITE_FREE_YD * R.ELITE_FREE_YD
+  for k = 1, #f - 3, 4 do
+    local ax, ay, vx, vy = f[k], f[k + 1], f[k + 2] - f[k], f[k + 3] - f[k + 1]
+    local L2 = vx * vx + vy * vy
+    local u = L2 > 0 and math.max(0, math.min(1, ((x - ax) * vx + (y - ay) * vy) / L2)) or 0
+    if (ax + vx * u - x) ^ 2 + (ay + vy * u - y) ^ 2 <= w2 then return true end
+  end
+  return false
+end
+-- Yards of the walk `e` (points from index `from`, a road's from 5) in elite area `t` off its free stretches `f`.
+function R.EliteYardsOff(cont, side, t, f, e, from)
+  local yd = 0
+  for i = from or 1, #e - 3, 2 do
+    local x1, y1, x2, y2 = e[i], e[i + 1], e[i + 2], e[i + 3]
+    local d = math.sqrt((x2 - x1) ^ 2 + (y2 - y1) ^ 2)
+    local n = math.max(1, math.ceil(d / R.HOSTILE_STEP))
+    for k = 0, n - 1 do
+      local u = (k + 0.5) / n
+      local x, y = x1 + (x2 - x1) * u, y1 + (y2 - y1) * u
+      local at = R.EliteTownsAt(cont, x, y, side)
+      if at and at[t] and not R.EliteFree(f, x, y) then yd = yd + d / n end
+    end
+  end
+  return yd
+end
 -- Whether (x, y) is within reach of guards hostile to the player (`side`: HostileSide()), not counting the
 -- towns in `exempt` (a set, R.HostileTownsNear); with `acc`, the town whose guard it is.
 function R.HostileAt(cont, x, y, side, exempt)
@@ -3259,8 +3630,10 @@ function R.HostileAt(cont, x, y, side, exempt)
   local b = HostileBuckets(cont, side)[math.floor(x / HB) * 65536 + math.floor(y / HB)]
   local town = exempt and R.HostileTowns(cont, side)
   for _, i in ipairs(b or {}) do
-    if (list[i] - x) ^ 2 + (list[i + 1] - y) ^ 2 <= list[i + 2] ^ 2 and not (town and exempt[town[i]]) then
-      return true, i
+    if (list[i] - x) ^ 2 + (list[i + 1] - y) ^ 2 <= list[i + 2] ^ 2 then
+      -- (an exempt town: all of it, or an elite area's free stretches only, R.HostileTownsNear)
+      local e = town and exempt[town[i]]
+      if not e or (e ~= true and not R.EliteFree(e, x, y)) then return true, i end
     end
   end
   return false
@@ -3314,6 +3687,20 @@ end
 -- when it's up to that much longer. The zones a route starts and ends in don't count.
 R.LEVEL_RED = 4
 R.LEVEL_FACTOR = 4
+-- (item 135b, 1.4.2; the idea from Polestar, GPL-3, our own code) A road through one costs LEVEL_ROAD_FACTOR a yard
+-- instead: a road is the safe line through a zone (its mobs keep off it, the way is short), so it's taken when the way
+-- round is about that much longer, and asked about as ever (Nav.RedOnRoute). Only for zones at most LEVEL_ROAD_MAX
+-- levels over the player's (their lowest level): past that every yard of one costs LEVEL_FACTOR, roads too. Off the
+-- roads (a leg, a link between road pieces, the terrain's and the world grid's open ground) as before.
+R.LEVEL_ROAD_FACTOR = 3
+R.LEVEL_ROAD_MAX = 20
+-- The cost factor a yard of zone `z` (R.RedZones' set `red`: its levels over the player's), on a road or off one.
+function R.RedFactor(red, z, road)
+  local over = red and red[z]
+  if not over then return 1 end
+  if road and type(over) == "number" and over <= R.LEVEL_ROAD_MAX then return R.LEVEL_ROAD_FACTOR end
+  return R.LEVEL_FACTOR
+end
 -- (asked 2026-11-14: level 20, Tarren Mill to the Wetlands swam 1.6k yd down the coast round the Arathi Highlands;
 -- "take the road through Arathi with a warning") with zones too high about, a walk swimming SWIM_DETOUR_YD or more
 -- pays LEVEL_FACTOR a yard of water, as a yard in one: the way round them isn't a long swim. The road through is
@@ -3372,8 +3759,8 @@ function R.ZoneLevels(id)
   if l then return l[1], l[2] end
 end
 
--- The zones too high for the player now: { [uiMap] = true }, or nil (none, the option off,
--- the level unknown).
+-- The zones too high for the player now: { [uiMap] = levels over the player's (the zone's lowest less theirs) }, or nil
+-- (none, the option off, the level unknown).
 local redZones = {}
 function R.RedZones()
   local st = ns.settings and ns.settings.gps
@@ -3388,7 +3775,7 @@ function R.RedZones()
         local lo = R.ZoneLevels(id)
         if lo and lvl < lo - R.LEVEL_RED then
           set = set or {}
-          set[id] = true
+          set[id] = lo - lvl
         end
       end
     end
@@ -3719,8 +4106,10 @@ local function Reuse(cont, x1, y1, tkey)
   return bestC, out
 end
 
-local function Walk(cont, x1, y1, x2, y2, transient, road1, road2, low, fresh)
-  local key = string.format("%d:%.0f:%.0f:%.0f:%.0f%s%s", cont, x1, y1, x2, y2, road1 and "r" or "", road2 and "R" or "")
+-- (`townEnds`: R.WalkTownEnds', for Passability.FindPath; part of the walk's key)
+local function Walk(cont, x1, y1, x2, y2, transient, road1, road2, low, fresh, townEnds)
+  local key = string.format("%d:%.0f:%.0f:%.0f:%.0f%s%s%s", cont, x1, y1, x2, y2, road1 and "r" or "", road2 and "R" or "",
+    townEnds and ("~" .. townEnds) or "")
   local tkey = string.format("%d:%.0f:%.0f", cont, x2, y2)
   local w = walks[key]
   -- (not from closed ground, a start the player stands on: its walk crosses up to Passability.START_SLACK of it, and a
@@ -3736,7 +4125,7 @@ local function Walk(cont, x1, y1, x2, y2, transient, road1, road2, low, fresh)
       math.floor(x2 / g), math.floor(y2 / g))
     if failed[rough] then return nil end
     if R.SYNC_WALKS then
-      local c, path = ns.Passability.FindPath(cont, x1, y1, x2, y2, road1, road2)
+      local c, path = ns.Passability.FindPath(cont, x1, y1, x2, y2, road1, road2, townEnds)
       Remember(key, rough, c, path, tkey)
       w = walks[key]
     else
@@ -3764,7 +4153,7 @@ local function Walk(cont, x1, y1, x2, y2, transient, road1, road2, low, fresh)
         end
         walkQueued[key] = true
         local job = { key = key, rough = rough, tkey = tkey, transient = transient, cont = cont, x1 = x1, y1 = y1,
-          low = (low or lowJob) and true or nil, co =coroutine.create(function() return ns.Passability.FindPath(cont, x1, y1, x2, y2, road1, road2) end) }
+          low = (low or lowJob) and true or nil, co =coroutine.create(function() return ns.Passability.FindPath(cont, x1, y1, x2, y2, road1, road2, townEnds) end) }
         -- (a walk from where the player is, the route's own, ahead of the walks between fixed points and the other
         -- background jobs, after those already started and the other walks from the player: else, queued behind
         -- the plan's walks between docks and flight masters, it went stale as the player moved on before its turn
@@ -5709,6 +6098,8 @@ function R.JumpDrops(opts)
   local N = ns.Nav
   if not (N and N.SafeDrop and N.PlainSafeDrop) then return nil end
   local maxDrop = opts and opts.maxDrop or N.SafeDrop()
+  -- (a ghost's unlimited safe drop: the shortcuts as an Expert jumper's, any ledge; item 126)
+  if maxDrop == math.huge and R.Ghost() then maxDrop = R.GHOST_DROP end
   if not maxDrop or maxDrop == math.huge or maxDrop <= R.WG_BAKED_DROP + 0.5 then return nil end
   return math.min(N.PlainSafeDrop(), R.WG_BAKED_DROP), maxDrop
 end
@@ -5808,7 +6199,9 @@ function R.SpellJumpStraight(cont, sx, sy, tx, ty, opts, best)
   for i = 1, #(r.kinds or {}) do
     if r.kinds[i] == R.KIND_DROP and r.kinds[i - 1] ~= R.KIND_DROP then drops = drops + 1 end
   end
-  if drops == 0 or (r.length or math.huge) + drops * R.DROP_COST >= best.length then return nil end
+  if drops == 0 or (r.length or math.huge) + drops * R.DROP_COST + R.LiftFirstRoute(cont, r, opts) >= best.length then
+    return nil
+  end
   r.spellJumpOwn, r.spellJumpStraight = true, true
   return r
 end
@@ -5891,7 +6284,7 @@ function R.SpellJumpVia(cont, sx, sy, tx, ty, opts, best)
         for j = 1, #b.kinds do
           if b.kinds[j] == R.KIND_DROP and b.kinds[j - 1] ~= R.KIND_DROP then drops = drops + 1 end
         end
-        local cost = (a.length or 0) + (b.length or 0) + drops * R.DROP_COST
+        local cost = (a.length or 0) + (b.length or 0) + drops * R.DROP_COST + R.LiftFirstRoute(cont, b, opts)
         if drops > 0 and cost < best.length and (not pickCost or cost < pickCost) then
           local pts, kinds = {}, {}
           for j = 1, #a.pts do pts[j] = a.pts[j] end
@@ -5973,7 +6366,9 @@ function R.SpellJumpOwnOnly(cont, sx, sy, tx, ty, opts, got)
   if own.blocked then
     if not (fall > R.WG_BAKED_DROP) or R.UnmarkedFall(cont, own, opts) then return nil end
   end
-  if drops == 0 or (own.length or math.huge) + drops * R.DROP_COST >= got.length then return nil end
+  if drops == 0 or (own.length or math.huge) + drops * R.DROP_COST + R.LiftFirstRoute(cont, own, opts) >= got.length then
+    return nil
+  end
   -- (its walk still searched in the background, own.pending: shown as it is, provisional, and worked out again when the
   -- search lands; never the grid's long walk meanwhile. Kooki3z 2026-11-23: the faded jump off the rim, then the 3.35k
   -- yd walk round settled for half a minute, as the grid's answer landed while the Router's own was still searched)
@@ -6344,7 +6739,7 @@ R.HOSTILE_OVER_RED_YD = 100
 function R.WalkGuardYards(cont, r, sx, sy, tx, ty)
   local side = HostileSide()
   if not (side and r and r.pts and #r.pts >= 4) then return 0 end
-  local exempt = R.HostileTownsNear(cont, side, sx, sy, tx, ty)
+  local exempt = R.EndsExempt(cont, side, sx, sy, tx, ty)
   local yd, pts = 0, r.pts
   for i = 1, #pts - 3, 2 do yd = yd + R.HostileYards(cont, pts[i], pts[i + 1], pts[i + 2], pts[i + 3], side, exempt) end
   return yd
@@ -6380,7 +6775,7 @@ R.BEND_MAX_YD, R.BEND_OUT_YD, R.BEND_MARGIN = 400, 150, 8
 function R.BendRoundGuards(cont, r, sx, sy, tx, ty)
   local side = HostileSide()
   if not (side and r and r.pts and r.kinds and #r.pts >= 4) or r.zs or r.fz or r.unconnected then return r end
-  local out, outK = R.BendPts(cont, r.pts, r.kinds, side, R.HostileTownsNear(cont, side, sx, sy, tx, ty))
+  local out, outK = R.BendPts(cont, r.pts, r.kinds, side, R.EndsExempt(cont, side, sx, sy, tx, ty))
   if not out then return r end
   local length, road = 0, 0
   for k = 1, #out / 2 - 1 do
@@ -6712,6 +7107,8 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
   if ns.Passability and ns.Passability.SetDropMax then ns.Passability.SetDropMax(math.max(maxDrop, R.TRACK_DROP_MAX)) end
   -- (the jumps avoided on this trip, Nav.AvoidJump: no road drop from within reach of one's top)
   local JumpBanned = ns.Nav and ns.Nav.jumpBans and ns.Nav.jumpBans[1] and ns.Nav.JumpBanned or nil
+  -- (a spell jump with a lift near for the same climb: LIFT_FIRST_S more, R.LiftFirstYards; nil, none to weigh)
+  local liftFloor = R.LiftFirstFloor(cont, maxDrop)
   local grid = ns.Terrain and ns.Terrain[cont]
   local cityPenalty = grid and grid.slack and R.CITY_BLOCKED_PENALTY
   -- (a blocked leg or link: a city's walls are real, and so are its ruins' up top)
@@ -6733,13 +7130,14 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
   -- R.GuardsOverHighZones' second search)
   local red = not (opts and opts.redFree) and R.RedZones() or nil
   local exempt = red and { [R.ZoneAt(cont, sx, sy)] = true, [R.ZoneAt(cont, tx, ty)] = true }
-  local function Danger(zy)
+  -- (`road`: along a road, LEVEL_ROAD_FACTOR a yard where the zone's within LEVEL_ROAD_MAX levels: item 135b)
+  local function Danger(zy, road)
     if not (red and zy) then return 0 end
     local d = 0
     for z, yd in pairs(zy) do
-      if red[z] and not exempt[z] then d = d + yd end
+      if red[z] and not exempt[z] then d = d + yd * (R.RedFactor(red, z, road) - 1) end
     end
-    return d * (R.LEVEL_FACTOR - 1)
+    return d
   end
   local function DangerLine(x1, y1, x2, y2)
     if not red then return 0 end
@@ -6783,7 +7181,8 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
     return wet * math.max(0, R.LEVEL_FACTOR - swimCost) -- (swimming left out: dearer than a zone too high already)
   end
   -- (the guards' towns the route starts or ends in: not paid for, R.HostileTownsNear; a stop at Dun Garok)
-  local exempt = R.HostileTownsNear(cont, HostileSide(), sx, sy, tx, ty)
+  -- (an elite area at the stop: only its way in, and at the start all of it till a No, R.EndsExempt: items 142, 130)
+  local exempt = R.EndsExempt(cont, HostileSide(), sx, sy, tx, ty)
   R.SetLightEnds(sx, sy, tx, ty)
   local lightNear = {} -- [edge] = a point of it near the walk's ends (memo): its light ones not paid for
   local function LightNear(ei)
@@ -6807,7 +7206,12 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
     if v == nil then
       local extra = 0
       for t, yd in pairs(g.towns and g.towns[ei] or EMPTY) do
-        if not (exempt and exempt[t]) then extra = extra + yd end
+        local f = exempt and exempt[t]
+        if not f then
+          extra = extra + yd
+        elseif f ~= true then -- (an elite area at the walk's end: its yards off the way in or out, items 142 and 130)
+          extra = extra + math.min(yd, R.EliteYardsOff(cont, HostileSide(), t, f, g.e[ei], 5))
+        end
       end
       v = 1 + (extra * (R.HOSTILE_FACTOR - 1) + (not near and g.light and g.light[ei] or 0)) / math.max(g.e[ei][3], 1)
       if g.preview and g.preview[ei] then v = v * R.PREVIEW_FACTOR end -- (a previewed walk's: cheap still)
@@ -6827,10 +7231,10 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
         -- (through Danger both ways: it holds the zones' own exempt table — the towns' shadows it here)
         local over = g.zonesOver and g.zonesOver[ei]
         if over then
-          v = Danger(over) / math.max(e[3], 1)
+          v = Danger(over, true) / math.max(e[3], 1)
         else
           local z = g.zoneId and g.zoneId[ei]
-          v = (z and z ~= 0) and Danger({ [z] = g.zoneYd[ei] }) / math.max(e[3], 1) or 0
+          v = (z and z ~= 0) and Danger({ [z] = g.zoneYd[ei] }, true) / math.max(e[3], 1) or 0
         end
       end
       edgeDanger[ei] = v
@@ -7057,7 +7461,8 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
       local searching
       -- (an end that isn't the start or the stop is a road's point: Passability.FindPath's road1/road2)
       c, path, searching = Walk(cont, x1, y1, x2, y2, opts and opts.transient and x1 == sx and y1 == sy,
-        not (x1 == sx and y1 == sy), not (x2 == tx and y2 == ty), walkAll)
+        not (x1 == sx and y1 == sy), not (x2 == tx and y2 == ty), walkAll, nil,
+        R.WalkTownEnds(cont, sx, sy, tx, ty, x1, y1, x2, y2))
       if searching then
         pending = true
         c = PendingCost(cont, x1, y1, x2, y2)
@@ -7458,7 +7863,13 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
             local by = cameBy[n]
             local prevDrop = type(by) == "number" and g.drops[by >= 0 and by or -by] or nil
             extra = R.DropExtra(drop, R.ChainDrop(prevDrop) and R.ChainDrop(drop))
+            if extra and liftFloor and drop > liftFloor then
+              local hz = g.z or g.nz
+              extra = extra + R.LiftFirstYards(cont, g.n[n * 2 - 1], g.n[n * 2], drop, hz and hz[n], liftFloor)
+            end
           end
+          -- (a lift road: its wait by the cars' phase when known, Lifts.CostYards; item 135a)
+          if extra and g.e[aei][4] == R.SOURCE_LIFT then extra = extra + R.LiftYards(g, cont, aei, se >= 0, n, ec) end
           if extra then relax(n, g.adjTo[ai], ec + alen * EdgeDanger(aei) + extra, se) end
         end
       end
@@ -7556,7 +7967,8 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
       local c, path = direct, nil
       if not c and Pass.FindPath then
         local searching
-        c, path, searching = Walk(cont, sx, sy, tx, ty, opts and opts.transient)
+        c, path, searching = Walk(cont, sx, sy, tx, ty, opts and opts.transient, nil, nil, nil, nil,
+          R.WalkTownEnds(cont, sx, sy, tx, ty, sx, sy, tx, ty))
         if searching then
           pending = true
           c = PendingCost(cont, sx, sy, tx, ty) -- (meanwhile: about straight, when only a little is blocked)
@@ -7631,7 +8043,8 @@ function RouteOne(cont, sx, sy, tx, ty, opts)
       -- the player's position: a search that goes stale as they move on)
       local path, searching
       if p.gap and Pass and Pass.FindPath and not layered then
-        path, searching = select(2, Walk(cont, p[2], p[3], p[4], p[5], opts and opts.transient and p[2] == sx and p[3] == sy or false))
+        path, searching = select(2, Walk(cont, p[2], p[3], p[4], p[5], opts and opts.transient and p[2] == sx and p[3] == sy or false,
+          nil, nil, nil, nil, R.WalkTownEnds(cont, sx, sy, tx, ty, p[2], p[3], p[4], p[5])))
         -- (a long link between road pieces with no walk around it, searched and none found: a jump no one walks,
         -- over a crater's wall or a mountain. The route is worked out again without it, with the extra far links
         -- to go round it by (`withExtras`), and that one taken if it's better. At BLOCKED_PENALTY the 1,192 yd over Un'Goro's wall still beat the 6,000 yd round by Tanaris from

@@ -145,6 +145,7 @@ WG.F_RIM_WALL = F_RIM_WALL
 local ZERO = byte("0") -- (a surface's links as the heights give them)
 local ZESC = 62 -- (a height written whole: this, then 3 characters)
 local SHIFT = 131072 -- a surface's id: its tile's key * SHIFT + its index in the tile
+WG.SHIFT = SHIFT
 local BASE = 8 -- (cells per entry of a tile's `base`: its first surface)
 WG.REGION_ADDON = "AzerothGPS_WG%d_%d_%d"
 
@@ -852,8 +853,9 @@ WG.Ends = Ends
 --   costs HOSTILE_FACTOR (the towns the leg starts or ends in not, Router.HostileTownsNear), the light ones
 --   HOSTILE_LIGHT_FACTOR (not within LIGHT_END_YD of the ends, Router.SetLightEnds);
 -- - zones too high (option avoidHighZones, Router.RedZones): a yard in one costs LEVEL_FACTOR (not the start's and the
---   stop's zones); with the straight line through one, a yard swum as much (RouteOne's SwimDetour: the way round them
---   isn't a long swim);
+--   stop's zones), a step along road ground Router.RedFactor's (LEVEL_ROAD_FACTOR within LEVEL_ROAD_MAX levels: item
+--   135b); with the straight line through one, a yard swum as much (RouteOne's SwimDetour: the way round them isn't a
+--   long swim);
 -- - swimming: Passability.SwimCost (Allow swimming off and a swim removed: AVOID_SWIM_COST; water walking: its own);
 --   the water banned for the trip (Passability.SwimBanned) closed;
 -- - the player's own walls (Passability.CrossesWall, while they have any: Passability.DrawnWalls) cut the links across
@@ -870,7 +872,7 @@ function WG.Costs(c, sx, sy, tx, ty, opts)
   local x = { cont = cont, f = {} }
   x.side = Rt.HostileSide and Rt.HostileSide() or nil
   if x.side then
-    x.exempt = Rt.HostileTownsNear and Rt.HostileTownsNear(cont, x.side, sx, sy, tx, ty) or nil
+    x.exempt = Rt.EndsExempt and Rt.EndsExempt(cont, x.side, sx, sy, tx, ty) or nil -- (items 142, 130)
     x.light = Rt.HOSTILE_LIGHT and Rt.HOSTILE_LIGHT[x.side]
     -- (No to "Take it?": their ground far dearer, REFUSED_FACTOR, so the way round is taken wherever there's one, however
     -- long; shut, a start or stop by a camp had no way at all. Item 63b)
@@ -1176,12 +1178,24 @@ local function Extra(x, id, px, py)
   end
   if x.red then
     local z = Rt.ZoneAt(x.cont, px, py)
-    if x.red[z] and not x.redExempt[z] then v = v + Rt.LEVEL_FACTOR - 1 end
+    if x.red[z] and not x.redExempt[z] then
+      v = v + Rt.LEVEL_FACTOR - 1
+      -- (along road ground less, item 135b: RoadLess)
+      local less = Rt.RedFactor and Rt.LEVEL_FACTOR - Rt.RedFactor(x.red, z, true) or 0
+      if less > 0 then
+        x.fr = x.fr or {}
+        x.fr[id] = less
+      end
+    end
   end
   x.f[id] = v
   return v
 end
 WG.Extra = Extra
+-- What a yard of surface `id` along road ground costs less than its Extra (a zone too high, within
+-- Router.LEVEL_ROAD_MAX levels: Router.RedFactor's road price; item 135b). Its Extra worked out first. (WG.Search reads
+-- x.fr itself: its upvalues are near Lua 5.1's 60.)
+function WG.RoadLess(x, id) return x.fr and x.fr[id] or 0 end
 
 -- Whether a step from surface s (tile t, cell ci) in direction d onto s2 (tile nt) is a drop off a ledge: down
 -- DROP_Z or more and not linked back up.
@@ -1839,7 +1853,10 @@ function WG.BlockDistances(c, tx, ty, x, sx, sy)
   local function Factor(bx, by)
     if not (x and x.red and Rt.ZoneAt) then return 1 end
     local z = Rt.ZoneAt(c.cont, (bx + 0.5) * size, (by + 0.5) * size)
-    if z and x.red[z] and not (x.redExempt and x.redExempt[z]) then return Rt.LEVEL_FACTOR or 1 end
+    if z and x.red[z] and not (x.redExempt and x.redExempt[z]) then
+      -- (its roads, the least a yard there costs: item 135b)
+      return Rt.RedFactor and Rt.RedFactor(x.red, z, true) or Rt.LEVEL_FACTOR or 1
+    end
     return 1
   end
   -- (the longer ways in: every longer way out of a loaded block, by its far end)
@@ -1932,7 +1949,10 @@ function WG.BlockCorridor(c, sx, sy, tx, ty, x)
   local function Factor(bx, by)
     if not (x and x.red and Rt.ZoneAt) then return 1 end
     local z = Rt.ZoneAt(c.cont, (bx + 0.5) * size, (by + 0.5) * size)
-    if z and x.red[z] and not (x.redExempt and x.redExempt[z]) then return Rt.LEVEL_FACTOR or 1 end
+    if z and x.red[z] and not (x.redExempt and x.redExempt[z]) then
+      -- (its roads, the least a yard there costs: item 135b)
+      return Rt.RedFactor and Rt.RedFactor(x.red, z, true) or Rt.LEVEL_FACTOR or 1
+    end
     return 1
   end
   while hk[1] do
@@ -1990,6 +2010,14 @@ end
 -- A* over the grid from `starts` ({ id, key, ci, cost }) to any of `goals` ({ [id] = extra }), toward (tx, ty);
 -- `inside(x, y)`: the corridor (nil: anywhere); `x`: the costs (WG.Costs; nil: the grid's own alone). The way as
 -- { id, key, ci, link, drop } steps, or nil.
+-- A lift link's yards over its own `cost`: its wait by the cars' phase when known (Lifts.CostYards, item 135a), else 0.
+function WG.LiftYards(c, L, cost)
+  local LT = ns.Lifts
+  if not (LT and LT.CostYards) then return 0 end
+  local a, b = L.pts[1], L.pts[#L.pts]
+  return LT.CostYards(c.cont, a[1], a[2], ((b[3] or 0) > (a[3] or 0)) and "bottom" or "top", cost - 1)
+end
+
 function WG.Search(c, starts, goals, tx, ty, inside, x)
   local Rt = R()
   local P = ns.Passability
@@ -2003,6 +2031,8 @@ function WG.Search(c, starts, goals, tx, ty, inside, x)
   local swim = x and x.swim or c.swim
   local any = x and x.any
   local dropCost = Rt.DROP_COST or 30
+  -- (a spell jump with a lift near for the same climb: LIFT_FIRST_S more, Router.LiftFirstYards; nil, none to weigh)
+  local liftFloor = x and Rt.LiftFirstFloor and Rt.LiftFirstFloor(c.cont, x.maxDrop) or nil
   -- (the thin tall walls from the models' collision, Passability.CrossesModelWall: a hard barrier for every far drop and
   -- link that crosses one in plan view, its heights whatever they are. Item 78, Red Cloud Mesa's palisade, then the whole
   -- map. The neighbor steps aren't checked: the bake drops every one across a wall, worldbake.shipped_walls, and a check
@@ -2046,6 +2076,7 @@ function WG.Search(c, starts, goals, tx, ty, inside, x)
   local far = 0
   for _, st in ipairs(starts) do far = max(far, Dist(st.x or tx, st.y or ty, tx, ty)) end
   local limit = min(WG.MAX_NODES, WG.NODES_BASE + WG.NODES_PER_YD * far)
+  if x and x.wholeBudget then limit = WG.MAX_NODES end -- (a short leg whose way is long round: WG.Walk, item 139)
   -- (the loop below reads a surface's record in one go and a neighbor in the node's own tile without a call: the same
   -- numbers as Link, Step, Pt, Flags, Z and H give, a third less time a node; study/route-perf, 2026-11-25. `LK`: the
   -- node's eight links, this search's own table, as a tile decoding for one search may pause for another)
@@ -2056,6 +2087,11 @@ function WG.Search(c, starts, goals, tx, ty, inside, x)
   if x and x.nodeCap then limit = min(limit, x.nodeCap) end -- (a join's small search, JoinBySearch)
   if x and x.noLimit then limit = huge end -- (kept to a corridor, which bounds it: the refine, never cut short)
   if x then x.limitHit = nil end
+  -- (HPA*, WorldHPA.lua: `x.home`, a set of tile keys, the search kept to them: a surface outside is reached (a goal, a
+  -- way out of them) but never searched on from; `x.flood`, the bake's and a cluster's flood: every surface reached,
+  -- no stop at a goal, its tables handed back in `x.res`)
+  local home = x and x.home
+  local flood = x and x.flood
   while hk[1] do
     local f, id = Pop(hk, hv)
     if not closed[id] then
@@ -2071,8 +2107,9 @@ function WG.Search(c, starts, goals, tx, ty, inside, x)
         local tot = g[id] + extra
         if not bestEnd or tot < bestEnd then bestEnd, found = tot, id end
       end
-      if found and f >= bestEnd then break end
+      if found and f >= bestEnd and not flood then break end
       local key, ci, gs = floor(id / SHIFT), cellOf[id], g[id]
+      local expand = not home or home[key] == true
       local t = WG.Tile(c, key)
       local s = id - key * SHIFT
       local ca, cb = floor(ci / per), ci % per
@@ -2089,7 +2126,7 @@ function WG.Search(c, starts, goals, tx, ty, inside, x)
       if ownCells then roadA, unroadA = RoadCell(x, c, t, ci) end
       roadA = (roadA or IS_ROAD[fs]) and not unroadA
       local swimA = IS_SWIM[fs]
-      for d = 1, 8 do
+      for d = 1, expand and 8 or 0 do
         local kk = LK[d]
         local nkey, nci, nt
         if kk == 0 and x and x.erased then
@@ -2130,6 +2167,7 @@ function WG.Search(c, starts, goals, tx, ty, inside, x)
             if ok then
               local step = d > 4 and diag or cell
               local cost = sqrt(step * step + dz * dz) + abs(dz) * WG.CLIMB_COST
+              local onRoad = false
               if wet then
                 cost = cost * swim
                 -- (into the water from dry ground: SWIM_ENTER_YD more, once a swim: the bank, getting out. Item 60,
@@ -2142,11 +2180,20 @@ function WG.Search(c, starts, goals, tx, ty, inside, x)
                   roadB = (roadB or rb) and not ub
                 end
                 if roadA and roadB then cost = cost * road end
+                onRoad = roadA and roadB
               end
               if any and cost then
                 local ex2 = xf[id2]
                 if ex2 == nil then ex2 = Extra(x, id2, px, py) end
-                if ex2 >= huge or ea >= huge then cost = nil else cost = cost + step * (ea + ex2) / 2 end
+                if ex2 >= huge or ea >= huge then
+                  cost = nil
+                else
+                  local e2 = ea + ex2
+                  -- (a zone too high's road ground, item 135b)
+                  local fr = onRoad and x.fr
+                  if fr then e2 = e2 - (fr[id] or 0) - (fr[id2] or 0) end
+                  cost = cost + step * e2 / 2
+                end
               end
               -- (a drop by the open world's rules, Router.DropExtra: a step down's walked off, a fall past it only where
               -- it saves the walk, never a chain of them down one slope)
@@ -2155,6 +2202,9 @@ function WG.Search(c, starts, goals, tx, ty, inside, x)
                 local ld = lastDrop[id]
                 local chained = ld and Rt.ChainDrop and Rt.ChainDrop(-dz) and Dist(sx, sy, ld[1], ld[2]) <= Rt.CHAIN_YD
                 local extra = Rt.DropExtra and Rt.DropExtra(-dz, chained) or dropCost
+                if extra and liftFloor and -dz > liftFloor then
+                  extra = extra + Rt.LiftFirstYards(c.cont, sx, sy, -dz, zs, liftFloor)
+                end
                 if extra and cost then cost = cost + extra else cost = nil end
                 if Rt.ChainDrop and Rt.ChainDrop(-dz) then land = { px, py } end
               end
@@ -2178,7 +2228,7 @@ function WG.Search(c, starts, goals, tx, ty, inside, x)
       end
       -- (drops off a sheer cliff over empty cells: FarDrops)
       -- (and the slopes walked down over them, `walk`: anyone's, a plain walk; a drop only within the drop limit)
-      local fd = x and FarDrops(c, t, s, key, ci, zs, sx, sy)
+      local fd = expand and x and FarDrops(c, t, s, key, ci, zs, sx, sy)
       if fd then
         local banned = x.jumpBanned and x.jumpBanned(c.cont, sx, sy, zs)
         for _, e in ipairs(fd) do
@@ -2196,6 +2246,9 @@ function WG.Search(c, starts, goals, tx, ty, inside, x)
               local ld = lastDrop[id]
               local chained = ld and Rt.ChainDrop and Rt.ChainDrop(fall) and Dist(sx, sy, ld[1], ld[2]) <= Rt.CHAIN_YD
               extra = Rt.DropExtra and Rt.DropExtra(fall, chained) or dropCost
+              if extra and liftFloor and fall > liftFloor then
+                extra = extra + Rt.LiftFirstYards(c.cont, sx, sy, fall, zs, liftFloor)
+              end
             end
             if any then
               local ex2 = Extra(x, e.id2, e.x, e.y)
@@ -2214,6 +2267,7 @@ function WG.Search(c, starts, goals, tx, ty, inside, x)
         end
       end
       local out, own = c.out[id], x and x.own and x.own[id]
+      if not expand then out, own = nil, nil end
       local nOut = out and #out or 0
       for oi = 1, nOut + (own and #own or 0) do
         local li = oi <= nOut and out[oi] or own[oi - nOut]
@@ -2224,13 +2278,17 @@ function WG.Search(c, starts, goals, tx, ty, inside, x)
             local bkey, bci = CellKey(c, floor(p[1] / cell), floor(p[2] / cell))
             if bkey == L.bkey then
               local cost = L.yd * road
+              -- (a lift: its wait by the cars' phase when known, Lifts.CostYards; item 135a)
+              if L.kind == 5 then cost = cost + WG.LiftYards(c, L, cost) end
               if any then
                 -- (the road link's own yards past guards and in zones too high, by its points)
                 local q0 = L.pts[1]
                 for q = 2, #L.pts do
                   local q1 = L.pts[q]
                   local seg = Dist(q0[1], q0[2], q1[1], q1[2])
-                  cost = cost + seg * (Extra(x, L.own and -(1e9 + L.n * 1000 + q) or -(li * 1000 + q), q1[1], q1[2]))
+                  local qid = L.own and -(1e9 + L.n * 1000 + q) or -(li * 1000 + q)
+                  cost = cost + seg * Extra(x, qid, q1[1], q1[2])
+                  if x.fr and x.fr[qid] then cost = cost - seg * x.fr[qid] end -- (road ground: item 135b)
                   q0 = q1
                 end
                 if cost >= huge then cost = nil end -- (through ground shut: item 63b)
@@ -2245,6 +2303,9 @@ function WG.Search(c, starts, goals, tx, ty, inside, x)
                   local q = L.pts[1]
                   local chained = ld and Rt.ChainDrop(fall) and Dist(q[1], q[2], ld[1], ld[2]) <= Rt.CHAIN_YD
                   local extra = Rt.DropExtra(fall, chained)
+                  if extra and liftFloor and fall > liftFloor then
+                    extra = extra + Rt.LiftFirstYards(c.cont, q[1], q[2], fall, q[3], liftFloor)
+                  end
                   if extra then cost = cost + extra else cost = nil end
                   if Rt.ChainDrop(fall) then land = { p[1], p[2] } end
                 end
@@ -2268,6 +2329,8 @@ function WG.Search(c, starts, goals, tx, ty, inside, x)
   if t0 then WG.stats.ms = WG.stats.ms + (debugprofilestop() - t0) end
   WG.lastNodes = k
   WG.lastCost = found and bestEnd or nil -- (the way's cost, for the tests: test_world_grid_alt's bound against it)
+  if flood then x.res = { g = g, prev = prev, via = via, dropAt = dropAt, cellOf = cellOf, nodes = k } end
+  if x and x.keep and not found then x.res = { g = g, nodes = k } end -- (HPA*'s: what a search in vain reached)
   g, closed = nil, nil
   WG.GcStep()
   if not found then return nil end
@@ -3171,6 +3234,32 @@ function WG.FailedNear(tkey, sx, sy, tx, ty)
   end
   return false
 end
+-- A short leg to one of the trip's stops whose way is long round (item 139, Kooki3z 2026-11-27: Darkshore's west coast
+-- road, 40.2, 64.2, to Felwood behind the ridge, 985 yd straight, the walk 8-10k yd south through Ashenvale): its
+-- search floods the shut-in coast before it leaves it, 135k nodes, over the short leg's budget (NODES_PER_YD: 109k) and
+-- the guards' cap (HOSTILE_CAP 80k) at every Road tolerance. Cut short, its stop was "unreached" for UNREACHED_SECONDS,
+-- then searched again the same way: "Working out the route..." for good, 190k nodes every two minutes. Now such a
+-- search, cut short, is searched once more with the long legs' whole budget (MAX_NODES, `wholeBudget`); cut short then
+-- too, it's no way for good from round there (EXHAUSTED_YD; till WG.Reset): "No way found yet", not searched again.
+WG.EXHAUSTED_YD = 300
+WG.exhausted = {}
+function WG.ExhaustedNear(tkey, sx, sy)
+  for _, p in ipairs(WG.exhausted[tkey] or {}) do
+    if Dist(p[1], p[2], sx, sy) <= WG.EXHAUSTED_YD then return true end
+  end
+  return false
+end
+function WG.Exhausted(tkey, sx, sy, tx, ty, nodes)
+  local list = WG.exhausted[tkey] or {}
+  WG.exhausted[tkey] = list
+  list[#list + 1] = { sx, sy }
+  WG.stats.exhausted = (WG.stats.exhausted or 0) + 1
+  local D = ns.Debug
+  if D and D.Log then
+    pcall(D.Log, "worldgrid no way within the whole budget", { from = string.format("%.0f,%.0f", sx, sy),
+      to = string.format("%.0f,%.0f", tx, ty), nodes = nodes })
+  end
+end
 local function Remember(key, r)
   if not WG.routes[key] then WG.order[#WG.order + 1] = key end
   WG.routes[key] = r
@@ -3244,7 +3333,7 @@ local function JoinOnto(c, r, sx, sy, sz, opts)
   if side then
     local n = #pts
     local hx = { cont = c.cont, side = side,
-      exempt = Rt.HostileTownsNear and Rt.HostileTownsNear(c.cont, side, sx, sy, pts[n - 1], pts[n]) or nil }
+      exempt = Rt.EndsExempt and Rt.EndsExempt(c.cont, side, sx, sy, pts[n - 1], pts[n]) or nil }
     if WG.GuardsOnLine(hx, sx, sy, jx, jy) and not Rt.HostileAt(c.cont, jx, jy, side, hx.exempt) then return nil end
   end
   -- (the straight join walked on the grid, from the start's surface, arriving on the route's floor there: a route
@@ -3438,6 +3527,7 @@ function WG.Walk(c, sx, sy, sz, tx, ty, tz, opts)
   local got = WG.routes[key]
   if got then return got.route or false end
   if WG.FailedNear(tkey, sx, sy, tx, ty) then return false end
+  if WG.exhausted[tkey] and WG.ExhaustedNear(tkey, sx, sy) then return false end
   if WG.IsUnreached(c.cont, tx, ty, tz) then return false end
   local Rt = R()
   -- (one found for the same stop from near here, still remembered: joined onto. Not from floor candidates, item 106:
@@ -3475,6 +3565,49 @@ function WG.Walk(c, sx, sy, sz, tx, ty, tz, opts)
       do
         local x = WG.Costs(c, sx, sy, tx, ty, opts)
         local n0 = WG.stats.nodes
+        -- (a leg tile to tile first, HPA* (item 127, WorldHPA.lua): its way, or no way for sure; else, or when it can't
+        -- tell, the grid's own search)
+        -- (a leg whose straight line passes the other faction's guards: its searches round them and through them as
+        -- 1.4.1 made them, so the trip walks through and asks, not hearths (item 51); HPA* would only add to them)
+        -- (nor a plan's side walk, the ride check's, where the guards are avoided: its cap and its way through as 1.4.1
+        -- weighed them, never a far dock's walk past them found where 1.4.1's gave up, more plans for the background)
+        local guardLine = x.side and WG.GuardsOnLine(x, sx, sy, tx, ty)
+        local guardSide = sideWalk and x.side ~= nil
+        local function Find(xx)
+          local HP = ns.WorldHPA
+          xx.hpa, xx.hpaNoWay = nil, nil -- (this search's own: not a copied search's, Widen's or Through's)
+          if HP and not guardLine and not guardSide and HP.Usable(c, sx, sy, tx, ty, xx, true) then
+            -- (the grid's own search first, as 1.4.1 made it, its own budget and caps; tile to tile only when that one is
+            -- cut short, in place of the wider searches after it (the whole budget, the next cap). The hpa-bench,
+            -- 2026-11-27: tile to tile first, or after a first try of its own, was slower to settle on 15-18 of 100
+            -- trips: the weighed search with the landmark fields finds most long legs in fewer nodes)
+            local got0 = WG.Search(c, starts, goals, tx, ty, inside, xx)
+            if got0 or not xx.limitHit then return got0 end
+            local pre = HP.Search(c, starts, goals, tx, ty, xx, true)
+            if pre == false then
+              xx.limitHit, xx.hpaNoWay = nil, true
+              WG.stats.hpaNoWay = (WG.stats.hpaNoWay or 0) + 1
+              return nil
+            end
+            if pre ~= "ok" then return nil end -- (cut short, as 1.4.1's: the wider searches after it as ever)
+            xx.hpaPre = true
+            local got = HP.Search(c, starts, goals, tx, ty, xx)
+            xx.hpaPre = nil
+            if got then
+              xx.hpa, xx.limitHit = true, nil
+              WG.stats.hpa = (WG.stats.hpa or 0) + 1
+              return got
+            end
+            if got == false then
+              xx.limitHit, xx.hpaNoWay = nil, true
+              WG.stats.hpaNoWay = (WG.stats.hpaNoWay or 0) + 1
+              return nil
+            end
+            xx.limitHit = true -- (cut short, as the grid's own was)
+            return nil
+          end
+          return WG.Search(c, starts, goals, tx, ty, inside, xx)
+        end
         -- (a long leg: inside its corridor first, the whole grid only when there's no way there: item 38)
         -- (a long leg: the heuristic weighed HEUR_LONG, item 38: south of Camp Taurajo to Un'Goro, the one walk 10.4k yd
         -- round, 386k nodes at HEUR, never settled in game; at 3, 88k and 3.5% longer. A route found in seconds beats the
@@ -3496,23 +3629,58 @@ function WG.Walk(c, sx, sy, sz, tx, ty, tz, opts)
         elseif guarded then x.nodeCap = WG.HOSTILE_LONG_CAP end -- (a long leg's: item 59, 423k nodes round in vain)
         -- (a plan's side walk: SIDE_WALK_CAP at most, its way through the guards too)
         if sideWalk and not refused then x.nodeCap = min(x.nodeCap or huge, WG.SIDE_WALK_CAP) end
+        -- (a capital's other crossing tried, WG.Leg: within its own budget, CROSS_WALK_NODES)
+        if opts and opts.crossCap then x.nodeCap = min(x.nodeCap or huge, opts.crossCap) end
         x.throughCut = nil
-        local steps = WG.Search(c, starts, goals, tx, ty, inside, x)
+        -- (a short leg to one of the trip's stops: the whole budget, MAX_NODES, not its length's (NODES_PER_YD) nor the
+        -- guards' cap when they're not on the straight line (their way through is then no shorter). Item 139: its way
+        -- may be long round a ridge; only the trip's own legs, never a plan's side walk, whose cap keeps the ride check
+        -- quick. A way found within the old budget is the same way: only a search it cut short goes on)
+        -- (not to a stop inside a cave: its way in is the cave's own roads from its mouth, WG.CaveLeg; the grid's walk
+        -- straight to its floor is only when there's no road in, a floor the grid seldom reaches. The whole budget there
+        -- was 200k nodes more for every no way, and the stop's No way found yet a minute late: the Wailing Caverns stop
+        -- with no cave road, Woodpaw Den, 1.4.2's CI)
+        local wide = not sideWalk and Dist(sx, sy, tx, ty) < WG.LONG_LEG_YD and ToAStop(tx, ty)
+          and not WG.InCave(c.cont, tx, ty, tz)
+        local widened, wideCut, wideNodes = false, nil, 0
+        local throughX -- (the way through's costs, once searched)
+        local function Widen(xb)
+          local x3 = {}
+          for k, v in pairs(xb) do x3[k] = v end
+          x3.nodeCap, x3.wholeBudget = nil, true
+          local n1 = WG.stats.nodes
+          local got = Find(x3)
+          widened, wideCut, wideNodes = true, x3.limitHit and true or false, WG.stats.nodes - n1
+          if x3.limitHit then WG.stats.wideCut = (WG.stats.wideCut or 0) + 1 end
+          return got, x3
+        end
+        local steps
+        if wide and not (guarded and not refused and WG.GuardsOnLine(x, sx, sy, tx, ty)) then
+          local x3
+          steps, x3 = Widen(x)
+          x3.wholeBudget = nil -- (its later searches, the way through's, their own budgets)
+          x = x3
+        else
+          steps = Find(x)
+        end
         local through = false
         local function Through()
           local x2 = {}
           for k, v in pairs(x) do x2[k] = v end
           x2.side, x2.exempt, x2.light, x2.nodeCap = nil, nil, nil, sideWalk and WG.SIDE_WALK_CAP or nil
+          if opts and opts.crossCap then x2.nodeCap = min(x2.nodeCap or huge, opts.crossCap) end
           x2.any = x2.red ~= nil
-          local got = WG.Search(c, starts, goals, tx, ty, inside, x2)
+          local got = Find(x2)
           x.throughCut = x2.limitHit and true or false
+          throughX = x2
           return got, x2
         end
         if not steps and guarded and not refused then
           WG.LogThrough(sx, sy, tx, ty, WG.stats.nodes - n0)
           local s2, x2 = Through()
           if s2 then steps, x, through = s2, x2, true end
-        elseif steps and guarded and not refused and not x.heur then -- (not a long leg's: its length the land's, its search dear)
+        elseif steps and guarded and not refused and (not x.heur or x.hpa) then -- (not a long leg's: its length the land's,
+          -- its search dear; but a long leg's found tile to tile, HPA*, item 127: its way through as quick to find)
           -- (a way round found: kept only within the usual detour over the way through, DETOUR_FACTOR times it or
           -- DETOUR_YD more (item 53c, Kooki3z's order: round the guards if reasonable, else ask "Take it?" with the way
           -- through (Nav.CheckHostileRoute), and only on a no the long way). Looked at only when the way round is
@@ -3547,6 +3715,23 @@ function WG.Walk(c, sx, sy, sz, tx, ty, tz, opts)
             for _, st in ipairs(more) do tried[#tried + 1] = st end
           end
         end
+        -- (item 139: the short leg's search cut short by its budget, not out of ground: the whole budget once, with the
+        -- costs of the way it last tried (through the guards, when that was searched))
+        if not steps and wide and not widened then
+          local wasCut
+          if guarded and not refused then wasCut = x.throughCut ~= false else wasCut = x.limitHit end
+          if wasCut then
+            local s3, x3 = Widen(throughX or x)
+            if s3 then
+              steps, x = s3, x3
+              if throughX then through = true end
+            elseif not wideCut then
+              x.limitHit, x.throughCut = nil, false -- (out of ground with the whole budget: no way, said so)
+            end
+          end
+        end
+        -- (and cut short with it too: no way for good from round here, never searched again the same way)
+        if not steps and widened and wideCut then WG.Exhausted(tkey, sx, sy, tx, ty, wideNodes) end
         if steps then route = WG.Pull(c, steps, sx, sy, tx, ty, x) end
         -- (remembered as searched in vain only when its search ran out of ground: one stopped by its node budget, the
         -- guards' cap's way through included, proves nothing. Items 80/81, Kooki3z by Astranaar: a leg cut short was
@@ -3561,7 +3746,13 @@ function WG.Walk(c, sx, sy, sz, tx, ty, tz, opts)
         -- once (WG.Unreached), never searched again from the flight masters the ride check weighs: Kooki3z's route into
         -- the Wailing Caverns hung. Only the trip's stops, and short legs: a flight master's walk cut short from 2-3k yd
         -- off says nothing of the others (test_a10_..._chillwind_camp: its plan lost the flight))
-        if not steps and cut and not refused and Dist(sx, sy, tx, ty) <= WG.UNREACHED_LEG_YD and ToAStop(tx, ty) then
+        -- (and so is one tile to tile says is no way for sure, HPA*'s after the grid's own search was cut short (item 127),
+        -- round the guards and through them alike: its search ran out of tiles, not of budget, so `cut` is false. Not
+        -- marked, the Wailing Caverns stop with no cave road was searched again from every flight master's plan and never
+        -- settled, test_a_stop_the_grid_cant_reach_settles_as_no_way_found_yet, 1.4.2's CI)
+        local sure = x.hpaNoWay and (not guarded or refused or (throughX and throughX.hpaNoWay)) and true or false
+        if not steps and (cut or sure) and not refused and Dist(sx, sy, tx, ty) <= WG.UNREACHED_LEG_YD
+            and ToAStop(tx, ty) then
           WG.Unreached(c.cont, tx, ty, tz)
         end
         if route and through then
@@ -3573,6 +3764,8 @@ function WG.Walk(c, sx, sy, sz, tx, ty, tz, opts)
         -- shown meanwhile and swapped only for one REFINE_GAIN shorter, never flipping back and forth)
         -- (not a side walk's (`sideWalk`, the ride check's): only weighed against the walk, never walked as it is (the
         -- trip's own legs are searched apart); its best way searched 120-135k nodes more a dock on the Dun Morogh trip)
+        -- (a long leg's found tile to tile too, HPA*: its refine round its way, as cheap as it was or cheaper, item 127's
+        -- "the same quality"; 51-131k nodes in the background, after the trip's own walks)
         if x.heur and route and not sideWalk then
           local cost1 = WG.lastCost or math.huge
           if Rt.SYNC_WALKS then
@@ -3610,7 +3803,7 @@ function WG.Walk(c, sx, sy, sz, tx, ty, tz, opts)
           local x2 = {}
           for k, v in pairs(x) do x2[k] = v end
           x2.road = 1
-          local s2 = WG.Search(c, starts, goals, tx, ty, inside, x2)
+          local s2 = Find(x2)
           local plain = s2 and WG.Pull(c, s2, sx, sy, tx, ty, x2)
           -- (and only to the same floor: the plain walk may end at another of the goals, a tower's foot for the
           -- archmage up it; bake9's sweep, Archmage Tervosh, Ian Strom, Jadenvis Seawatcher)
@@ -4289,6 +4482,73 @@ function WG.CaveLeg(c, cont, sx, sy, tx, ty, opts)
   return out
 end
 
+-- Other spots on capital `name`'s edge near its crossing (x, y, z) (CG.Crossing's, where the Router's own route crosses
+-- in): { { x, y, z }, ... }, nearest first, at most CROSS_RETRY, CROSS_RETRY_YD round it, each on a floor of the city's
+-- grid within CROSS_RETRY_Z of z (any, with none), with the land outside within CROSS_EDGE_YD. Item 141 (1.4.2):
+-- Thunder Bluff's north lift's foot stands on a rise; the Router's own came at it straight from the east, up the slope,
+-- and the grid had no way there though the road up the rise is 30 yd round.
+WG.CROSS_RETRY = 12
+WG.CROSS_RETRY_YD = 80
+WG.CROSS_RETRY_Z = 20
+WG.CROSS_EDGE_YD = 10
+WG.CROSS_WALK_NODES = 20000 -- (the walk outside to one: within this many ...
+WG.CROSS_RETRY_NODES = 100000 -- ... and all those tried for one leg within this many)
+function WG.OtherCrossings(cont, name, cc, x, y, z)
+  local CG = ns.CityGrid
+  local out = {}
+  local E = WG.CROSS_EDGE_YD
+  for r = 10, WG.CROSS_RETRY_YD, 10 do
+    for k = 0, 15 do
+      local an = k * math.pi / 8
+      local px, py = x + r * math.cos(an), y + r * math.sin(an)
+      if CG.CityFor(cont, px, py) == name then
+        local edge = false
+        for j = 0, 7 do
+          local bn = j * math.pi / 4
+          if CG.CityFor(cont, px + E * math.cos(bn), py + E * math.sin(bn)) ~= name then edge = true break end
+        end
+        local f = edge and CG.SurfacesAt(cc, px, py, z)[1]
+        if f and (not z or math.abs(f.z - z) <= WG.CROSS_RETRY_Z) then
+          local apart = true
+          for _, q in ipairs(out) do
+            if (q[1] - px) ^ 2 + (q[2] - py) ^ 2 < 400 then apart = false break end
+          end
+          if apart then
+            out[#out + 1] = { px, py, f.z }
+            if #out >= WG.CROSS_RETRY then return out end
+          end
+        end
+      end
+    end
+  end
+  return out
+end
+
+-- Whether the grid gets out from (qx, qy, qz) toward (ox, oy, oz): a small search (CROSS_ESCAPE_NODES) from there,
+-- its surfaces, else (a speck: the city's cells are the city grid's) the floors round it as WG.Walk starts, that finds
+-- it or runs out of budget, not out of ground. No drops: the way out is walked in the other way too.
+-- (WG.OtherCrossings' spots on Thunder Bluff's north lift's rise flooded the land for seconds each before failing.)
+WG.CROSS_ESCAPE_NODES = 4000
+function WG.CrossEscapes(c, qx, qy, qz, ox, oy, oz, opts)
+  local goals = {}
+  for _, e in ipairs(Ends(c, ox, oy, oz)) do goals[e.id] = e.cost end
+  if not next(goals) then return true end
+  local x = WG.Costs(c, qx, qy, ox, oy, opts) or {}
+  x.nodeCap, x.maxDrop, x.slopeDrop = WG.CROSS_ESCAPE_NODES, 0, 0
+  local starts, tried = Ends(c, qx, qy, qz), {}
+  for _ = 0, WG.NEAR_CELLS do
+    if starts[1] then
+      local n1 = WG.stats.nodes
+      if WG.Search(c, starts, goals, ox, oy, nil, x) or x.limitHit then return true end
+      if WG.stats.nodes - n1 >= WG.ISLAND_NODES then return false end
+      for _, st in ipairs(starts) do tried[#tried + 1] = st end
+    end
+    starts = WG.NearStarts(c, qx, qy, qz, tried)
+    if not starts[1] then return false end
+  end
+  return false
+end
+
 function WG.Leg(cont, sx, sy, tx, ty, opts)
   if not WG.On() then return nil end
   local c = WG.Cont(cont)
@@ -4299,6 +4559,10 @@ function WG.Leg(cont, sx, sy, tx, ty, opts)
   if a and b then return nil end -- (one city: its grid, CG.Leg; two: the Router's own between them)
   if WG.NotMeshed(cont, sx, sy) or WG.NotMeshed(cont, tx, ty) then return nil end
   if not (a or b) then
+    -- (1.4.2, item 119: a building's own grid, through its doors, in the test's towns; BuildingGrid.lua)
+    local BG = ns.BuildingGrid
+    local bg = BG and BG.Leg and BG.Leg(c, cont, sx, sy, tx, ty, opts)
+    if bg ~= nil then return bg end
     -- (a stop inside one of the open world's buildings, or a start, the other end outside it: through its door. Item 70)
     local door = WG.BuildingLeg(c, cont, sx, sy, tx, ty, opts)
     if door ~= nil then return door end
@@ -4332,34 +4596,67 @@ function WG.Leg(cont, sx, sy, tx, ty, opts)
   end
   local x, y, z, i = CG.Crossing(own, cont, name, cc, a ~= nil)
   if not x then return WG.NoWay(cont, sx, sy, tx, ty, "no crossing into " .. name) end
-  local inside, outside
-  if a then
-    local sz = opts.z
-    local zs
-    if CG.PlayerStart(cont, sx, sy) then
-      sz = CG.PlayerFloorZ(cont, sx, sy) or sz
-      zs = not sz and CG.PlayerFloorZs and CG.PlayerFloorZs(cont, sx, sy) or nil
+  -- (the city's grid from or to the crossing, the world grid's on from or up to it: inside, outside, or "pending")
+  local function Splice(px, py, pz, retry)
+    local inside, outside
+    local wo = opts
+    if retry then -- (another crossing: its walk outside within CROSS_WALK_NODES; one that isn't there flooded the land)
+      wo = {}
+      for kk, v in pairs(opts) do wo[kk] = v end
+      wo.crossCap = WG.CROSS_WALK_NODES
     end
-    inside = CG.Walk(cc, sx, sy, sz, x, y, z, nil, zs)
-    local o2 = opts
-    if opts.swimming then -- (the start's water is the city's: the grid's walk starts out of it)
-      o2 = {}
-      for kk, v in pairs(opts) do o2[kk] = v end
-      o2.swimming = nil
+    if a then
+      local sz = opts.z
+      local zs
+      if CG.PlayerStart(cont, sx, sy) then
+        sz = CG.PlayerFloorZ(cont, sx, sy) or sz
+        zs = not sz and CG.PlayerFloorZs and CG.PlayerFloorZs(cont, sx, sy) or nil
+      end
+      inside = CG.Walk(cc, sx, sy, sz, px, py, pz, nil, zs)
+      local o2 = wo
+      if opts.swimming then -- (the start's water is the city's: the grid's walk starts out of it)
+        o2 = {}
+        for kk, v in pairs(wo) do o2[kk] = v end
+        o2.swimming = nil
+      end
+      outside = inside ~= "pending" and inside
+        and WG.Walk(c, px, py, (inside.fz or {})[#(inside.fz or {})] or pz, tx, ty, opts.tz, o2)
+    else
+      inside = CG.Walk(cc, px, py, pz, tx, ty, opts.tz)
+      outside = inside ~= "pending" and inside and WG.Walk(c, sx, sy, opts.z, px, py, (inside.fz or {})[1] or pz, wo)
     end
-    outside = inside ~= "pending" and inside and WG.Walk(c, x, y, (inside.fz or {})[#(inside.fz or {})] or z, tx, ty, opts.tz, o2)
-  else
-    inside = CG.Walk(cc, x, y, z, tx, ty, opts.tz)
-    outside = inside ~= "pending" and inside and WG.Walk(c, sx, sy, opts.z, x, y, (inside.fz or {})[1] or z, opts)
+    if inside == "pending" or outside == "pending" then return "pending" end
+    -- (the two grids' walks meeting on different floors at the crossing: the world grid's arrived on another floor than
+    -- the city's starts on (its own floor there unreached: the mountain's top over Ironforge, 210 yd over the city's
+    -- halls), so the splice is a fall through the rock: as with no walk outside. The underground sweep, 2026-11-23)
+    if inside and outside and not WG.SpliceMeets(inside, outside, a ~= nil) then
+      WG.stats.splitFloors = (WG.stats.splitFloors or 0) + 1
+      outside = nil
+    end
+    return inside, outside
   end
-  if inside == "pending" or outside == "pending" then return "pending" end
+  local inside, outside = Splice(x, y, z)
+  if inside == "pending" then return "pending" end
   if not inside then return WG.NoWay(cont, sx, sy, tx, ty, "no way inside " .. name) end
-  -- (the two grids' walks meeting on different floors at the crossing: the world grid's arrived on another floor than
-  -- the city's starts on (its own floor there unreached: the mountain's top over Ironforge, 210 yd over the city's
-  -- halls), so the splice is a fall through the rock: as with no walk outside. The underground sweep, 2026-11-23)
-  if outside and not WG.SpliceMeets(inside, outside, a ~= nil) then
-    WG.stats.splitFloors = (WG.stats.splitFloors or 0) + 1
-    outside = nil
+  if not outside then
+    -- (no way outside to where the Router's own crosses in: its straight leg off the roads came at the city up a slope
+    -- the grid can't climb (item 141, Thunder Bluff's north lift's foot from the east); the nearest other spots on the
+    -- city's edge then, WG.OtherCrossings, the first that both grids walk)
+    -- (each tried only when the grid gets out from it at all, WG.CrossEscapes, and its walk outside within
+    -- CROSS_WALK_NODES, all of them within CROSS_RETRY_NODES)
+    local ox, oy, oz = a and tx or sx, a and ty or sy, a and opts.tz or opts.z
+    local n0 = WG.stats.nodes
+    for _, q in ipairs(WG.OtherCrossings(cont, name, cc, x, y, z)) do
+      if WG.stats.nodes - n0 > WG.CROSS_RETRY_NODES then break end
+      local i2, o2
+      if WG.CrossEscapes(c, q[1], q[2], q[3], ox, oy, oz, opts) then i2, o2 = Splice(q[1], q[2], q[3], true) end
+      if i2 == "pending" then return "pending" end
+      if i2 and o2 then
+        inside, outside = i2, o2
+        WG.stats.recrossed = (WG.stats.recrossed or 0) + 1
+        break
+      end
+    end
   end
   if not outside then
     -- (the grid has no way outside: the city grid's whole leg when both ends are on its floors (a spot by Ironforge's
@@ -4378,13 +4675,16 @@ end
 ---------------------------------------------------------------------------------------------------- the switch
 -- (the routes and decoded tiles dropped; the regions loaded stay: the game can't load a folder twice)
 function WG.Reset()
+  if ns.WorldHPA then ns.WorldHPA.gaveUp = {} end
   WG.routes, WG.order = {}, {}
   WG.failed, WG.failOrder = {}, {}
   WG.unreached = {}
+  WG.exhausted = {}
   for _, c in pairs(WG.conts) do
     c.tiles, c.bytes, c.none, c.far, c.farOld, c.farN = {}, 0, {}, nil, nil, 0
   end
   WG.stats.tileBytes = 0
+  if ns.BuildingGrid and ns.BuildingGrid.Reset then ns.BuildingGrid.Reset() end
 end
 
 function WG.Set(on)

@@ -129,7 +129,24 @@ M.IsDesaturated = function(s) return s._desat or false end
 M.SetThickness = function(s, t) s._thick = t end -- (recorded)
 M.SetTexCoord = function(s, ...) s._coords = { ... } end -- (recorded)
 M.SetDrawLayer = function(s, layer, sub) s._layer, s._sub = layer, sub end -- (recorded)
-M.SetFont = function(s, f, size, flags) s._font = { f, size, flags } end -- (recorded)
+-- (recorded; false for a file in AGPS_MISSING_FONTS, as the game says when a font file does not load)
+M.SetFont = function(s, f, size, flags)
+  if AGPS_MISSING_FONTS and AGPS_MISSING_FONTS[f] then return false end
+  s._font = { f, size, flags }
+  return true
+end
+-- (a font string's template is its font object; set again, it takes that one's font: the file set by SetFont goes)
+M.CreateFontString = function(s, name, layer, template)
+  local w = NewWidget("FontString", name, s)
+  w._fontObject = template
+  return w
+end
+M.SetFontObject = function(s, o) s._fontObject, s._font = o, nil end
+M.GetFontObject = function(s) return s._fontObject end
+M.SetShadowOffset = function(s, x, y) s._shadowOffset = { x, y } end -- (recorded)
+M.GetShadowOffset = function(s) local o = s._shadowOffset or { 1, -1 } return o[1], o[2] end
+M.SetShadowColor = function(s, r, g, b, a) s._shadowColor = { r, g, b, a } end -- (recorded)
+M.GetShadowColor = function(s) local c = s._shadowColor or { 0, 0, 0, 1 } return c[1], c[2], c[3], c[4] end
 M.SetTextScale = function(s, k) s._textScale = k end -- (recorded: Arrow.lua scales its text so)
 M.GetTextScale = function(s) return s._textScale or 1 end
 M.GetFont = function(s)

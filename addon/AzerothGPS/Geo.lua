@@ -146,21 +146,25 @@ local function FromInsetFraction(cont, u, v)
   end
 end
 
+-- Where world spot (x, y) on continent `cont` is on the world map's art, as fractions (u east, v south); an isle
+-- shown as an inset there, where it's drawn. Nil when it's on neither. (The search orders what's on another
+-- continent by it: GPSFrame's G.SearchPlacesPlain.)
+function Geo.WorldFraction(cont, x, y)
+  cont = Geo.Base(cont)
+  local a = Geo.WorldArtBounds(cont)
+  if a then return (a[4] - y) / (a[4] - a[2]), (a[3] - x) / (a[3] - a[1]) end
+  return InsetFraction(cont, x, y) -- (an isle shown as an inset on the world map: where it's drawn there)
+end
+
 -- `into`: into an isle's coordinates too (by its inset; Geo.IntoAny), else nil there (the public API's
 -- ToContinent: nil, as its callers expect).
 local function ToContinent(from, x, y, to, into)
   from, to = Geo.Base(from), Geo.Base(to)
   if from == to then return x, y end
-  local a, b = Geo.WorldArtBounds(from), Geo.WorldArtBounds(to)
+  local b = Geo.WorldArtBounds(to)
   if not b and not into then return nil end
-  local u, v
-  if a then
-    u = (a[4] - y) / (a[4] - a[2])
-    v = (a[3] - x) / (a[3] - a[1])
-  else -- (an isle shown as an inset on the world map: where it's drawn there)
-    u, v = InsetFraction(from, x, y)
-    if not u then return nil end
-  end
+  local u, v = Geo.WorldFraction(from, x, y)
+  if not u then return nil end
   if not b then return FromInsetFraction(to, u, v) end
   return b[3] - v * (b[3] - b[1]), b[4] - u * (b[4] - b[2])
 end

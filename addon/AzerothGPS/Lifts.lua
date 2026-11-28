@@ -204,6 +204,107 @@ function LT.ManeuverWords(m)
   if not f or (m.dist or 0) > LT.NOTE_YD then return nil end
   return LT.WaitWords(f.level, f.x, f.y, f.floor)
 end
+---------------------------------------------------------------------------
+-- The wait in the route's costs (item 135a, 1.4.2; an idea from Polestar, GPL-3: our own code). The data prices each
+-- lift at a fixed wait and ride (AVG_SECONDS: capitals.py's, lifts.py's and cities.py's LIFT_SECONDS, as yards walked
+-- at YD_PER_SECOND). With a car's phase known, the lift costs the wait for the next car at the time the player gets
+-- there (ETA: from where they stand now, at ETA_SPEED) and its ride instead. Worked out once per lift and floor and
+-- kept for the trip (LT.ResetCosts, Nav's new stops): the route doesn't change as the cars come and go, only when a
+-- phase is learned or changes (a ride seen, LT.Rode: one reroute then).
+---------------------------------------------------------------------------
+LT.AVG_SECONDS = { ["Undercity"] = 25, ["Thunder Bluff"] = 20, ["Thousand Needles"] = 30 }
+LT.YD_PER_SECOND = 7
+LT.ETA_SPEED = 7 -- yards a second to the lift (the run's)
+local costs = {} -- [station .. floor] = { stamp, seconds }
+function LT.ResetCosts() costs = {} end
+
+-- The phases known for the cars of `station`, as one string ("" when none: nothing to price).
+local function Stamp(station, t)
+  local seen, parts = LT.Sightings(), {}
+  for _, c in ipairs(ns.LiftCars or {}) do
+    local s = c.station == station and seen[LT.CarKey(c)]
+    if s and s.phase and s.at and t - s.at <= LT.KEEP_HOURS * 3600 then
+      parts[#parts + 1] = string.format("%s=%.2f@%.0f", LT.CarKey(c), s.phase, s.at)
+    end
+  end
+  return table.concat(parts, ";")
+end
+
+-- The player's yards to (x, y) on `level`, or nil.
+local function YardsTo(level, x, y)
+  local ok, px, py, _, cont = pcall(UnitPosition, "player")
+  if not ok or not px or (ns.IsSecret and (ns.IsSecret(px) or ns.IsSecret(py) or ns.IsSecret(cont))) then return nil end
+  local N = ns.Nav
+  local lv = N and N.PlayerLevel and N.PlayerLevel(cont) or cont
+  if lv ~= level and cont ~= level then return nil end
+  return math.sqrt(Dist2(px, py, x, y))
+end
+
+-- The seconds car `c` takes from leaving `floor` to stopping at the other.
+local function RideSeconds(c, floor)
+  local other = floor == "bottom" and "top" or "bottom"
+  local a, b = c[floor], c[other]
+  if not (a and b and c.period) then return nil end
+  return Mod(b[1] - a[2], c.period)
+end
+
+-- The lift's wait and ride boarded at `floor` ("bottom" / "top") by (x, y) on `level`, as seconds over the data's fixed
+-- ones (less than 0: quicker), or 0 when no car's phase is known there. `eta`: the seconds till the player gets there
+-- (nil: from where they stand, ETA_SPEED).
+function LT.CostSeconds(level, x, y, floor, eta)
+  local near = level and x and y and LT.CarAt(level, x, y, LT.STATION_YD)
+  if not near then return 0 end
+  local now = LT.Now()
+  local stamp = Stamp(near.station, now)
+  local key = near.station .. floor
+  if stamp == "" then
+    costs[key] = nil
+    return 0
+  end
+  local m = costs[key]
+  if m and m[1] == stamp then return m[2] end
+  if not eta then
+    local yd = YardsTo(level, x, y)
+    eta = yd and yd / LT.ETA_SPEED or 0
+  end
+  -- (the soonest of its cars there then, and that car's ride)
+  local w, ride
+  for _, c in ipairs(ns.LiftCars or {}) do
+    if c.station == near.station then
+      local cw = LT.CarWait(c, floor, now + eta)
+      if cw and (not w or cw < w) then w, ride = cw, RideSeconds(c, floor) end
+    end
+  end
+  local avg = LT.AVG_SECONDS[near.place]
+  local d = (w and ride and avg) and (w + ride - avg) or 0
+  costs[key] = { stamp, d }
+  return d
+end
+
+-- The same as yards walked (Router's, the grids' lift roads and links), never under -`floorYd` (their own length).
+function LT.CostYards(level, x, y, floor, floorYd)
+  local d = LT.CostSeconds(level, x, y, floor) * LT.YD_PER_SECOND
+  if floorYd and d < -floorYd then d = -floorYd end
+  return d
+end
+
+-- A phase learned or changed (LT.Rode): the lifts' costs worked out again, the route once.
+local Rode = LT.Rode
+function LT.Rode(c, to, tb, ta)
+  local was = Stamp(c.station, ta)
+  local phase = Rode(c, to, tb, ta)
+  if phase and Stamp(c.station, ta) ~= was then
+    costs[c.station .. "bottom"], costs[c.station .. "top"] = nil, nil
+    -- (the grids' walks kept with the old costs: searched again)
+    local WG, CG = ns.WorldGrid, ns.CityGrid
+    if WG and WG.routes then WG.routes, WG.order = {}, {} end
+    if CG and CG.routes then CG.routes, CG.order = {}, {} end
+    local N = ns.Nav
+    if N and N.Invalidate and N.stops and N.stops[1] then N.Invalidate(true) end
+  end
+  return phase
+end
+
 local on -- (below: on a car's shaft now)
 -- Not while riding: on a car of that lift that isn't standing at the floor boarded from (it's left: the next car's
 -- wait there is no use now).

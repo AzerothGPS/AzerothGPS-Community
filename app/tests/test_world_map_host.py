@@ -380,10 +380,17 @@ def test_the_maps_buttons_are_over_the_games_icons_in_the_world_map_and_the_map_
     lua.globals().ToggleWorldMap()
     try:
         assert G.WorldMapHosted()
-        # (the game's icons: 2000 to about 2900)
-        assert b._level >= min(9000, G.WorldMapLevel() + G.WORLD_MAP_BUTTONS)
-        assert poi._level < G.WorldMapLevel() + 100 and b._level > poi._level + 3000
-        assert b._level < G.WorldMapLevel() + G.WORLD_MAP_OVER
+        box = G.WorldMapBox()
+        if G.hudOut:
+            # (our map in the canvas, the scroll frame's child, drawn as one layer at the scroll frame's level: the
+            # HUD on the scroll frame itself, over all of it and over the icons there, test_hud_on_top.py)
+            assert lua.eval("rawequal")(G.hudLayer._parent, box)
+            assert b._level > box.GetFrameLevel(box)
+        else:
+            # (the game's icons: 2000 to about 2900)
+            assert b._level >= min(9000, G.WorldMapLevel() + G.WORLD_MAP_BUTTONS)
+            assert poi._level < G.WorldMapLevel() + 100 and b._level > poi._level + 3000
+            assert b._level < G.WorldMapLevel() + G.WORLD_MAP_OVER
     finally:
         lua.globals().ToggleWorldMap()
         lua.execute("AGPS_SB.GetFrameStrata, AGPS_PL.GetFrameStrata = nil, nil AGPS_SB, AGPS_PL = nil, nil")

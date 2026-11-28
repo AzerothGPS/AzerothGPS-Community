@@ -236,8 +236,9 @@ def test_the_button_only_with_a_route_last_in_the_bottom_row_and_on_the_bar_whil
     _tick(lua, ns, 2)  # (G.WatchQuickOn: laid out again)
     t = _slot(ns, "pauseRoute")
     assert t and str(G.QuickPlace("pauseRoute")) == "menuRight" and str(t.where) == "menuRight"
-    row = [str(s.id) for s in G.QuickSlots().values() if str(s.where) == "menuRight"]
-    assert row[-1] == "pauseRoute", row  # (the bottom row, all the way to the right)
+    row = [str(s.id) for s in G.QuickSlots().values() if str(s.where) == "menuRight" and not s.tail]
+    assert row[-1] == "pauseRoute", row  # (the bottom row, all the way to the right: but for Import and Share and the
+    # companions' buttons, the row's end since 1.4.2, Kooki3z 2026-11-27)
     assert str(t.labelNow()) == "Pause Routing"
     if G.mapMenu:
         G.mapMenu.Hide(G.mapMenu)

@@ -227,6 +227,13 @@ TRANSPORT_WAIT = 120.0  # s, average wait for the next departure
 # 356.3), except where timed otherwise (MEASURED_CYCLES: Grom'gol's departures from Brill 335.5-336.5 s apart, its
 # arrivals 337, against 333.0). An extra on every cycle (3.6 s) was tried first and put Durotar's timer 4 s off a cycle.
 DOCK_SECONDS = 62.5
+# Docks whose ship waits off the end of the pier, in the water (the TaxiPathNode's spot): the deck's spot beside it and
+# the deck's height instead, the walks to and from the ship (Nav's EndZ). Item 138b (1.4.2): Auberdine's boat stops 12 yd
+# off the pier's T, the sea's bottom 19 yd under it; the walk off the boat swam 290 yd to the beach instead of walking
+# the pier (the world grid's deck, 6 yd over the water, has no way up out of it). Measured on the world grid's deck.
+DOCK_SPOTS = {  # the row's name -> (x, y, z)
+    "Auberdine, Darkshore": (6587.5, 769.5, 6.0),
+}
 MEASURED_CYCLES = {  # "dock 1 | dock 2" (the row's names) -> seconds
     "Grom'gol Base Camp, Stranglethorn Vale | Brill, Tirisfal Glades": 336.3,
 }
@@ -341,6 +348,12 @@ def transports_lua(cd: ClientData) -> str:
         wait1, wait2 = a["Delay"], b["Delay"]
         (c1, x1, y1), (c2, x2, y2) = (a["ContinentID"], *a["Loc"][:2]), (b["ContinentID"], *b["Loc"][:2])
         name1, name2 = place_name(c1, x1, y1), place_name(c2, x2, y2)
+        # (a dock whose ship waits off the pier: the walks to and from it end on the deck, DOCK_SPOTS)
+        dz1 = dz2 = None
+        if name1 in DOCK_SPOTS:
+            x1, y1, dz1 = DOCK_SPOTS[name1]
+        if name2 in DOCK_SPOTS:
+            x2, y2, dz2 = DOCK_SPOTS[name2]
         if pid in periods:  # (the live server's: at the dock DOCK_SECONDS, the cycle the dump's unless timed in game)
             wait1 = wait2 = DOCK_SECONDS
             cycle = MEASURED_CYCLES.get(f"{name1} | {name2}", periods[pid])
@@ -362,6 +375,7 @@ def transports_lua(cd: ClientData) -> str:
                     f'{_lua_str(name1)}, {_lua_str(name2)}, '
                     f'cycle = {cycle:.1f}, ride1 = {ride1:.1f}, ride2 = {ride2:.1f}, wait1 = {wait1}, wait2 = {wait2}'
                     f'{", server = true" if pid in periods else ""}'
+                    f'{f", z1 = {dz1:.1f}" if dz1 is not None else ""}{f", z2 = {dz2:.1f}" if dz2 is not None else ""}'
                     f'{_faction_field(name1, name2)}{place_ids(1, name1)}{place_ids(2, name2)} }},')
     # The Deeprun Tram: its own map (369), in by an area trigger at each end (Stormwind, Ironforge), with the triggers'
     # heights (`z1`, `z2`: the walks to and from them on their floor. Without, the walk to Stormwind's ended on the keep's

@@ -19,7 +19,12 @@ def test_an_upstairs_innkeeper_gets_take_the_stairs_up(game, cont, start, stop, 
     st.worldGrid, st.cityGrid = True, True
     WG.Set(True)
     R.Reset()
-    r = R.Route(cont, start[0], start[1], stop[0], stop[1], lua.table(tz=tz))
+    # (the world grid's own stairs; a building's own grid's: test_building_routing.py)
+    was, st.buildingGrid = st.buildingGrid, False
+    try:
+        r = R.Route(cont, start[0], start[1], stop[0], stop[1], lua.table(tz=tz))
+    finally:
+        st.buildingGrid = was
     part = lua.table(cont=cont, pts=r.pts, kinds=r.kinds, stop=1, fz=r.fz, zs=r.zs)
     p = T.Path(lua.table(parts=lua.table(part), legs=lua.table(lua.table(walk=True))))
     ms = T.Maneuvers(p)

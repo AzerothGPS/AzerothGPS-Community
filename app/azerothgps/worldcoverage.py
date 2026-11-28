@@ -117,6 +117,9 @@ KNOWN_GAPS: dict = {
     ('Ashenvale Sentinel', 2408, -1726): "foot: the mesh walks to it; the grid's 8.33 yd cells miss the stairs or door",
     ('Rayan Dawnrisen', 3983, -4799): "noway: the grid's cell has another floor than the spot's",
     ('Haleh', 6110, -4189): "noway: its floor is reached; no walk from the starts round it",
+    # (the sample's since 1.4.2's camp NPCs left the shipped stops; her spot unchanged: from the west the grid stays on
+    # the floor below hers, 711.5 under 743.5, to her x, y)
+    ('Syurana', 7122, -3978): "foot: the grid's cell has another floor than the spot's",
     ('Frahun Shadewhisper', 10519, 778): "foot: the mesh walks to it; the grid's 8.33 yd cells miss the stairs or door",
     ('Alyissia', 10527, 778): "foot: the mesh walks to it; the grid's 8.33 yd cells miss the stairs or door",
     ('Halaan Hawk-Eye', 4065, 1795): "foot: the grid's cell has another floor than the spot's",

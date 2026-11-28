@@ -290,7 +290,10 @@ def _seamless(on=True, projection=True, saved_extra=""):
     projection)."""
     pytest.importorskip("lupa.lua51")
     from azerothgps.gameharness import start
-    gps = f"style = '{'seamless' if on else 'minimap'}'"
+    # (the map shown at the reference size, G.ZOOM_REF_SIZE, the stages' and zooms' own, as tuned: the default 450 map
+    # shows 480 since 1.4.2 for its quick buttons going right, G.QuickMinSides; two of them hidden here keep it 450)
+    gps = (f"style = '{'seamless' if on else 'minimap'}', "
+           "quick = { pauseRoute = 'hidden', import = 'hidden' }")
     lua, ns = start(saved=f"AzerothGPSDB = {{ settings = {{ gps = {{ {gps} }} }}, seamlessDefault60 = true, mapStyles75 = true "
                           f"{saved_extra} }}")
     lua.execute(WORLD_MAPS)
@@ -485,6 +488,10 @@ OPENMAP_FILES = AUTHOR_FILES | {"addon/AzerothGPS/GPSFrame.lua", "addon/AzerothG
                                 "addon/AzerothGPS/Atlas/Atlas.lua"}
 # (and the No Map style's tests: they stub the OpenMap addon's API, which No Map follows; Kooki3z 2026-11-20)
 OPENMAP_FILES |= {"app/tests/test_no_map_style.py"}
+# (and the supported addons' tests: the world map option turning No Map on with the OpenMap addon there; 1.4.2)
+OPENMAP_FILES |= {"app/tests/test_supported_uis.py", "app/tests/test_ui_overlap.py"}
+# (and the HUD tests: icons over No Map over OpenMap's map, the HUD over them; 1.4.2)
+OPENMAP_FILES |= {"app/tests/test_hud_on_top.py"}
 
 
 def _repo_files():
@@ -1981,10 +1988,11 @@ def test_undercity_opened_from_its_icon_is_left_zoomed_far_out(on):
         _wheel(lua, G, 1.25)
     free = G.BrowseState()[1]
     assert not free.interior and not free.city and G.ViewState()[0:2] == pytest.approx((x, y))
-    st.zoom = 300.0
+    st.zoom = (G.SEAM_TILES_OUT[1] + G.SEAM_TILES_OUT[2]) / 2 * G.ZoomScale()
     G.Update()
     # (back in: no longer the map opened from its icon; on OpenMap the city's whole map as zoomed in over it, asked
-    # 2026-11-15, G.CityUnderView; the other styles: the land)
+    # 2026-11-15, G.CityUnderView, as the terrain gives way (item 143: closer in, the land alone); the other styles: the
+    # land)
     assert not G.BrowseState()[1].city
     if on:
         assert G.zoomedInside == 7675285
@@ -2758,6 +2766,22 @@ def _up_at_the_ruins(lua, ns, which=0):
     ns.GPS.Update()
 
 
+def _over_the_ruins_on_the_map(lua, ns):
+    """Up top at the Ruins on the map (not the square): zoomed in to the terrain's own stage the land alone (item 143,
+    Kooki3z 2026-11-27: "zoomed in at a point it should only show the terrain map"); as the terrain gives way (the
+    tiles' fade, G.SEAM_TILES_OUT) Undercity's whole map over its rooms."""
+    G, st = ns.GPS, ns.settings.gps
+    was = st.zoom
+    assert G.TerrainAlone(st.zoom) and G.inside is None
+    st.zoom = (G.SEAM_TILES_OUT[1] + G.SEAM_TILES_OUT[2]) / 2 * G.ZoomScale()
+    lua.execute("AGPS_T = AGPS_T + 1")
+    G.Update()
+    assert G.inside is not None
+    st.zoom = was
+    lua.execute("AGPS_T = AGPS_T + 1")
+    G.Update()
+
+
 @pytest.mark.parametrize("minimap", [False, True])
 @pytest.mark.parametrize("which", [0, 1])
 def test_undercity_shows_only_once_down_in_it(which, minimap):
@@ -2780,7 +2804,7 @@ def test_undercity_shows_only_once_down_in_it(which, minimap):
     if minimap:
         assert G.inside is None and G.zoomedInside is None and G.shownLevel != 10001
     else:  # (the map, zoomed in over its rooms: its map, as ever; "zoom in from the map on UC stopped working")
-        assert G.inside is not None
+        _over_the_ruins_on_the_map(lua, ns)
     lua.execute("GetSubZoneText = function() return 'Trade Quarter' end")  # (down the lift)
     _down_in_undercity(lua, ns)
     _up_at_the_ruins(lua, ns, which)
@@ -2790,7 +2814,7 @@ def test_undercity_shows_only_once_down_in_it(which, minimap):
         assert G.inside is None and G.zoomedInside is None and G.shownLevel != 10001
         assert G.MinimapMode()
     else:
-        assert G.inside is not None
+        _over_the_ruins_on_the_map(lua, ns)
 
 
 def test_undercity_opened_from_its_icon_has_the_terrain_round_it():

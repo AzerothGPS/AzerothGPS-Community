@@ -5,7 +5,7 @@
 ## Author: AzerothGPS
 ## X-License: All Rights Reserved
 ## X-Copyright: Copyright (c) 2026 AzerothGPS
-## Version: 1.4.1
+## Version: 1.4.2
 ## IconTexture: Interface\AddOns\AzerothGPS\Media\Device
 ## SavedVariables: AzerothGPSDB
 ## LoadSavedVariablesFirst: 1
@@ -91,6 +91,8 @@ Nav.lua
 Turns.lua
 CityGrid.lua
 WorldGrid.lua
+WorldHPA.lua
+BuildingGrid.lua
 Unstuck.lua
 Shore.lua
 StopSnap.lua
@@ -102,6 +104,9 @@ Polestar.lua
 Questify.lua
 AzerothPilot.lua
 OpenXP.lua
+FlowUp.lua
+WaypointUI.lua
+UIFont.lua
 Layers.lua
 MapExtras.lua
 GPSFrame.lua
