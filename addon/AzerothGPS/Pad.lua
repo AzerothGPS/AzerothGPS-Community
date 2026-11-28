@@ -399,6 +399,7 @@ function Pad.ShowMarks(on)
     reticle:SetSize(20, 20)
     reticle:SetPoint("CENTER", canvas, "CENTER", 0, 0)
     reticle:SetFrameLevel((canvas:GetFrameLevel() or 1) + 50)
+    reticle.agpsOverHud = true -- (no map icon: over the map's buttons and text too, GPSFrame's G.ApplyHud)
     local h = reticle:CreateTexture(nil, "OVERLAY")
     h:SetColorTexture(1, 1, 1, 0.85)
     h:SetSize(18, 2)
@@ -1563,6 +1564,14 @@ function Pad.Tick(dt)
   if Pad.MenuOpen() and not searching then
     if g.mapMenu then g.mapMenu.idle = 0 end
     if Pad.focus and not Pad.focus:IsShown() then Pad.SetFocus(nil) end
+    -- (just opened: the focus on the first of the drawer's as it slides out, not on the row's always-shown buttons
+    -- that were there first (Import and Share's since 1.4.2), till a control is pressed or a moment's gone)
+    if Pad.menuFresh then
+      local first = Pad.MenuButtons()[1]
+      if first and Pad.focus ~= first and Pad.used then Pad.SetFocus(first) end
+      Pad.menuFresh = Pad.menuFresh - (dt or 0)
+      if Pad.menuFresh <= 0 then Pad.menuFresh = nil end
+    end
     -- (the drawer slid out: its first button; not with the mouse in use, asked 2026-11-16: "if the player starts using
     -- the mouse again stop the map menu highlighting for a selection, its fighting the mouse selection and shows
     -- tooltips")
@@ -1694,6 +1703,7 @@ function Pad.PickMark()
   m = CreateFrame("Frame", nil, canvas)
   m:SetPoint("CENTER", canvas, "CENTER", 0, 0)
   m:SetFrameLevel((canvas:GetFrameLevel() or 1) + 49)
+  m.agpsOverHud = true -- (no map icon: over the map's buttons and text too, GPSFrame's G.ApplyHud)
   local t = m:CreateTexture(nil, "OVERLAY")
   t:SetAllPoints()
   t:SetBlendMode("ADD")
@@ -1936,6 +1946,11 @@ function Pad.MenuButtons()
     for _, e in ipairs(g.QuickFindEntries()) do add(g.quickFindButtons and g.quickFindButtons[e.kind]) end
     if #out > 0 then return out end
   end
+  -- (a flyout in a group's open, Map Layers' Route, Travel...: its buttons, GPSFrame's G.ToggleSubGroup)
+  if g.OpenSubSlot and g.OpenSubSlot() then
+    for _, b in ipairs(g.SubButtons()) do add(b) end
+    if #out > 0 then return out end
+  end
   local open = g.OpenGroupSlot and g.OpenGroupSlot()
   if open then
     for _, m in ipairs(open.members or {}) do add(m.button) end
@@ -2057,6 +2072,7 @@ function Pad.OpenMenu()
   g.mapMenu.idle = 0
   Pad.SetFocus(nil)
   Pad.Move(0)
+  Pad.menuFresh = Pad.MENU_FRESH_SECONDS
   Pad.ShowMarks(true)
   return true
 end
@@ -2087,6 +2103,8 @@ function Pad.MenuParent()
       if t.id == "quickFind" and t.button and t.button:IsShown() then return t.button end
     end
   end
+  local inner = g.OpenSubSlot and g.OpenSubSlot()
+  if inner and inner.button and inner.button:IsShown() then return inner.button end
   local open = g.OpenGroupSlot and g.OpenGroupSlot()
   return open and open.button or nil
 end
@@ -2098,8 +2116,10 @@ function Pad.FocusSlot(id)
   end
   return Pad.Move(0)
 end
+Pad.MENU_FRESH_SECONDS = 1
 function Pad.MenuRun(has, down)
   if not down then return nil end
+  if not has.menu then Pad.menuFresh = nil end -- (a control pressed: the focus the player's from now)
   local g = G()
   if g.mapMenu then g.mapMenu.idle = 0 end
   local q = Pad.Question()
@@ -2124,6 +2144,13 @@ function Pad.MenuRun(has, down)
       g.SetQuickFindOpen(false)
       Pad.SetFocus(nil)
       return Pad.FocusSlot("quickFind")
+    end
+    -- (a flyout in a group's, Map Layers' Route...: back to its button, its group still out)
+    local inner = g.OpenSubSlot and g.OpenSubSlot()
+    if inner and g.CloseOpenSub and g.CloseOpenSub() then
+      Pad.SetFocus(nil)
+      if inner.button and inner.button:IsShown() then Pad.SetFocus(inner.button) else Pad.Move(0) end
+      return true
     end
     local open = g.OpenGroupSlot and g.OpenGroupSlot()
     if open and g.CloseOpenGroup and g.CloseOpenGroup() then

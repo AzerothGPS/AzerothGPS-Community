@@ -23,6 +23,9 @@ ns.DEFAULTS = {
     -- place, size, zoom and minimized logo: extraWindowPoint, extraWindowSize, extraWindowWidth, extraWindowZoom,
     -- extraWindowMinimized, extraWindowMiniAt (none till it's moved: the first window's)
     extraWindow = false,
+    -- companion addons' buttons (AzerothGPS_StreetView's figure and Street Guess's) at the end of the map menu's
+    -- column, not on its row going right (1.4.2, Kooki3z 2026-11-27; GPSFrame's G.SyncCompanions)
+    companionsInMenu = false,
     replaceMinimapKeepSquare = true, -- the square kept as it is while the map is grown out of it, both shown (asked
     -- 2026-11-15; off: the game's minimap given back meanwhile; GPSFrame's G.SquareKeptOut)
     replaceMinimapIdle = 5, -- s of quiet before the map grown out of the square goes back (0: never; asked 2026-11-11)
@@ -32,6 +35,13 @@ ns.DEFAULTS = {
     -- and the world map keep it; GPSFrame's G.SquareHidesRoute)
     replaceMinimapResume = true, -- a glowing Resume Routing button by the square's logo while routing is paused (1.3.9,
     -- asked 2026-11-18; GPSFrame's G.PlaceMinimapResume)
+    replaceMinimapLogo = true, -- the AzerothGPS logo button on the square (Kooki3z 2026-11-27 for 1.4.2: "add option to
+    -- hide minimap logo button"; off: hidden, its clicks reached by the Show/Hide GPS key, /agps show and /agps;
+    -- GPSFrame's G.SquareLogoShown)
+    replaceMinimapLogoKeep = true, -- the logo in its original spot over the square's corner (1.4.2, Kooki3z 2026-11-28;
+    -- unticked by a drag; GPSFrame's G.LogoKept)
+    replaceMinimapLogoUnlocked = false, -- the logo dragged round the square's edge (1.4.2; GPSFrame's G.LogoDragStart;
+    -- its spot `replaceMinimapLogoAngle`, unset: its corner)
     replaceMinimapNoBorder = false, -- the square without its border, only the map (Kooki3z 2026-11-26 for 1.4.1;
     -- GPSFrame's G.SquareHidesBorder)
     replaceMinimapSize = "small", -- its square: "small" (200), "medium" (260), "large" (320) (G.MINIMAP_SIDES)
@@ -94,6 +104,12 @@ ns.DEFAULTS = {
     showDungeonPaths = true, -- a dungeon's dotted way through on its map (the map menu's Show Routes; GPS.DungeonPathsOn)
     dungeonPathColor = "gold", -- a dungeon's dotted usual way: a key of GPS.DUNGEON_PATH_COLORS (the map's picker)
     layerCaves = true, -- cave and mine entrances (double-click one for a stop)
+    -- (1.4.2, Kooki3z 2026-11-27: the map's elements shown or hidden one by one from the Map Layers button, GPSFrame's
+    -- G.MAP_LAYERS; these four had no switch of their own before)
+    layerRoute = true, -- the route's line on the map (off: still routed, the directions as ever; only not drawn)
+    layerStops = true, -- the stops' and the destination's markers
+    layerDocks = true, -- boats', zeppelins' and the tram's docks (with points of interest before 1.4.2: InitDB's docks142)
+    layerNpcs = true, -- the NPCs drawn in a building's inside map (GPSFrame's G.AddInteriorNpcs)
     -- how far out each kind's icons show (yards to the map's edge at the reference size; 6100 the top notch: always;
     -- "stage": gone past the seamless map's world stage, as shipped): GPSFrame's G.IconShown, asked 2026-11-14
     iconYdTaxi = 6100, iconYdPoi = "stage", iconYdQuests = 6000, iconYdCity = "stage", iconYdInstances = 6100,
@@ -142,6 +158,8 @@ ns.DEFAULTS = {
     eliteOffset = -10, -- ... those whose elites' top level is at least the player's plus this (Router.ELITE_OFFSET_MIN to MAX)
     showAvoided = true, -- the guard zones a route goes around, drawn red on the map (item 63c); the elite areas gold
     worldGrid = true, -- 1.4.0's world routing: routes on the open world's walk grid (WorldGrid.lua); always on (item 74)
+    buildingGrid = true, -- 1.4.2's building routing (test): walks inside the open world's buildings on their own grids
+    -- (BuildingGrid.lua, item 119), in BuildingGrid.TOWNS only for now
     cityGrid = true, -- 1.4.0's city routing: routes inside the capitals on their walk grids (CityGrid.lua); always on
     -- since 2026-11-23 (Kooki3z: "this will be the new default for pathing going forward")
     allowSwim = true, -- routes may swim (Passability.avoidSwim off: Nav.SyncSwim); off, they go round by land
@@ -190,9 +208,12 @@ ns.DEFAULTS = {
     dirShown = true, -- the directions panel (off: the arrow alone)
     dirStopsOnly = false, -- the directions list the stops only, no turns
     dirTextScale = 1, -- the directions' text size
+    dirTextStyle = "ui", -- their font: a supported UI's text style ("ui", with DaylightUI or EllesmereUI) or ours ("agps"; 1.4.2, UIFont.lua)
     targetNpcButton = true, -- near the next stop's NPC, a Target button under the directions panel (1.3.14)
     targetNpcMarkSolo = true, -- ... its click also marks the NPC with the stop's route marker, solo
     targetNpcMarkGroup = false, -- ... and in a party or raid (a raid: with lead or assist only)
+    waypointUI = true, -- the next stop as the Waypoint UI addon's waypoint, with that addon (1.4.2; WaypointUI.lua)
+    waypointUIPins = true, -- ... and the player's own Ctrl-click pins there added as stops (1.4.2; WaypointUI.lua)
     -- click-through: the map and the arrow ignore the mouse (clicks go to the game world)
     clickThroughMoving = false, -- while moving
     clickThroughCombat = false, -- in combat (off by default: asked, 2026-10-01)
@@ -779,6 +800,24 @@ function ns.SplitDirLock(gps)
   end
 end
 
+-- A profile's gps settings: the Quests button's place (its group's, "questsG", else its first button's from before
+-- groups) and its spot in the order (quickOrder) given to Map Layers ("mapLayers"), unless Map Layers has its own.
+function ns.QuestsToLayers(gps)
+  if type(gps) ~= "table" then return end
+  local q = gps.quick
+  if type(q) == "table" and q.mapLayers == nil then
+    q.mapLayers = q.questsG or q.quests
+  end
+  local order = gps.quickOrder
+  if type(order) == "table" then
+    local has = false
+    for _, id in ipairs(order) do has = has or id == "mapLayers" end
+    for i, id in ipairs(order) do
+      if id == "questsG" and not has then order[i] = "mapLayers" end
+    end
+  end
+end
+
 local function InitDB()
   local fresh = AzerothGPSDB == nil -- (no saved data before this session: a first install, for the setup and the tips)
   AzerothGPSDB = AzerothGPSDB or {}
@@ -890,6 +929,27 @@ local function InitDB()
       if type(t) == "table" and type(t.gps) == "table" and (t.gps.roadTolerance == 0 or t.gps.roadTolerance == nil) then
         t.gps.roadTolerance = ns.DEFAULTS.gps.roadTolerance
       end
+    end
+  end
+  -- (1.4.2: the docks were shown with Points of interest; their own setting since (Map Layers). Points of interest
+  -- turned off kept them hidden: the docks off too, once, in every profile)
+  if not db.docks142 then
+    db.docks142 = true
+    if gps and gps.poiPoi == false and gps.layerDocks == nil then gps.layerDocks = false end
+    for _, t in pairs(type(db.profiles) == "table" and db.profiles or {}) do
+      if type(t) == "table" and type(t.gps) == "table" and t.gps.poiPoi == false and t.gps.layerDocks == nil then
+        t.gps.layerDocks = false
+      end
+    end
+  end
+  -- (1.4.2: the map menu's Quests button gone, Map Layers in its place, Kooki3z 2026-11-27: where a player put the
+  -- Quests button (or hid it), and its place in their order, Map Layers takes once, in every profile; the quest layers'
+  -- own settings as they were)
+  if not db.questsToLayers142 then
+    db.questsToLayers142 = true
+    ns.QuestsToLayers(gps)
+    for _, t in pairs(type(db.profiles) == "table" and db.profiles or {}) do
+      if type(t) == "table" then ns.QuestsToLayers(t.gps) end
     end
   end
   Merge(db.settings, ns.DEFAULTS)
@@ -1902,6 +1962,8 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
     if ns.started and ns.Record and ns.Record.OnEnteringWorld then pcall(ns.Record.OnEnteringWorld, arg1, arg2) end
     if ns.started and ns.Setup and ns.Setup.OnEnteringWorld then pcall(ns.Setup.OnEnteringWorld) end
     if ns.started and ns.WhatsNew and ns.WhatsNew.OnEnteringWorld then pcall(ns.WhatsNew.OnEnteringWorld) end
+    -- (a supported UI picks its font at login: our HUD text takes it again, UIFont.lua)
+    if ns.started and ns.UIFont and ns.UIFont.OnEnteringWorld then pcall(ns.UIFont.OnEnteringWorld) end
   elseif event == "PLAYER_LOGOUT" then
     if ns.Nav and ns.Nav.SaveTrack then pcall(ns.Nav.SaveTrack) end
     if ns.Record and ns.Record.OnLogout then pcall(ns.Record.OnLogout) end
@@ -1929,6 +1991,7 @@ ev:SetScript("OnEvent", function(_, event, arg1, arg2)
     Start("map", ns.GPS and ns.GPS.Init)
     Start("minimap route", ns.GPS and ns.GPS.InitMinimapRoute)
     Start("direction arrow", ns.Arrow and ns.Arrow.Init)
+    Start("UI text style", ns.UIFont and ns.UIFont.Init) -- (after the map and the arrow made their texts)
     Start("window looks", ns.Looks and ns.Looks.Init)
     Start("waypoint import", ns.Import and ns.Import.Init)
     Start("teleports", ns.Teleports and ns.Teleports.Init)

@@ -106,11 +106,8 @@
   "14304@1:1891,-4150": "Kor'kron Elite: z 43.5 floating by 33.5; grid gap: Orgrimmar's collision has a floor at 43.5 there (Grommash Hold); not in the city grid",
   "14304@1:1952,-4146": "Kor'kron Elite: z 43.5 floating by 34.0; grid gap: Orgrimmar's collision has a floor at 43.5 there (Grommash Hold); not in the city grid",
   "2543@0:35,256": "Archmage Ansirem Runeweaver: z 42.0 under by 28.5; unverified: inside Dalaran's dome, no floor at 42 in the world mesh (nearest 65)",
-  "2696@0:-2357,-2423": "Foggy MacKreel: z 74.9 floating by 74.9; grid gap: the world mesh has a floor at 74.9 there; the world grid kept only the sea",
   "3520@0:-8656,677": "Ol' Emma: z 108.1 floating by 5.8; grid gap: Stormwind's collision has a floor at 108.1 there; the city grid's is 102.2",
   "3534@0:-755,1497": "Wallace the Blind: z 17.1 under by 11.9; unverified: no floor at 17 in the world mesh (nearest 29: a cellar the mesh lacks, or the spawn's height)",
-  "5510@0:-8419,647": "Thulman Flintcrag: z 97.5 floating by 31.2; grid gap: Stormwind's collision has a floor at 97.4 there; not in the city grid",
-  "5994@1:1461,-4182": "Zayus: z 61.4 floating by 16.9; grid gap: Orgrimmar's collision has a floor at 61.3 there (the upper floor); not in the city grid",
-  "6014@1:1453,-4186": "X'yera: z 61.4 floating by 21.9; grid gap: Orgrimmar's collision has a floor at 61.3 there (the upper floor); not in the city grid"
+  "5510@0:-8419,647": "Thulman Flintcrag: z 97.5 floating by 31.2; grid gap: Stormwind's collision has a floor at 97.4 there; not in the city grid"
  }
 }

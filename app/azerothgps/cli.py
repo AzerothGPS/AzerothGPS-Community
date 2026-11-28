@@ -655,6 +655,23 @@ def cmd_city_grid(args) -> int:
     return 0
 
 
+def cmd_building_grid(args) -> int:
+    """The open world's buildings' walk grids (buildinggrid.py, 1.4.2 item 119): `extract` (needs the client) the
+    inventory and each grid's triangles; the bake (no client) with the city grids' rebake in the same run."""
+    import json as _json
+
+    from . import buildinggrid
+
+    if args.what == "extract":
+        cd = _client(args)
+        idx = buildinggrid.extract(cd, only=args.only)
+        print(f"{len(idx['rows'])} placements, {len(idx['variants'])} grids: {buildinggrid.work_dir()}")
+        return 0
+    st = buildinggrid.run(write_files=args.write, jobs=args.jobs, city=not args.no_city)
+    print(_json.dumps({k: v for k, v in st.items() if k != "city"}))
+    return 1 if st["failed"] else 0
+
+
 def cmd_world_grid(args) -> int:
     """The open world's layered walk grid (worldmesh.py, worldgrid.py, worldbake.py; 1.4.0's world routing, being
     tested): `mesh` builds every map tile's Recast mesh, `grid` each tile's cells, then the bake (`--write`:
@@ -677,6 +694,21 @@ def cmd_world_grid(args) -> int:
             stats.append({"cont": c, "landmarks": res["landmarks"], "regions": len(res["regions"]), "bytes": size})
         (DATA / "debug" / "worldgrid").mkdir(parents=True, exist_ok=True)
         (DATA / "debug" / "worldgrid" / "alt.json").write_text(_json.dumps(stats, indent=1), encoding="utf-8")
+        print(_json.dumps(stats))
+        return 0
+    if args.what == "hpa":
+        # (item 127: HPA*'s ways between the map tiles and their costs, each region folder's Hpa.lua with --write)
+        from . import worldhpa
+        import os as _os
+        from pathlib import Path as _P
+        root = _P(_os.environ.get("AGPS_WG_ADDONS_DIR") or worldbake.addons_root())
+        stats = []
+        for c in conts:
+            res = worldhpa.bake(c)
+            size = worldhpa.write(c, res, root) if args.write else None
+            stats.append({k: v for k, v in res.items() if k != "regions"} | {"cont": c, "bytes": size})
+        (DATA / "debug" / "worldgrid").mkdir(parents=True, exist_ok=True)
+        (DATA / "debug" / "worldgrid" / "hpa.json").write_text(_json.dumps(stats, indent=1), encoding="utf-8")
         print(_json.dumps(stats))
         return 0
     if args.what == "mesh":
@@ -1816,15 +1848,26 @@ def main(argv: list[str] | None = None) -> int:
     sp.add_argument("--check", action="store_true", help="route between the cities' places on the grid, as the addon "
                                                          "does (the option on), against its own routing")
     sp.set_defaults(fn=cmd_city_grid)
+    sp = sub.add_parser("building-grid", help="the buildings' walk grids out in the open world (1.4.2; extract: the "
+                                              "inventory and triangles, needs the client; bake: the grids and the city "
+                                              "grids' rebake, --write: the regions' Buildings.lua and Data/CityGrid.lua)")
+    sp.add_argument("what", choices=["extract", "bake"])
+    sp.add_argument("--only", nargs="+", help="extract: only the grids of placements whose path or uid is one of these")
+    sp.add_argument("--write", action="store_true", help="bake: write the files")
+    sp.add_argument("--jobs", type=int, default=6)
+    sp.add_argument("--no-city", action="store_true", help="bake: not the city grids (a size check)")
+    client_args(sp)
+    sp.set_defaults(fn=cmd_building_grid)
     sp = sub.add_parser("world-grid", help="the open world's layered walk grid from our own navmeshes (1.4.0's world "
                                           "routing, being tested; --write: Data/WorldGrid<cont>.lua)")
     sp.add_argument("what", nargs="?", default="bake", choices=["mesh", "models", "model-walls", "grid", "bake", "zones", "check",
-                                                            "coverage", "tocs", "alt"],
+                                                            "coverage", "tocs", "alt", "hpa"],
                     help="mesh: every map tile's Recast mesh; model-walls: the thin tall walls' footprints from the "
                          "models (Data/ModelWalls.lua with --write); grid: each tile's cells; bake (the default): the "
                          "continents' grids; zones: the sample zones against today's walls; check: the route test; "
                          "coverage: every shipped stop walked to on the grids alone, each one they can't reach with its "
-                         "cause (worldcoverage.py); tocs: every region folder's toc written again (no bake)")
+                         "cause (worldcoverage.py); tocs: every region folder's toc written again (no bake); alt: the "
+                         "landmark fields; hpa: HPA*'s ways between the map tiles (worldhpa.py, Hpa.lua)")
     sp.add_argument("--cont", help="continents by commas (0,1,2991)")
     sp.add_argument("--per", type=int, default=64, help="cells a map tile's side (64: 8.33 yd, the shipped; 128: 4.17)")
     sp.add_argument("--workers", type=int, default=7)

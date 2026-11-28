@@ -282,7 +282,7 @@ local function Rand() return LK.Random() end
 
 local function Framed()
   local g = G()
-  return S().windowFrame ~= false and g and g.chrome ~= nil and g.chrome:IsShown() and true or false
+  return g and g.WindowFramed and g.WindowFramed() and g.chrome ~= nil and g.chrome:IsShown() and true or false
 end
 
 function C.Place()
@@ -575,6 +575,7 @@ function LK.Init()
   local f = CreateFrame("Frame", nil, canvas) -- (in the map's clipped area, over the route and its icons)
   f:SetAllPoints(canvas)
   f:SetFrameLevel(canvas:GetFrameLevel() + 20)
+  f.agpsOverHud = true -- (no map icon: the confetti over the map's buttons and text too, GPSFrame's G.ApplyHud)
   f:EnableMouse(false)
   f:Hide()
   f:SetScript("OnUpdate", function(_, elapsed) E.Update(elapsed) end)

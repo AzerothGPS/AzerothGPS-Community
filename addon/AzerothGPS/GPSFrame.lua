@@ -1672,6 +1672,8 @@ G.NPC_DOT_SERVICES = "qvftbhipdmasr" -- (npcs.py's letters but "g", gossip alone
 G.STANDIN_NPC_SLACK_YD = 4
 G.npcDotCache = {}
 function G.InteriorNpcs(place, wmo, room, cont)
+  -- (an auto map's, G.AutoArt's as `place`: its NPCs by its cells and floors, `room` the floor's index or nil)
+  if place and place.auto then return G.AutoMapNpcs(place, room) end
   local key = table.concat({ place[1], place[2], place[3], tostring(room), cont or 0 }, ":")
   local hit = G.npcDotCache[key]
   if hit then return hit end
@@ -1741,11 +1743,14 @@ function G.WholeCityPlace(place, cont)
 end
 function G.AddInteriorNpcs(pois, place, wmo, room, cont, cx, cy, rot, s, half)
   if G.WholeCityPlace(place, cont) then return end
+  if G.LayerOn and not G.LayerOn("npcs") then return end -- (Map Layers' NPCs in buildings hidden)
   for _, n in ipairs(G.InteriorNpcs(place, wmo, room, cont)) do
     local dx, dy = Geo.ScreenOffset(cx, cy, n.x, n.y)
     dx, dy = Geo.Rotate(dx * s, dy * s, rot)
     if math.abs(dx) <= half and math.abs(dy) <= half then
-      pois[#pois + 1] = { 16, dx, dy, n.name, n.x, n.y, z = n.z, level = cont, npcIcon = n.icon, note = n.title,
+      -- (an auto map's NPC: its floor named, G.AutoMapNpcs)
+      local note = n.floorName and ((n.title and n.title ~= "" and (n.title .. "\n") or "") .. n.floorName) or n.title
+      pois[#pois + 1] = { 16, dx, dy, n.name, n.x, n.y, z = n.z, level = cont, npcIcon = n.icon, note = note,
         npc = G.NpcClickInfo(n.id, n.name, n.title, n.level or cont, n.x, n.y, n.z) } -- (another addon's Shift-click)
     end
   end
@@ -1921,10 +1926,19 @@ G.ALL_FLOORS = ALL_FLOORS
 -- A city whose map is one model (Ironforge's in its mountain, an underground city's: Undercity's) with the view's middle
 -- over it, the player not in it: that model, every floor (asked 2026-11-15: "should the whole city map also come up for
 -- a city you're not in as soon as you zoom in over it, without hovering? yes"). Zoomed in to CITY_MAX_ZOOM (at the
--- reference size), as the player's own city's map shows.
+-- reference size), as the player's own city's map shows. Never zoomed in past the terrain's own stage (G.TerrainAlone:
+-- Kooki3z 2026-11-27, item 143, flying over Undercity: "some areas still showing transitioned maps when zoomed in at a
+-- point it should only show the terrain map"): there the terrain alone, as everywhere else on the seamless map. So it
+-- shows as the terrain gives way, through the tiles' fade (G.SEAM_TILES_OUT; CITY_MAX_ZOOM if that's further out):
+-- zoomed in from the map on Undercity its map still comes up ("zoom in from the map on UC stopped working", 2026-11-16).
 function G.CityUnderView(x, y, cont, zoom)
   if not (x and zoom and ns.Interiors and ns.Interiors[cont]) then return nil end
-  if zoom / math.max(G.ZoomScale and G.ZoomScale() or 1, 1e-6) > G.CITY_MAX_ZOOM then return nil end
+  local top = G.CITY_MAX_ZOOM
+  if G.Seamless and G.Seamless() and G.SEAM_TILES_OUT then
+    top = math.max(top, G.SEAM_TILES_OUT[2] * (G.SeamShare and G.SeamShare() or 1))
+  end
+  if zoom / math.max(G.ZoomScale and G.ZoomScale() or 1, 1e-6) > top then return nil end
+  if G.TerrainAlone(zoom) then return nil end
   local skips = G.ZoomSkips()
   for _, p in ipairs(ns.Interiors[cont]) do
     if (G.MOUNTAIN_CITY_MODELS[p[1]] or skips[p[1]]) and x >= p[6] and x <= p[8] and y >= p[7] and y <= p[9] then
@@ -2324,7 +2338,7 @@ function G.MapSize(size, own)
   if not size then
     if not own and G.WorldMapHosted and G.WorldMapHosted() then return G.WorldMapSize() end -- (in the world map)
     local mmSide = not own and G.MinimapSide and G.MinimapSide() -- (the map as the minimap: its square; `own`: the window's)
-    if mmSide then return mmSide, mmSide end
+    if mmSide then return mmSide, (G.SquareFitHeight and G.SquareFitHeight(mmSide)) or mmSide end
     if G.FreeSize() then return G.FitSize(st.width, st.size) end
     local v = (st and st.size) or G.ZOOM_REF_SIZE
     return G.FitSize(v, v)
@@ -2563,6 +2577,20 @@ end
 -- the art's and the tiles' alpha at `zoom` yards (at the reference size: zoom / G.ZoomScale())
 function G.ArtBlend(zoom)
   return G.Smooth(G.SEAM_ART_IN[1], G.SEAM_ART_IN[2], zoom), 1 - G.Smooth(G.SEAM_TILES_OUT[1], G.SEAM_TILES_OUT[2], zoom)
+end
+
+-- The seamless map zoomed in to where the terrain shows alone (`zoom`: yards, this map's size): its tiles whole and
+-- opaque, closer than where they start fading out over the art (G.SEAM_TILES_OUT's start; the art coming in under them
+-- before that is never seen over land). Nothing that belongs to the transition is drawn over the land there: no whole
+-- city's map for a city the player isn't in (G.CityUnderView, item 143: Undercity's rings and Sewers flying over the Ruins
+-- of Lordaeron). The same rule in the GPS window, the world map and the minimap square: the zoom at the reference size
+-- (G.ZoomScale: the world map's own box in it, G.MapSize; heading-up's longer terrain stage, G.SeamShare, as
+-- G.SeamBlend reads it). Not the player's own inside map (down in a city, in a building) nor one they opened, hovered
+-- or a route's cave: those at any zoom, as before.
+function G.TerrainAlone(zoom)
+  if not (zoom and G.Seamless and G.Seamless() and G.SEAM_TILES_OUT) then return false end
+  local share = G.SeamShare and G.SeamShare() or 1
+  return zoom / math.max(G.ZoomScale and G.ZoomScale() or 1, 1e-6) / share <= G.SEAM_TILES_OUT[1]
 end
 
 -- The seamless blend as last drawn (/agps seamless check, issue #60's readings): the zoom (yards, and at the reference
@@ -5340,6 +5368,135 @@ local DOCK_ICON = { zeppelin = "Interface\\AddOns\\AzerothGPS\\Media\\Zeppelin",
   tram = "Interface\\Icons\\INV_Misc_Gear_01" } -- (the Deeprun Tram's ends: no timetable)
 local DOCK_NAME = { zeppelin = L["Zeppelin to %s"], boat = L["Boat to %s"], tram = L["Deeprun Tram to %s"] }
 
+-- The map's layers, each shown or hidden on its own (1.4.2, Kooki3z 2026-11-27: "another menu quick button with submenu
+-- selections for showing/hiding all our map elements individually like city icons, our route, flight path icons, caves
+-- entrances, dungeons/raids, etc"): the map menu's Map Layers group of quick buttons, in its groups (G.LAYER_GROUPS).
+-- Each is a setting of the player's (ns.settings.gps, saved with the rest); where an option already showed or hid it
+-- (Options > Map icons, Map, Routing) it is that option's own setting, so the two always agree. `truthy`: read as the
+-- map reads it, on only when true (on by default); else on unless false. `needs`: drawn only with that layer on too (its
+-- button gray while it's off). Hiding the route's line never stops the routing nor the directions: only the drawing.
+G.MAP_LAYERS = {
+  { id = "route", key = "layerRoute", label = L["Route line"] },
+  { id = "stops", key = "layerStops", label = L["Stops and destination"] },
+  { id = "heightProfile", key = "heightProfile", label = L["Height profile"] },
+  { id = "floorPicker", key = "floorPicker", label = L["Floor picker where floors stack"] },
+  { id = "avoided", key = "showAvoided", label = L["Enemy areas"] },
+  { id = "taxi", key = "poiTaxi", truthy = true, label = L["Flight masters"] },
+  { id = "docks", key = "layerDocks", label = L["Boats, zeppelins and the tram"] },
+  { id = "instances", key = "layerInstances", label = L["Dungeons and raids"],
+    tip = L["Their entrances on the map (every map style). Click one for its map, with its bosses in the usual order; right-click goes back out."] },
+  { id = "dungeonPaths", key = "showDungeonPaths", label = L["Routes through dungeons"], needs = "instances",
+    tip = L["In dungeons and raids: the dotted way through, boss by boss, and where it takes the stairs. Off: no dotted lines in there."] },
+  { id = "caves", key = "layerCaves", label = L["Cave entrances"],
+    tip = L["Cave and mine entrances on the map (not on a continent's map). Double-click one for a stop there."] },
+  { id = "labels", key = "poiLabels", truthy = true, label = L["Place names"] },
+  { id = "poi", key = "poiPoi", truthy = true, label = L["Points of interest"] },
+  { id = "city", key = "layerCity", label = L["City locations"] },
+  { id = "npcs", key = "layerNpcs", label = L["NPCs in buildings"] },
+  { id = "pins", key = "showCustomPins", label = L["Pins"] },
+  { id = "otherPins", key = "otherAddonPins", label = L["Other addons' icons"] },
+  { id = "party", key = "showParty", label = L["Party members"] },
+  { id = "quests", key = "layerQuests", truthy = true, label = L["Quests"],
+    tip = L["Your quests' objectives and turn-ins on the map."] },
+  { id = "questAreas", key = "layerQuestAreas", truthy = true, label = L["Quest areas on the map"], needs = "quests",
+    tip = L["The quests' areas outlined on the map, like on the minimap."], tint = { 0.45, 0.6, 1 } },
+  { id = "herbs", key = "layerHerbs", label = L["Herbs"] },
+  { id = "ore", key = "layerOre", label = L["Ore"] },
+}
+G.LAYER_GROUPS = {
+  { id = "route", label = L["Route"], icon = "Interface\\Icons\\INV_Misc_Map02",
+    layers = { "route", "stops", "heightProfile", "floorPicker", "avoided" } },
+  { id = "travel", label = L["Travel"], icon = "Interface\\Icons\\Ability_Mount_Wyvern_01",
+    layers = { "taxi", "docks", "instances", "dungeonPaths", "caves" } },
+  { id = "places", label = L["Places"], icon = "Interface\\Icons\\INV_Misc_Map_01",
+    layers = { "labels", "poi", "city", "npcs", "pins", "otherPins", "party" } },
+  { id = "questsGather", label = L["Quests and gathering"], icon = "Interface\\Icons\\Trade_Herbalism",
+    layers = { "quests", "questAreas", "herbs", "ore" } },
+}
+-- Each layer's quick button's icon (Map Layers' flyouts): the quick button's own where the layer has one (caves,
+-- dungeons, city locations, herbs, ore, quests, dungeon routes), else the map's own art for it or a game icon drawn at
+-- each size (Data/IconSizes.lua), the round buttons' art at whole pixels (G.RoundArt).
+G.LAYER_QUICK_ICONS = {
+  route = "Interface\\Icons\\INV_Boots_02", stops = "Interface\\TargetingFrame\\UI-RaidTargetingIcon_6",
+  heightProfile = "Interface\\Icons\\Spell_Magic_FeatherFall", floorPicker = "Interface\\Icons\\INV_Misc_StoneTablet_01",
+  avoided = "Interface\\Icons\\Ability_Warrior_ShieldWall", taxi = "Interface\\Icons\\Ability_Mount_Wyvern_01",
+  docks = "Interface\\AddOns\\AzerothGPS\\Media\\Ship", instances = INSTANCE_ICON,
+  dungeonPaths = "Interface\\Icons\\Ability_DualWield", caves = CAVE_ICON, labels = "Interface\\Icons\\INV_Letter_15",
+  poi = "Interface\\Icons\\INV_Misc_Map03", city = "Interface\\Icons\\INV_Helmet_03",
+  npcs = "Interface\\Icons\\INV_Misc_Head_Human_01", pins = "Interface\\Icons\\INV_Jewelry_Talisman_03",
+  otherPins = "Interface\\Icons\\Trade_Engineering", party = "atlas:classicon-priest",
+  quests = "atlas:SideInProgressQuestIcon", questAreas = "atlas:SideInProgressQuestIcon",
+  herbs = "Interface\\Icons\\INV_Misc_Herb_07", ore = "Interface\\Icons\\INV_Ore_Copper_01",
+}
+G.layerById = {}
+for _, e in ipairs(G.MAP_LAYERS) do
+  G.layerById[e.id] = e
+  e.quickIcon = G.LAYER_QUICK_ICONS[e.id]
+end
+-- A group's state: all its layers drawn (true), none (false) or "some".
+function G.LayerGroupState(id)
+  for _, grp in ipairs(G.LAYER_GROUPS) do
+    if grp.id == id then
+      local on = 0
+      for _, lid in ipairs(grp.layers) do
+        if G.LayerOn(lid) then on = on + 1 end
+      end
+      if on == #grp.layers then return true end
+      if on == 0 then return false end
+      return "some"
+    end
+  end
+  return nil
+end
+G.LAYERS_ICON = "Interface\\Icons\\INV_Misc_Eye_01" -- (the Map Layers button's; drawn at each size, Data/IconSizes.lua)
+-- Whether layer `id` is set to show (its own setting alone; `needs` aside). Unknown ids: shown.
+function G.LayerSet(id, st)
+  local e = G.layerById[id]
+  st = st or (ns.settings and ns.settings.gps)
+  if not (e and st) then return true end
+  if e.truthy then return st[e.key] and true or false end
+  return st[e.key] ~= false
+end
+-- Whether layer `id` is drawn: set to show, and the layer it needs too.
+function G.LayerOn(id, st)
+  local e = G.layerById[id]
+  if not G.LayerSet(id, st) then return false end
+  if e and e.needs then return G.LayerOn(e.needs, st) end
+  return true
+end
+-- Layer `id` shown or hidden (`on`), or each of `ids` (a list: Show All, Hide All). The maps drawn again at once, every
+-- one: the window, the extra map window, the square's (G.LayersChanged).
+function G.SetLayer(id, on)
+  local st = ns.settings and ns.settings.gps
+  if not st then return false end
+  local ids = type(id) == "table" and id or { id }
+  for _, i in ipairs(ids) do
+    local e = G.layerById[i]
+    if e then st[e.key] = on and true or false end
+  end
+  G.LayersChanged()
+  return true
+end
+function G.SetAllLayers(on)
+  local ids = {}
+  for _, e in ipairs(G.MAP_LAYERS) do ids[#ids + 1] = e.id end
+  return G.SetLayer(ids, on)
+end
+-- A layer changed: every map drawn again (its icons gathered again: G.Redraw), the quick buttons' looks (the layers'
+-- own and the Caves button's, the same setting) and the options window to match.
+function G.LayersChanged()
+  local seen = {}
+  for _, g in ipairs({ ns.realGPS or ns.GPS or G, ns.GPS or false, ns.mapClone or false, ns.extraMap or false, G }) do
+    if g and not seen[g] then
+      seen[g] = true
+      if g.Redraw then pcall(g.Redraw) end
+      if g.RefreshQuick then pcall(g.RefreshQuick) end
+    end
+  end
+  if ns.Layers and ns.Layers.version then ns.Layers.version = ns.Layers.version + 1 end -- (the minimap's icons too)
+  if ns.Options and ns.Options.Refresh then pcall(ns.Options.Refresh) end
+end
+
 -- A zeppelin's or boat's dock: its timer ("in 2:10" to its next arrival, "leaves 0:45" while
 -- it's docked) and the tooltip's lines, from Taxi's learned timetable.
 local function Clock(sec)
@@ -5956,21 +6113,23 @@ local function DrawStopPins(toScreen, viewCont)
   end
   -- every stop's marker (the route is worked out and drawn only to the ones ahead, PlannedStops:
   -- the option; a marker costs next to nothing)
-  local stops = ns.Nav.stops
+  -- (Map Layers: the stops' markers with Stops and destination, the detours' and rides' with the Route line)
+  local stops = G.LayerOn("stops") and ns.Nav.stops or {}
   for i = 1, #stops do
     local d = stops[i]
     pin(d, d.name or (#stops > 1 and Format(L["Stop %d"], i) or L["Destination"]), nil, i)
   end
-  for i, d in ipairs(pending) do
+  for i, d in ipairs(G.LayerOn("stops") and pending or {}) do
     pin(d, Format(L["New stop %d (not confirmed yet)"], i), i)
   end
+  local routeShown = G.LayerOn("route")
   -- the detour to a flight master not learned yet (Nav.LearnOnRoute): its pin, removable
-  local learn = ns.Nav.route and not ns.Nav.QuestPaused() and ns.Nav.LearnOnRoute(ns.Nav.route)
+  local learn = routeShown and ns.Nav.route and not ns.Nav.QuestPaused() and ns.Nav.LearnOnRoute(ns.Nav.route)
   for _, h in ipairs(learn or {}) do
     pin({ cont = h.cont, x = h.x, y = h.y, learnNode = h.node }, Format(L["Detour: learn the flight path at %s"], h.name))
   end
   -- the rides it takes (flights, boats, zeppelins, the tram, teleports): each removable from this route
-  for _, p in ipairs(ns.Nav.route and ns.Nav.RidePins and ns.Nav.RidePins(ns.Nav.route) or {}) do
+  for _, p in ipairs(routeShown and ns.Nav.route and ns.Nav.RidePins and ns.Nav.RidePins(ns.Nav.route) or {}) do
     pin(p, p.title)
   end
   for i = n + 1, #stopPins do stopPins[i]:Hide() end
@@ -6494,6 +6653,15 @@ G.ROUND_MINIMAP_MASKS = { [186178] = true, ["textures\\minimapmask"] = true }
 function G.OnMinimapMask(tex)
   G.minimapMask = tex
   mm.route, mm.placed = nil, nil
+  -- (another mask set by the minimap's UI while it's the square, EllesmereUI's as it applies its settings: the square's
+  -- own again once that's done; with its mask the Minimap drew black over the square)
+  local m = G.mmState
+  if not G.clone and m and m.on and m.applied and not G.minimapPlacing and tex ~= G.MINIMAP_CLEAR
+      and tex ~= G.MINIMAP_SQUARE and G.MinimapMovedSoon then
+    G.minimapForce = true
+    m.placedKey = nil
+    G.MinimapMovedSoon()
+  end
 end
 function G.MinimapSquare()
   if G.mmState and G.mmState.applied then return true end -- (the GPS map as the minimap: a square)
@@ -6677,7 +6845,7 @@ function G.MinimapIconList(px, py, cont, reach)
     end
   end
   local base = Geo.Base(cont)
-  if st.poiPoi ~= false then
+  if G.LayerOn("docks", st) then
     for _, t in ipairs(ns.Transports or {}) do
       if DOCK_ICON[t[8]] and N.TransportUsable(t) then
         local dim = not N.RideAllowed(t) and 0.35 or nil
@@ -6745,7 +6913,7 @@ function G.UpdateMinimapIcons(force)
   -- gathered again: what they show changed, the player left the box's middle half, or the full refresh is due
   local shows = table.concat({ tostring(cont), tostring(ns.Layers and ns.Layers.version), tostring(G.drawVersion),
     tostring(st.layerQuests), tostring(st.layerCity), tostring(st.layerHerbs), tostring(st.layerOre),
-    tostring(st.showCustomPins), tostring(st.poiPoi), tostring(st.layerInstances), tostring(st.layerCaves),
+    tostring(st.showCustomPins), tostring(st.poiPoi), tostring(st.layerDocks), tostring(st.layerInstances), tostring(st.layerCaves),
     tostring(N and N.PlayerLevel and N.PlayerLevel(cont)), tostring(Geo.PlayerMap()) }, ":")
   local g = mm.gather
   local changed = force
@@ -7101,8 +7269,126 @@ G.MINIMAP_BORDER = ns.WINDOW_PLAIN_BORDER or "SimplePanelTemplate"
 G.MINIMAP_BORDER_FIT = { 1.5, 3.5, 1.5, -0.5 }
 -- The square without its border (Kooki3z 2026-11-26 for 1.4.1, option `replaceMinimapNoBorder`, off by default): only
 -- the map shows. (The game's own minimap art, G.MINIMAP_ART, is hidden while it's the square either way.)
+-- With a supported UI's own minimap loaded (G.SupportedMinimapUI) it's always off, whatever the option says (Kooki3z
+-- 2026-11-27 for 1.4.2, his screenshot of DaylightUI's: "maybe just remove the boarder all together when one of these
+-- UIs are enabled"; before, it went off by itself only until the player set the option): that UI's own frame is the
+-- border, and nothing of ours is drawn round the square (G.SquareBare: our frame's own dark edge too). The option is
+-- grayed meanwhile (Options > Minimap) and never written, so the player's own setting is back as it was with that UI
+-- turned off.
 function G.SquareHidesBorder()
+  if G.SupportedMinimapUI() ~= nil then return true end
   return S().replaceMinimapNoBorder == true
+end
+-- The square with nothing of ours round it: the map is the minimap square under a supported UI's minimap. Our frame's
+-- own backdrop (its dark ground and the BORDER wide gray edge round the canvas) is see-through then, and the logo sits
+-- inside the square's corner (G.PlaceMinimapButton), not hanging below it over that UI's panel.
+function G.SquareBare()
+  return (G.MinimapMode() and G.SupportedMinimapUI() ~= nil) and true or false
+end
+function G.AddOnLoaded(name)
+  local fn = (C_AddOns and C_AddOns.IsAddOnLoaded) or rawget(_G, "IsAddOnLoaded")
+  if not fn then return false end
+  local ok, on = pcall(fn, name)
+  return (ok and on) and true or false
+end
+-- The full UI replacement whose own square minimap is in use, by name, else nil. EllesmereUI (its Minimap module) and
+-- DaylightUI (its Info Panel's minimap, on unless turned off in it: DaylightUI.API, read only). Both make the minimap
+-- square and say so through GetMinimapShape or its mask (G.MinimapSquare), move it (G.OnMinimapMoved follows it) and
+-- gather addon buttons into a drawer of their own (Options' O.ButtonOwned leaves ours to it).
+function G.SupportedMinimapUI()
+  if G.AddOnLoaded("DaylightUI_InfoPanel") then
+    local dui = rawget(_G, "DaylightUI")
+    local api = type(dui) == "table" and rawget(dui, "API")
+    local on = true
+    if type(api) == "table" then
+      if type(api.IsModuleEnabled) == "function" then
+        local ok, v = pcall(api.IsModuleEnabled, "InfoPanel")
+        if ok and v == false then on = false end
+      end
+      if on and type(api.GetSetting) == "function" then
+        local ok, v = pcall(api.GetSetting, "InfoPanel", "map.enabled")
+        if ok and v == false then on = false end
+      end
+    end
+    if on then return "DaylightUI" end
+  end
+  if G.AddOnLoaded("EllesmereUIMinimap") then return "EllesmereUI" end
+  return nil
+end
+-- The panel a supported UI keeps the minimap in (DaylightUI's Info Panel: the Minimap a child of its map area, in the
+-- panel's LOW strata, over its dark backdrop), else nil: the Minimap's parent when it's neither the screen nor the
+-- game's minimap container. Kooki3z's screenshot 2026-11-27 for 1.4.2: the square, in the lowest strata, was under
+-- that panel's backdrop (only the Minimap's own dots and our route on it showed over it). Read only.
+function G.SquarePanel()
+  -- (DaylightUI's only: EllesmereUI's Minimap hangs off the screen, or off its own layout frame, which fixes the
+  -- Minimap's strata and level: nothing to be over there)
+  if G.extra or G.SupportedMinimapUI() ~= "DaylightUI" then return nil end
+  local mmap = rawget(_G, "Minimap")
+  local p = type(mmap) == "table" and mmap.GetParent and mmap:GetParent() or nil
+  if type(p) ~= "table" or p == UIParent or p == rawget(_G, "MinimapCluster") or not p.GetFrameLevel then return nil end
+  return p
+end
+-- The square in that panel: in the panel's strata, its whole frame tree one level over the panel's map area (so over
+-- everything of the panel's under the map: its backdrop, its strip, its meter), and the game's Minimap lifted over the
+-- square's top (its dots, the panel's texts on it and our route on it over the map, as with the square in the lowest
+-- strata). Back to its own level when it isn't (another style of UI, the window, the world map). Our frames only, and
+-- the Minimap's level (given back, G.LiftMinimap); nothing of the other UI's is moved.
+function G.ApplySquareLevels(panel)
+  if panel then
+    G.sqLevelOwn = G.sqLevelOwn or frame:GetFrameLevel() or 0
+    local level = (panel:GetFrameLevel() or 0) + 1
+    if G.sqLevel ~= level then
+      G.sqLevel = level
+      G.sqTop = G.SetLevelTree(level, nil, false)
+    end
+  elseif G.sqLevelOwn then
+    G.SetLevelTree(G.sqLevelOwn, nil, false)
+    G.sqLevelOwn, G.sqLevel, G.sqTop = nil, nil, nil
+  end
+  local real = G.clone and ns.realGPS or G
+  if real and real.LiftMinimap then real.LiftMinimap() end
+end
+-- The game's Minimap one level over the highest square's top in another UI's panel (ours, and the second map's while
+-- it's the square), or back to the level it had (`G.mmLift`); not in combat (queued: G.ApplySettings after it).
+function G.LiftMinimap()
+  if G.clone or type(Minimap) ~= "table" or not Minimap.SetFrameLevel then return end
+  local top = G.sqTop
+  local c = ns.mapClone
+  if c and c.cloneActive and c.sqTop and (not top or c.sqTop > top) then top = c.sqTop end
+  local lift = G.mmLift
+  if not top and not lift then return end
+  if InCombatLockdown and InCombatLockdown() then
+    G.mmState.queued = true
+    return
+  end
+  local now = Minimap:GetFrameLevel() or 0
+  G.minimapLeveling = true
+  if top then
+    if not lift then
+      lift = { own = now }
+      G.mmLift = lift
+    end
+    if now <= top then pcall(Minimap.SetFrameLevel, Minimap, top + 1) end
+  else
+    G.mmLift = nil
+    if now ~= lift.own then pcall(Minimap.SetFrameLevel, Minimap, lift.own) end
+  end
+  G.minimapLeveling = nil
+end
+-- (the other UI putting the Minimap at its own level again, as DaylightUI does when its settings are applied: over
+-- the square again once that's done)
+function G.OnMinimapLevel()
+  if G.minimapLeveling or not G.mmLift or G.minimapLevelWait then return end
+  if C_Timer and C_Timer.After then
+    G.minimapLevelWait = true
+    C_Timer.After(0, function()
+      G.minimapLevelWait = nil
+      local ok, err = pcall(G.LiftMinimap)
+      if not ok then G.LogError("minimap level", err) end
+    end)
+  else
+    G.LiftMinimap()
+  end
 end
 G.MINIMAP_MASK_AGAIN = { 0.1, 0.5 } -- s after the minimap is given back: its own mask set once more
 G.MINIMAP_TWEEN = 0.25 -- s: the square grows into the window, and back
@@ -7152,6 +7438,7 @@ end
 G.MINIMAP_LOGO_UNITS = ns.CORNER_LOGO_UNITS or 62
 -- (asked 2026-11-09: 80% of that on the large square, and shrinking with the square's side; a bit further left)
 G.MINIMAP_LOGO_SHARE = 0.8
+G.MINIMAP_LOGO_INSIDE = 2 -- (UI units in from the square's corner, under another UI's minimap: G.LogoKept)
 G.MINIMAP_LOGO_IN = 0.3 -- its middle this share of its width in from the square's left edge (the window's: 0.42)
 function G.MinimapLogoUnits()
   return G.MINIMAP_LOGO_UNITS * G.MINIMAP_LOGO_SHARE * G.MinimapSquareSide() / G.MINIMAP_SIDES.large
@@ -7228,18 +7515,30 @@ end
 -- Every frame in the window with how far over the window's own level it is (parents first).
 function G.LevelOffsets()
   local base, strata, list = frame:GetFrameLevel() or 0, frame:GetFrameStrata(), {}
+  -- (the HUD layer's frames: in its strata, which may be over the window's, G.ApplyHud)
+  local hud = G.hudLayer
+  local hudStrata = hud and hud.GetFrameStrata and hud:GetFrameStrata() or strata
   local function Gather(f, buttons)
-    buttons = buttons or (topLayer ~= nil and f == topLayer)
     for _, kid in ipairs({ f:GetChildren() }) do
+      -- (`buttons`: the map's buttons and panels, the HUD layer and everything on it, the layer itself too: a frame
+      -- made on it later starts over the game's icons in the world map as well)
+      local b = buttons or (hud ~= nil and kid == hud) or (hud == nil and topLayer ~= nil and f == topLayer)
       if kid.GetFrameLevel and kid.SetFrameLevel then
         local l = kid:GetFrameLevel() or 0
-        -- (`over`: a frame with a strata of its own, to be over everything: a dropdown's list, the search's panel;
-        -- `buttons`: the map's buttons and panels, everything on the layer over the map)
+        -- (`over`: a frame with a strata of its own, to be over everything: a dropdown's list, the search's panel)
         local ks = kid.GetFrameStrata and kid:GetFrameStrata()
-        list[#list + 1] = { kid, l - base, over = ks and ks ~= strata and l or nil,
-          buttons = buttons or nil }
+        -- (a frame still at the level G.SetLevelTree set it to: its own place over the window, as read then. Read off
+        -- its level, a button lifted WORLD_MAP_BUTTONS over the map was lifted that much again at the world map's next
+        -- tick, every button up to the cap: the height profile strip, its X and every button on it all at 9000, the X
+        -- tied with the strip under it and its clicks the strip's (Kooki3z's video 2026-11-27 for 1.4.2: "still can't
+        -- click the X on height data"))
+        local off = l - base
+        if G.wmSetLevel[kid] == l and G.wmOffset[kid] then off = G.wmOffset[kid] end
+        -- (`lvl`: its level as read, for the HUD layer's frames' places over that layer, G.SetLevelTree)
+        list[#list + 1] = { kid, off, over = ks and ks ~= (b and hudStrata or strata) and ks ~= strata and l or nil,
+          buttons = b or nil, lvl = l }
       end
-      Gather(kid, buttons)
+      Gather(kid, b)
     end
   end
   Gather(frame)
@@ -7255,8 +7554,38 @@ G.WORLD_MAP_OVER = 5000
 -- (seen in game 2026-11-11, gathering icons drawn across Clear Route: "our buttons should always be on top of
 -- those"). The game's icons are at about 2000 to 2900.
 G.WORLD_MAP_BUTTONS = 4000
+G.WORLD_MAP_TOP = 9800 -- (the HUD's highest level there: the game's frame levels end at 10000)
+-- The HUD layer's level over the window's own, as made (G.TOP_LEVEL over the canvas).
+function G.HudOffset() return 1 + G.ArtSpan() + G.TOP_LEVEL end
+-- The highest level of the world map canvas's icons (the game's pins, other addons' on it, OpenMap's), our map not
+-- counted: each frame on the canvas and the frames on those (a pin's highlight, its label).
+function G.WorldMapIconTop()
+  -- (the canvas's (the game's pins) and the scroll frame's (OpenMap's pin root, its sets, their pins), a few deep; not
+  -- ours, nor what's G.WORLD_MAP_UI or more over the scroll frame: OpenMap's coordinates, tab rail and panels, which
+  -- our buttons keep clear of instead (G.WorldMapCornerSpot), and the player's arrow it lifts over everything)
+  local box = G.WorldMapBox()
+  local best = 0
+  if not (type(box) == "table" and box.GetChildren) then return best end
+  local child = rawget(box, "Child")
+  local ui = (box:GetFrameLevel() or 0) + G.WORLD_MAP_UI
+  local function Look(f, depth)
+    for _, k in ipairs({ f:GetChildren() }) do
+      if type(k) == "table" and k ~= frame and k ~= G.hudLayer and k.GetFrameLevel then
+        local l = k:GetFrameLevel() or 0
+        if l < ui then
+          if l > best then best = l end
+          if depth < 4 and k.GetNumChildren and (k:GetNumChildren() or 0) > 0 then Look(k, depth + 1) end
+        end
+      end
+    end
+  end
+  Look(box, 1)
+  if type(child) == "table" and child.GetChildren then Look(child, 2) end
+  return best
+end
 G.wmOwnLevel = setmetatable({}, { __mode = "k" })
 G.wmSetLevel = setmetatable({}, { __mode = "k" }) -- (the level SetLevelTree set each frame to last)
+G.wmOffset = setmetatable({}, { __mode = "k" }) -- (and its own place over the window it was set from)
 -- The window and every frame in it moved to `level` (the window's; the others keep their places over it, as `offsets`
 -- has them: read before the window was given another parent, which sets levels of its own).
 -- Whether frame `f` is the route panel or in it.
@@ -7280,17 +7609,43 @@ function G.SetLevelTree(level, offsets, boost)
   end
   local top = level
   if frame:GetFrameLevel() ~= level then frame:SetFrameLevel(level) end
+  -- (the HUD layer's frames: each kept as far over the layer as it is, both levels as read at once (`lvl`: the same
+  -- whether the layer was up there or not when read, so nothing creeps from tick to tick), the layer at `hud`: in the world map over the game's icons
+  -- and other addons' as they are now, measured (G.WorldMapIconTop), and WORLD_MAP_BUTTONS over the map at least; under
+  -- G.WORLD_MAP_TOP with room for all of them. Kooki3z 2026-11-27, No Map over OpenMap: its icons over the height strip
+  -- and a timer over Clear Route: our map's level there is over OpenMap's art, and +4000 went past the old cap of 9000,
+  -- every button flattened at it, under the icons.)
+  local hudE2, hudLvl, maxRel
+  for _, e in ipairs(offsets) do
+    if e[1] == G.hudLayer then hudE2, hudLvl = e[2], e.lvl or e[2] end
+  end
+  local function Rel(e) return math.max(0, (e.lvl or e[2]) - hudLvl) end
+  if hudE2 then
+    maxRel = 0
+    for _, e in ipairs(offsets) do
+      if e.buttons and not (G.wmOwnLevel[e[1]] or e.over) then maxRel = math.max(maxRel, Rel(e)) end
+    end
+  end
+  local hud
+  if hudE2 and boost then
+    hud = math.max(level + G.WORLD_MAP_BUTTONS, G.WorldMapIconTop() + 1)
+    hud = math.max(level + 1, math.min(hud, G.WORLD_MAP_TOP - maxRel))
+  elseif hudE2 then
+    hud = level + G.HudOffset()
+  end
   for _, e in ipairs(offsets) do
     local kid, l = e[1], nil
     local own = G.wmOwnLevel[kid] or e.over
     if own and boost then
       G.wmOwnLevel[kid] = own
-      l = math.min(9500, level + G.WORLD_MAP_OVER + math.min(own, 500))
+      l = math.min(9990, math.max(level + G.WORLD_MAP_OVER, (hud or 0) + (maxRel or 0) + 1) + math.min(own, 500))
     elseif own then
       G.wmOwnLevel[kid] = nil
       l = own
+    elseif e.buttons and hud then
+      l = math.min(G.WORLD_MAP_TOP, hud + Rel(e))
     elseif e.buttons and boost then
-      l = math.min(9000, level + G.WORLD_MAP_BUTTONS + math.max(0, e[2]))
+      l = math.min(G.WORLD_MAP_TOP, level + G.WORLD_MAP_BUTTONS + math.max(0, e[2]))
     else
       l = math.max(0, level + e[2])
       if l > top then top = l end
@@ -7301,8 +7656,200 @@ function G.SetLevelTree(level, offsets, boost)
       pcall(kid.SetFrameLevel, kid, l)
       G.wmSetLevel[kid] = l
     end
+    G.wmOffset[kid] = e[2]
   end
   return top
+end
+-- The HUD layer (G.hudLayer: the directions' panel, the height strip, every button of ours on the map) over every map
+-- icon. In the window, the map's own icons are on the canvas's layers, all under it by level (G.TOP_LEVEL); in the world
+-- map the game's and other addons' icons are under it by G.SetLevelTree (WORLD_MAP_BUTTONS). Left: the game's Minimap
+-- while it's ours (the square's, its ground hidden: only its dots and the tracked flight masters, herbs and ore drawn)
+-- in a strata over the window's, LOW over the lowest one's (G.PlaceMinimapItself), and over the window's map where they
+-- overlap, the extra map window's mostly, our text and buttons with it (Kooki3z 2026-11-27, a flight master's icon
+-- across the directions). The HUD layer in the Minimap's strata then, over it and everything on it by level, the
+-- window's map still under the Minimap. Not in the world map (its levels are G.SetLevelTree's) nor in another UI's
+-- minimap panel (the Minimap is lifted over the square there on purpose, G.LiftMinimap; the HUD's hidden there).
+G.STRATA_RANK = { BACKGROUND = 1, LOW = 2, MEDIUM = 3, HIGH = 4, DIALOG = 5, FULLSCREEN = 6, FULLSCREEN_DIALOG = 7,
+  TOOLTIP = 8 }
+G.HUD_OVER_HOST = 10 -- (levels over the top of the Minimap's own frames)
+G.HUD_CHECK_EVERY = 1 -- (seconds: G.Update checks it again, for a Minimap or its icons moved up since)
+-- A level `n` over the window's own (as the corner buttons were made: the size grip 20, the minimap button 30), on the
+-- HUD layer: at least as far over that layer as it is over it in the window, so over the game's icons in the world map
+-- too (a frame made there after G.SetLevelTree: the world map's size grip).
+function G.HudLevel(n)
+  local base = (frame:GetFrameLevel() or 0) + n + G.ArtSpan()
+  local hud = G.hudLayer
+  if not hud then return base end
+  local over = math.max(1, n - 1 - G.TOP_LEVEL) -- (the HUD layer: 1 + ArtSpan + TOP_LEVEL over the window)
+  return math.min(9000, math.max(base, (hud:GetFrameLevel() or 0) + over))
+end
+-- The Minimap when its dots may draw over this window's map: taken by the first map (on the square), shown.
+function G.HudIconHost()
+  if G.WorldMapHosted() or type(Minimap) ~= "table" or not Minimap.GetFrameStrata then return nil end
+  local real = G.clone and ns.realGPS or G
+  local m = real and real.mmState
+  if not (m and m.applied) then return nil end
+  if Minimap.IsShown and not Minimap:IsShown() then return nil end
+  if Minimap.GetAlpha and (Minimap:GetAlpha() or 1) <= 0 then return nil end
+  return Minimap
+end
+-- The highest level in frame `f`'s tree (its own frames, a few deep: the Minimap's pins and buttons).
+local function TreeTop(f, depth, best)
+  best = math.max(best or 0, f.GetFrameLevel and f:GetFrameLevel() or 0)
+  if depth > 0 and f.GetChildren then
+    for _, kid in ipairs({ f:GetChildren() }) do
+      if type(kid) == "table" and (not kid.IsShown or kid:IsShown()) then best = TreeTop(kid, depth - 1, best) end
+    end
+  end
+  return best
+end
+G.HudTreeTop = TreeTop
+-- The HUD layer's strata set to `strata`: what's on it follows (the game passes a strata down to every child; the
+-- frames with one of their own, a dropdown's list, the search's panel, the minimap button, keep theirs).
+function G.SetHudStrata(strata)
+  local hud = G.hudLayer
+  local was = hud:GetFrameStrata()
+  if was == strata then return end
+  local own, follow = {}, {}
+  local function Walk(f)
+    for _, kid in ipairs({ f:GetChildren() }) do
+      if kid.GetFrameStrata and kid.SetFrameStrata then
+        local ks = kid:GetFrameStrata()
+        if ks ~= was then own[#own + 1] = { kid, ks } else follow[#follow + 1] = kid end
+      end
+      Walk(kid)
+    end
+  end
+  Walk(hud)
+  hud:SetFrameStrata(strata)
+  for _, kid in ipairs(follow) do -- (as the game passes it down)
+    if kid:GetFrameStrata() ~= strata then kid:SetFrameStrata(strata) end
+  end
+  for _, e in ipairs(own) do
+    if e[1]:GetFrameStrata() ~= e[2] then e[1]:SetFrameStrata(e[2]) end
+  end
+  -- (the window's logo, over the title bar in the window's strata: as high as the HUD, back after)
+  local plate = G.logo and G.logo.plate
+  if plate and plate.GetFrameStrata then
+    local r = G.STRATA_RANK
+    if (r[strata] or 0) > (r[plate:GetFrameStrata()] or 0) then
+      G.hudPlateWas = G.hudPlateWas or plate:GetFrameStrata()
+      plate:SetFrameStrata(strata)
+    elseif G.hudPlateWas and strata == frame:GetFrameStrata() then
+      plate:SetFrameStrata(G.hudPlateWas)
+      G.hudPlateWas = nil
+    end
+  end
+end
+-- Every frame on the HUD layer in its strata with how far over the layer it is (parents first; the frames in a strata
+-- of their own left out: they keep theirs), and the farthest.
+function G.HudRel()
+  local hud = G.hudLayer
+  local now = hud:GetFrameLevel() or 0
+  local strata, list, span = hud:GetFrameStrata(), {}, 0
+  local function Walk(f)
+    for _, kid in ipairs({ f:GetChildren() }) do
+      -- (not one the world map's levels put over everything for a strata of its own, G.SetLevelTree's wmOwnLevel)
+      if kid.GetFrameLevel and kid.SetFrameLevel and (not kid.GetFrameStrata or kid:GetFrameStrata() == strata)
+        and not G.wmOwnLevel[kid] then
+        local rel = math.max(0, (kid:GetFrameLevel() or 0) - now)
+        list[#list + 1] = { kid, rel }
+        if rel > span then span = rel end
+      end
+      Walk(kid)
+    end
+  end
+  Walk(hud)
+  return list, span
+end
+-- The HUD layer moved to `level`, everything on it kept as far over it as it was (`list`: as read before, G.HudRel).
+function G.SetHudLevel(level, list)
+  local hud = G.hudLayer
+  if not list and (hud:GetFrameLevel() or 0) == level then return end
+  list = list or G.HudRel()
+  hud:SetFrameLevel(level)
+  for _, e in ipairs(list) do
+    local l = math.min(9950, math.max(0, level + e[2]))
+    if e[1]:GetFrameLevel() ~= l then pcall(e[1].SetFrameLevel, e[1], l) end
+  end
+end
+-- In the game's world map our map is in the map's canvas, the scroll frame's child, which the game draws as one layer
+-- at the scroll frame's own level: a frame on the scroll frame itself is over all of it or under all of it, whatever
+-- the levels in it. OpenMap's icons (its flight masters, dungeons, boats: Stitch.lua's pin root, on the scroll frame,
+-- at the game's "PIN_FRAME_LEVEL_OPENMAP_ICONS") are on the scroll frame, so they were over our whole map, the HUD
+-- with it (Kooki3z 2026-11-27 for 1.4.2: "OpenMap elements on the map like flight masters and dungeons are on top of
+-- our buttons still"). There the HUD layer goes on the scroll frame too, over our map, given our frame's size and
+-- place, at the level over the icons there (G.WorldMapIconTop); back on the window as the map leaves the world map.
+G.WORLD_MAP_UI = 8000 -- (levels over the scroll frame: OpenMap's own bars and panels from there up, its coordinates
+-- at 9000, its tab rail 9300, a dungeon's map 8800; ours keep clear of those by place, G.WorldMapCornerSpot)
+function G.PlaceHud(host)
+  local hud = G.hudLayer
+  if hud:GetParent() == host then return nil end
+  -- (the frames the world map's levels put over everything for a strata of their own, G.SetLevelTree: at their own
+  -- levels again, their strata doing the work, on the scroll frame as on the window)
+  local function Own(f)
+    for _, kid in ipairs({ f:GetChildren() }) do
+      local own = G.wmOwnLevel[kid]
+      if own then
+        G.wmOwnLevel[kid], G.wmSetLevel[kid] = nil, nil
+        pcall(kid.SetFrameLevel, kid, own)
+      end
+      Own(kid)
+    end
+  end
+  Own(hud)
+  local list = G.HudRel() -- (read before: a new parent sets levels of its own)
+  hud:SetParent(host)
+  hud:SetScale(1) -- (the map's frame is scaled against the canvas's scale: the scroll frame's own is the same)
+  hud:ClearAllPoints()
+  hud:SetAllPoints(frame)
+  G.hudOut = host ~= frame or nil
+  hud:SetShown(not G.hudOut or frame:IsShown())
+  return list
+end
+-- The HUD layer over the map's icons: its strata and level as above. `force`: now (else at most each HUD_CHECK_EVERY
+-- from G.Update; at once from G.ApplySettings).
+function G.ApplyHud(force)
+  local hud = G.hudLayer
+  if not (hud and frame) then return end
+  local now = GetTime and GetTime() or 0
+  if not force and G.hudChecked and now - G.hudChecked < G.HUD_CHECK_EVERY then return end
+  G.hudChecked = now
+  local box = G.WorldMapHosted() and G.WorldMapBox() or nil
+  local child = box and rawget(box, "Child")
+  -- (on the world map's scroll frame, over its icons: while our map's in its canvas)
+  if box and child and frame:GetParent() == child and box.GetFrameLevel then
+    local list = G.PlaceHud(box)
+    G.SetHudStrata(box:GetFrameStrata() or frame:GetFrameStrata())
+    local _, span = G.HudRel()
+    local base = (box:GetFrameLevel() or 0) + 1
+    local level = math.max(base, math.min(G.WorldMapIconTop() + 1, G.WORLD_MAP_TOP - span))
+    if list or level ~= (hud:GetFrameLevel() or 0) then G.SetHudLevel(level, list) end
+    if hud:GetAlpha() ~= frame:GetAlpha() then hud:SetAlpha(frame:GetAlpha()) end
+    return
+  end
+  local back = G.PlaceHud(frame)
+  if back then -- (out of the world map: its own level over the canvas again)
+    hud:SetAlpha(1)
+    G.SetHudLevel((canvas and canvas:GetFrameLevel() or 0) + G.TOP_LEVEL, back)
+  end
+  if G.squareInPanel or G.WorldMapHosted() then -- (its levels G.SetLevelTree's there)
+    G.SetHudStrata(frame:GetFrameStrata())
+    return
+  end
+  local strata = frame:GetFrameStrata()
+  local host = G.HudIconHost()
+  local level = canvas and (canvas:GetFrameLevel() or 0) + G.TOP_LEVEL or (hud:GetFrameLevel() or 0)
+  if host then
+    local r, hs = G.STRATA_RANK, host:GetFrameStrata()
+    if (r[hs] or 0) > (r[strata] or 0) then strata = hs end
+    if hs == strata then level = math.max(level, TreeTop(host, 3) + G.HUD_OVER_HOST) end
+  end
+  G.SetHudStrata(strata)
+  -- (only up: back down where it was made once nothing's over it; the world map's levels, G.SetLevelTree, put it
+  -- where it belongs there and back)
+  if level > (hud:GetFrameLevel() or 0) or (not host and G.hudRaised) then G.SetHudLevel(level) end
+  G.hudRaised = host and true or nil
 end
 -- The world map's own buttons over its map (tracking, floors, its coordinates): kept over ours.
 function G.RaiseWorldMapOverlays(top)
@@ -7504,11 +8051,188 @@ G.WORLD_MAP_INSET = 44 -- (UI units from the map's left edge: past the round but
 -- The import button in the map's bottom right corner: in the world map, left of that window's own button there
 -- (asked 2026-11-10: "bottom right needs the import button shifted left for game map mode").
 G.WORLD_MAP_CORNER = 36
-function G.PlaceCornerButtons(host)
+-- The bottom-right column (import, Back to Your Position over it, and the companions' buttons going up from those,
+-- Api.lua's MapButton) clear of other addons' frames drawn over it in the world map (Kooki3z's screenshot 2026-11-27
+-- for 1.4.2: "maybe openmap covering our buttons on world map"). OpenMap's coordinates (its Extras.lua: a bar in the
+-- map's bottom-right corner, 9000 levels over the map) and its tab rail (Panel.lua: tabs low on the map's right edge
+-- going up, 9300 over) are over the icons, ours too (WORLD_MAP_BUTTONS over the map): the import button was under its
+-- coordinates and the column above it half under its tabs. Read off the frames as they are (nothing of theirs
+-- touched): one along the bottom puts the column over it, one up the side puts it left of it.
+G.CORNER_COLUMN = 1 -- (buttons the column holds: Back to Your Position; since 1.4.2 the import button and the
+-- companions' are the map menu's, G.QUICK)
+G.CORNER_STEP = 32 -- (UI units each: 28 and the 4 between)
+G.CORNER_GAP = 4
+G.CORNER_BUTTON = 28
+-- What's drawn over the column in the world map: { left, bottom, right, top } (screen pixels) of each shown frame on
+-- the world map's scroll frame, not ours and not its map canvas (the game's icons, under our buttons), in a higher
+-- strata or at a higher level. A frame as big as half the map is a layer (OpenMap's rail): what's on it counts; and a
+-- frame smaller than a few units (OpenMap's coordinates bar, 1 wide) holds what counts. The world map window's own
+-- frames too, past the scroll frame: OpenMap's tab rail is one (its Panel.lua: a frame on WorldMapFrame set over the
+-- scroll frame, 9300 over it), and so are the game's own buttons over the map (its quest log button).
+function G.WorldMapCornerCovers(box)
+  local list = {}
+  local b = G.mapButtons and G.mapButtons.import
+  if not (b and box and box.GetChildren) then return list end
+  local order = ns.STRATA_ORDER or {}
+  -- (compared at most at 9000, where our buttons were held before G.WORLD_MAP_TOP: OpenMap's own frames out of the
+  -- canvas are 9000 and more over the map and still over them, the game's pins far under)
+  local level = math.min(b:GetFrameLevel() or 0, 9000)
+  -- (in the world map's strata, as everything over its map: ours on the scroll frame or in its canvas)
+  local rank = order[box.GetFrameStrata and box:GetFrameStrata() or b:GetFrameStrata() or "MEDIUM"] or 0
+  local child = rawget(box, "Child")
+  local bw, bh = box:GetWidth() or 0, box:GetHeight() or 0
+  local function Look(f, depth)
+    for _, k in ipairs({ f:GetChildren() }) do
+      if k ~= frame and k ~= child and k ~= G.hudLayer and k.IsVisible and k:IsVisible() and k.GetWidth then
+        local kw, kh = k:GetWidth() or 0, k:GetHeight() or 0
+        local layer = kw >= bw / 2 and kh >= bh / 2
+        if not layer and kw >= 4 and kh >= 4 then
+          local r = order[k:GetFrameStrata() or ""] or 0
+          if r > rank or (r == rank and (k:GetFrameLevel() or 0) > level) then
+            local l, bt = k:GetLeft(), k:GetBottom()
+            local es = k:GetEffectiveScale() or 1
+            if l and bt then list[#list + 1] = { l * es, bt * es, (l + kw) * es, (bt + kh) * es } end
+          end
+        end
+        if depth < 3 then Look(k, depth + 1) end
+      end
+    end
+  end
+  Look(box, 1)
+  local wm = rawget(_G, "WorldMapFrame")
+  if type(wm) == "table" and wm ~= box and wm.GetChildren then
+    local kids = {}
+    for _, k in ipairs({ wm:GetChildren() }) do
+      if k ~= box then kids[#kids + 1] = k end
+    end
+    Look({ GetChildren = function() return unpack(kids) end }, 1)
+  end
+  return list
+end
+-- Where the import button goes in the world map (its BOTTOMRIGHT from the map's): left of the game's own button in that
+-- corner, and clear of what's over the column there (G.WorldMapCornerCovers).
+function G.WorldMapCornerSpot()
+  local x, y = -6 - G.WORLD_MAP_CORNER, 6
+  local box = G.WorldMapBox()
+  if not (box and topLayer) then return x, y end
+  local R, B = box:GetRight(), box:GetBottom()
+  local bw, bh = box:GetWidth(), box:GetHeight()
+  if not (R and B and bw and bh) then return x, y end
+  local bes, tes = box:GetEffectiveScale() or 1, topLayer:GetEffectiveScale() or 1
+  R, B = R * bes, B * bes
+  local covers = G.WorldMapCornerCovers(box)
+  -- (kept for the height profile strip and Confirm Route, clear of them too, G.BottomCovers: in the button layer's
+  -- units from the map's bottom left)
+  local kept, L = {}, box:GetLeft()
+  if L then
+    L = L * bes
+    for i, o in ipairs(covers) do
+      kept[i] = { (o[1] - L) / tes, (o[2] - B) / tes, (o[3] - L) / tes, (o[4] - B) / tes }
+    end
+  end
+  G.wmCoverRects = kept
+  local w, h = G.CORNER_BUTTON * tes, G.CORNER_COLUMN * G.CORNER_STEP * tes
+  for _ = 1, 12 do
+    local cr, cb = R + x * tes, B + y * tes
+    local cl, ct = cr - w, cb + h
+    local hit
+    for _, o in ipairs(covers) do
+      if o[1] < cr and o[3] > cl and o[2] < ct and o[4] > cb then
+        hit = o
+        break
+      end
+    end
+    if not hit then break end
+    if hit[3] - hit[1] > hit[4] - hit[2] then
+      y = (hit[4] - B) / tes + G.CORNER_GAP -- (along the bottom: the column over it)
+    else
+      x = (hit[1] - R) / tes - G.CORNER_GAP -- (up the side: the column left of it)
+    end
+    if -x > bw * bes / tes / 2 or y > bh * bes / tes / 2 then return -6 - G.WORLD_MAP_CORNER, 6 end -- (no room)
+  end
+  return x, y
+end
+-- (`tick`: from the world map's tick, placed again only when the spot changed)
+function G.PlaceCornerButtons(host, tick)
   local b = G.mapButtons and G.mapButtons.import
   if not b then return end
-  b:ClearAllPoints()
-  b:SetPoint("BOTTOMRIGHT", host and -6 - G.WORLD_MAP_CORNER or -6, 6)
+  local x, y = -6, 6
+  G.wmCoverRects = nil
+  if host then x, y = G.WorldMapCornerSpot() end
+  G.cornerX, G.cornerY = x, y
+  local key = string.format("%.1f:%.1f", x, y)
+  if not tick or G.cornerAt ~= key then
+    G.cornerAt = key
+    b:ClearAllPoints()
+    b:SetPoint("BOTTOMRIGHT", x, y)
+  end
+  -- (Back to Your Position in that spot, wherever it is: the import button went into the map menu's row in 1.4.2)
+  local r = G.mapButtons.recenter
+  if r and not G.recenterOnImport then
+    G.recenterOnImport = true
+    r:ClearAllPoints()
+    r:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", 0, 0)
+  end
+end
+
+-- The bottom-right column's room on the map's button layer, { left, bottom, right, top } from its bottom left: the
+-- import button where G.PlaceCornerButtons put it, and the buttons going up from it (Back to Your Position, and the
+-- companions' anchored on top of those: StreetView's figure and Street Guess's button, Api.lua's MapButton), never less
+-- than CORNER_COLUMN of them. nil before the map's buttons are made.
+function G.CornerColumnRect()
+  local b = G.mapButtons and G.mapButtons.import
+  if not (b and topLayer) then return nil end
+  local W = topLayer:GetWidth()
+  if type(W) ~= "number" then return nil end
+  local x, y = G.cornerX or -6, G.cornerY or 6
+  local col, n = { [b] = true }, 1 -- (the corner's spot: Back to Your Position's, while it shows)
+  local r = G.mapButtons.recenter
+  if r then col[r] = true end
+  for _ = 1, 8 do -- (the frames anchored by their BOTTOM on one of the column's)
+    local more = false
+    for _, k in ipairs({ topLayer:GetChildren() }) do
+      if not col[k] and not (G.companionOf and G.companionOf[k]) and k.IsShown and k:IsShown() and k.GetPoint then
+        local ok, p, rel = pcall(k.GetPoint, k, 1)
+        if ok and p == "BOTTOM" and rel and col[rel] then
+          col[k], n, more = true, n + 1, true
+        end
+      end
+    end
+    if not more then break end
+  end
+  n = math.max(n, G.CORNER_COLUMN)
+  return { W + x - G.CORNER_BUTTON, y, W + x, y + n * G.CORNER_STEP - G.CORNER_GAP }
+end
+-- What sits over the map's bottom that the height profile strip (MapExtras) and Confirm Route keep clear of, each
+-- { left, bottom, right, top } on the button layer from its bottom left: the bottom-right column (under the strip it
+-- covered the strip's X in the world map: Kooki3z's screenshot 2026-11-27 for 1.4.2, StreetView's figure and Street
+-- Guess's button over it, "can't click the X here"), and in the world map other addons' frames over the map there
+-- (OpenMap's coordinates and tab rail, G.WorldMapCornerCovers, read as the column was last placed).
+function G.BottomCovers()
+  local list = {}
+  local col = G.CornerColumnRect()
+  if col then list[1] = col end
+  for _, o in ipairs(G.wmCoverRects or {}) do list[#list + 1] = o end
+  return list
+end
+-- Confirm Route's height off the map's bottom: `y` (22, or over the height profile strip while it shows: MapExtras keeps
+-- the strip where it is and the button goes over it), else over other addons' frames there in the world map (OpenMap's
+-- coordinates, across a narrow map's middle; G.wmCoverRects); `w` its width.
+G.ROUTE_BUTTON_H = 22
+function G.RouteButtonY(y, w)
+  local W = topLayer and topLayer:GetWidth()
+  if type(W) ~= "number" then return y end
+  local l, r = W / 2 - w / 2, W / 2 + w / 2
+  local covers = G.wmCoverRects or {}
+  for _ = 1, 4 do
+    local hit
+    for _, o in ipairs(covers) do
+      if o[1] < r and o[3] > l and o[2] < y + G.ROUTE_BUTTON_H and o[4] > y then hit = o break end
+    end
+    if not hit then break end
+    y = math.floor(hit[4] + 3 + 0.5)
+  end
+  return y
 end
 
 -- A double-click on any icon of the game's map makes a stop there, as one on the map itself does (asked 2026-11-10:
@@ -7641,9 +8365,38 @@ function G.WorldMapPick(chain, x, y, viewW)
   end
   return id
 end
+-- (G.wmSyncing: inside it, the game's map changing or its zoom reset by our own SetMapID isn't the game's doing,
+-- G.WorldMapGameMoved)
 function G.WorldMapSync()
+  if G.wmSyncing then return false end
+  G.wmSyncing = true
+  local ok, r = pcall(G.WorldMapSyncNow)
+  G.wmSyncing = nil
+  if not ok then error(r, 0) end
+  return r
+end
+-- The game moved its own canvas (hooked, after its own call): its map changed by itself (the player's zone or subzone
+-- changed: a flight in and out of Undercity's area) or its zoom reset (ResetZoom, the middle the map's). Ours set on it
+-- again at once, in the same frame: through the next frame the game's icons over our map (its player arrow, another
+-- addon's quest icons) sat round its map's middle and jumped back (item 143). `mapChanged`: its OnMapChanged, the
+-- whole change made; a ResetZoom alone (its window's size) only when the map is still ours, else that OnMapChanged
+-- follows. Our own SetMapID and zooms (G.wmSyncing) aren't the game's.
+function G.WorldMapGameMoved(mapChanged)
+  local st = G.wmState
+  if G.wmSyncing or not (st and st.on) then return end
+  st.sc, st.sig = nil, nil
+  if not mapChanged then
+    local wm = rawget(_G, "WorldMapFrame")
+    local okM, cur = pcall(function() return wm and wm.GetMapID and wm:GetMapID() end)
+    if not (okM and cur == st.mapID) then return end
+  end
+  local ok, err = pcall(G.WorldMapSync)
+  if not ok and G.LogError then G.LogError("world map sync", err) end
+end
+function G.WorldMapSyncNow()
   local st = G.wmState
   if not (st.on and canvas) then return false end
+  local had = st.mapID -- (a map of ours already on it: not the world map just opened)
   local wm, box = WorldMapFrame, G.WorldMapBox()
   local child = box and rawget(box, "Child")
   if not (child and box.InstantPanAndZoom and wm.SetMapID and wm.GetMapID and ns.Maps) then return false end
@@ -7651,6 +8404,9 @@ function G.WorldMapSync()
   if G.NoMapOn() and G.NoMapStitched() then return false end
   local x, y, cont, _, s = G.ViewState()
   if not (x and y and cont and s and s > 0) or G.ViewInstance() then return false end
+  -- (between redraws our map glides with the player, G.GlidePan: its middle this frame, at the scale as drawn)
+  local gc = G.glideCenter
+  if gc and gc.s == s then x, y = gc.x, gc.y end
   local chain = G.WorldMapChain(x, y, cont, wm:GetMapID())
   if not chain then return false end
   local viewW = canvas:GetWidth() / s
@@ -7666,11 +8422,13 @@ function G.WorldMapSync()
     local px, py, pc = Geo.PlayerWorld()
     local onPlayer = not free and um and um.bounds and px and um.continent == Geo.Base(pc)
       and px >= um.bounds[1] and px <= um.bounds[3] and py >= um.bounds[2] and py <= um.bounds[4]
+    -- (the game set its canvas for that map, its zoom reset and its middle the map's: ours set on it again at once, not
+    -- a frame or two later. Left till the next frame, the game's own icons (its player arrow, Questie's) sat round the
+    -- map's middle meanwhile and jumped back: item 143's video, a flight over the Ruins of Lordaeron)
+    st.sc = nil
     if onPlayer then
       st.mapID = cur
-      return false
-    end
-    if um and um.bounds and um.continent and um.type ~= 1 then
+    elseif um and um.bounds and um.continent and um.type ~= 1 then
       local b = um.bounds
       local zoom = G.MapFitZoom(um)
       -- (a city with an inside map, Ironforge, Undercity: no further out than its map shows, G.CityUnderView)
@@ -7681,7 +8439,12 @@ function G.WorldMapSync()
     end
   end
   local changed = cur ~= id
-  if changed then pcall(wm.SetMapID, wm, id) end
+  if changed then
+    pcall(wm.SetMapID, wm, id)
+    -- (from one of its maps to another while it's open, at a zoom's stage (zone, continent): no ping on the game's
+    -- arrow, G.WorldMapQuietPing. Its first map as it opens keeps the game's own)
+    if had then G.WorldMapQuietPing() end
+  end
   st.mapID = id
   local bes = box:GetEffectiveScale() or 1
   local es = bes -- (ours is kept the scroll frame's: G.WorldMapKeepScale; read off ourselves it lags a zoom)
@@ -7698,6 +8461,11 @@ function G.WorldMapSync()
   local dx, dy = (ccx * es - bl * bes) / bes, (bt * bes - ccy * es) / bes -- (our middle from the box's top left)
   local h, vv = u * cw - dx / sc, v * ch - dy / sc
   local key = string.format("%d:%.5f:%.2f:%.2f", id, sc, h, vv)
+  -- (the game's canvas at another scale than ours set: reset by the game since, its window resized or its map changed)
+  local okS, scNow = pcall(function() return box.GetCanvasScale and box:GetCanvasScale() end)
+  if okS and type(scNow) == "number" and st.sc and math.abs(scNow - st.sc) > 1e-6 * math.max(st.sc, 1e-6) then
+    st.sc, st.sig = nil, nil
+  end
   -- (both ways: the game's scroll frame pulls its scroll back inside its own limits, the vertical one too near a
   -- zone's edge, and other addons' icons over it sat off their places until the view moved again: "when zooming the
   -- icons jump out of place then back in after a second or so", 2026-11-12)
@@ -7730,6 +8498,27 @@ function G.WorldMapSync()
   return true
 end
 
+-- The game's own player arrow (its group members' pin, GroupMembersPinMixin:OnMapChanged) pings each time its map
+-- changes: StartPlayerPing(2, .25), rings round it growing out and fading for two seconds. Zooming our map in and out
+-- in the world map changes the game's map at each stage (a zone's map, the continent's), so the arrow flashed big now
+-- and then as the zoom went past one (Kooki3z 2026-11-27, 1.4.2: "the player arrow on world map sometimes flashes
+-- larger when zooming in and out"). Stopped at once after our own change of its map (StopPlayerPing, as its OnHide
+-- does; a method call on the game's pin, nothing written to it). True when a pin was there.
+function G.WorldMapQuietPing()
+  local wm = rawget(_G, "WorldMapFrame")
+  if not (wm and wm.EnumeratePinsByTemplate) then return false end
+  local n = 0
+  pcall(function()
+    for pin in wm:EnumeratePinsByTemplate("GroupMembersPinTemplate") do
+      if pin.StopPlayerPing then
+        pcall(pin.StopPlayerPing, pin)
+        n = n + 1
+      end
+    end
+  end)
+  return n > 0
+end
+
 -- The world map window's own size, dragged by a corner on the map while it's in it (asked 2026-11-10: "Can we make
 -- the in game map window sizable when in this mode?"): the windowed map only, its shape kept, the size remembered
 -- (`worldMapSize`, in the window's own units).
@@ -7759,10 +8548,10 @@ function G.ApplyWorldMapSize()
 end
 function G.WorldMapGrip()
   if G.wmGrip or not frame then return G.wmGrip end
-  local b = CreateFrame("Button", nil, frame)
+  local b = CreateFrame("Button", nil, G.hudLayer or frame)
   b:SetSize(18, 18)
   b:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -1, 1)
-  b:SetFrameLevel(frame:GetFrameLevel() + 40 + G.ArtSpan())
+  b:SetFrameLevel(G.HudLevel(40))
   b:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
   b:SetHighlightTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Highlight")
   b:SetPushedTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Down")
@@ -8008,6 +8797,7 @@ function G.WorldMapTick()
   if st.level and (not st.levelAt or now - st.levelAt >= 1) then
     st.levelAt = now
     G.SetLevelTree(st.level, nil, true)
+    G.PlaceCornerButtons(true, true) -- (other addons' frames over the corner shown, moved or sized since: OpenMap's)
   end
   -- (the game's icons made again since: a quest area redrawn; and its map changed, by us or by itself, its art's
   -- layers made again: unseen and under ours at once, item 92)
@@ -8044,6 +8834,11 @@ end
 function G.CloseMapMenus()
   if G.mapMenu then G.mapMenu:Hide() end
   if G.searchPanel then G.searchPanel:Hide() end
+end
+-- The map menu button's name (1.4.2, Kooki3z 2026-11-27: "Make the Map Menu say AzerothGPS Map Menu in game map mode"):
+-- in the game's world map, among its own buttons and other addons', ours by name; in the GPS map's window, Map Menu.
+function G.MapMenuName()
+  return G.WorldMapHosted() and L["AzerothGPS Map Menu"] or L["Map Menu"]
 end
 -- The world map closed by us (never one the player opened themselves with its own key).
 function G.CloseWorldMap()
@@ -8085,6 +8880,14 @@ function G.HookWorldMap()
   end)
   local box = G.WorldMapBox()
   if box and box.HookScript then pcall(box.HookScript, box, "OnSizeChanged", function() G.WorldMapChanged() end) end
+  -- (the game moving its own canvas: its map changed by itself, its zoom reset; ours set on it again in the same call,
+  -- G.WorldMapGameMoved)
+  if hooksecurefunc then
+    if type(wm.OnMapChanged) == "function" then pcall(hooksecurefunc, wm, "OnMapChanged", function() G.WorldMapGameMoved(true) end) end
+    if box and type(box.ResetZoom) == "function" then
+      pcall(hooksecurefunc, box, "ResetZoom", function() G.WorldMapGameMoved(false) end)
+    end
+  end
   local tick = CreateFrame("Frame", nil, UIParent)
   tick:SetScript("OnUpdate", function() G.WorldMapTick() end)
   if ns.TimeScript then ns.TimeScript(tick, "OnUpdate", "world map tick") end
@@ -8102,7 +8905,72 @@ function G.HookWorldMap()
 end
 -- The square's side (UI units) from the setting.
 function G.MinimapSquareSide()
-  return G.MINIMAP_SIDES[S().replaceMinimapSize or "small"] or G.MINIMAP_SIDES.small
+  return G.SquareFitSide() or G.MINIMAP_SIDES[S().replaceMinimapSize or "small"] or G.MINIMAP_SIDES.small
+end
+-- Under a supported UI's own minimap (G.SupportedMinimapUI; Kooki3z's screenshots 2026-11-27 for 1.4.2), the square is
+-- that minimap's size, over it exactly, until the player picks a size (Options > Minimap or the setup,
+-- `replaceMinimapSizePicked`): that UI lays out round its minimap (EllesmereUI's button rows and zone text hang off a
+-- frame of its own at its map's size, centered on the Minimap; DaylightUI's panel has its strip and meter round its
+-- map area), and a bigger square had EllesmereUI's buttons half over the map and covered DaylightUI's strip. The size:
+-- DaylightUI's map area (the Minimap's parent there, G.SquarePanel), else the Minimap's own when it was taken
+-- (`m.home`), in the map's units, the border round it. nil: the size option's.
+G.SQUARE_FIT_MIN, G.SQUARE_FIT_MAX = 100, 600
+function G.SquareFitSide()
+  if G.extra or S().replaceMinimapSizePicked == true or not G.SupportedMinimapUI() or not frame then return nil end
+  local fes = G.SquareES()
+  if fes <= 0 then return nil end
+  local size
+  local panel = G.SquarePanel()
+  if panel and panel.GetWidth then
+    local w = panel:GetWidth()
+    if type(w) == "number" and w > 0 then size = w * (panel:GetEffectiveScale() or 1) / fes end
+  end
+  if not size then
+    local home = G.mmState.home
+    if not (home and type(home.w) == "number" and home.w > 0) then return nil end
+    size = home.w * (home.es or fes) / fes
+  end
+  local side = math.floor(size + 2 * BORDER + 0.5)
+  if side < G.SQUARE_FIT_MIN or side > G.SQUARE_FIT_MAX then return nil end
+  return side
+end
+-- The square's own effective scale: the screen's (its frame is the screen's child at scale 1). Not the frame's as it is
+-- now: in the game's world map the first map's frame is that window's child at its canvas's scale, and the square's
+-- size, the game's Minimap's on it and the logo's place were worked out by that one, the logo jumping as the world map
+-- opened and closed (Kooki3z's recording 2026-11-27 under EllesmereUI).
+function G.SquareES()
+  local es = UIParent and UIParent:GetEffectiveScale() or 1
+  return (type(es) == "number" and es > 0) and es or 1
+end
+-- The square's height where its UI crops its minimap (EllesmereUI's square with a title bar, or its rectangle: the
+-- Minimap's parent is a frame of its own centered on the Minimap, as wide and less tall, its border round that frame):
+-- the square as tall as that frame, so none of our map is outside its border (the zoom is by the width, as the
+-- Minimap's). nil: as tall as wide.
+function G.SquareFitHeight(side)
+  if not side or G.SquareFitSide() ~= side then return nil end
+  local mmap = rawget(_G, "Minimap")
+  local p = type(mmap) == "table" and mmap.GetParent and mmap:GetParent() or nil
+  if type(p) ~= "table" or p == UIParent or not p.GetHeight or G.MinimapHomeParent(p) ~= UIParent then return nil end
+  local w, h = p:GetWidth(), p:GetHeight()
+  if not (type(w) == "number" and type(h) == "number" and w > 0 and h > 0 and h < w - 0.5) then return nil end
+  local es = (p.GetEffectiveScale and p:GetEffectiveScale() or 1) / G.SquareES()
+  return math.floor(h * es + 2 * BORDER + 0.5)
+end
+-- The GPS window's frame (option `windowFrame`): off by itself under a supported UI (Kooki3z 2026-11-27 for 1.4.2: "when
+-- using another UI like EllesmereUI or DaylightUI, turn off the window frame option for the GPS window as well just like
+-- we do for the minimap"), until the player sets the option by hand (`windowFramePicked`, G.WindowFramePicked): from
+-- then on the option alone says. The tutorial's steps show the frame whatever the UI.
+function G.WindowFramed()
+  local st = S()
+  if st.windowFramePicked == true or (ns.Tutorial and ns.Tutorial.run) then return st.windowFrame ~= false end
+  if G.SupportedMinimapUI() then return false end
+  return st.windowFrame ~= false
+end
+function G.SquareSizePicked()
+  S().replaceMinimapSizePicked = true
+end
+function G.WindowFramePicked()
+  S().windowFramePicked = true
 end
 -- The square's side while the map is the minimap square, else nil.
 function G.MinimapSide()
@@ -8249,7 +9117,7 @@ function G.TakeMinimap()
     G.drawVersion = G.drawVersion + 1
     return
   end
-  m.home = { parent = Minimap:GetParent(), w = Minimap:GetWidth(), h = Minimap:GetHeight(),
+  m.home = { parent = G.MinimapHomeParent(Minimap:GetParent()), w = Minimap:GetWidth(), h = Minimap:GetHeight(),
     es = Minimap:GetEffectiveScale() }
   -- (where the minimap is in its container, when it isn't in its middle: a minimap addon that parents it to the
   -- whole screen and anchors it to a corner, EllesmereUI's; the square went to the wrong place, seen 2026-11-10)
@@ -8276,6 +9144,37 @@ end
 G.MINIMAP_MOVED_PX = 0.5 -- (a move under this: the same place)
 G.MINIMAP_MOVED_MAX = 5 -- (placed again at most this often in MINIMAP_MOVED_SPAN s: another addon putting it back
 G.MINIMAP_MOVED_SPAN = 2 -- each time we do isn't fought forever)
+-- The frame the square's place is reckoned from: the Minimap's parent, or the whole screen when that parent hangs off
+-- the Minimap itself. EllesmereUI's cropped minimap (its square with a title bar, a rectangle) parents the Minimap to a
+-- frame of its own centered on the Minimap (its "layout frame"): reckoned from that one, the square's place moved with
+-- the Minimap the square had just moved, and the player's arrow (the game's, on the Minimap) was off the square's
+-- middle where our map draws the player (Kooki3z's screenshot 2026-11-27 for 1.4.2: "user isn't center of the
+-- minimap"), and the square's own anchor went round in a circle through it.
+G.MINIMAP_HOME_DEPTH = 8
+function G.MinimapHomeParent(parent)
+  if type(parent) ~= "table" or parent == UIParent or not parent.GetPoint then return parent or UIParent end
+  local seen, list = {}, { parent }
+  local depth = 0
+  while #list > 0 and depth < G.MINIMAP_HOME_DEPTH do
+    depth = depth + 1
+    local nextList = {}
+    for _, f in ipairs(list) do
+      if f == Minimap then return UIParent end
+      if not seen[f] and f ~= UIParent and f.GetNumPoints then
+        seen[f] = true
+        for i = 1, (f:GetNumPoints() or 0) do
+          local _, rel = f:GetPoint(i)
+          if type(rel) == "string" then rel = _G[rel] end
+          if type(rel) == "table" then nextList[#nextList + 1] = rel end
+        end
+        local up = f.GetParent and f:GetParent()
+        if type(up) == "table" and up ~= UIParent then nextList[#nextList + 1] = up end
+      end
+    end
+    list = nextList
+  end
+  return parent
+end
 function G.AnchorFraction(point)
   point = type(point) == "string" and point:upper() or "CENTER"
   local fx = point:find("LEFT") and 0 or (point:find("RIGHT") and 1 or 0.5)
@@ -8298,7 +9197,7 @@ function G.MinimapHomeFromPoint()
   if G.clone or not home or type(Minimap) ~= "table" then return nil end
   local p = G.MinimapOwnPoints()[1]
   if not p then return nil end
-  local parent = Minimap:GetParent() or UIParent
+  local parent = G.MinimapHomeParent(Minimap:GetParent() or UIParent)
   local point, rel, relPoint, x, y = p[1], p[2], p[3], tonumber(p[4]) or 0, tonumber(p[5]) or 0
   if type(rel) == "string" then rel = _G[rel] end
   rel = rel or parent
@@ -8319,22 +9218,48 @@ end
 function G.OnMinimapMoved()
   local m = G.mmState
   if G.clone or G.minimapPlacing or not m.on or not m.home then return false end
-  local parent, dx, dy, es = G.MinimapHomeFromPoint()
-  if not parent then return false end
-  if m.was then m.was.points, m.was.parent = G.MinimapOwnPoints(), parent end -- (theirs, given back)
   local home = m.home
-  local moved = home.parent ~= parent or math.abs((home.dx or 0) - dx) > G.MINIMAP_MOVED_PX
+  -- (sized again by its UI, EllesmereUI's map size changed: its own size from now, before its place is read by it;
+  -- the square fitted to it again, G.SquareFitSide)
+  local resized = G.minimapForce and m.applied and true or false -- (its mask set by its UI: ours again)
+  G.minimapForce = nil
+  local w = Minimap:GetWidth()
+  if m.setW and type(w) == "number" and w > 0 and math.abs(w - m.setW) > G.MINIMAP_MOVED_PX then
+    home.w, home.h = w, Minimap:GetHeight() or w
+    m.setW = nil
+    resized = true
+  end
+  -- (scaled by its UI, its mover's scale: its size in the square's units again, G.SquareFitSide)
+  local es = Minimap:GetEffectiveScale()
+  if m.setES and type(es) == "number" and es > 0 and math.abs(es - m.setES) > 1e-4 then
+    home.es = es
+    m.setES = nil
+    resized = true
+  end
+  local parent, dx, dy, es = G.MinimapHomeFromPoint()
+  if parent then
+    if m.was then m.was.points, m.was.parent = G.MinimapOwnPoints(), Minimap:GetParent() or parent end -- (theirs, given back)
+  else -- (still on the square's anchor: the same middle)
+    if not resized then return false end
+    parent, dx, dy, es = home.parent, home.dx or 0, home.dy or 0, home.es
+  end
+  local moved = resized or home.parent ~= parent or math.abs((home.dx or 0) - dx) > G.MINIMAP_MOVED_PX
     or math.abs((home.dy or 0) - dy) > G.MINIMAP_MOVED_PX
   -- (taken, it's off the square's anchor now even where it's the same place)
   if not moved and not m.applied then return false end
-  local now = GetTime and GetTime() or 0
-  local mv = m.moves
-  if not mv or now - mv.since > G.MINIMAP_MOVED_SPAN then
-    mv = { since = now, n = 0 }
-    m.moves = mv
+  -- (a size, scale or mask its UI set is followed every time: the square takes it, nothing to fight over; only a
+  -- place it's put back to again and again stops being followed for a while. EllesmereUI's size slider dragged went
+  -- past the limit, and the square stayed at its old size over a black map: Kooki3z's recording 2026-11-27)
+  if not resized then
+    local now = GetTime and GetTime() or 0
+    local mv = m.moves
+    if not mv or now - mv.since > G.MINIMAP_MOVED_SPAN then
+      mv = { since = now, n = 0 }
+      m.moves = mv
+    end
+    if mv.n >= G.MINIMAP_MOVED_MAX then return false end
+    mv.n = mv.n + 1
   end
-  if mv.n >= G.MINIMAP_MOVED_MAX then return false end
-  mv.n = mv.n + 1
   home.parent, home.dx, home.dy, home.es = parent, dx, dy, es
   m.placedKey = nil -- (G.PlaceMinimapItself: the Minimap set on the anchor again)
   G.ApplySettings() -- (in combat: the window now, the Minimap after, m.queued)
@@ -8617,6 +9542,11 @@ end
 -- minimap's own container: Edit Mode moving it moves the square). corner, home, x, y.
 function G.MinimapCorner(side)
   local was = G.mmState.home or {}
+  -- (fitted to DaylightUI's map area: centered on the area itself. Reckoned from the Minimap's point there, by its size
+  -- when it was taken (the game's, smaller), the square was up and left of the area, DaylightUI's panel showing as a
+  -- dark band down its right and along its bottom: Kooki3z's screenshot 2026-11-27)
+  local panel = G.SquarePanel()
+  if panel and side and G.SquareFitSide() == side then was = { parent = panel, dx = 0, dy = 0 } end
   local home = was.parent or UIParent
   local ues = UIParent:GetEffectiveScale() or 1
   local hx, hy = home:GetCenter()
@@ -8626,16 +9556,22 @@ function G.MinimapCorner(side)
   local dx, dy = was.dx or 0, was.dy or 0 -- (the old minimap's middle from its container's)
   local cx, cy = hx * hes / ues + dx, hy * hes / ues + dy
   local right, top = cx > sw / 2, cy > sh / 2
-  -- (the old minimap's half side, in the map's units)
+  -- (the old minimap's half side, in the map's units; the square fitted to another UI's minimap: centered on it)
   local half = (was.w or side) / 2 * (was.es or ues) / ues
+  if side and G.SquareFitSide() == side then half = side / 2 end
   return (top and "TOP" or "BOTTOM") .. (right and "RIGHT" or "LEFT"), home, dx + (right and half or -half),
     dy + (top and half or -half), right, top
 end
 
 -- The window as the square, in the minimap's corner (our frame: in combat too).
 function G.PlaceMinimapFrame(side)
-  local corner, home, ox, oy = G.MinimapCorner(side)
+  local corner, home, ox, oy, right, top = G.MinimapCorner(side)
   frame:ClearAllPoints()
+  if G.SquareFitSide() == side then -- (fitted to another UI's minimap: on its middle, whatever its height)
+    local half = side / 2
+    frame:SetPoint("CENTER", home, "CENTER", ox - (right == false and -half or half), oy - (top == false and -half or half))
+    return
+  end
   frame:SetPoint(corner, home, "CENTER", ox, oy)
 end
 
@@ -8789,15 +9725,22 @@ function G.PlaceMinimapItself(side)
     a:EnableMouse(false)
     G.mmAnchor = a
   end
-  local corner, home, ox, oy = G.MinimapCorner(side)
+  local corner, home, ox, oy, right, top = G.MinimapCorner(side)
   a:ClearAllPoints()
-  a:SetPoint(corner, home, "CENTER", ox, oy)
-  a:SetSize(side, side)
+  local tall = G.SquareFitHeight(side)
+  if G.SquareFitSide() == side then -- (as the square: on that UI's minimap's middle, G.PlaceMinimapFrame)
+    local half = side / 2
+    a:SetPoint("CENTER", home, "CENTER", ox - (right == false and -half or half), oy - (top == false and -half or half))
+  else
+    a:SetPoint(corner, home, "CENTER", ox, oy)
+  end
+  a:SetSize(side, tall or side)
   -- (the game's Minimap touched only when something changed: the size, the scale, the way its ground is hidden, or
   -- its mask or ground set by something else since; every settings change re-set them all, and opening the options
   -- brought a round white disc over the square, the user 2026-11-09)
   local inner = side - 2 * BORDER
-  local k = (frame:GetEffectiveScale() or 1) / (Minimap:GetEffectiveScale() or 1)
+  -- (by the square's scale, not the frame's: in the world map the frame is that window's, G.SquareES)
+  local k = G.SquareES() / (Minimap:GetEffectiveScale() or 1)
   -- (the map in the game's world map window meanwhile: the game's Minimap stands in for it on the square, in the
   -- same place at the same size, square, with its own ground, its border and our route on it)
   local how = G.MinimapHideMode()
@@ -8819,7 +9762,10 @@ function G.PlaceMinimapItself(side)
     end)
     G.minimapPlacing = nil
     if not okP then error(errP, 0) end
-    Minimap:SetSize(inner * k, inner * k)
+    G.minimapPlacing = true
+    pcall(Minimap.SetSize, Minimap, inner * k, inner * k)
+    G.minimapPlacing = nil
+    m.setW, m.setES = inner * k, Minimap:GetEffectiveScale()
     G.SetMinimapBlobs(G.MinimapBlobAlpha()) -- (its quest areas: the map's own instead, while they're drawn)
     G.PlaceQueueEye(true)
     G.PlaceZoomButtons(true)
@@ -8956,6 +9902,7 @@ function G.ApplyMinimapChrome(compact, force)
   end
   if G.chromeStrip then G.chromeStrip:SetShown(not compact) end
   if changed or force then G.ApplyFrameLook() end
+  if G.ApplyFade then G.ApplyFade() end -- (our frame's own edge: none round the square under another UI, G.SquareBare)
 end
 -- The square's look again after the windows' logo look was applied (ns.ApplyLogoLook: the options window opening the
 -- first time, a logo setting, the UI's scale): it gives every window its titled border and its logo back.
@@ -9123,10 +10070,10 @@ function G.PlaceMinimapButton()
   local sq = host or kept
   local on = sq and G.mmAnchor or frame
   local shown = m.on and (not sq or G.mmAnchor ~= nil)
-  local parent = sq and UIParent or frame -- (the world map's picture ends at its own edge)
+  local parent = sq and UIParent or G.hudLayer or frame -- (the world map's picture ends at its own edge)
   if b:GetParent() ~= parent then
     b:SetParent(parent)
-    b:SetFrameLevel((parent:GetFrameLevel() or 1) + 30 + G.ArtSpan())
+    b:SetFrameLevel(parent == UIParent and (parent:GetFrameLevel() or 1) + 30 + G.ArtSpan() or G.HudLevel(30))
   end
   b:SetShown(shown and true or false)
   if not shown then
@@ -9143,9 +10090,15 @@ function G.PlaceMinimapButton()
   b.hl:SetShown(not logo)
   b.logo:SetShown(logo)
   b.logoHl:SetShown(logo)
+  -- (as the logo, on the square: one place and one size whatever the map does. On the Minimap's anchor, the square's
+  -- own box, always (not the window, which is the square only while the map isn't out or in the world map), and sized
+  -- by its own scale, not the window's (in the world map that window's canvas's). Kooki3z 2026-11-27 under EllesmereUI:
+  -- "the logo still jumps on the minimap when opening the map")
+  if logo and G.mmAnchor then on = G.mmAnchor end
   if logo then
-    local size = ns.ShowCornerLogo(b.logo, G.MinimapLogoUnits(), frame:GetEffectiveScale())
-    ns.ShowCornerLogo(b.logoHl, G.MinimapLogoUnits(), frame:GetEffectiveScale())
+    local es = (b.GetEffectiveScale and b:GetEffectiveScale()) or G.SquareES()
+    local size = ns.ShowCornerLogo(b.logo, G.MinimapLogoUnits(), es)
+    ns.ShowCornerLogo(b.logoHl, G.MinimapLogoUnits(), es)
     b:SetSize(size, size)
     b.logoSize = size
   else
@@ -9153,7 +10106,20 @@ function G.PlaceMinimapButton()
   end
   b:SetFrameStrata(not logo and G.MINIMAP_EXPANDED_STRATA or "MEDIUM") -- (over the game's Minimap on the square)
   b:ClearAllPoints()
-  if logo then
+  -- (the logo hidden by the option on the square: placed all the same, the Resume Routing button by its place)
+  if logo and not G.SquareLogoShown() then b:Hide() end
+  local at = logo and G.LogoMovedAngle()
+  if at then -- (dragged somewhere round the square's edge: there, G.LogoEdgePoint)
+    local x, y = G.LogoEdgePoint(on, at)
+    b:SetPoint("CENTER", on, "CENTER", x, y)
+  elseif logo and not G.LogoKept() and G.SupportedMinimapUI() ~= nil then
+    -- (under another UI's minimap, its original spot off (Kooki3z 2026-11-28: "When using Ellesmere or DaylightUI this
+    -- original spot option should be off and greyed out"): inside the square's corner, on the map. Hanging below it,
+    -- it was over that UI's panel, DaylightUI's text row, with a gap of its panel by it: his screenshot 2026-11-27)
+    b:SetPoint("BOTTOMLEFT", on, "BOTTOMLEFT", G.MINIMAP_LOGO_INSIDE, G.MINIMAP_LOGO_INSIDE)
+  elseif logo then
+    -- (its original spot, over the square's corner: Kooki3z 2026-11-28, "I liked the way it was originally displayed
+    -- over the corner", G.LogoKept)
     -- (hanging below the bottom by the share the window's hangs over its top, for its size)
     local size = b.logoSize or 0
     b:SetPoint("CENTER", on, "BOTTOMLEFT", size * G.MINIMAP_LOGO_IN,
@@ -9166,6 +10132,77 @@ function G.PlaceMinimapButton()
   G.PlaceMinimapResume(logo and on or nil)
 end
 
+-- The logo button on the square (option `replaceMinimapLogo`, on by default; Kooki3z 2026-11-27 for 1.4.2: "add option
+-- to hide minimap logo button"). Its left-click opens the GPS map out of the square (or the world map with that
+-- option) and its right-click the options: hidden, the Show/Hide GPS key and /agps show open the map, /agps the
+-- options (the option's tooltip says so). The arrow back into the corner, on the map grown out of the square, stays.
+-- The logo dragged round the square's edge (Kooki3z 2026-11-27 for 1.4.2: "make the AzerothGPS logo on the minimap
+-- movable around the minimap like the buttons do", "locked by default"): while `replaceMinimapLogoUnlocked` is on
+-- (Options > Minimap), a left-drag slides it along the edge, as the minimap button goes round the minimap (Options.lua's
+-- angle from the middle, on a square's edge). Saved as that angle, `replaceMinimapLogoAngle` (degrees; nil: its corner,
+-- as before), so it keeps its spot on any size of square, ours or another UI's. Locked, a drag does nothing; clicks as
+-- ever (the drag's own button-up isn't one). The Resume Routing button goes beside it.
+G.LOGO_DRAG_CLICK = 0.3 -- s after a drag in which a button-up is the drag's, not a click
+function G.LogoUnlocked() return S().replaceMinimapLogoUnlocked == true end
+function G.LogoAngle()
+  local a = tonumber(S().replaceMinimapLogoAngle)
+  return a
+end
+-- "Keep the logo in its original spot" (`replaceMinimapLogoKeep`, on by default; Kooki3z 2026-11-28: "I liked the way
+-- it was originally displayed over the corner like before, can we have an option on by default that keeps its
+-- original position and is unticked when the minimap logo was moved and greyed out while the button is unlocked"):
+-- on, the logo is over the square's corner as in 1.4.1 whatever angle was dragged; a drag unticks it.
+-- Under DaylightUI's or EllesmereUI's minimap it's off, whatever the option says (Kooki3z 2026-11-28; the option grayed
+-- with a note, its setting never written, back as it was without that UI): the logo inside the square's corner there.
+function G.LogoKept()
+  if G.SupportedMinimapUI() ~= nil then return false end
+  return S().replaceMinimapLogoKeep ~= false
+end
+-- The angle the logo is placed at: the dragged one, unless it's kept in its original spot.
+function G.LogoMovedAngle()
+  if G.LogoKept() then return nil end
+  return G.LogoAngle()
+end
+-- The point on box `on`'s edge at angle `deg` from its middle (UI units from the middle), the logo's middle half its
+-- size in from the edge so it stays on the square.
+function G.LogoEdgePoint(on, deg)
+  local w, h = on:GetWidth() or 0, on:GetHeight() or 0
+  local half = ((G.mmButton and G.mmButton.logoSize) or 0) / 2
+  local rx, ry = math.max(0, w / 2 - half), math.max(0, h / 2 - half)
+  local r = math.rad(deg)
+  local x, y = math.cos(r), math.sin(r)
+  local q = math.max(math.abs(x) / math.max(rx, 1e-6), math.abs(y) / math.max(ry, 1e-6))
+  if q <= 0 then return 0, 0 end
+  return x / q, y / q
+end
+-- The angle of the cursor from box `on`'s middle, in degrees.
+function G.LogoCursorAngle(on)
+  local mx, my = on:GetCenter()
+  local cx, cy = GetCursorPosition()
+  local k = on:GetEffectiveScale() or 1
+  if not (mx and my and cx and cy) then return nil end
+  return math.deg((math.atan2 or math.atan)(cy / k - my, cx / k - mx))
+end
+function G.LogoDragStart(b)
+  if not (G.LogoUnlocked() and G.mmAnchor and b.logo and b.logo:IsShown()) then return end
+  b:SetScript("OnUpdate", function() G.LogoDragTo(G.LogoCursorAngle(G.mmAnchor)) end)
+end
+function G.LogoDragTo(deg)
+  if not deg then return end
+  S().replaceMinimapLogoAngle = math.floor(deg * 10 + 0.5) / 10
+  -- (moved: no longer in its original spot, Options' check unticked; not under another UI's minimap, where it's off
+  -- anyway and the player's own choice stays as it was for when that UI is gone)
+  if G.SupportedMinimapUI() == nil then S().replaceMinimapLogoKeep = false end
+  G.PlaceMinimapButton()
+end
+function G.LogoDragStop(b)
+  b:SetScript("OnUpdate", nil)
+  if G.LogoUnlocked() then G.logoDragged = GetTime and GetTime() or 0 end
+end
+function G.SquareLogoShown()
+  if ns.Tutorial and ns.Tutorial.run then return true end -- (the tutorial's steps point at it)
+  return S().replaceMinimapLogo ~= false
+end
 -- The square's Resume Routing button (asked 2026-11-18 for 1.3.9, a red circle just right of the logo: "(enabled by
 -- default) I'd like the unpause button to also show in the minimap glowing here"; option `replaceMinimapResume`):
 -- the Pause Routing quick button's look and icon, small, just right of the logo in the square's bottom-left corner,
@@ -9179,7 +10216,7 @@ G.MINIMAP_RESUME_GAP = 2
 G.PAUSE_ICON = "Interface\\Icons\\Spell_Nature_TimeStop" -- (the Pause Routing quick button's)
 function G.MakeMinimapResume()
   if G.mmResume or G.clone then return G.mmResume end
-  local r = CreateFrame("Button", nil, frame)
+  local r = CreateFrame("Button", nil, G.hudLayer or frame)
   r:SetSize(22, 22)
   local bg = r:CreateTexture(nil, "BACKGROUND")
   bg:SetAllPoints()
@@ -9246,8 +10283,19 @@ function G.PlaceMinimapResume(on)
   side = r.agpsArt.F / r.agpsArt.ppu
   r:ClearAllPoints()
   -- (the logo's middle is MINIMAP_LOGO_IN of its width in from the square's left: its right edge half a width further)
-  r:SetPoint("BOTTOMLEFT", on, "BOTTOMLEFT", size * (G.MINIMAP_LOGO_IN + 0.5) + G.MINIMAP_RESUME_GAP,
-    G.MINIMAP_RESUME_GAP * 2)
+  if G.LogoMovedAngle() then -- (the logo dragged round the edge: beside it, toward the square's middle)
+    local lx = G.LogoEdgePoint(on, G.LogoMovedAngle())
+    if lx > 0 then
+      r:SetPoint("RIGHT", b, "LEFT", -G.MINIMAP_RESUME_GAP, 0)
+    else
+      r:SetPoint("LEFT", b, "RIGHT", G.MINIMAP_RESUME_GAP, 0)
+    end
+  else
+    local x = size * (G.MINIMAP_LOGO_IN + 0.5) + G.MINIMAP_RESUME_GAP
+    -- (the logo inside the square's corner under another UI's minimap: right of it there)
+    if not G.LogoKept() and G.SupportedMinimapUI() ~= nil then x = G.MINIMAP_LOGO_INSIDE + size + G.MINIMAP_RESUME_GAP end
+    r:SetPoint("BOTTOMLEFT", on, "BOTTOMLEFT", x, G.MINIMAP_RESUME_GAP * 2)
+  end
   if not r.glow and G.MakeGlow then r.glow = G.MakeGlow(r) end
   if r.glow then
     local u = G.FitFrameArt(r.glow, r, side * G.GLOW_SHARE)
@@ -9330,7 +10378,7 @@ function G.BringUpQuestion()
 end
 function G.MakeMinimapAsk()
   if G.mmAsk or G.clone then return G.mmAsk end
-  local r = CreateFrame("Button", nil, frame)
+  local r = CreateFrame("Button", nil, G.hudLayer or frame)
   r:SetSize(22, 22)
   local bg = r:CreateTexture(nil, "BACKGROUND")
   bg:SetAllPoints()
@@ -9523,6 +10571,23 @@ function G.InitMinimapReplace()
     for _, method in ipairs({ "SetPoint", "SetParent" }) do
       if Minimap[method] then pcall(hooksecurefunc, Minimap, method, function() G.MinimapMovedSoon() end) end
     end
+    -- (scaled by its UI: G.OnMinimapMoved follows its effective scale)
+    if Minimap.SetScale then
+      pcall(hooksecurefunc, Minimap, "SetScale", function()
+        local es = Minimap:GetEffectiveScale()
+        local setES = G.mmState.setES
+        if setES and type(es) == "number" and math.abs(es - setES) > 1e-4 then G.MinimapMovedSoon() end
+      end)
+    end
+    -- (and sized by its UI to another size than the square's: EllesmereUI's map size, G.OnMinimapMoved)
+    if Minimap.SetSize then
+      pcall(hooksecurefunc, Minimap, "SetSize", function(_, w)
+        local setW = G.mmState.setW
+        if setW and type(w) == "number" and math.abs(w - setW) > G.MINIMAP_MOVED_PX then G.MinimapMovedSoon() end
+      end)
+    end
+    -- (and another UI putting it at its own level, under the square in its panel again: G.LiftMinimap)
+    if Minimap.SetFrameLevel then pcall(hooksecurefunc, Minimap, "SetFrameLevel", function() G.OnMinimapLevel() end) end
   end
   local tick = CreateFrame("Frame", nil, UIParent)
   tick:SetScript("OnUpdate", function(_, dt) G.MinimapTick(dt) end)
@@ -9536,9 +10601,9 @@ function G.InitMinimapReplace()
   end)
   if UISpecialFrames and not G.clone then table.insert(UISpecialFrames, "AzerothGPSMinimapBack") end
   G.mmEscape = esc
-  local b = CreateFrame("Button", nil, frame)
+  local b = CreateFrame("Button", nil, G.hudLayer or frame)
   b:SetSize(20, 20)
-  b:SetFrameLevel(frame:GetFrameLevel() + 30 + G.ArtSpan())
+  b:SetFrameLevel(G.HudLevel(30))
   local bg = b:CreateTexture(nil, "BACKGROUND")
   bg:SetAllPoints()
   bg:SetColorTexture(0.05, 0.05, 0.06, 0.85)
@@ -9559,7 +10624,12 @@ function G.InitMinimapReplace()
   -- (right-click: the options, as the minimap button's; asked 2026-11-09, "always make right click on the logo ... open
   -- options")
   b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+  -- (dragged round the square's edge while unlocked, G.LogoDragStart; a drag's own button-up isn't a click)
+  b:RegisterForDrag("LeftButton")
+  b:SetScript("OnDragStart", function(self) G.LogoDragStart(self) end)
+  b:SetScript("OnDragStop", function(self) G.LogoDragStop(self) end)
   b:SetScript("OnClick", function(_, mouse)
+    if G.logoDragged and GetTime and GetTime() - G.logoDragged < G.LOGO_DRAG_CLICK then return end
     if mouse == "RightButton" then
       if ns.Options and ns.Options.Toggle then ns.Options.Toggle() end
       return
@@ -9589,9 +10659,9 @@ function G.InitMinimapReplace()
   G.MakeMinimapAsk()
   -- (and on the opened window while the square is kept, the logo staying on the square: the arrow back as before 1.3.0,
   -- asked 2026-11-16 for 1.3.5, "the little arrow in the pop out map in the bottom left is gone ... lets add that back")
-  local back = CreateFrame("Button", nil, frame)
+  local back = CreateFrame("Button", nil, G.hudLayer or frame)
   back:SetSize(20, 20)
-  back:SetFrameLevel(frame:GetFrameLevel() + 30 + G.ArtSpan())
+  back:SetFrameLevel(G.HudLevel(30))
   local bbg = back:CreateTexture(nil, "BACKGROUND")
   bbg:SetAllPoints()
   bbg:SetColorTexture(0.05, 0.05, 0.06, 0.85)
@@ -9723,7 +10793,7 @@ G.UPKEEP_EVERY = 0.25 -- the route's upkeep with the map and the arrow both hidd
 -- flight-path icons and the stops' markers hopped while the tiles slid; the marks were anchored to the
 -- panned icon layer and moved twice, ahead of the map, until each re-gather put them back.)
 function G.GlidePan()
-  G.glided = false
+  G.glided, G.glideCenter = false, nil
   if free or browse or hiddenShown or not canvas or not G.markLayer then return end
   local px, py = Geo.PlayerWorld()
   if not px then return end
@@ -9735,9 +10805,10 @@ function G.GlidePan()
   local zoom = mmZoom or approachZoom or st2.zoom
   if not zoom or zoom == 0 then return end
   local rot = mmRot or G.ViewRot(st2, facing, zoom)
+  if G.wmState.on then rot = 0 end -- (in the game's world map: north up, as G.Update draws it)
   local s = half / zoom
   local cx, cy = px, py
-  if st2.rotate and not mmZoom then cx, cy = G.ScreenToWorld(px, py, 0, G.HEADING_UP_LOW * halfH, rot, s) end
+  if st2.rotate and not mmZoom and not G.NoMapOn() then cx, cy = G.ScreenToWorld(px, py, 0, G.HEADING_UP_LOW * halfH, rot, s) end
   local function Off(x, y)
     local dx, dy = Geo.ScreenOffset(cx, cy, x, y)
     return Geo.Rotate(dx * s, dy * s, rot)
@@ -9766,6 +10837,14 @@ function G.GlidePan()
     if arrow and arrow.agpsRot ~= r then
       arrow.agpsRot = r
       arrow:SetRotation(r)
+    end
+    -- (in the game's world map: its canvas, the game's icons and other addons' on it, glides along too, this frame,
+    -- not only at each redraw; between them it stood still under our sliding map and caught up in a step at each
+    -- redraw, 5 to 10 a second: item 143, "icons are jumping still, more so on this flight path")
+    G.glideCenter = { x = cx, y = cy, s = s }
+    if G.wmState.on then
+      local okW, errW = pcall(G.WorldMapSync)
+      if not okW then G.LogError("world map sync", errW) end
     end
   end
   local as = areaState
@@ -10032,12 +11111,30 @@ function G.ApplyNavLook()
     G.navLock:SetShown(G.navDetached == true and not bare)
     G.SetLockGlyph(G.navLock, locked)
   end
+  G.ApplyNavMouse()
 end
 -- The detached panel locked (1.3.9, asked 2026-11-18, "be able to lock the detached route panel"): `navPanelLocked`,
 -- no dragging, no sizing (its grip and edge hidden), no right-click back to the map; its buttons still work, its lock
 -- button (shown with them) or the option unlocks it. Only while detached: on the map it never moves anyway.
 function G.NavLocked()
   return G.navDetached == true and S().navPanelLocked == true
+end
+-- Locked, click-through (1.4.2, Kooki3z: "on route panel detach, when locked, make it click through like the directions
+-- are when locked"): the panel and every frame in it (the X, Attach, the lock, the steps' -/+, Share, the quest rows'
+-- Leave Out / Put Back, its grip and edge) take no clicks, wheel or mouse over, so a click there targets or turns the
+-- camera; the option unlocks it. The map's own click-through's SetMouse, each frame's mouse kept and given back on
+-- unlocking. As the directions' locked panel, the use and target buttons still take clicks: secure buttons of their own
+-- on UIParent (G.NewUseButton, G.MakeTargetButton), never the panel's children. On the map: the map's click-through's.
+function G.ApplyNavMouse()
+  if not navPanel then return end
+  local through = G.NavLocked()
+  navPanel:EnableMouse(G.navDetached == true and not through) -- (on the map it takes no mouse: the map under it drags)
+  if through and navPanel.EnableMouseWheel then navPanel:EnableMouseWheel(false) end
+  if through == (G.navThrough == true) then return end
+  G.navThrough = through or nil
+  -- (unlocked on the map while the map's click-through is on: left to that, which gives them back when it ends)
+  local take = not through and not (G.clickThrough and not G.navDetached)
+  for _, c in ipairs({ navPanel:GetChildren() }) do G.SetMouse(c, take) end
 end
 function G.SetNavLocked(on)
   S().navPanelLocked = on and true or false
@@ -10394,6 +11491,8 @@ function G.UpdateNavPanel(px, py, cont, hidden, route, dest)
   G.tpAhead = status and not hidden and (collapsed or steps == "") and ns.Nav.TeleportAheadText(0) or nil
   -- (and the other faction's territory the route can't go round, Nav.HostileNote: asked 2026-11-14)
   G.hostileNote = status and not hidden and ns.Nav.HostileNote and ns.Nav.HostileNote() or nil
+  -- (and as a ghost, the run to the body against the Spirit Healer, Nav.CorpseNote: item 135e)
+  G.corpseNote = status and not hidden and ns.Nav.CorpseNote and ns.Nav.CorpseNote() or nil
   local grouped = (IsInGroup and IsInGroup()) or (IsInRaid and IsInRaid())
   local manySteps = #ns.Nav.Steps() > 3 or (G.walkTurns or 0) > G.WALK_TURNS_SHOWN
   -- (the same text and states as the last redraw: the panel isn't touched again — a heading-up
@@ -10402,12 +11501,13 @@ function G.UpdateNavPanel(px, py, cont, hidden, route, dest)
   local psig = table.concat({ status or "", steps, collapsed and "c" or "-", hidden and "h" or "-",
     grouped and "g" or "-", manySteps and "m" or "-", st.stepsAll and "a" or "-",
     #ns.Nav.stops > 0 and "s" or "-", tostring(ns.Nav.Version()), tostring(navClosedAt),
-    G.Held() and "H" or "-", tostring(G.drawVersion), G.tpAhead or "", G.hostileNote or "",
+    G.Held() and "H" or "-", tostring(G.drawVersion), G.tpAhead or "", G.hostileNote or "", G.corpseNote or "",
     G.NavBare() and "b" or "-", G.NavFixed() and tostring(G.NavDetachedHeight()) or "-",
     G.NavWrap() and "w" or "-" }, "|")
   if psig ~= G.navPanelSig then
   G.navPanelSig = psig
   local tail = (G.tpAhead and "\n" .. G.tpAhead or "") .. (G.hostileNote and "\n" .. G.hostileNote or "")
+    .. (G.corpseNote and "\n" .. G.corpseNote or "")
   navText:SetText((collapsed and G.CollapsedStatus(status) or status or "") .. tail)
   -- (the route being worked out: laid out with all its dots, and those cycled between, G.WorkingDotsTick)
   local wt = not hidden and not collapsed and ns.Nav.warming and not ns.Nav.route and ns.Nav.WorkingShown()
@@ -10473,6 +11573,7 @@ function G.Update()
     G.CITY_MAX_ZOOM = G.CityMaxZoomFor(ok and id or nil)
   end
   if G.WatchQuickOn then G.WatchQuickOn() end
+  G.ApplyHud() -- (the HUD over the map's icons: a Minimap moved up since, now and then)
   local px, py, cont, pz = Geo.PlayerWorld()
   if px then pcall(G.AutoFollowCheck, px, py, cont) end
   -- In a dungeon the game hides the player's position: its map still (the art, the usual way
@@ -10559,6 +11660,7 @@ function G.Update()
     end
   end
   view.x, view.y, view.rot, view.s = cx, cy, rot, s
+  G.glideCenter = nil -- (the view as drawn now: the world map's canvas follows it, G.WorldMapSyncNow)
   G.markView = { x = cx, y = cy, rot = rot, s = s, half = half } -- (the marks are placed round this: G.GlidePan)
   G.markLayer:ClearAllPoints()
   G.markLayer:SetPoint("CENTER", canvas, "CENTER", 0, 0)
@@ -10960,7 +12062,15 @@ function G.Update()
     fl.text:SetShown((inst or view.cave) ~= nil and not browse)
     -- (Confirm Route above the dungeon's note, not over it)
     routeBtn:ClearAllPoints()
-    if fl.text:IsShown() then routeBtn:SetPoint("BOTTOM", fl.text, "TOP", 0, 3) else routeBtn:SetPoint("BOTTOM", 0, 22) end
+    -- (and over other addons' frames along the world map's bottom, and over the height profile strip: G.RouteButtonY)
+    local stripTop = G.mx and G.mx.strip and G.mx.strip:IsShown() and G.mx.stripTop or nil
+    if fl.text:IsShown() and not stripTop then
+      G.routeButtonY = nil
+      routeBtn:SetPoint("BOTTOM", fl.text, "TOP", 0, 3)
+    else
+      G.routeButtonY = G.RouteButtonY(stripTop and stripTop + 3 or 22, math.max(128, (routeBtn:GetTextWidth() or 0) + 24))
+      routeBtn:SetPoint("BOTTOM", 0, G.routeButtonY)
+    end
   end
   -- (its floors filled under the art: the parts with none, a courtyard or a raid out in the open,
   -- still show where you can walk)
@@ -11054,8 +12164,9 @@ function G.Update()
   G.swimSegN = 0 -- (the swims drawn: none till the route's are, G.SwimAtCursor)
   G.jumpSegN = 0 -- (and the jumps, G.JumpAtCursor)
   if route and ns.Nav.RedAsking and ns.Nav.RedAsking() then route = nil end -- (asked "keep this route?": not drawn yet)
-  -- (held by another addon: the route goes on, not drawn; the square with its route off, G.SquareHidesRoute: same)
-  if route and not G.Held() and not G.SquareHidesRoute() then
+  -- (held by another addon: the route goes on, not drawn; the square with its route off, G.SquareHidesRoute: same; and
+  -- the Route line layer hidden, Map Layers: the route worked out and the directions as ever, the line not drawn)
+  if route and not G.Held() and not G.SquareHidesRoute() and G.LayerOn("route") then
     -- Every part of the route, converted into this view's continent coordinates.
     local reach = half * 1.5
     local function toScreen(x, y)
@@ -11301,7 +12412,8 @@ function G.Update()
   -- ICON_REFRESH on: party members, quests and docks' countdowns stay current)
   local iconSig = table.concat({ tostring(inst), tostring(browse), tostring(place and place[1]), tostring(viewCont),
     tostring(zoom), tostring(ns.Nav.Version()), tostring(ns.Nav.route), tostring(ns.Layers and ns.Layers.version),
-    #pending, tostring(instBand and instBand[1]), ns.OtherPins and ns.OtherPins.Stamp() or 0 }, ":")
+    #pending, tostring(instBand and instBand[1]), ns.OtherPins and ns.OtherPins.Stamp() or 0,
+    tostring(view.cave and view.cave.key) }, ":") -- (a cave's or auto map's: its NPCs, G.AutoMapNpcs)
   -- (kept while they show the same and the view only panned a little: they're culled at the view's edge, so
   -- the layer moves at most ICON_PAN_PX before they're gathered and placed again; a bare strip at the leading
   -- edge lasts at most that far or ICON_REFRESH)
@@ -11416,7 +12528,9 @@ function G.Update()
   -- own one under it isn't drawn as well
   local function DropUnderStops(pois)
     local under = {}
-    for _, list in ipairs({ ns.Nav.stops, pending }) do
+    -- (only the markers drawn: with Map Layers' stops or route hidden, the icons under them show)
+    local stopsShown, routeShown = G.LayerOn("stops"), G.LayerOn("route")
+    for _, list in ipairs(stopsShown and { ns.Nav.stops, pending } or {}) do
       for _, d in ipairs(list) do
         if d.tex then
           local x, y = Geo.ToContinent(d.cont, d.x, d.y, viewCont)
@@ -11425,12 +12539,12 @@ function G.Update()
       end
     end
     -- (and a flight master's detour: its pin is that flight master's icon, right-clickable)
-    for _, h in ipairs(ns.Nav.route and ns.Nav.LearnOnRoute(ns.Nav.route) or {}) do
+    for _, h in ipairs(routeShown and ns.Nav.route and ns.Nav.LearnOnRoute(ns.Nav.route) or {}) do
       local x, y = Geo.ToContinent(h.cont, h.x, h.y, viewCont)
       if x then under[#under + 1] = { x, y } end
     end
     -- (and the rides the route takes: their pins are the flight master's or dock's icon, right-clickable)
-    for _, h in ipairs(ns.Nav.route and ns.Nav.RidePins(ns.Nav.route) or {}) do
+    for _, h in ipairs(routeShown and ns.Nav.route and ns.Nav.RidePins(ns.Nav.route) or {}) do
       local x, y = Geo.ToContinent(h.cont, h.x, h.y, viewCont)
       if x then under[#under + 1] = { x, y } end
     end
@@ -11526,7 +12640,8 @@ function G.Update()
     end
     -- zeppelins' and boats' docks (with points of interest, every map style but the world map):
     -- their next arrival, double-click for a stop there
-    if st.poiPoi ~= false and G.ShowsTravelMarkers() then
+    -- (their own layer since 1.4.2, Map Layers' Boats, zeppelins and the tram: with Points of interest before)
+    if G.LayerOn("docks", st) and G.ShowsTravelMarkers() then
       local base = Geo.Base(viewCont)
       for i, t in ipairs(ns.Transports or {}) do
         if DOCK_ICON[t[8]] and ns.Nav.TransportUsable(t) then -- (only the player's faction's)
@@ -11585,6 +12700,13 @@ function G.Update()
       end
     end
     AddPins(pois) -- (on a continent's map too: a few, not hundreds like the caves)
+    -- (a map drawn from its cells, a building's or a cave's: its NPCs as a building's inside map's, on the floor shown
+    -- or every floor; G.AutoMapNpcs)
+    local ac = view.cave
+    if ac and ac.auto and not browse then
+      local nf = #ac.floors
+      G.AddInteriorNpcs(pois, ac, nil, (view.floor or 0) > 0 and nf - view.floor + 1 or nil, viewCont, cx, cy, rot, s, half)
+    end
     DrawPois(DropUnderStops(pois), zoom)
   elseif place and not browse then
     -- inside a building's map (a city like Undercity): its districts' names, like the
@@ -11805,10 +12927,10 @@ function G.SizeFromCursor()
   return G.ClampSize and G.ClampSize(v, true) or v, l, t
 end
 function G.MakeSizeGrip()
-  local grip = CreateFrame("Button", nil, frame)
+  local grip = CreateFrame("Button", nil, G.hudLayer or frame)
   grip:SetSize(16, 16)
   grip:SetPoint("BOTTOMRIGHT", -2, 2)
-  grip:SetFrameLevel(frame:GetFrameLevel() + 20 + G.ArtSpan())
+  grip:SetFrameLevel(G.HudLevel(20))
   local gbg = grip:CreateTexture(nil, "BACKGROUND") -- (visible even if the old art is missing here)
   gbg:SetPoint("BOTTOMRIGHT")
   gbg:SetSize(8, 8)
@@ -12102,11 +13224,13 @@ end
 function G.SyncPopupsOver()
   if G.clone or not ns.SetPopupsOver then return end
   local shown = frame and frame:IsShown()
-  ns.SetPopupsOver(shown and (G.frameStrata or "BACKGROUND") ~= "BACKGROUND" or false)
+  -- (the square in another UI's panel is in that panel's strata, still under the game's windows and our popups)
+  ns.SetPopupsOver(shown and (G.frameStrata or "BACKGROUND") ~= "BACKGROUND" and not G.squareInPanel or false)
 end
 
 function G.ApplySettings()
   G.ApplySeamPlayer() -- (the OpenMap stages the player set, Options > Map)
+  if not G.clone then G.NoMapAutoBack() end -- (the world map option off however it went: the setup's Skip too)
   pcall(G.UpdateEscCatcher) -- (Escape closes the map, Options > Map)
   G.ApplyArrowLook() -- (Icon size: the player's arrow grows with it)
   if not frame then return end
@@ -12128,6 +13252,7 @@ function G.ApplySettings()
   -- is one level over the art and far under the icons. The canvas is scaled and scrolled; the map keeps its own
   -- size by the opposite scale (G.WorldMapKeepScale) and its place by its anchor to the scroll frame.)
   do
+    if host and G.sqLevelOwn then G.ApplySquareLevels(nil) end -- (the square's levels in a UI's panel: its own first)
     local parent = host and G.WorldMapCanvas() or UIParent
     if frame:GetParent() ~= parent then
       if host then G.frameLevelOwn = G.frameLevelOwn or frame:GetFrameLevel() or 0 end
@@ -12142,7 +13267,7 @@ function G.ApplySettings()
   local held = (mmOn or m.applied) and InCombatLockdown and InCombatLockdown() -- (the game's Minimap: never moved in combat)
   G.drawVersion = G.drawVersion + 1 -- (settings drive what's drawn: the kept tiles and icons are placed again)
   -- the window frame (option, locked or not); without it, an unlocked map has the Move tab
-  local framed = G.chrome ~= nil and (st.windowFrame ~= false or mmSide ~= nil) and not host
+  local framed = G.chrome ~= nil and (G.WindowFramed() or mmSide ~= nil) and not host
   local inset = (framed and not mmSide) and CHROME_PORTRAIT_INSET or 4
   -- (in the world map: right of that window's own buttons in the map's top left corner, the map pin's and other
   -- addons' (Questie's): the directions were under them, seen in game 2026-11-10)
@@ -12192,6 +13317,10 @@ function G.ApplySettings()
   -- second maps (the square's copy, the extra window) as they were)
   local strata = G.OverUI(mmOn, m.expanded, mmSide) and G.MINIMAP_EXPANDED_STRATA or "BACKGROUND"
   if host then strata = G.WorldMapStrata() end
+  -- (the square in another UI's minimap panel, DaylightUI's: over that panel, under the Minimap, G.ApplySquareLevels)
+  local panel = (mmSide and not host and not G.extra) and G.SquarePanel() or nil
+  if panel then strata = panel:GetFrameStrata() or "LOW" end
+  G.squareInPanel = panel ~= nil or nil
   if host then
     G.frameLevelOwn = G.frameLevelOwn or frame:GetFrameLevel() or 0
     local level = G.WorldMapLevel()
@@ -12205,16 +13334,20 @@ function G.ApplySettings()
     G.SetLevelTree(G.frameLevelOwn, G.wmOffsets, false)
     G.frameLevelOwn, G.wmOffsets = nil, nil
   end
+  if not host then G.ApplySquareLevels(panel) end
   if host or G.wmGrip then G.WorldMapGrip():SetShown(host and G.WorldMapWindowed()) end
   if (G.frameStrata or "BACKGROUND") ~= strata then
     G.frameStrata = strata
     frame:SetFrameStrata(strata)
     if ns.ApplyLogoLook then pcall(ns.ApplyLogoLook) end -- (the logo's plate keeps its own strata: set again)
     -- (the search's panel has a strata of its own: over the map out too)
-    if G.searchPanel then G.searchPanel:SetFrameStrata(strata == "BACKGROUND" and "DIALOG" or ns.POPUP_OVER_STRATA) end
+    if G.searchPanel then
+      G.searchPanel:SetFrameStrata((strata == "BACKGROUND" or panel) and "DIALOG" or ns.POPUP_OVER_STRATA)
+    end
     G.SyncPopupsOver() -- (our popups over the map out)
   end
   G.ApplyMinimapChrome(mmSide ~= nil)
+  if G.ApplyFade then G.ApplyFade() end -- (our frame's own edge: none round the square under another UI, G.SquareBare)
   if host then
     frame:ClearAllPoints()
     frame:SetPoint("TOPLEFT", G.WorldMapBox(), "TOPLEFT", 0, 0)
@@ -12253,7 +13386,8 @@ function G.ApplySettings()
       G.MinimapCall(Minimap, "SetAlpha", alpha)
     end
   end
-  G.PlaceMinimapButton()
+  G.ApplyHud(true) -- (over the map's icons: the window's strata, the Minimap's, the world map's may have changed)
+  G.PlaceMinimapButton() -- (after: its strata, its own, set again over the one the HUD passed down)
   frame:SetMovable(not st.locked and not mmSide and not host)
   if topLayer then topLayer:SetShown(not mmSide) end -- (its buttons, panels and text: none on the square)
   -- (as the minimap: always, as the minimap is; else minimized: only the logo, G.SetMinimized. With the world map
@@ -12312,6 +13446,8 @@ local function ApplyFade()
   topLayer:SetAlpha(fade)
   -- (No map: no dark ground of ours behind the route, the map under it shows through)
   local ground = G.NoMapOn() and 0 or fade
+  -- (the square under another UI's minimap: none of our frame's edge or ground round it, G.SquareBare)
+  if G.SquareBare() then ground = 0 end
   frame:SetBackdropColor(0.05, 0.05, 0.05, ground)
   frame:SetBackdropBorderColor(0.15, 0.15, 0.15, ground)
   if G.chrome then G.chrome:SetAlpha(fade) end
@@ -12362,6 +13498,7 @@ local function SetMouse(f, takeMouse)
   end
   for _, c in ipairs({ f:GetChildren() }) do SetMouse(c, takeMouse) end
 end
+G.SetMouse = SetMouse -- (the detached route panel's lock: G.ApplyNavMouse)
 
 -- The map's frame checks (the fade, its click-through, the quest areas' and roads' hover tooltips) while not fading:
 -- this often (seconds), less with Options > Performance's gentle background work (the low-end settings).
@@ -12822,7 +13959,13 @@ function G.NoMapView(cx, cy, cont, zoom, half)
     G.NoMapHook() -- (its canvas followed every frame from now on, not only at our redraws)
     local x, y, c, s = G.NoMapFollow(view.cont or cont, view.cont and view.x or cx, view.cont and view.y or cy)
     if x then
+      -- (the player's own look kept as theirs: a drag on the map pans OpenMap's view and set the crosshair, and a
+      -- double-click set a stop (G.AddStopAt); taken for OpenMap's view at the next redraw, the crosshair went, and with
+      -- it Confirm Route and the way back (Kooki3z 2026-11-27 for 1.4.2: "using openmap addon and no map ... don't get
+      -- confirm/cancel route buttons"). Its middle is OpenMap's still, so Confirm Route routes to what's in the middle.)
+      local was = free
       free = { x = x, y = y, rot = 0, cont = c, nomap = true }
+      if was and was.cross then free.cross, free.pan, free.land, free.nomap = true, was.pan, was.land, nil end
       G.noMapDrawn = { x = x, y = y, cont = c, s = s }
       return x, y, half / s, s
     end
@@ -13805,6 +14948,73 @@ function G.PlayerAutoMap(cont, px, py)
   local art = G.AutoArt(cont, key)
   if not art or (art.kind == "cave" and ns.Nav and ns.Nav.Indoors and ns.Nav.Indoors() == false) then return nil end
   return key
+end
+-- The NPCs in auto map `art` (1.4.2, Kooki3z 2026-11-27, Auberdine's inn: "for maps we added, can we also add the NPCs
+-- inside as well like other buildings when mousing over?"): G.InteriorNpcs' for a map drawn from its cells, the same
+-- NPCs (shipped, special: NPC_DOT_SERVICES, every side's) and the same entries, each on its own floor: a spawn on one
+-- of the floor's cells (G.AutoMapAt's test, AUTO_NPC_SLACK_YD round each: an innkeeper behind the counter stands at
+-- the cells' edge) whose height is in the floor's band, AUTO_NPC_Z_YD round it (the highest floor whose band has it,
+-- floors' bands overlapping on their stairs; none: the band nearest within AUTO_NPC_Z_YD, a balcony's or roof's NPC).
+-- A stand-in (its height the ground's): by its cells alone, the floor nearest its height. `floor`: that floor's index
+-- (1 the lowest) only, nil every floor. Each entry's `floorName` ("Floor 1 of 2, from the top") where it has floors.
+G.AUTO_NPC_SLACK_YD = 2
+G.AUTO_NPC_Z_YD = 5
+function G.AutoMapNpcs(art, floor)
+  if not (art and art.auto) then return {} end
+  art.npcs = art.npcs or {}
+  local hit = art.npcs[floor or 0]
+  if hit then return hit end
+  local out = {}
+  if floor then
+    for _, n in ipairs(G.AutoMapNpcs(art, nil)) do
+      if n.floor == floor then out[#out + 1] = n end
+    end
+    art.npcs[floor] = out
+    return out
+  end
+  local Lay = ns.Layers
+  if Lay and Lay.ShippedNpcs then
+    local base, m, nf = Geo.Base(art.cont), G.AUTO_NPC_SLACK_YD, #art.floors
+    local pattern = "[" .. G.NPC_DOT_SERVICES .. "]"
+    for _, n in ipairs((Lay.ShippedNpcs())) do
+      if n.svc and n.svc:find(pattern) then
+        local sp = n.spawns
+        for i = 1, #sp - 3, 4 do
+          local x, y, z = sp[i + 1], sp[i + 2], sp[i + 3]
+          if x >= art.x0 - m and x <= art.x1 + m and y >= art.y0 - m and y <= art.y1 + m and Geo.Base(sp[i]) == base then
+            local best, bd, bin
+            for fi, q in ipairs(art.auto) do
+              local on = false
+              for j = 1, #q - 3, 4 do
+                if math.abs(x - q[j]) <= q[j + 2] / 2 + m and math.abs(y - q[j + 1]) <= q[j + 3] / 2 + m then
+                  on = true
+                  break
+                end
+              end
+              if on then
+                local b = art.floors[fi]
+                local d = math.max(b[1] - z, z - b[2], 0)
+                local inside = d == 0 and not n.standin
+                -- (in its band: the highest such; else the nearest band)
+                if inside and (not bin or fi > best) then best, bd, bin = fi, 0, true
+                elseif not bin and (n.standin or d <= G.AUTO_NPC_Z_YD) and (not bd or d < bd) then best, bd = fi, d end
+              end
+            end
+            if best then
+              local icon = ns.Pins and ns.Pins.NpcIcon and ns.Pins.NpcIcon({ shipped = n }) or nil
+              local I = ns.Pins and ns.Pins.NPC_ICONS
+              if I and (icon == I.npc or icon == I.quest) then icon = nil end -- (as G.InteriorNpcs: a dot)
+              out[#out + 1] = { x = x, y = y, z = z, name = ns.NpcName(n.id, n.name), title = ns.NpcTitle(n.id, n.title),
+                icon = icon, id = n.id, level = sp[i], floor = best,
+                floorName = nf >= 2 and Format(L["Floor %d of %d, from the top"], nf - best + 1, nf) or nil }
+            end
+          end
+        end
+      end
+    end
+  end
+  art.npcs[0] = out
+  return out
 end
 G.autoTints = {} -- [floor][faint] = { r, g, b, a } (made once: no garbage each layout)
 -- Quads for auto map `art` (G.AutoArt's) in the view centered on (cx, cy), added to `quads`: floor `floor` (its index,
@@ -14832,10 +16042,12 @@ function G.MobLevelLabel(e, playerLevel)
   return string.format("|cff%02x%02x%02x%s|r ", math.floor(r * 255 + 0.5), math.floor(g * 255 + 0.5),
     math.floor(b * 255 + 0.5), text)
 end
--- A search row's text: its icon, a mob's levels (G.MobLevelLabel), its name, the grey text and the yards.
+-- A search row's text: its icon, a mob's levels (G.MobLevelLabel), its name, the yards and the grey text. (The yards
+-- before the grey text since 1.4.2: after it, a long place's "Tailor, Shen'dar Village..." cut them off the row, and
+-- only the short rows showed how far they were; Kooki3z 2026-11-27.)
 function G.SearchRowText(e)
-  return string.format("%s%s%s  |cff9d9d9d%s|r%s", e.tex and ("|T" .. e.tex .. ":14:14|t ") or "",
-    G.MobLevelLabel(e), e.name, e.sub or "", e.yd and ("  " .. ns.Nav.FormatDistance(e.yd)) or "")
+  return string.format("%s%s%s%s  |cff9d9d9d%s|r", e.tex and ("|T" .. e.tex .. ":14:14|t ") or "",
+    G.MobLevelLabel(e), e.name, e.yd and ("  " .. ns.Nav.FormatDistance(e.yd)) or "", e.sub or "")
 end
 -- The search list's Pin button (asked 2026-11-14): search entry `e` (an NPC or a city place) pinned for good
 -- (Pins.AddFromSearch), on its floor: where floors there are told by under or over a cave's ground (G.PinFloors'
@@ -14917,9 +16129,13 @@ function G.KindMatch(words, kind)
   return true
 end
 
--- Places matching `text` (any case, 2+ letters): names starting with it first, then what is of the kind typed
--- ("Class Trainer", "Flight master": G.KindMatch) nearest first, then names containing it, shorter first; the same
--- name nearer first ("Rogue Trainer": every city's), each with its yards from the player on their continent (`yd`).
+-- Places matching `text` (any case, 2+ letters), nearest first (1.4.2, Kooki3z 2026-11-27: "searches should always be
+-- closest match first"; before, every name starting with it came first, a city's Tailoring Trainer a continent away
+-- over the tailor on the player's island): those on the player's continent or island by their yards (`yd`), then
+-- those elsewhere by how far they are on the world map, then those it's only inside a word of ("Brinna" for "inn").
+-- How well each matches (G.SEARCH_TIER) only between those as near, and where the player's spot isn't known: a name
+-- starting with it, what is of the kind typed ("Class Trainer", "Flight master": G.KindMatch), a word of the name
+-- starting with it; shorter names first.
 -- Several words (asked 2026-10-03: "Inn Ir" for Ironforge's inn): every word starts a word of the name or its place,
 -- those whose name starts with the first word first. At most `max` (default 8).
 -- What and where typed together (asked 2026-11-14: "tailor tarren mill" found nothing; "consider any search like
@@ -15001,6 +16217,17 @@ function G.SearchEntryAt(e, places)
   end
   return named(e.cont, e.x, e.y)
 end
+-- How well a search entry matches what's typed: 1 its name starts with it (each word typed starting one of its words,
+-- the first its name's first), 2 of the kind typed or selling it, 3 a word of its name starts with it, 4 only inside a
+-- word. Listed by nearness first (G.SearchPlacesPlain); 4 after all the rest.
+G.SEARCH_TIER = { starts = 1, kind = 2, word = 3, inside = 4 }
+-- (the order's key for what's off the player's continent or island: past any yards on it, then by world map fractions)
+G.SEARCH_FAR_KEY = 1e7
+-- Whether position `i` of `s` (lower case) starts a word: the first, or after a space, "-", "(", "'", "," or ".".
+function G.SearchWordStart(s, i)
+  if not (s and i) then return false end
+  return i == 1 or s:sub(i - 1, i - 1):find("[%s%-%(%)',%.]") ~= nil
+end
 function G.SearchPlaces(text, max)
   max = max or 8
   local q = G.SearchLower(text):gsub("^%s+", ""):gsub("%s+$", ""):gsub("%s+", " ")
@@ -15045,7 +16272,7 @@ function G.SearchPlacesPlain(text, max)
   if #q < 2 then return {} end
   local words = {}
   for w in q:gmatch("%S+") do words[#words + 1] = w end
-  local starts, kinds, contains = {}, {}, {}
+  local found, mobs, tier = {}, {}, {} -- (what matches, the mobs apart; [entry] = how well, G.SEARCH_TIER)
   local all = {}
   for _, e in ipairs(SearchIndex()) do all[#all + 1] = e end
   -- (the class's file name, "MAGE": the places' names are English; UnitClass's first value is in the client's language)
@@ -15135,35 +16362,44 @@ function G.SearchPlacesPlain(text, max)
     if e.mob then e.sub = L["Enemy"] end
     local sells = sold and sold[e.shipped and e.id or e.seller or false]
     e.sells = nil
-    local into
+    local t -- (how well it matches: G.SEARCH_TIER)
     if e.kindOnly then
       if G.EntryKindTyped(words, e, memo) then
-        into = kinds
+        t = 2
       elseif sells then
-        into, e.sells = kinds, sells
+        t, e.sells = 2, sells
       end
     elseif e.npc and generic and G.EntryKindTyped(words, e, memo) then
-      into = kinds -- (an NPC of the kind typed is listed by it, nearest first, even named so: "Innkeeper Renee")
+      t = 2 -- (an NPC of the kind typed is listed by it, nearest first, even named so: "Innkeeper Renee")
     elseif i == 1 then
-      into = starts
+      t = 1
     elseif G.EntryKindTyped(words, e, memo) then
-      into = kinds
+      t = 2
     elseif sells then
-      into, e.sells = kinds, sells
+      t, e.sells = 2, sells
     elseif i then
-      into = contains
+      -- (a word of the name starting with it, "Dun Morogh" for "mor"; else inside a word, "Brinna" for "inn")
+      local hay = e.lower:find(q, 1, true) and e.lower or e.en
+      t = G.SearchWordStart(hay, i) and 3 or 4
     elseif #words > 1 and AllWordsStart(words, e.lower .. " " .. (e.en or "") .. " " .. G.SearchLower(e.sub)) then
       local first = e.lower:sub(1, #words[1]) == words[1] or (e.en and e.en:sub(1, #words[1]) == words[1])
-      into = first and starts or contains
+      t = first and 1 or 3
     end
-    if into then
-      into[#into + 1] = e
-      -- (a shipped NPC found: at its spawn nearest the player, only now)
-      if e.shipped then G.PlaceShippedNpc(e, px, py, pc, learnedFor[e.id] or (ns.db and ns.db.npcs and ns.db.npcs[e.id])) end
+    if t then
+      tier[e] = t
+      if e.mob then
+        mobs[#mobs + 1] = e
+      else
+        found[#found + 1] = e
+        -- (a shipped NPC found: at its spawn nearest the player, only now)
+        if e.shipped then
+          G.PlaceShippedNpc(e, px, py, pc, learnedFor[e.id] or (ns.db and ns.db.npcs and ns.db.npcs[e.id]))
+        end
+      end
     end
     -- (the yards there in a straight line, on the player's continent; the index's entries are kept: set each time. A
-    -- mob's once it's listed: "de" finds hundreds, their spawns read only for the few shown)
-    e.yd = (into and not e.mob and px and e.cont and Geo.Base(e.cont) == base)
+    -- mob's once it's placed, below)
+    e.yd = (t and not e.mob and px and e.cont and Geo.Base(e.cont) == base)
       and math.sqrt((e.x - px) ^ 2 + (e.y - py) ^ 2) or nil
   end
   local FAR = math.huge
@@ -15172,26 +16408,60 @@ function G.SearchPlacesPlain(text, max)
     if a.name ~= b.name then return a.name < b.name end
     return (a.yd or FAR) < (b.yd or FAR)
   end
-  local function nearest(a, b)
-    if (a.yd or FAR) ~= (b.yd or FAR) then return (a.yd or FAR) < (b.yd or FAR) end
+  local function better(a, b)
+    if tier[a] ~= tier[b] then return tier[a] < tier[b] end
     return order(a, b)
   end
-  table.sort(starts, order)
-  table.sort(kinds, nearest)
-  table.sort(contains, order)
-  local out = {}
-  for _, l in ipairs({ starts, kinds, contains }) do
-    for _, e in ipairs(l) do
-      if #out < (max or 8) then out[#out + 1] = e end
+  -- (the mobs: their camps read only for the best `max` by name, "de" finds hundreds; those placed at the camp nearest
+  -- the player, "Enemy, Elwynn Forest", and ordered by it with the rest)
+  table.sort(mobs, better)
+  for k = 1, math.min(#mobs, max or 8) do
+    local e = mobs[k]
+    G.PlaceMob(e, px, py, pc)
+    e.yd = (px and e.cont and Geo.Base(e.cont) == base) and math.sqrt((e.x - px) ^ 2 + (e.y - py) ^ 2) or nil
+    found[#found + 1] = e
+  end
+  -- Nearest first (Kooki3z 2026-11-27, 1.4.2: "searches should always be closest match first"): what's on the player's
+  -- continent or island by its yards, how well it matches only between those as near. Then what's elsewhere, its land
+  -- nearest first by the world map (G.SEARCH_FAR_KEY; a land's key its nearest result's), and on each land the best
+  -- match first, then the nearer on the world map: a world map's fractions are too coarse to put "Advisor to Thrall"
+  -- over Thrall a few yards away. Inside a word only ("Brinna" for "inn") after all the rest. The player's spot unknown
+  -- (a dungeon): best match first, as before.
+  local pu, pv
+  if px and pc then pu, pv = Geo.WorldFraction(pc, px, py) end
+  local key, est, land = {}, {}, {}
+  for _, e in ipairs(found) do
+    if e.yd then
+      key[e], est[e] = e.yd, 0
+    else
+      local u, v
+      if pu and e.cont and e.x then u, v = Geo.WorldFraction(e.cont, e.x, e.y) end
+      est[e] = 0 -- (where unknown: by how well it matches, then by name)
+      if u then
+        local d, b = math.sqrt((u - pu) ^ 2 + (v - pv) ^ 2), Geo.Base(e.cont)
+        est[e], key[e] = d, b
+        if not land[b] or d < land[b] then land[b] = d end
+      end
     end
   end
+  for _, e in ipairs(found) do
+    if not e.yd then -- (its land's key, where it's known: `key` held the land till now)
+      local d = key[e] and land[key[e]]
+      key[e] = d and G.SEARCH_FAR_KEY + d or 2 * G.SEARCH_FAR_KEY
+    end
+    if tier[e] == 4 then key[e] = key[e] + 4 * G.SEARCH_FAR_KEY end
+  end
+  table.sort(found, function(a, b)
+    if key[a] ~= key[b] then return key[a] < key[b] end
+    if tier[a] ~= tier[b] then return tier[a] < tier[b] end
+    if est[a] ~= est[b] then return est[a] < est[b] end
+    return order(a, b)
+  end)
+  local out = {}
+  for k = 1, math.min(#found, max or 8) do out[k] = found[k] end
   -- (a shipped NPC shown: its title and where it is, "Armorer, Brill", as one talked to; "Sells Sharp Arrow, Orgrimmar")
   for _, e in ipairs(out) do
     if e.shipped or e.sells then e.sub = G.SearchSub(e) end
-    if e.mob then -- (a mob shown: at its camp nearest the player, "Enemy, Elwynn Forest")
-      G.PlaceMob(e, px, py, pc)
-      e.yd = (px and e.cont and Geo.Base(e.cont) == base) and math.sqrt((e.x - px) ^ 2 + (e.y - py) ^ 2) or nil
-    end
   end
   return out
 end
@@ -15531,7 +16801,8 @@ function G.AddStopAt(x, y, name, stopCont, tex, z, exact, questID, npcId, npcNam
     ns.Print(Format(L["at most %d stops per route"], max))
     return false
   end
-  if not free then
+  -- (OpenMap's view under No map, `free.nomap`, isn't the player's: a stop placed makes it theirs, as from following)
+  if not free or free.nomap then
     free = { x = view.x, y = view.y, rot = view.rot, cross = true, cont = view.cont }
     if recenter then recenter:Show() end
   end
@@ -15952,6 +17223,7 @@ function G.SetStyle(style)
   local was = S().style
   if style == "none" and was ~= "none" then S().styleBeforeNone = G.STYLES[was] and was or nil end
   S().style = style
+  S().noMapAuto = nil -- (picked: not the one G.UseWorldMapPicked put in, G.UseWorldMapPicked sets it after)
   if style == "seamless" and was ~= style and ns.Atlas and ns.Atlas.ReloadIfNeeded then ns.Atlas.ReloadIfNeeded() end
   if not G.IsMapStyle(style) and browse then G.BrowseToTerrain() end
   if not G.Seamless() then
@@ -15962,6 +17234,41 @@ function G.SetStyle(style)
   if frame and G.RefreshQuick then G.RefreshQuick() end
   if ns.Options and ns.Options.Refresh then ns.Options.Refresh() end
   if (style == "none" or was == "none") and frame and G.wmState.on then G.ApplySettings() end -- (its level in the world map)
+  G.Redraw()
+  return true
+end
+
+-- The player turning "Show the GPS map in the game's world map" on or off (Options > Map, its pictures, the setup's
+-- card, the tutorial's check; the setting already changed). Kooki3z for 1.4.2: "if openmap is installed and player picks
+-- use in game map, auto switch to no map option": on, with the OpenMap addon there, the map style goes to No Map (said
+-- once in chat), so OpenMap's own map shows under the route; `noMapAuto` remembers it was put in so. Off again, the
+-- style picked before it comes back (only that one: a No Map the player picked themselves stays theirs). A style picked
+-- meanwhile clears `noMapAuto` (G.SetStyle).
+function G.OpenMapInstalled()
+  return G.OpenMapAPI() ~= nil or G.AddOnLoaded("OpenMap")
+end
+function G.UseWorldMapPicked(on)
+  local st = S()
+  if on then
+    if st.style ~= "none" and G.OpenMapInstalled() and G.WorldMapWanted() and not G.HeldStyle() and G.SetStyle("none") then
+      st.noMapAuto = true
+      ns.Print(L["OpenMap is installed: the map style is now No Map, so OpenMap's map shows under your route. Pick another style in Options > Map."])
+      return true
+    end
+  else
+    G.NoMapAutoBack()
+  end
+  return false
+end
+-- No Map put in by G.UseWorldMapPicked with the world map option off now: the style picked before it back.
+function G.NoMapAutoBack()
+  local st = S()
+  if not (st.noMapAuto and st.useWorldMap ~= true) then return false end
+  st.noMapAuto = nil
+  if st.style ~= "none" then return false end
+  st.style = G.NoMapFallback() -- (not G.SetStyle: nothing to ask, it's the style that was showing out of the world map)
+  if frame and G.RefreshQuick then G.RefreshQuick() end
+  if ns.Options and ns.Options.Refresh then ns.Options.Refresh() end
   G.Redraw()
   return true
 end
@@ -16956,6 +18263,7 @@ function G.MakeGroupRow(panel)
   row.text:SetPoint("RIGHT", b, "LEFT", -4, 0)
   row.text:SetJustifyH("LEFT")
   row.text:SetWordWrap(false)
+  if G.navThrough and panel == navPanel then G.SetMouse(row, false) end -- (made while it's locked: click-through too)
   return row
 end
 function G.GroupQuestText(q)
@@ -17621,7 +18929,7 @@ function G.LayoutTitle()
     for _, s in ipairs(list) do s.frame:Hide() end
     return
   end
-  local framed = S().windowFrame ~= false
+  local framed = G.WindowFramed()
   local barW = (G.MapSize()) + 4 -- (the frame 2 past the map each side)
   local left, right = G.TitleLeft(), G.TITLE_CLOSE_ROOM
   local level = math.min(9000, G.ChromeLevel(chrome) + 2)
@@ -18003,7 +19311,24 @@ function G.Init()
   -- and the height profile strip (MapExtras, at this layer's own level) are under every button; item 134, Kooki3z
   -- 2026-11-26: "buttons should always go over this")
   G.TOP_LEVEL = 8 -- (over the canvas's)
-  local top = CreateFrame("Frame", nil, frame) -- above the map tiles
+  -- (the HUD layer: everything of ours drawn over the map, the button layer below and the window's corner buttons
+  -- (the size grips, the minimap button and its arrow back), over every map icon in every map mode, G.ApplyHud; a frame
+  -- made on it later is over them too. Kooki3z 2026-11-27: "our text box should sit on top of map icons", "same with
+  -- height data and all our buttons". No mouse of its own: what's on it takes the mouse it did.)
+  local hud = CreateFrame("Frame", nil, frame)
+  hud:SetAllPoints(frame)
+  hud:SetFrameStrata(frame:GetFrameStrata())
+  hud:SetFrameLevel(canvas:GetFrameLevel() + G.TOP_LEVEL)
+  hud:EnableMouse(false)
+  G.hudLayer = hud
+  -- (on the world map's scroll frame, G.PlaceHud: shown and hidden with the map)
+  frame:HookScript("OnShow", function() if G.hudOut then hud:Show() end end)
+  frame:HookScript("OnHide", function() if G.hudOut then hud:Hide() end end)
+  if G.sizeGrip then -- (made with the window, before this layer)
+    G.sizeGrip:SetParent(hud)
+    G.sizeGrip:SetFrameLevel(G.HudLevel(20))
+  end
+  local top = CreateFrame("Frame", nil, hud) -- above the map tiles
   top:SetAllPoints(canvas)
   top:SetFrameLevel(canvas:GetFrameLevel() + G.TOP_LEVEL)
   G.topLayer = top -- (the tests check the buttons are over the strip and the ring)
@@ -18036,10 +19361,12 @@ function G.Init()
   recenter:SetScript("OnLeave", GameTooltip_Hide)
   recenter:Hide()
 
-  -- Import waypoints (TomTom /way lines): bottom-right, below the recenter button.
+  -- Import waypoints (TomTom /way lines), Import and Share: since 1.4.2 a quick button at the end of the map menu's row
+  -- going right (Kooki3z 2026-11-27: "move the import and share button in the map menu as well at the end of the
+  -- horizontal row"; its slot "import", G.QUICK), no longer the bottom-right column's.
   local import = CreateFrame("Button", nil, top)
   import:SetSize(28, 28)
-  import:SetPoint("BOTTOMRIGHT", -6, 6)
+  import:SetPoint("BOTTOMLEFT", 3 + MAP_BUTTON + 4, 3) -- (till the quick buttons are laid out: G.LayoutQuick)
   local ibg = import:CreateTexture(nil, "BACKGROUND")
   ibg:SetAllPoints()
   ibg:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
@@ -18050,7 +19377,7 @@ function G.Init()
   import:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
   import:SetScript("OnClick", function() ns.Import.Toggle() end)
   import:SetScript("OnEnter", function(self)
-    GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+    GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     GameTooltip:SetText(L["Import and Share"], 1, 1, 1)
     GameTooltip:AddLine(L["Paste TomTom /way lines to make them the route's stops, or copy or send your route to someone else. Copy your map data (herbs, ore, NPCs, pins, roads, walls) for other players, and import theirs."], nil, nil, nil, true)
     GameTooltip:Show()
@@ -18058,7 +19385,14 @@ function G.Init()
   import:SetScript("OnLeave", GameTooltip_Hide)
   -- (for companion addons placing their own buttons: Api.lua MapButton; "logo": the window frame's logo plate, over
   -- every part of the frame (its border is at frame level 500 in the client's template), API 14)
-  G.mapButtons = { recenter = recenter, import = import, logo = G.logo and G.logo.plate or nil }
+  -- (API.MapButton("import"), since 1.4.2: where the import button was, the bottom-right corner, kept as a frame of
+  -- its own for what companions put by it: a companion's frames to its left, StreetView's buttons over it until the
+  -- map menu takes them, G.SyncCompanions. Back to Your Position is in that spot, G.PlaceCornerButtons)
+  local corner = CreateFrame("Frame", nil, top)
+  corner:SetSize(28, 28)
+  corner:SetPoint("BOTTOMRIGHT", -6, 6)
+  G.importButton = import
+  G.mapButtons = { recenter = recenter, import = corner, logo = G.logo and G.logo.plate or nil }
 
   -- Map menu (bottom-left): a round button that opens the map type and the map layers.
   local STYLES = {
@@ -18067,7 +19401,7 @@ function G.Init()
     { "zone", "Interface\\Icons\\INV_Misc_Map05", L["World Map"], L["The world map, fully explored. Right-click to zoom out to the continent; click a zone to open it."] },
     { "nospoiler", "Interface\\Icons\\INV_Misc_Map03", L["No Spoiler Map"], L["The world map as your character has explored it: undiscovered parts stay hidden. Routes still use every road."] },
     -- (Kooki3z 2026-11-20: "a No Map option ... using the world map": with the world map option only, `needs`)
-    { "none", "Interface\\Icons\\INV_Misc_Spyglass_02", L["No Map"], L["Only the route, stops and icons, over the game's world map or another map addon's that replaces it. Only with the GPS map in the game's world map (Options > Map)."], "useWorldMap" },
+    { "none", "Interface\\Icons\\INV_Misc_Spyglass_02", L["No Map"], L["Only the route, stops and icons, over the game's world map or the map another addon like OpenMap puts there: the one to use with OpenMap. Only with the GPS map in the game's world map (Options > Map)."], "useWorldMap" },
   }
   local mapButton = CreateFrame("Button", nil, top)
   mapButton:SetSize(MAP_BUTTON, MAP_BUTTON)
@@ -18109,7 +19443,7 @@ function G.Init()
   mapButton:SetScript("OnClick", function() menu:SetShown(not menu:IsShown()) end)
   mapButton:SetScript("OnEnter", function(self)
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-    GameTooltip:SetText(L["Map Menu"], 1, 1, 1) -- (asked 2026-11-11: "Map" said nothing of what it opens)
+    GameTooltip:SetText(G.MapMenuName(), 1, 1, 1) -- (asked 2026-11-11: "Map" said nothing of what it opens)
     GameTooltip:AddLine(L["Opens the quick buttons you keep in the menu: map styles, layers, drawing a farming area and more (Options: Quick buttons). Closes after 20 seconds untouched."], nil, nil, nil, true)
     GameTooltip:Show()
   end)
@@ -18513,13 +19847,21 @@ function G.Init()
         if G.mapMenu then G.mapMenu:Hide() end
         ns.OpenXP.Toggle()
       end },
+    -- (item 145, Kooki3z 2026-11-27: FlowUp Forever's steps, read from the pin it draws on the minimap; FlowUp.lua)
+    { id = "flowupRoute", icon = "Interface\\Icons\\INV_Misc_Note_02", label = L["FlowUp Route"],
+      tip = L["Routes to each step of your FlowUp guide in turn: the step FlowUp's map pin marks is your next stop, done when FlowUp checks it off (not by getting there), then on to the next. Click again to stop. Replaces the current route. (Shown with FlowUp installed)"],
+      when = function() return ns.FlowUp and ns.FlowUp.Available() end,
+      isOn = function() return ns.FlowUp and ns.FlowUp.On() end,
+      action = function()
+        if G.mapMenu then G.mapMenu:Hide() end
+        ns.FlowUp.Toggle()
+      end },
+    -- (a shaman who knows Astral Recall: its name, icon and tip, the setting the same: G.SyncHearthQuick)
     { id = "hearth", key = "useHearthstone", icon = "Interface\\Icons\\INV_Misc_Rune_01", label = L["Use Hearthstone"],
       tip = L["A route may start with your Hearthstone when it's ready and faster."], route = true, defaultOn = true },
-    { id = "quests", key = "layerQuests", icon = ns.Layers and ns.Layers.ICON and ns.Layers.ICON.objective, label = L["Quests"],
-      tip = L["Your quests' objectives and turn-ins on the map."] },
-    { id = "questAreas", key = "layerQuestAreas", icon = ns.Layers and ns.Layers.ICON and ns.Layers.ICON.objective,
-      label = L["Quest Areas"], tip = L["The quests' areas outlined on the map, like on the minimap."], needs = "layerQuests",
-      tint = { 0.45, 0.6, 1 } },
+    -- (1.4.2, Kooki3z 2026-11-27: "replace the quests button position with this one since quests and quest areas are
+    -- now under the map layer menu": the Quests group and its two buttons gone, Map Layers in their place, below)
+    { id = "layersHere" },
     { id = "herbs", key = "layerHerbs", icon = "Interface\\Icons\\INV_Misc_Herb_07", label = L["Herbs"], tip = L["Herb nodes you know."] },
     { id = "ore", key = "layerOre", icon = "Interface\\Icons\\INV_Ore_Copper_01", label = L["Ore"], tip = L["Ore nodes you know."] },
     { id = "nodeFind", icon = "Interface\\Icons\\INV_Misc_Spyglass_03", label = L["Find Herbs and Ore"],
@@ -18548,20 +19890,13 @@ function G.Init()
       warn = function() return ns.Layers.GM2Status() end },
     { id = "city", key = "layerCity", icon = "Interface\\Icons\\INV_Helmet_03", label = L["City Locations"],
       tip = L["Places guards pointed out to you (trainers, bank, ...), for all your characters."], defaultOn = true },
-    -- (asked 2026-11-16: "remove the boss route button ... replace it with Show Routes": on, as before, a dungeon's
-    -- dotted way through; off, none of its dotted lines. A boss route is still /agps bosses)
-    { id = "dungeonPaths", key = "showDungeonPaths", icon = "Interface\\Icons\\Ability_DualWield", label = L["Show Routes"],
-      defaultOn = true,
-      tip = L["In dungeons and raids: the dotted way through, boss by boss, and where it takes the stairs. Off: no dotted lines in there."] },
-    -- (the dungeon route toggle ("dungeonRoute": G.SetDungeonRoute) is left off the map menu: this
-    -- client hides the player's position in dungeons, so the route it starts never can)
-    { id = "caves", key = "layerCaves", icon = CAVE_ICON, label = L["Caves"], defaultOn = true,
-      tip = L["Cave and mine entrances on the map (not on a continent's map). Double-click one for a stop there."] },
-    { id = "instances", key = "layerInstances", icon = INSTANCE_ICON, label = L["Dungeons and Raids"], defaultOn = true,
-      tip = L["Their entrances on the map (every map style). Click one for its map, with its bosses in the usual order; right-click goes back out."] },
+    -- (the Caves/Dungeons/Raids group and its Caves, Dungeons and Raids and Show Routes: gone, Kooki3z 2026-11-27, "also
+    -- caves/dungeons/raids, lets remove that button as its also under map layers button": Map Layers' Travel has them, the
+    -- same settings. The dungeon route toggle ("dungeonRoute": G.SetDungeonRoute) was never on the map menu: this client
+    -- hides the player's position in dungeons, so the route it starts never can; a boss route is still /agps bosses)
     -- (asked 2026-11-16: routing paused, by hand: Nav.SetPaused. Shown with a route; in the menu's row going right,
     -- last, by default; while paused also on the bar at the map's bottom, without opening the menu)
-    { id = "pauseRoute", icon = "Interface\\Icons\\Spell_Nature_TimeStop", label = L["Pause Routing"],
+    { id = "pauseRoute", steady = true, icon = "Interface\\Icons\\Spell_Nature_TimeStop", label = L["Pause Routing"],
       tip = L["Stop working out and drawing the route, the stops kept: less work while you aren't following it. Again to resume, worked out from where you are. Also /agps pause."],
       when = function() return ns.Nav.dest ~= nil end,
       labelNow = function() return ns.Nav.paused and L["Resume Routing"] or L["Pause Routing"] end,
@@ -18589,6 +19924,48 @@ function G.Init()
   for i, sd in ipairs(STYLES) do
     table.insert(QUICK, 3 + i, { id = "style_" .. sd[1], style = sd[1], icon = sd[2], label = sd[3], tip = sd[4], needs = sd[5] })
   end
+  -- Map Layers (1.4.2, Kooki3z 2026-11-27: "Map layer should be in the map menu pop out no always showing and all its
+  -- options should be submenu quick buttons just like every other quick button with sub buttons to toggle on and off
+  -- supported by controller too"): a group of the map menu's ("mapLayers", G.QUICK_GROUPS), its buttons the layers'
+  -- groups (G.LAYER_GROUPS), each with a flyout of its own out of it (`subMembers`, G.ToggleSubGroup: a group's in a
+  -- group's, as Quick Find's Ammo in Quick Find), then Show All and Hide All. Each layer's button turns it on or off
+  -- (G.SetLayer), lit or gray as the other toggles; a group's lit while any of its layers shows. The layers' buttons are
+  -- nobody's slot (`nested`): only in their group's flyout.
+  -- (Map Layers' own buttons where the Quests group's were: its slot that one's, in the menu's order; its layers' after)
+  local layerRows = {}
+  for _, lg in ipairs(G.LAYER_GROUPS) do
+    local sub = {}
+    for _, lid in ipairs(lg.layers) do
+      local e = G.layerById[lid]
+      local need = e.needs and G.layerById[e.needs]
+      sub[#sub + 1] = "layer_" .. lid
+      QUICK[#QUICK + 1] = { id = "layer_" .. lid, nested = true, layer = lid, icon = e.quickIcon, label = e.label,
+        tip = e.tip, tint = e.tint,
+        needs = need and need.key or nil, needsTip = need and Format(L["Turn %s on first."], need.label) or nil,
+        isOn = function() return G.LayerSet(lid) end,
+        action = function()
+          if e.needs and not G.LayerOn(e.needs) then return end -- (gray: the layer it needs is hidden)
+          G.SetLayer(lid, not G.LayerSet(lid))
+        end }
+    end
+    local t = { id = "layers_" .. lg.id, icon = lg.icon, label = lg.label, subMembers = sub, layerGroup = lg.id,
+      isOn = function() return G.LayerGroupState(lg.id) ~= false end }
+    t.action = function() G.ToggleSubGroup(t) end
+    layerRows[#layerRows + 1] = t
+  end
+  layerRows[#layerRows + 1] = { id = "layersShowAll", icon = G.LAYERS_ICON, label = L["Show All"],
+    action = function() G.SetAllLayers(true) end }
+  layerRows[#layerRows + 1] = { id = "layersHideAll", icon = G.LAYERS_ICON, label = L["Hide All"], dim = true,
+    action = function() G.SetAllLayers(false) end }
+  for i, t in ipairs(QUICK) do
+    if t.id == "layersHere" then
+      table.remove(QUICK, i)
+      for j, r in ipairs(layerRows) do table.insert(QUICK, i + j - 1, r) end
+      break
+    end
+  end
+  QUICK[#QUICK + 1] = { id = "import", button = import, label = L["Import and Share"], tail = 1,
+    tip = L["Paste TomTom /way lines to make them the route's stops, or copy or send your route to someone else. Copy your map data (herbs, ore, NPCs, pins, roads, walls) for other players, and import theirs."] }
   G.QUICK = QUICK
   -- Where each goes: always shown or in the menu, going up or right from the map button,
   -- or hidden. (The defaults, asked 2026-10-01: the menu up and right, the tools always shown.)
@@ -18596,24 +19973,28 @@ function G.Init()
   -- (the questing addons' routes, shown only with their addon loaded: on the bar to the right, always shown; asked
   -- 2026-11-16 for 1.3.5, "if using RestedXP or any of the supported questing addons, these buttons are always shown by
   -- default to the right")
-  G.QUICK_DEFAULT = { search = "menuUp", quickFind = "menuUp", questRoute = "menuRight", rxpRoute = "barRight", zygorRoute = "barRight", polestarRoute = "barRight", questifyRoute = "barRight", aprRoute = "barRight", openxpRoute = "barRight", hearth = "menuRight", pauseRoute = "menuRight",
-    city = "hidden", dungeonsG = "menuUp", styles = "hidden", gather = "menuUp", questsG = "menuUp" }
+  G.QUICK_DEFAULT = { search = "menuUp", quickFind = "menuUp", mapLayers = "menuUp", import = "menuRight", questRoute = "menuRight", rxpRoute = "barRight", zygorRoute = "barRight", polestarRoute = "barRight", questifyRoute = "barRight", aprRoute = "barRight", openxpRoute = "barRight", flowupRoute = "barRight", hearth = "menuRight", pauseRoute = "menuRight",
+    city = "hidden", styles = "hidden", gather = "menuUp" }
   -- Groups: one button in the bar or menu; clicked, its buttons slide out beside it (to the
   -- right from a column going up, upward from a row going right).
   G.QUICK_GROUPS = {
     { id = "styles", label = L["Map Style"], members = { "style_seamless", "style_minimap", "style_zone", "style_nospoiler", "style_none" },
       tip = L["The map's look: click to choose."] },
-    { id = "questsG", label = L["Quests"], members = { "quests", "questAreas" }, tip = L["Quests and quest areas on the map."] },
-    { id = "dungeonsG", label = L["Caves/Dungeons/Raids"], icon = INSTANCE_ICON, members = { "caves", "instances", "dungeonPaths" },
-      tip = L["Cave, dungeon and raid entrances on the map, and a route through a dungeon's bosses."] },
     { id = "gather", label = L["Herbs, Ore and Farming"], members = { "herbs", "ore", "nodeFind", "gm2Import", "farm" },
       tip = L["Herb and ore nodes on the map, finding particular ones, and drawing a farming area."] },
+    { id = "mapLayers", label = L["Map Layers"], icon = G.LAYERS_ICON,
+      members = { "layers_route", "layers_travel", "layers_places", "layers_questsGather", "layersShowAll", "layersHideAll" },
+      tip = L["Show or hide each thing the map draws, one by one: the route, its stops, travel, places, quests and gathering. On every map, saved with your options."] },
   }
   G.GROUP_IDLE = 8 -- seconds an opened group stays open with the mouse away
   G.DRAWER_SECONDS = 0.22 -- the menu column slides open and shut like a drawer
   G.QUICK_STEP_BAR, G.QUICK_STEP_MENU = 30, 28
 
   function G.QuickPlace(id)
+    -- (a companion addon's button, G.SyncCompanions: on the row going right, or with the option in the menu's column)
+    if G.companionIds and G.companionIds[id] then
+      return S().companionsInMenu and "menuUp" or "menuRight"
+    end
     -- (a custom search's: where its row says, the whole account's; in Quick Find, not a map menu button)
     local Sx = ns.Searches
     local row = Sx and Sx.FromQuickId(id)
@@ -18662,7 +20043,9 @@ function G.Init()
   -- place } to try one).
   function G.QuickCounts(change)
     local up, right = 0, 0
-    for _, t in ipairs(G.QuickSlots()) do
+    -- (`steady` ones counted whether shown or not, Pause Routing's: the map's size the same as a route starts, never
+    -- 30 wider and the row's last pushed out; Kooki3z 2026-11-27, the row's tail like every other quick button)
+    for _, t in ipairs(G.QuickSlots(true)) do
       local where = (change and change[1] == t.id) and change[2] or G.QuickPlace(t.id)
       if where == "barUp" or where == "menuUp" then up = up + 1 end
       if where == "barRight" or where == "menuRight" then right = right + 1 end
@@ -18773,10 +20156,12 @@ function G.Init()
         end
         local tip = t.tip
         if t.padTip and ns.Pad and ns.Pad.used then tip = t.padTip() end -- (the controller in use: its buttons)
-        GameTooltip:AddLine(tip, nil, nil, nil, true)
+        if tip then GameTooltip:AddLine(tip, nil, nil, nil, true) end
         local warn = t.warn and t.warn()
         if warn then GameTooltip:AddLine(warn, 1, 0.55, 0.2, true) end
-        if t.needs and not t.style and not S()[t.needs] then GameTooltip:AddLine(L["Turn Quests on first."], 1, 0.5, 0.5) end
+        if t.needs and not t.style and not S()[t.needs] then
+          GameTooltip:AddLine(t.needsTip or L["Turn Quests on first."], 1, 0.5, 0.5)
+        end
         GameTooltip:Show()
       end)
     end
@@ -18808,6 +20193,7 @@ function G.Init()
   -- The slots: a button on its own, or a group's one button. G.QuickSlots() in the order
   -- set in the options (gps.quickOrder: slot ids), the rest after in the built-in order.
   local byId, SLOTS, openGroup, groupIdle = {}, {}, nil, 0
+  local openSub -- (a group's member whose own flyout is out: Map Layers' Route, Travel..., G.ToggleSubGroup)
   for _, t in ipairs(QUICK) do byId[t.id] = t end
   -- the Pause Routing quick button (the controller's Pause/Unpause hint goes over it while paused: Pad.HintTargets)
   function G.PauseButton()
@@ -18850,7 +20236,8 @@ function G.Init()
   for _, grp in ipairs(G.QUICK_GROUPS) do MakeGroup(grp) end
   for _, t in ipairs(QUICK) do
     local grp = memberOf[t.id]
-    if not grp then
+    if t.nested then -- (a flyout's in a group's: Map Layers' layers, G.ToggleSubGroup)
+    elseif not grp then
       SLOTS[#SLOTS + 1] = t
     elseif not grp.added then
       grp.added = true
@@ -18876,7 +20263,7 @@ function G.Init()
     end
     if G.LayoutQuick then G.LayoutQuick() end
   end
-  function G.QuickSlots()
+  function G.QuickSlots(steady)
     local rank, base = {}, {}
     for i, id in ipairs(S().quickOrder or {}) do rank[id] = i end
     -- (an order saved before Quick Find: it goes just above Search Places, asked 2026-11-14)
@@ -18885,12 +20272,86 @@ function G.Init()
     for i, t in ipairs(SLOTS) do
       -- (the map editing tools: their option, /agps dev)
       local shown = not (t.dev or t.wallDev or t.edit) or S().devTools
-      if shown and (not t.when or t.when()) then out[#out + 1] = t end
+      if shown and (not t.when or t.when() or (steady and t.steady)) then out[#out + 1] = t end
       base[t.id] = i
     end
-    local function key(t) return rank[t.id] or 1000 + base[t.id] end
+    -- (the import button at the end of its line, the companions' buttons after it, unless placed in the order; 1.4.2)
+    local function key(t) return rank[t.id] or (t.tail or 0) * 100000 + 1000 + base[t.id] end
     table.sort(out, function(a, b) return key(a) < key(b) end)
     return out
+  end
+  -- Companion addons' buttons in the map menu (1.4.2, Kooki3z 2026-11-27: "Lets make azerothgps streetview icons be in
+  -- the map menu as well, always shown on the horizontal line by default with a option to have them shown on map menu
+  -- pop out at the end"): each a quick slot of its own ("companion<n>", `tail` 2: after the import button), on the row
+  -- going right, or with Options > Keys and buttons' companionsInMenu at the end of the menu's column. Two ways in:
+  -- API.MapMenuButton(button) (Api.lua), or a button of theirs put on the map's button layer by its BOTTOM over our
+  -- corner's (API.MapButton "import" or "recenter", or one of those already over them): StreetView's figure and Street
+  -- Guess's button, placed by StreetView itself (its Figure.lua) and taken here as they show up. Their own re-placing
+  -- (on Back to Your Position shown or hidden) is put right again at once: our hooks run after theirs.
+  G.companionIds, G.companionOf = {}, {}
+  local companionN, companionKids = 0, -1
+  function G.AddCompanionButton(b, label, tip)
+    if not (b and b.SetPoint) or G.companionOf[b] then return G.companionOf[b] end
+    companionN = companionN + 1
+    local t = { id = "companion" .. companionN, button = b, companion = true, tail = 2, label = label, tip = tip }
+    t.when = function() return not t.off end -- (its addon's to hide: API.MapMenuButtonShown, G.SetCompanionShown)
+    G.companionIds[t.id], G.companionOf[b] = t, t
+    local r = G.mapButtons and G.mapButtons.recenter
+    if r and not G.companionHooked then -- (their buttons placed again as it shows or hides: back in the menu after)
+      G.companionHooked = true
+      r:HookScript("OnShow", function() if G.LayoutQuick then G.LayoutQuick() end end)
+      r:HookScript("OnHide", function() if G.LayoutQuick then G.LayoutQuick() end end)
+    end
+    -- (its addon putting it back over our corner, as StreetView does on its own events: back in the map menu at once,
+    -- shown or hidden as the menu is, whichever of their hooks and ours runs first; never left over the corner)
+    local own = b.SetPoint
+    b.SetPoint = function(self, p, rel, ...)
+      own(self, p, rel, ...)
+      local mb = G.mapButtons
+      if mb and rel ~= nil and (rel == mb.import or rel == mb.recenter) and not G.relayingCompanion then
+        G.relayingCompanion = true
+        pcall(G.LayoutQuick)
+        G.relayingCompanion = nil
+      end
+    end
+    G.AddQuick({ t })
+    -- (the map as wide or tall as its buttons need, as for any quick button: G.FitSize, by the settings applied again)
+    if G.QuickFits and not G.QuickFits() and G.ApplySettings then G.ApplySettings() end
+    return t
+  end
+  -- A companion's button shown with the map menu's (the default) or never (`on` false): the map shows and hides the
+  -- buttons it places, so its addon says so here instead of hiding it.
+  function G.SetCompanionShown(b, on)
+    local t = b and G.companionOf[b]
+    if not t then return false end
+    t.off = not on or nil
+    if G.LayoutQuick then G.LayoutQuick() end
+    if t.off then b:Hide() end
+    return true
+  end
+  -- The buttons put over our corner, looked for when the button layer's children changed (twice a second at most).
+  function G.SyncCompanions()
+    local kids = { top:GetChildren() }
+    if #kids == companionKids then return end
+    companionKids = #kids
+    local mb = G.mapButtons
+    if not mb then return end
+    local over = { [mb.import or false] = true, [mb.recenter or false] = true }
+    local found = {}
+    for _ = 1, 8 do
+      local more = false
+      for _, k in ipairs(kids) do
+        if not over[k] and not G.companionOf[k] and k.GetPoint and k.IsObjectType and k:IsObjectType("Button") then
+          local ok, p, rel = pcall(k.GetPoint, k, 1)
+          if ok and p == "BOTTOM" and rel and over[rel] then
+            over[k], more = true, true
+            found[#found + 1] = k
+          end
+        end
+      end
+      if not more then break end
+    end
+    for _, k in ipairs(found) do G.AddCompanionButton(k) end
   end
   -- The custom searches put in the map menu (ns.Searches, Options > Quick buttons): a quick button each, made the
   -- first time it's wanted, its icon, name and tooltip as its row's now; one moved to Quick Find or removed is taken
@@ -18981,19 +20442,72 @@ function G.Init()
         end
       end
     end
+    -- (a member's own flyout, Map Layers' groups': out from it the other way, a column from a row and a row from a
+    -- column, as Quick Find's Ammo; shut with its group)
+    for _, t in ipairs(QUICK) do
+      if t.subMembers then
+        local grp = memberOf[t.id]
+        local open = openSub == t and grp ~= nil and grp == openGroup and t.button:IsShown()
+        if openSub == t and not open then openSub = nil end
+        local column = grp and (grp.where == "barUp" or grp.where == "menuUp") -- (the group's buttons: a row)
+        for j, sid in ipairs(t.subMembers) do
+          local m = byId[sid]
+          if m and m.button then
+            m.button:ClearAllPoints()
+            if open then
+              if column then
+                m.button:SetPoint("BOTTOM", t.button, "TOP", 0, 4 + (j - 1) * G.QUICK_STEP_MENU)
+              else
+                m.button:SetPoint("LEFT", t.button, "RIGHT", 4 + (j - 1) * G.QUICK_STEP_BAR, 0)
+              end
+              m.button:SetAlpha(1)
+              m.button:SetFrameLevel(t.button:GetFrameLevel() + 2)
+              m.button:Show()
+            else
+              m.button:Hide()
+            end
+          end
+        end
+      end
+    end
     if G.PlaceQuickFind then G.PlaceQuickFind() end
+  end
+  -- A group's member's own flyout (Map Layers' Route, Travel...): out, or in again; one at a time.
+  function G.ToggleSubGroup(t)
+    openSub = openSub ~= t and t or nil
+    groupIdle = 0
+    if G.mapMenu then G.mapMenu.idle = 0 end
+    PlaceGroup()
+    return openSub == t
+  end
+  function G.OpenSubSlot() return openSub end -- (Pad.lua: the menu's focus in it)
+  -- Its buttons as shown, in their order out from it.
+  function G.SubButtons()
+    local out = {}
+    for _, sid in ipairs(openSub and openSub.subMembers or {}) do
+      local m = byId[sid]
+      if m and m.button and m.button:IsShown() then out[#out + 1] = m.button end
+    end
+    return out
+  end
+  function G.CloseOpenSub()
+    if not openSub then return false end
+    openSub = nil
+    PlaceGroup()
+    return true
   end
   -- A group's flyout open (not Map Editing's): shut. True when one was (Pad.lua: B backs out of it first).
   function G.OpenGroupSlot() return openGroup end -- (Pad.lua: the menu's focus in an open group)
   function G.CloseOpenGroup()
     if not openGroup then return false end
-    openGroup = nil
+    openGroup, openSub = nil, nil
     PlaceGroup()
     return true
   end
   function G.ToggleGroup(slot)
     if slot.keep then return G.SetMapEditOpen(not G.mapEditOpen) end -- (Map Editing: open on its own, G.SetMapEditOpen)
     openGroup = openGroup ~= slot and slot or nil
+    openSub = nil
     groupIdle = 0
     if G.mapMenu then G.mapMenu.idle = 0 end
     PlaceGroup()
@@ -19025,6 +20539,7 @@ function G.Init()
     if not openGroup then return end
     local over = openGroup.button:IsMouseOver()
     for _, m in ipairs(openGroup.members) do over = over or (m.button:IsShown() and m.button:IsMouseOver()) end
+    for _, b in ipairs(G.SubButtons()) do over = over or b:IsMouseOver() end
     groupIdle = over and 0 or groupIdle + dt
     if over and G.mapMenu then G.mapMenu.idle = 0 end
     if groupIdle >= G.GROUP_IDLE or not openGroup.button:IsShown() then
@@ -19121,6 +20636,7 @@ function G.Init()
     local now = GetTime()
     if G.quickWatchAt and now - G.quickWatchAt < G.QUICK_WATCH_SECONDS then return end
     G.quickWatchAt = now
+    G.SyncCompanions()
     -- (the square's Resume Routing button with it: a route cleared or the option changed meanwhile)
     if G.mmResume and (G.mmResume:IsShown() and true or false) ~= (G.mmResumeOn ~= nil and ns.Nav.paused ~= nil
         and G.MinimapResumeOn()) then
@@ -19144,10 +20660,35 @@ function G.Init()
       G.RefreshQuick()
     end
   end
+  -- The hearth button (Use Hearthstone) as Use Astral Recall for a shaman who knows it (Kooki3z 2026-11-27: "When you are
+  -- on a Shaman ... recommend Astral Recall"): the route takes it first (Teleports.Available), the hearthstone only while
+  -- it's on its cooldown. Its label, tip and icon; the setting (useHearthstone) the same. From RefreshQuick and as the
+  -- spells known change (Teleports' SPELLS_CHANGED).
+  G.HEARTH_ICON, G.RECALL_ICON = "Interface\\Icons\\INV_Misc_Rune_01", "Interface\\Icons\\Spell_Nature_AstralRecal"
+  function G.SyncHearthQuick()
+    local T = ns.Teleports
+    local recall = T and T.RecallKnown and T.RecallKnown() or false
+    for _, t in ipairs(QUICK) do
+      if t.id == "hearth" and t.recall ~= recall then
+        t.recall = recall
+        if recall then
+          local name = T.RecallName()
+          t.label = Format(L["Use %s"], name)
+          t.tip = Format(L["A route may start with %s when it's ready and faster, else with your Hearthstone."], name)
+          t.icon = G.RECALL_ICON
+        else
+          t.label, t.tip = L["Use Hearthstone"], L["A route may start with your Hearthstone when it's ready and faster."]
+          t.icon = G.HEARTH_ICON
+        end
+        if t.iconTex then G.SetButtonIcon(t.iconTex, t.icon) end
+      end
+    end
+  end
   function G.RefreshQuick()
+    G.SyncHearthQuick()
     for _, t in ipairs(QUICK) do
       if t.iconTex then
-        local on = G.QuickOn(t) and (not t.needs or S()[t.needs])
+        local on = G.QuickOn(t) and (not t.needs or S()[t.needs]) and not t.dim -- (dim: Hide All's, always gray)
         t.iconTex:SetDesaturated(not on)
         t.iconTex:SetAlpha(on and 1 or 0.45)
         if t.tint and on then t.iconTex:SetVertexColor(t.tint[1], t.tint[2], t.tint[3]) else t.iconTex:SetVertexColor(1, 1, 1) end
@@ -19159,6 +20700,8 @@ function G.Init()
         if m.style then
           if G.QuickOn(m) then icon, any = m.icon, true end
         elseif m.key and G.QuickOn(m) and (not m.needs or S()[m.needs]) then
+          any = true
+        elseif m.subMembers and G.QuickOn(m) then -- (Map Layers: lit while any layer shows)
           any = true
         end
       end
@@ -19241,6 +20784,14 @@ function G.Init()
     local function place(list, pinned, up)
       for j, b in ipairs(list) do
         if drawer <= 0 then
+          -- (shut: tucked in where they slide out from, hidden; a companion's button its addon put over the corner, as
+          -- StreetView re-places its own, held in there too, not left over the corner's column)
+          b:ClearAllPoints()
+          if up then
+            b:SetPoint("BOTTOM", mapButton, "TOP", 0, 4 + pinned * G.QUICK_STEP_MENU)
+          else
+            b:SetPoint("LEFT", mapButton, "RIGHT", 4 + pinned * G.QUICK_STEP_BAR, 0)
+          end
           b:Hide()
         else
           local k = pinned + (j - 1) * e -- slides out from just past the always-shown ones
@@ -19337,6 +20888,9 @@ function G.Init()
     end
     for _, m in ipairs(openGroup and openGroup.members or {}) do
       if m.button:IsShown() and m.button:IsMouseOver() then return true end
+    end
+    for _, b in ipairs(G.SubButtons and G.SubButtons() or {}) do
+      if b:IsMouseOver() then return true end
     end
     return G.QuickFindMouseOver()
   end
@@ -19471,6 +21025,8 @@ function G.Init()
   stepsText:SetJustifyH("LEFT")
   stepsText:SetSpacing(G.NAV_STEPS_SPACING)
   G.stepsText = stepsText -- (the tests)
+  -- (a supported UI's font, outline and shadow, as the directions'; the measure too, so cut lines fit: UIFont.lua)
+  if ns.UIFont then ns.UIFont.Register(navText, G.navMeasure, stepsText) end
   local cancel = CreateFrame("Button", nil, navPanel, "UIPanelCloseButton")
   cancel.agpsClose = true -- (an X: the look's close color, G.TintButtons)
   G.navCancel = cancel -- (the tutorial points at it)
@@ -19580,7 +21136,7 @@ function G.Init()
       GameTooltip:AddLine(L["Lets you drag and resize this panel again."], nil, nil, nil, true)
     else
       GameTooltip:SetText(L["Lock Panel"], 1, 1, 1)
-      GameTooltip:AddLine(L["Keeps this panel where it is: no dragging or resizing."], nil, nil, nil, true)
+      GameTooltip:AddLine(L["Keeps this panel where it is, and clicks go through it to the game world. To unlock it later: Options > Map window > Lock the panel."], nil, nil, nil, true)
     end
     GameTooltip:Show()
   end)
@@ -19713,6 +21269,8 @@ function G.Init()
   infoText = top:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   infoText:SetPoint("BOTTOM", 0, 4)
   infoText:SetShadowOffset(1, -1)
+  G.infoText = infoText -- (the tests)
+  if ns.UIFont then ns.UIFont.Register(infoText) end -- (a supported UI's text style, UIFont.lua)
 
   noMapText = top:CreateFontString(nil, "OVERLAY", "GameFontNormal")
   noMapText:SetPoint("CENTER")

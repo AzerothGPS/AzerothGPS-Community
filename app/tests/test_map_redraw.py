@@ -2476,6 +2476,9 @@ def test_pins_are_found_by_the_search_with_where_they_are(game):
         sw = P.Add(lua.eval("{ level = 0, x = -8811.0, y = 660.0, name = 'Auction House' }"))
         iff = P.Add(lua.eval("{ level = 0, x = -4957.0, y = -911.0, name = 'Auction House' }"))
         assert sw.place == "Stormwind City" and iff.place == "Ironforge"  # (kept when made)
+        # (in Stormwind's Trade District: nearest first since 1.4.2, the pins before Undercity's auctioneers)
+        lua.execute("AGPS_OLD_AH = { AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] } "
+                    "AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = -8811.0, 660.0, 0")
         res = G.SearchPlaces("auction", 8)
         found = sorted((str(res[i].name), str(res[i].sub)) for i in range(1, len(res) + 1) if res[i].pin)
         assert found == [("Auction House", "Ironforge"), ("Auction House", "Stormwind City")]
@@ -2502,6 +2505,8 @@ def test_pins_are_found_by_the_search_with_where_they_are(game):
         G.ConfirmRoute()
         assert len(N.stops) == 1 and str(N.stops[1].name) == "Auction House"
     finally:
+        lua.execute("if AGPS_OLD_AH then AGPS_POS[1], AGPS_POS[2], AGPS_POS[3] = AGPS_OLD_AH[1], AGPS_OLD_AH[2], "
+                    "AGPS_OLD_AH[3] AGPS_OLD_AH = nil end")
         while len(own) > before:
             own[len(own)] = None
         N.Clear()
@@ -2546,7 +2551,8 @@ def test_known_city_places_are_found_by_several_words(game):
         assert len(res) >= 1 and (str(res[1].name), str(res[1].sub)) == ("Inn", "Ironforge"), \
             [(str(res[i].name), str(res[i].sub)) for i in range(1, len(res) + 1)]
         assert str(res[1].place) == "Ironforge Inn" and res[1].tex
-        found = [(str(r.name), str(r.sub)) for r in G.SearchPlaces("inn", 8).values()]
+        # (nearest first since 1.4.2: from Brill, its innkeepers before Ironforge's inn; a long list for the faction's)
+        found = [(str(r.name), str(r.sub)) for r in G.SearchPlaces("inn", 200).values()]
         assert ("Inn", "Ironforge") in found and ("Inn", "Orgrimmar") not in found  # (not the other faction's)
         N.Clear()
         e = res[1]
@@ -2555,7 +2561,7 @@ def test_known_city_places_are_found_by_several_words(game):
         assert str(N.stops[1].name) == "Ironforge Inn"
         # a Horde character: Orgrimmar's inn, not Ironforge's
         lua.execute("UnitFactionGroup = function() return 'Horde' end")
-        found = [(str(r.name), str(r.sub)) for r in G.SearchPlaces("inn", 8).values()]
+        found = [(str(r.name), str(r.sub)) for r in G.SearchPlaces("inn", 200).values()]
         assert ("Inn", "Orgrimmar") in found and ("Inn", "Ironforge") not in found
         # no guard talked to: found all the same (asked 2026-10-30, test_trainers_and_services_are_found_without_a_guard)
         db.cityRevealed = lua.eval("{}")
@@ -3107,31 +3113,38 @@ def test_a_bigger_window_shows_more_of_the_map_not_the_map_bigger(game):
     # (asked: at the most zoomed out, a bigger map window only made the map bigger) the size changed keeps the
     # scale (more or less of the map shown), and a window bigger than 450 zooms out further, on the terrain
     # view's tiles still
+    # (the Terrain style set here, not left to the tests before: on the Seamless map, the default, the wheel goes on out
+    # to the world view; a test run by itself saw it before the harness's first redraw dropped the art, 2026-11-27)
     lua, ns = game
     G, st = ns.GPS, ns.settings.gps
-    size, zoom = st.size, st.zoom
+    size, zoom, style = st.size, st.zoom, st.style
     try:
+        st.style = "terrain"
         st.size = 450
         G.ApplySettings()
+        # (shown at least as big as the quick buttons need: 480 by default since 1.4.2, G.QuickMinSides; the zoom's
+        # limit grows past ZOOM_REF_SIZE with the size shown, G.MaxZoom)
+        w0 = G.MapSize()[0]
+        assert w0 == max(450, G.QuickMinSize())
         for _ in range(12):
             G.WheelZoom(2.0)
         top = st.zoom
-        assert top == pytest.approx(2500.0)
+        assert top == pytest.approx(2500.0 * max(1, w0 / G.ZOOM_REF_SIZE)) and top == pytest.approx(G.MaxZoom())
         st.size = 800
         G.ApplySettings()
-        assert st.zoom == pytest.approx(top * 800 / 450)  # (the same yards to a pixel: more of the map)
+        assert st.zoom == pytest.approx(top * 800 / w0)  # (the same yards to a pixel: more of the map)
         for _ in range(4):
             G.WheelZoom(2.0)
-        assert st.zoom == pytest.approx(top * 800 / 450) and st.zoom < G.MinimapMaxZoom()  # (its limit; tiles)
+        assert st.zoom == pytest.approx(top * 800 / w0) and st.zoom < G.MinimapMaxZoom()  # (its limit; tiles)
         st.size = 450
         G.ApplySettings()
         assert st.zoom == pytest.approx(top)
         G.SetZoom(300.0)
         st.size = 600
         G.ApplySettings()
-        assert st.zoom == pytest.approx(400.0)  # (not only at the limit)
+        assert st.zoom == pytest.approx(300.0 * 600 / w0)  # (not only at the limit)
     finally:
-        st.size, st.zoom = size, zoom
+        st.size, st.zoom, st.style = size, zoom, style
         G.ApplySettings()
         st.zoom = zoom
 
@@ -3904,12 +3917,13 @@ def test_a_narrow_any_shape_map_never_grows_taller_and_its_title_bar_stays_on_th
     chrome = G.chrome
     lua.execute("AGPS_OLD_CUR = GetCursorPosition\nGetCursorPosition = function() return AGPS_CX, AGPS_CY end")
     try:
-        st.lockSize, st.locked, st.quick = False, False, None  # (the default quick buttons: two going right)
+        st.lockSize, st.locked, st.quick = False, False, None  # (the default quick buttons: four going right, Pause
+        # Routing counted with or without a route and Import and Share since 1.4.2)
         st.freeSize, st.width, st.size = True, 450, 450
         G.ApplySettings()
         assert G.ScreenKnown() and tuple(G.Screen()) == (1920, 1080)  # (the stand-in's screen)
         minw = G.QuickMinWidth()
-        assert minw == 360 and G.QuickCapacityAt(minw, 450)[1] >= 2 > G.QuickCapacityAt(minw - 10, 450)[1]
+        assert minw == 480 and G.QuickCapacityAt(minw, 450)[1] >= 4 > G.QuickCapacityAt(minw - 10, 450)[1]
         grip = G.sizeGrip
         # (the stand-in's frames: left 100, top 500) the corner 450 down, narrower and narrower
         for w in (400, 360, 350, 300, 250, 200, 150):
@@ -4017,9 +4031,12 @@ def test_a_still_view_keeps_its_tiles_and_icons_and_a_big_map_redraws_less(game)
     # tiles and icons again) the view hardly moved (under STILL_PX): the tiles and icons kept, not laid out again;
     # placed again once it moves, TILE_REFRESH / ICON_REFRESH on anyway, or a forced redraw; a map over BIG_MAP
     # across redraws at most BIG_MAP_HZ a second
+    # (the Terrain style set here, not left to the tests before: run by itself, the harness's first redraw dropped the
+    # Seamless map's art, and the tiles were laid again for it, 2026-11-27)
     lua, ns = game
     G, st = ns.GPS, ns.settings.gps
-    size, zoom, x0 = st.size, st.zoom, float(lua.eval("AGPS_POS[1]"))
+    size, zoom, style, x0 = st.size, st.zoom, st.style, float(lua.eval("AGPS_POS[1]"))
+    st.style = "terrain"
     lua.execute("""
       AGPS_LAYOUT = { tiles = 0, icons = 0 }
       AGPS_REAL = { m = AGPS_NS.GPS.LayoutMinimap, z = AGPS_NS.GPS.LayoutZone, p = AGPS_NS.GPS.LayoutPois }
@@ -4104,7 +4121,7 @@ def test_a_still_view_keeps_its_tiles_and_icons_and_a_big_map_redraws_less(game)
           AGPS_NS.GPS.LayoutMinimap, AGPS_NS.GPS.LayoutZone, AGPS_NS.GPS.LayoutPois = AGPS_REAL.m, AGPS_REAL.z, AGPS_REAL.p
           AGPS_POS[1] = {x0}
         """)
-        st.size, st.zoom, st.hz = size, zoom, 20
+        st.size, st.zoom, st.hz, st.style = size, zoom, 20, style
         G.ApplySettings()
 
 
@@ -4552,7 +4569,8 @@ def test_a_companion_widget_on_the_title_bar_moves_the_title_left(game):
         assert tuple(other._pt.values())[3] == -(26 + 100 + 4)
         assert tuple(tc._pts.TOPRIGHT.values())[3] == -(26 + 100 + 4 + 60 + 4)
         # a narrow map: the title cut short before the slot that fits; the one that doesn't, hidden
-        st.quick = lua.eval("{ questRoute = 'hidden', hearth = 'hidden' }")  # (no buttons going right: any width)
+        st.quick = lua.eval("{ questRoute = 'hidden', hearth = 'hidden', pauseRoute = 'hidden', import = 'hidden' }")
+        # (no buttons going right: any width)
         st.freeSize, st.width = True, 260
         G.ApplySettings()
         assert slot._shown and not other._shown
@@ -5467,7 +5485,7 @@ def test_the_maps_icons_on_the_games_minimap(game):
     db = ns.db
     saved_pins, saved_nodes = db.pins, db.nodes
     saved = (st.showCustomPins, st.layerHerbs, st.showParty)
-    others = ("poiPoi", "layerInstances", "layerCaves", "layerQuests", "layerCity", "layerOre")
+    others = ("poiPoi", "layerDocks", "layerInstances", "layerCaves", "layerQuests", "layerCity", "layerOre")
     saved_others = {o: st[o] for o in others}
     lua.execute("""
         AGPS_MEMBERS = {}
@@ -5562,7 +5580,7 @@ def test_our_icons_on_the_games_minimap_are_named_on_hover(game):
     st = ns.settings.gps
     db = ns.db
     saved_pins, saved_nodes, saved_city, saved_revealed = db.pins, db.nodes, db.cityPois, db.cityRevealed
-    kinds = ("showCustomPins", "layerHerbs", "showParty", "layerCity", "poiPoi", "layerInstances", "layerCaves",
+    kinds = ("showCustomPins", "layerHerbs", "showParty", "layerCity", "poiPoi", "layerDocks", "layerInstances", "layerCaves",
              "layerQuests", "layerOre", "minimapIcons")
     saved = {k: st[k] for k in kinds}
     old_members = G.party.io.members
@@ -8535,10 +8553,10 @@ def test_show_routes_off_hides_a_dungeons_dotted_way(game):
     lua, ns = game
     G, N = ns.GPS, ns.Nav
     st = ns.settings.gps
+    # (since 1.4.2 its toggle is Map Layers' Travel > Routes through dungeons, the same setting: test_map_layers.py)
     ids = [t.id for t in G.QUICK.values()]
-    assert "bossRoute" not in ids and "dungeonPaths" in ids
-    t = next(t for t in G.QUICK.values() if t.id == "dungeonPaths")
-    assert t.label == "Show Routes" and t.key == "showDungeonPaths" and st.showDungeonPaths is True
+    assert "bossRoute" not in ids and "dungeonPaths" not in ids and "layer_dungeonPaths" in ids
+    assert G.layerById.dungeonPaths.key == "showDungeonPaths" and st.showDungeonPaths is True
     gold = G.DungeonPathColor("gold")
 
     def dotted():
@@ -8901,7 +8919,7 @@ def test_turning_the_minimap_option_off_puts_the_minimap_back(minimap):
     blobs = dict(lua.eval("AGPS_MM.blobs").items())
     assert len(blobs) == 9 and set(blobs.values()) == {G.MINIMAP_BLOB_DEFAULT}  # (its quest areas back)
     # the window as it was: its own size and place, its frame and buttons
-    assert frame._w == st.size and lua.eval("AzerothGPSFrame._pt")[1] == st.point[1]
+    assert (frame._w, frame._h) == tuple(G.MapSize()) and frame._w == max(st.size, G.QuickMinSize()) and lua.eval("AzerothGPSFrame._pt")[1] == st.point[1]
     assert G.moveTab._shown is (not st.locked)
     # no mask seen before: the game's round one
     G.minimapMask = None
@@ -9022,7 +9040,8 @@ def test_the_minimap_square_grows_into_the_window_and_back(minimap):
     assert b._w == b._h and b._w > 0
     # (asked 2026-11-09: as the window's top-left logo, over the square's bottom-left corner)
     pt = lua.eval("{ (function(b) return unpack(b._pt) end)(AGPS_NS.GPS.mmButton) }")
-    assert pt[1] == "CENTER" and lua.eval("AGPS_NS.GPS.mmButton._pt[2] == AzerothGPSFrame") and pt[3] == "BOTTOMLEFT"
+    # (on the Minimap's anchor, the square's own box, in every state since 1.4.2: one place as the map comes out)
+    assert pt[1] == "CENTER" and lua.eval("AGPS_NS.GPS.mmButton._pt[2] == AGPS_NS.GPS.mmAnchor") and pt[3] == "BOTTOMLEFT"
     assert abs(pt[4] - b._w * G.MINIMAP_LOGO_IN) < 1e-6
     assert abs(pt[5] - (ns.TITLE_MID - 2) * b._w / ns.CORNER_LOGO_UNITS) < 1e-6
     b._scripts.OnClick(b)
@@ -9032,7 +9051,7 @@ def test_the_minimap_square_grows_into_the_window_and_back(minimap):
     assert G.mmState.tween is None
     p = lua.eval("AzerothGPSFrame._pt")
     assert [p[i] for i in (1, 3, 4, 5)] == [st.point[i] for i in (1, 3, 4, 5)]
-    assert frame._w == st.size and frame._h == st.size
+    assert (frame._w, frame._h) == tuple(G.MapSize()) == (max(st.size, G.QuickMinSize()),) * 2
     assert frame._strata == G.MINIMAP_EXPANDED_STRATA and top._shown is True and frame._shown
     # (asked 2026-11-09: "restore the minimap to original state while the map is expanded out")
     assert not G.MinimapTaken() and lua.eval("Minimap._pts.CENTER[2] == MinimapContainer")
@@ -9268,7 +9287,7 @@ def test_the_square_stays_as_it_is_while_the_map_is_out_of_it(minimap):
     assert m.tween is None and not G.MinimapMode() and G.MinimapView(0) is None
     p = lua.eval("AzerothGPSFrame._pt")
     assert [p[i] for i in (1, 3, 4, 5)] == [st.point[i] for i in (1, 3, 4, 5)]
-    assert frame._w == st.size and frame._h == st.size and frame._shown and top._shown is True
+    assert (frame._w, frame._h) == tuple(G.MapSize()) == (max(st.size, G.QuickMinSize()),) * 2 and frame._shown and top._shown is True
     assert frame._strata == G.MINIMAP_EXPANDED_STRATA
     assert cf._shown and (cf._w, cf._h) == (side, side)  # (both shown)
     unchanged()
@@ -9286,7 +9305,7 @@ def test_the_square_stays_as_it_is_while_the_map_is_out_of_it(minimap):
     _tick(lua, ns)
     assert m.tween is None and G.MinimapMode() and not G.SquareKeptOut() and not cf._shown
     assert lua.eval("AzerothGPSFrame._pt[1]") == "TOPRIGHT" and frame._w == side and frame._strata == "BACKGROUND"
-    assert top._shown is False and lua.eval("rawequal")(b._pt[2], frame) and b.logo._shown
+    assert top._shown is False and lua.eval("rawequal")(b._pt[2], G.mmAnchor) and b.logo._shown
     assert not back._shown  # (in the square: no arrow on it)
     unchanged()
     # quick: out, back, out, back with no animation waited for; then back by itself after its quiet seconds
@@ -9411,7 +9430,8 @@ def test_the_options_leave_the_minimap_square_as_it_is(minimap):
         assert lua.eval("AGPS_MM.mask") == G.MINIMAP_SQUARE and lua.eval("AGPS_MM.ground") is False
         assert lua.eval("MinimapCompassTexture._shown") is False and G.MinimapTaken()
         # the window's own size in the options' sliders, not the square's
-        assert lua.eval('select(2, AGPS_NS.GPS.MapSize(nil, true))') == st.size
+        # (the size it shows: the saved one, kept in range by the quick buttons' need, G.FitSize)
+        assert lua.eval('select(2, AGPS_NS.GPS.MapSize(nil, true))') == max(st.size, G.QuickMinSize())
         # a logo look applied again (a scale change): still the square's
         lua.execute("AGPS_NS.ApplyLogoLook()")
         square_look()
@@ -11111,7 +11131,7 @@ def test_the_zoom_is_kept_when_the_maps_size_changes_by_itself(game):
         G.ApplySettings()
         if st.quick is None:
             st.quick = lua.eval("{}")
-        keys = ("styles", "search", "questRoute", "dungeonsG", "gather", "questsG", "quickFind", "hearth")
+        keys = ("styles", "search", "questRoute", "gather", "mapLayers", "quickFind", "hearth")
         old = {k: st.quick[k] for k in keys}
         for k in keys:  # (the menu's buttons hidden one by one: its column shorter, the window's minimum with it)
             st.quick[k] = "hidden"

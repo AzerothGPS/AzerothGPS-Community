@@ -412,6 +412,11 @@ function MX.GridHeights(level, x, y)
   end
   local Geo = ns.Geo
   if not (Geo and Geo.Base and Geo.Base(level) == level) then return out, nil, nil end
+  -- (1.4.2, item 119 step 5: a building's own grid there, its floors: BuildingGrid.lua, never loading a region)
+  local BG = ns.BuildingGrid
+  local bh, bcell
+  if BG and BG.HeightsAt then bh, bcell = BG.HeightsAt(level, x, y) end
+  if bh and bh[1] then return bh, bcell, "building" end
   local w = WG and WG.On and WG.On() and WG.Cont and WG.Cont(level)
   if w and WG.SurfacesAt and MX.GridTileLoaded(w, x, y) then
     local ok, ss = pcall(WG.SurfacesAt, w, x, y)
@@ -613,6 +618,15 @@ MX.STRIP_ROW_GAP = 3 -- UI units over the bottom row of round buttons (GPSFrame'
 MX.INFO_BOTTOM = 4 -- (GPSFrame's info line, up from the map's bottom; its dungeon note 2 over it)
 MX.CLOSE_SIZE = 14 -- the close X's button (UI units), in the strip's top right
 MX.CLOSE_ALPHA, MX.CLOSE_LIT_ALPHA = 0.6, 1 -- (subtle; full under the mouse)
+-- Clear of what sits over the map's bottom (GPSFrame's G.BottomCovers: the bottom-right column of round buttons, and in
+-- the world map other addons' frames there: a map addon's coordinates and tab rail). Kooki3z's screenshot 2026-11-27 for
+-- 1.4.2 (a map addon, No Map, the world map: "i get overlap with streetview, also can't click the X here"): in the world map
+-- the column is left of the game's own corner button, over the strip's right end, and StreetView's figure and Street
+-- Guess's button going up it covered the X. Anything low along the bottom (a map addon's coordinates), its top less than
+-- CLEAR_LIFT_MAX over the strip's bottom: the strip over it, as wide as ever; anything taller (the column, a map addon's
+-- tabs up the side): the strip's end short of it, its X with it.
+MX.CLEAR_GAP = 4 -- UI units between the strip and what it keeps clear of
+MX.CLEAR_LIFT_MAX = 60 -- (something whose top is more than this over the strip's bottom: beside it instead)
 
 -- The strip's close X (item 122; Kooki3z 2026-11-26: "Left-click closes it for this route. Shift left-click closes it
 -- and turns it off in options."). Closed for the route: hidden on every map (the window, the extra one, the GPS map in
@@ -694,6 +708,8 @@ function MX.Make(G, top, below)
   local close = CreateFrame("Button", nil, f)
   close:SetSize(MX.CLOSE_SIZE, MX.CLOSE_SIZE)
   close:SetPoint("TOPRIGHT", f, "TOPRIGHT", -1, 0)
+  -- (its whole button the letter's: a click on the X or just round it is the X's, never the strip's under it)
+  if close.SetHitRectInsets then close:SetHitRectInsets(0, 0, 0, 0) end
   close:RegisterForClicks("LeftButtonUp")
   local x = close:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall") -- (the game's own yellow)
   x:SetPoint("CENTER", 0, 0)
@@ -718,6 +734,7 @@ function MX.Make(G, top, below)
   text:SetWordWrap(false)
   text:SetShadowOffset(1, -1)
   f.text = text
+  if ns.UIFont then ns.UIFont.Register(text) end -- (a supported UI's text style, as the directions: UIFont.lua)
   local dotEdge = f:CreateTexture(nil, "OVERLAY", nil, 6)
   dotEdge:SetSize(8, 8)
   dotEdge:SetColorTexture(0, 0, 0, 1)
@@ -888,6 +905,39 @@ function MX.LayStrip(f, p, at)
   f.dotAt = d
 end
 
+-- The strip's insets from the map's left and right and its bottom, `bottom` up from the map's bottom as placed, on a
+-- map `w` wide, clear of `covers` ({ left, bottom, right, top } each, from the map's bottom left): left, right, and the
+-- bottom it's lifted to (nil: as placed).
+function MX.StripClear(w, bottom, covers)
+  local side, gap, H = MX.STRIP_SIDE, MX.CLEAR_GAP, MX.STRIP_H
+  local function Hits(o, l, r, b)
+    return o[1] < w - r and o[3] > l and o[2] < b + H and o[4] > b
+  end
+  local lifted
+  for _ = 1, 4 do -- (over the bars under it; a bar it's lifted into is gone over too)
+    local up
+    for _, o in ipairs(covers or {}) do
+      if Hits(o, side, side, bottom) and o[4] - bottom <= MX.CLEAR_LIFT_MAX then
+        up = max(up or 0, o[4] + gap)
+      end
+    end
+    if not up or up <= bottom then break end
+    bottom, lifted = floor(up + 0.5), floor(up + 0.5)
+  end
+  local left, right = side, side
+  for _, o in ipairs(covers or {}) do
+    if Hits(o, left, right, bottom) then
+      if (o[1] + o[3]) / 2 > w / 2 then
+        right = max(right, w - o[1] + gap)
+      else
+        left = max(left, o[3] + gap)
+      end
+    end
+  end
+  if w - left - right < MX.STRIP_MIN_W then left, right = side, side end -- (no room for it short of them: as ever)
+  return floor(left + 0.5), floor(right + 0.5), lifted
+end
+
 -- At each redraw of map G (the end of G.Update): the strip for the route now, the floor picker for the map's middle.
 -- `level`, (x, y): what the map shows (G.shownLevel or the view's continent) and its middle; `zoom` its half width.
 function MX.OnRedraw(G, r, level, x, y, zoom)
@@ -902,41 +952,48 @@ function MX.OnRedraw(G, r, level, x, y, zoom)
     if p and w - 2 * MX.STRIP_SIDE < MX.STRIP_MIN_W then p = nil end
     st.profile = p
     if not p then
+      st.stripTop = nil
       if f:IsShown() then
         f:Hide()
         f.text:SetText("") -- (nothing stale left: laid again, in the units then, when it shows)
         f.laid = nil
       end
     else
-      -- (over the info line, the dungeon's note when it shows, Confirm Route when it shows)
+      -- (over the info line and the dungeon's note when it shows; Confirm Route / Clear Route goes over the strip,
+      -- GPSFrame's G.RouteButtonY: the strip stays put as that button comes and goes. It went over the button, and
+      -- jumped up and back each time the map was dragged or followed again: Kooki3z's video 2026-11-27 for 1.4.2, "its
+      -- position jumps too much", the X moving away as the pointer got to it)
       local b = st.below
-      local over = b[1]
       local note = b[2] and b[2]:IsShown()
-      if note then over = b[2] end
-      local btn = b[3] and b[3]:IsShown()
-      if btn then over = b[3] end
       -- (and over the bottom row of round buttons going right from the map button, item 134: its line and its text
-      -- clear of them, and still over the info line and the note; Confirm Route / Clear Route, when it shows, is over
-      -- that row already)
-      local row = not btn and G.BottomRowTop and G.BottomRowTop() or nil
-      local lift = nil
-      if row then
-        local function Tall(fs) return fs and fs.GetStringHeight and tonumber(fs:GetStringHeight()) or 12 end
-        local lineTop = MX.INFO_BOTTOM + Tall(b[1]) + (note and (2 + Tall(b[2])) or 0)
-        lift = floor(max(row + MX.STRIP_ROW_GAP, lineTop + 3) + 0.5)
+      -- clear of them, and still over the info line and the note)
+      local row = G.BottomRowTop and G.BottomRowTop() or nil
+      local function Tall(fs) return fs and fs.GetStringHeight and tonumber(fs:GetStringHeight()) or 12 end
+      local lineTop = MX.INFO_BOTTOM + Tall(b[1]) + (note and (2 + Tall(b[2])) or 0)
+      local bottom = b[1] and lineTop + 3 or MX.STRIP_BOTTOM
+      if row then bottom = max(row + MX.STRIP_ROW_GAP, bottom) end
+      bottom = floor(bottom + 0.5)
+      -- (clear of what's over the map's bottom, MX.StripClear, and kept there: worked out again only when the map's
+      -- size or the place it's worked out from changes, and while those stay the same it only ever moves further clear,
+      -- never back: a map addon's coordinates come and go with the pointer over its map, and the strip with them would)
+      local left, right, up = MX.StripClear(w, bottom, G.BottomCovers and G.BottomCovers() or nil)
+      local h = parent and parent:GetHeight() or 0
+      local key = Format("%d:%d:%d:%s", floor(w + 0.5), floor(h + 0.5), bottom, tostring(G.wmCoverRects ~= nil))
+      local keep = f.keep
+      if keep and keep.key == key then
+        left, right = max(left, keep.left), max(right, keep.right)
+        if keep.up and (not up or keep.up > up) then up = keep.up end
+        if w - left - right < MX.STRIP_MIN_W then left, right, up = keep.left, keep.right, keep.up end
       end
-      if f.over ~= over or f.overW ~= w or f.lift ~= lift then
+      f.keep = { key = key, left = left, right = right, up = up }
+      if up and up > bottom then bottom = up end
+      st.stripTop = bottom + MX.STRIP_H -- (Confirm Route over it: G.RouteButtonY)
+      if f.overW ~= w or f.bottom ~= bottom or f.left ~= left or f.right ~= right then
         f:ClearAllPoints()
-        -- (the info line, the note and the button are all centered on the map)
-        if lift then
-          f:SetPoint("BOTTOM", parent, "BOTTOM", 0, lift)
-        elseif over then
-          f:SetPoint("BOTTOM", over, "TOP", 0, 3)
-        else
-          f:SetPoint("BOTTOM", parent, "BOTTOM", 0, MX.STRIP_BOTTOM)
-        end
-        f:SetWidth(w - 2 * MX.STRIP_SIDE)
-        f.over, f.overW, f.lift = over, w, lift
+        -- (centered on the map as the info line is; its middle off the map's when one end is short of something)
+        f:SetPoint("BOTTOM", parent, "BOTTOM", (left - right) / 2, bottom)
+        f:SetWidth(w - left - right)
+        f.overW, f.bottom, f.left, f.right = w, bottom, left, right
       end
       if not f:IsShown() then f:Show() end
       MX.LayStrip(f, p, at)

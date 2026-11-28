@@ -19,7 +19,7 @@ MARION = (0, 2271.0, 243.0, 41.2)  # upstairs, Marion Call (2130)
 MARAUDON = (1, -1244.0, 2896.0)  # Maraudon's outer cave: passages over passages under the hill (74, 88, 128)
 
 _SETUP = """
-AGPS_RW = { units = {}, spellR = {}, interact = { [2] = 11.11, [3] = 9.9, [4] = 28 }, calls = 0, p = { 0, 0, 0 } }
+AGPS_RW = { units = {}, spellR = {}, interact = { [2] = 10.3, [3] = 10.3, [4] = 28 }, calls = 0, p = { 0, 0, 0 } }
 AGPS_RW_SAVED = { C_Spell = rawget(_G, 'C_Spell'), UnitExists = rawget(_G, 'UnitExists'),
   IsPlayerSpell = rawget(_G, 'IsPlayerSpell'), CheckInteractDistance = rawget(_G, 'CheckInteractDistance'),
   AGPS_GUIDS = rawget(_G, 'AGPS_GUIDS'), InCombatLockdown = InCombatLockdown }
@@ -205,8 +205,8 @@ def test_with_no_npc_in_reach_nothing_changes(game):  # noqa: F811
         _teleported(lua, ns)
         assert N.TrackCityZ(0, 2266.0, 241.0) is None
         assert w.calls == 0
-        # (the innkeeper named: her floor and upstairs are 7 yd apart, closer than the range checks can tell; still
-        # unknown, never a guess)
+        # (the innkeeper named, a few yards across: her floor and upstairs are 7 yd apart, both within trade's reach
+        # from here; still unknown, never a guess. From 7.6-10.3 yd across the across rule tells them: the test below)
         w.name("target", 5688, RENEE)
         w.name("mouseover", 2130, MARION)
         w.player(2266.0, 241.0, 34.3)
@@ -225,6 +225,31 @@ def test_with_no_npc_in_reach_nothing_changes(game):  # noqa: F811
         _tick(lua, 0.3)
         assert abs(N.TrackCityZ(0, 2267.0, 241.0) - 34.3) < 1
         assert ns.HeightBand.readings[1] is None
+
+
+@pytest.mark.parametrize("z, want", [(34.3, 34.3), (41.2, 41.2)], ids=["her-floor", "upstairs"])
+def test_from_8_yd_across_the_innkeeper_tells_her_floor_from_upstairs(game, z, want):  # noqa: F811
+    """Item 120b: trade and duel flip at 10.0-10.5 yd in 3D (the range probe). 7.6-10.3 yd across from an NPC standing on a
+    building's floor (the building grids' NPC floor), in range is its floor, out of range the other: Brill's inn's two
+    floors, 7 yd apart, told apart by the innkeeper alone."""
+    lua, ns = game
+    N, st, HB = ns.Nav, ns.settings.gps, ns.HeightBand
+    was = (st.worldGrid, st.buildingGrid)
+    st.worldGrid, st.buildingGrid = True, True
+    px, py = 2261.5, 243.0  # (8.2 yd across from Renee)
+    try:
+        assert ns.BuildingGrid.NpcFloor(0, RENEE[1], RENEE[2], RENEE[3]) is not None
+        with _RangeWorld(lua, ns) as w:
+            w.name("target", 5688, RENEE)
+            w.player(px, py, z)
+            _teleported(lua, ns)
+            band = HB.Here(0, px, py)
+            assert band is not None
+            assert HB.InBand(band, want, 1)
+            other = 41.2 if want < 40 else 34.3
+            assert not HB.InBand(band, other, 1)
+    finally:
+        st.worldGrid, st.buildingGrid = was
 
 
 def test_the_hearthstone_into_brills_inn_still_lands_on_the_innkeepers_floor(game):  # noqa: F811

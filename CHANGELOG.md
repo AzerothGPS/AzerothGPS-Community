@@ -2,9 +2,73 @@
 
 Each version's section is its release notes (GitHub and CurseForge).
 
-## 1.4.2 (in progress)
+## 1.4.2
 
-- Roads: new roads in Feralas and Stonetalon Mountains.
+### New
+
+- Map Layers in the map menu: show or hide each thing the map draws (the route, stops, flight masters, dungeons, caves, quests, herbs and more), with Show All and Hide All. It replaces the Quests and Caves/Dungeons/Raids buttons.
+- FlowUp Route: follows each step of your FlowUp guide, like the other guide routes.
+- Waypoint UI: your route's next stop becomes its waypoint, with its map pin and distance; a waypoint you set yourself is never replaced (Options > Directions).
+- Waypoint UI: a pin you set with Ctrl-click becomes a stop on your route, or starts one (Options > Directions).
+- DaylightUI's square minimap is supported like EllesmereUI's: the route, icons and the GPS minimap line up with it.
+- With DaylightUI or EllesmereUI, the directions and the map's text use your UI's font (Options > Directions > Directions text style).
+- The GPS minimap's logo can be hidden, or unlocked and dragged anywhere along the minimap's edge (Options > Minimap).
+- As a ghost, the directions show the run to your body and what the Spirit Healer would cost you.
+- Building routing (test): in some towns, routes walk inside inns and towers, floor by floor, through their doors (Options > Routing).
+- The new building and cave floor maps show the NPCs on each floor, with their icons and names on mouseover.
+- New roads in Feralas and Stonetalon Mountains.
+
+### Changed
+
+- Long walks are worked out much faster.
+- A stop no walk reaches is said at once instead of after a long search.
+- A change of running speed (a speed buff, Travel Form) reweighs walks against flights and boats at once.
+- In cities, caves and buildings, the direction arrow looks less far ahead and the route is recalculated sooner when you stray.
+- Once you've ridden a lift, routes count the wait for its next car instead of a guess.
+- A lift nearby is taken over a fall spell jump unless the lift is much slower.
+- Corpse runs jump straight off cliffs.
+- Avoid zones too high for your level: a zone only a little too high now costs more instead of being avoided outright (Deadwind Pass).
+- A trip that starts or ends inside the other faction's town uses the town's own gate and road.
+- Where floors stack, your floor is also told by the NPCs indoors near you, the minimap's place name and the flight master you land at.
+- With DaylightUI's or EllesmereUI's minimap, the GPS minimap's border and the GPS window's frame are off until you set them yourself.
+- With OpenMap, turning on the GPS map in the game's world map switches to the No Map style, and back when you turn it off.
+- With OpenMap installed, Options > Map says to pick the No Map style so your route draws on OpenMap's map.
+- Options > Map: shorter map style notes, and a notice under No Map saying what it can't show.
+- Routes through elite areas say "Through elite territory" in orange; a route through both elite and enemy areas says both.
+- Import and Share and StreetView's buttons are now in the map menu's bottom row, like the other quick buttons (Options > Keys and buttons).
+- The detached route panel, when locked, lets clicks through to the game world, like the locked directions (Options > Map window).
+- Search Places lists the nearest matches first, with the distance to each one nearby; places on other continents come last.
+
+### Fixed
+
+- Walks inside your own faction's towns no longer count as walks through a zone too high for you.
+- OpenMap zoomed in shows only the terrain; a city's map over the land comes in as you zoom out.
+- Flying over Undercity no longer flips the map between the whole city and one of its floors.
+- In the world map, its own icons and other addons' (Questie's) no longer jump while you fly or ride.
+- In the world map, the player arrow no longer flashes when zooming in and out.
+- City routing (test): routes reach X'yera and Zayus upstairs in Orgrimmar.
+- Routes to a stop just over a ridge, with the only way far round, settle quickly instead of searching for minutes.
+- Enemy areas near the route no longer flash on and off while the route is worked out.
+- Thunder Bluff: routes ride the north lift, and both cars of the southwest lift.
+- Ironforge: routes from the cobwebbed switchback under the High Seat go on down to the Hall of Thanes.
+- Blackrock Mountain: walking down the switchback to Blackrock Depths keeps your floor.
+- Auberdine: the walk off the boat follows the pier instead of swimming to the beach.
+- Eastern Plaguelands: routes into Plaguewood's cave go in by its mouth.
+- A walk with no way there is no longer weighed against a flight or boat as if it were one.
+- A stop at the edge of an elite enemy area is reached round the outside, not across the whole area.
+- Answering No to "Take it?" inside an elite enemy area now looks for a way round it, or says there's none.
+- Trips to another continent no longer walk a long way round to the boat when a flight there is faster.
+- Shamans: the directions and the hearth button use Astral Recall instead of the Hearthstone when it's ready.
+- DaylightUI and EllesmereUI: the GPS minimap sits over their minimap at its size with you in its middle, under their map text and clear of their panels and buttons.
+- EllesmereUI: the GPS minimap follows its minimap at once as it's resized or scaled, and its logo no longer jumps when the world map opens or closes.
+- OpenMap: the map's bottom-right buttons in the world map move clear of OpenMap's coordinates and tabs.
+- No Map in the world map: Confirm Route and Back to Your Position show again after you drag OpenMap's map, and the height profile stays clear of the buttons.
+- The directions, the height profile and the map's buttons stay on top of map icons in every map mode.
+- Player-made camp vendors such as the Reagent Bot are no longer listed as vendors.
+
+### Known issues
+
+- In a few spots, such as Stormwind's Valley of Heroes, the route can pick a Hearthstone trip that's slower than walking. Fixed in 1.4.3.
 
 ## 1.4.1
 

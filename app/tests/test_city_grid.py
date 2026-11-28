@@ -618,3 +618,47 @@ def test_the_floor_followed_is_held_from_the_great_forge_on(game):
     finally:
         CG.track = None
         ns.settings.gps.cityGrid = False
+
+
+VALLEY_OF_STRENGTH = (1, 1630.0, -4400.0, 16.0)  # (Kooki3z's `.go xyz 1630 -4400 16 1`, 2026-11-26)
+XYERA = (1, 1453.2, -4185.6, 61.4)  # Orgrimmar's Valley of Spirits, up in the loft (item 112's NPC floors)
+ZAYUS = (1, 1461.0, -4181.7, 61.4)
+
+
+@pytest.mark.parametrize("npc", [XYERA, ZAYUS], ids=["xyera", "zayus"])
+def test_up_to_the_loft_from_the_valley_of_strength_finishes_on_their_floor(game, npc):
+    """1.4.2's city rebake kept X'yera's and Zayus's loft (a piece too small for MIN_PIECE) and joined it by the
+    mesh's way (citygrid.anchor_links), but navfeatures' road links made again dropped that link: the loft was reached
+    only by the drops off it, no walk up, and the route there kept "calculating" in game (Kooki3z, with the world grid
+    on). The search must finish, in short slices, with a walk ending on their floor."""
+    lua, ns = game
+    R, CG = ns.Router, ns.CityGrid
+    lua.execute("AGPS_CLOCK_WAS = GetTime; GetTime = function() return os.clock() end")
+    R.SYNC_WALKS = False
+    ns.settings.gps.cityGrid = True
+    ns.settings.gps.worldGrid = True
+    a = VALLEY_OF_STRENGTH
+    try:
+        CG.routes, CG.order = lua.table(), lua.table()
+        clock = lua.eval("function() return os.clock() * 1000 end")
+        worst, n, r = 0.0, 0, None
+        for _ in range(20):
+            r = R.Route(a[0], a[1], a[2], npc[1], npc[2], lua.table(z=a[3], tz=npc[3]))
+            if not r.pending:
+                break
+            while R.HasWork() and n < 5000:
+                t = clock()
+                R.Pump(clock() + 1, clock)
+                worst = max(worst, clock() - t)
+                n += 1
+        assert not r.pending and not r.noWay, "the route never finished"
+        assert r.cityGrid == "Orgrimmar"
+        assert worst < FRAME_MS, f"a slice of the search ran {worst:.0f} ms"
+        pts, zs = _list(r.pts), [z for z in _heights(r) if z is not False]
+        assert math.hypot(pts[-2] - npc[1], pts[-1] - npc[2]) < 3
+        assert abs(zs[-1] - npc[3]) < 3, f"the walk ends at {zs[-1]:.1f}, not on the loft ({npc[3]})"
+    finally:
+        R.SYNC_WALKS = True
+        ns.settings.gps.cityGrid = False
+        ns.settings.gps.worldGrid = False
+        lua.execute("GetTime = AGPS_CLOCK_WAS")

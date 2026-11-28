@@ -850,11 +850,18 @@ def test_the_world_grids_floors_in_an_inn_and_none_on_a_steep_hillside(mx):
     lua, ns = mx
     MX = ns.MapExtras
     ns.settings.gps.worldGrid = True
+    ns.settings.gps.buildingGrid = False  # (the world grid's own floors; with the building grids: below)
     try:
         _wg_loaded(ns, 0, -9468.0, 17.0)
         fl, kind = MX.FloorsAt(0, -9468.0, 17.0)  # (Goldshire's inn, the Lion's Pride: three stories)
         floors = [fl[i] for i in range(1, len(fl) + 1)]
         assert kind == "world" and len(floors) == 3 and floors == sorted(floors)
+        # (1.4.2's building grids on: the inn's own floors, BuildingGrid.lua)
+        ns.settings.gps.buildingGrid = True
+        fl, kind = MX.FloorsAt(0, -9468.0, 17.0)
+        floors = [fl[i] for i in range(1, len(fl) + 1)]
+        assert kind == "building" and len(floors) >= 2 and floors == sorted(floors)
+        ns.settings.gps.buildingGrid = False
         # (a hillside west of the Ruins of Lordaeron whose steep cells hold two surfaces 4.5 yd apart: one floor)
         _wg_loaded(ns, 0, 1683.0, -92.0)
         assert len(MX.FloorsAt(0, 1683.0, -92.0)[0]) == 0
@@ -862,6 +869,7 @@ def test_the_world_grids_floors_in_an_inn_and_none_on_a_steep_hillside(mx):
         assert len(MX.FloorsAt(0, 2000.0, 0.0)[0]) == 0
     finally:
         ns.settings.gps.worldGrid = False
+        ns.settings.gps.buildingGrid = True
 
 
 def test_a_world_grid_walk_down_the_barrens_hills_shows_its_jumps(mx):

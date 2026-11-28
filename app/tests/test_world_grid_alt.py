@@ -23,7 +23,8 @@ def _bake(cont):
 
 
 def test_every_region_folder_ships_its_fields_from_the_grid_s_own_bake():
-    folders = sorted(p for p in ADDONS.glob("AzerothGPS_WG*") if p.is_dir())
+    # (the regions' folders: not AzerothGPS_WGHPA, HPA*'s ways, test_world_hpa.py)
+    folders = sorted(p for p in ADDONS.glob("AzerothGPS_WG*") if p.is_dir() and re.match(r"AzerothGPS_WG\d+_", p.name))
     assert folders
     ns_seen = set()
     for f in folders:

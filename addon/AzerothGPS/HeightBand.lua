@@ -24,7 +24,7 @@ local _, ns = ...
 local HB = {}
 ns.HeightBand = HB
 
-local sqrt, max, min, huge = math.sqrt, math.max, math.min, math.huge
+local sqrt, max, min, huge, floor = math.sqrt, math.max, math.min, math.huge, math.floor
 
 HB.UNITS = { "target", "mouseover", "softinteract", "softfriend", "focus", "npc" }
 HB.SHORTEST_YD = 5 -- (5 yd and shorter ranges add both units' combat reach, which isn't known: left out)
@@ -41,10 +41,18 @@ HB.ITEMS_SECONDS = 30 -- the bags' ranged items this often
 HB.PER_RANGE = 2 -- spells (or items) asked at each range: one that can't be asked about the unit says nil
 HB.RANGES = 6 -- distinct ranges asked, the shortest first (the long ones bound little)
 HB.FLOOR_SLACK = 1 -- yards a floor may lie outside the band and still count as in it
--- CheckInteractDistance's yards by index: { in range of at most, out of range of at least }. The client doesn't say
--- them and the game's versions differ (trade 11.11 or 8, duel 9.9 or 7), so in range takes the larger and out of range
--- the smaller: the band is never narrower than the truth.
-HB.INTERACT = { [2] = { 11.11, 7 }, [3] = { 9.9, 7 }, [4] = { 28, 28 } }
+-- CheckInteractDistance's yards by index: { in range of at most, out of range of at least }, 3D between the two
+-- spots. Measured on WoW Forever (item 120b, Kooki3z's range probe 2026-11-26 at Goldshire's inn, Innkeeper Farley and
+-- Keryn Sylvius alike): trade (2) and duel (3) both flip between 10.0 and 10.5 yd; follow (4) was in range at every
+-- spot up to 13.8 yd (its 28 the out of range's bound only past that).
+HB.INTERACT = { [2] = { 10.55, 9.95 }, [3] = { 10.55, 9.95 }, [4] = { 28, 13.8 } }
+HB.INTERACT_SLACK = 0 -- yards: the interact checks were measured spot to spot, the bodies' reach in them already
+-- The across rule (item 120b): an NPC standing on a building's floor (the building grids', BuildingGrid.NpcFloor) is a
+-- floor marker. With the player FLOOR_ACROSS yards across from it, trade's or duel's in range means its floor, out of
+-- range another (an inn's floors are 6 to 7 yd apart: in range from there reaches no other floor, out of range none of
+-- its own), FLOOR_HALF either side of the floor's height.
+HB.FLOOR_ACROSS = { 7.6, 10.3 }
+HB.FLOOR_HALF = 3
 -- (without the spellbook's API: spells that may be cast on a friendly NPC, asked when known)
 HB.FALLBACK_SPELLS = { 2050, 17, 1243, 635, 19740, 5185, 774, 1126, 331, 1459, 5697 }
 
@@ -294,9 +302,12 @@ function HB.Look(level, px, py)
           seen[guid] = true
           local x, y, z = HB.SpawnOf(id, level, px, py)
           if x then
+            -- (its floor in a building's own grid: a floor marker, the across rule; BuildingGrid.lua)
+            local BG = ns.BuildingGrid
+            local fz = BG and BG.NpcFloor and BG.NpcFloor(level, x, y, z) or nil
             for _, ck in ipairs(HB.Checks(unit)) do
               HB.readings[#HB.readings + 1] = { x = x, y = y, z = z, r = ck.r, inside = ck.inside, src = ck.src,
-                at = now, px = px, py = py, npc = id, unit = unit, level = level }
+                at = now, px = px, py = py, npc = id, unit = unit, level = level, fz = fz }
             end
           end
         end
@@ -318,7 +329,7 @@ function HB.Look(level, px, py)
   HB.readings = kept
   return kept
 end
-function HB.Reset() HB.readings, HB.lookAt, HB.last = {}, nil, nil end -- (the tests)
+function HB.Reset() HB.readings, HB.lookAt, HB.last, HB.landing, HB.roomMemo = {}, nil, nil, nil, nil end -- (the tests)
 
 -- The band of heights the readings allow at (px, py): a list of { lo, hi } (nil: no reading, every height; empty:
 -- the readings disagree).
@@ -347,8 +358,16 @@ function HB.Band(readings, px, py)
   end
   for _, rd in ipairs(readings) do
     local d = Dist(rd.x, rd.y, px, py)
+    local interact = type(rd.src) == "string" and rd.src:sub(1, 8) == "interact"
+    local slack = interact and HB.INTERACT_SLACK or HB.RANGE_SLACK
+    -- (the across rule: trade's or duel's from a floor marker, the player FLOOR_ACROSS across from it)
+    if rd.fz and (rd.src == "interact2" or rd.src == "interact3") and d >= HB.FLOOR_ACROSS[1]
+        and d <= HB.FLOOR_ACROSS[2] then
+      if rd.inside then Cut(rd.fz - HB.FLOOR_HALF, rd.fz + HB.FLOOR_HALF)
+      else Hole(rd.fz - HB.FLOOR_HALF, rd.fz + HB.FLOOR_HALF) end
+    end
     if rd.inside then
-      local R2 = rd.r + HB.RANGE_SLACK + HB.WANDER_YD
+      local R2 = rd.r + slack + HB.WANDER_YD
       local dd = max(0, d - HB.WANDER_YD)
       if dd < R2 then
         local hz = sqrt(R2 * R2 - dd * dd)
@@ -374,8 +393,169 @@ function HB.InBand(band, z, slack)
   return false
 end
 
+---------------------------------------------------------------------------------------------------- more evidence
+-- (item 135d, 1.4.2; the ideas from Polestar, GPL-3, our own code) Two more cues, each a height range folded into the
+-- band (HB.Here), so every floor tracker takes them as it takes the range checks: only ever choosing among the floors
+-- the roads or the grids have there, never the only source, and dropped where they'd leave nothing of the band.
+-- - The minimap's place name (GetMinimapZoneText, else GetSubZoneText) where floors stack: the rooms of the building,
+--   cave or city model (Data/Interiors.lua's WMO placements round the player) named like it span a height range, the
+--   floor the game names (Undercity's quarters, an inn's name, a cavern's). Only indoors (IsIndoors) or down in a city's
+--   level (Undercity says outdoors): out on a hill over a cave the name can still be the cave's.
+-- - A flight landed: the player stands on the flight master's floor (Data/Npcs.lua's spawns with the "f" service, the
+--   nearest within LAND_MASTER_YD of where it landed) for LAND_SECONDS, within LAND_YD of the landing, LAND_Z either way.
+HB.ROOM_PAD_YD = 5 -- (a placement's box, this much bigger: a door's step)
+HB.LAND_MASTER_YD, HB.LAND_SECONDS, HB.LAND_YD, HB.LAND_Z = 40, 30, 12, 3
+
+-- The services' spawns (Data/Npcs.lua's lines with service letter `letter`): { level, x, y, z, ... }, read once a
+-- letter (the packed list's lines scanned, a few ms; only at a landing or as a ghost, never at login).
+local serviceCache = {}
+function HB.ServiceSpawns(letter)
+  local c = serviceCache[letter]
+  if c then return c end
+  c = {}
+  local packed = ns.NpcsPacked
+  if type(packed) == "string" then
+    for line in packed:gmatch("[^\n]+") do
+      local svc, spawns = line:match("^%d+|[^|]*|[^|]*|([^|]*)|[^|]*|[^|]*|(.*)$")
+      if svc and svc:find(letter, 1, true) then
+        for lv, x, y, z in spawns:gmatch("(%-?%d+) (%-?[%d.]+) (%-?[%d.]+) (%-?[%d.]+)") do
+          c[#c + 1], c[#c + 2], c[#c + 3], c[#c + 4] = tonumber(lv), tonumber(x), tonumber(y), tonumber(z)
+        end
+      end
+    end
+  end
+  serviceCache[letter] = c
+  return c
+end
+function HB.ResetServices() serviceCache = {} end -- (the tests)
+-- The nearest of `letter`'s spawns to (x, y) on `level` (or its continent) within `yd`: x, y, z, yards; or nil.
+function HB.NearestService(letter, level, x, y, yd)
+  local base = ns.Geo and ns.Geo.Base and ns.Geo.Base(level) or level
+  local sp, best, bd = HB.ServiceSpawns(letter), nil, yd or huge
+  for i = 1, #sp - 3, 4 do
+    if sp[i] == level or sp[i] == base then
+      local d = Dist(sp[i + 1], sp[i + 2], x, y)
+      if d <= bd then best, bd = i, d end
+    end
+  end
+  if best then return sp[best + 1], sp[best + 2], sp[best + 3], bd end
+end
+
+-- A flight landed (Taxi.lua, the player off the taxi): where, and the flight master's height there.
+HB.landing = nil
+function HB.Landed(level, x, y)
+  HB.landing = nil
+  if not (level and x and y) then
+    local px, py, cont = ns.Geo.PlayerWorld()
+    if not px then return nil end
+    level = ns.Nav and ns.Nav.PlayerLevel and ns.Nav.PlayerLevel(cont) or cont
+    x, y = px, py
+  end
+  local _, _, z = HB.NearestService("f", level, x, y, HB.LAND_MASTER_YD)
+  if not z then return nil end
+  HB.landing = { level = level, x = x, y = y, z = z, at = GetTime() }
+  return z
+end
+
+-- The heights the rooms named `name` of model `w` span (its own coordinates; kept on the model): lo, hi or nil.
+local function RoomsNamed(w, name)
+  w.hbNamed = w.hbNamed or {}
+  local b = w.hbNamed[name]
+  if b == nil then
+    b = false
+    for _, g in ipairs(w.groups or {}) do
+      if g.n and g.n ~= "" and ns.IsPlaceNamed and ns.IsPlaceNamed(g.n, name) then
+        if not b then b = { g[3], g[6] } else b[1], b[2] = min(b[1], g[3]), max(b[2], g[6]) end
+      end
+    end
+    w.hbNamed[name] = b
+  end
+  if b then return b[1], b[2] end
+end
+-- The heights (the game's) the rooms named `text` near (px, py) on `level` span: lo, hi, or nil (no name, no model with
+-- rooms of that name round the player).
+function HB.RoomBand(level, px, py, text)
+  if not (text and text ~= "" and ns.Interiors and ns.WMOs) then return nil end
+  local base = ns.Geo and ns.Geo.Base and ns.Geo.Base(level) or level
+  local pad, lo, hi = HB.ROOM_PAD_YD, nil, nil
+  for _, p in ipairs(ns.Interiors[base] or {}) do
+    if px >= p[6] - pad and px <= p[8] + pad and py >= p[7] - pad and py <= p[9] + pad then
+      local w = ns.WMOs[p[1]]
+      local a, b = nil, nil
+      if w then a, b = RoomsNamed(w, text) end
+      if a then lo, hi = min(lo or huge, a + p[4]), max(hi or -huge, b + p[4]) end
+    end
+  end
+  return lo, hi
+end
+-- The place name's height range where the player stands (HB.RoomBand of the minimap's text, else the subzone's),
+-- indoors or down in a city's level only: lo, hi, the name; or nil.
+HB.roomMemo = nil
+function HB.ZoneTextBand(level, px, py)
+  local N = ns.Nav
+  local cityLevel = ns.CityLevels and ns.CityLevels[level]
+  if not cityLevel and not (N and N.Indoors and N.Indoors() == true) then return nil end
+  local function Text(f)
+    local ok, t = pcall(f or error)
+    return ok and type(t) == "string" and not Secret(t) and t ~= "" and t or nil
+  end
+  local texts = { Text(GetMinimapZoneText), Text(GetSubZoneText) }
+  local m = HB.roomMemo
+  local key = string.format("%s|%s|%s|%d|%d", tostring(level), texts[1] or "", texts[2] or "", floor(px / 4), floor(py / 4))
+  if m and m.key == key then return m.lo, m.hi, m.text end
+  local lo, hi, text
+  for i = 1, 2 do
+    if texts[i] and not lo then
+      lo, hi = HB.RoomBand(level, px, py, texts[i])
+      if lo then text = texts[i] end
+    end
+  end
+  HB.roomMemo = { key = key, lo = lo, hi = hi, text = text }
+  return lo, hi, text
+end
+
+-- The extra evidence at (px, py) on `level`: a list of { lo, hi, by }, the strongest first (a landing, then the name).
+function HB.Extras(level, px, py)
+  local out = {}
+  local l = HB.landing
+  local now = GetTime()
+  if l and l.level == level and now >= l.at and now - l.at <= HB.LAND_SECONDS and Dist(l.x, l.y, px, py) <= HB.LAND_YD then
+    out[#out + 1] = { l.z - HB.LAND_Z, l.z + HB.LAND_Z, by = "landing" }
+  end
+  local ok, lo, hi = pcall(HB.ZoneTextBand, level, px, py)
+  if ok and lo then out[#out + 1] = { lo, hi, by = "place name" } end
+  return out
+end
+-- `band` (HB.Band's; nil: every height) cut to [lo, hi]: the new band, or nil when that leaves nothing.
+function HB.CutTo(band, lo, hi)
+  local out = {}
+  for _, iv in ipairs(band or { { -huge, huge } }) do
+    local a, b = max(iv[1], lo), min(iv[2], hi)
+    if a <= b then out[#out + 1] = { a, b } end
+  end
+  return out[1] and out or nil
+end
+
+-- `band` (nil: every height; empty: the readings disagree, nothing) with the extra evidence at (px, py) cut in, each only
+-- where it leaves some of it: the band, and the evidence used ({ by, ... } or nil).
+function HB.WithExtras(band, level, px, py)
+  if band and not band[1] then band = nil end
+  local ok, extras = pcall(HB.Extras, level, px, py)
+  local used
+  for _, e in ipairs(ok and extras or {}) do
+    local cut = HB.CutTo(band, e[1], e[2])
+    if cut then
+      band = cut
+      used = used or {}
+      used[#used + 1] = e.by
+    end
+  end
+  return band, used
+end
+
 -- The band where the player stands at (px, py) on `level` (nil: no NPC in reach, or it says nothing; never errors).
--- Kept for the debug readout (HB.last).
+-- With the extra evidence (HB.Extras) cut in, each only where it leaves some of the band. Kept for the debug readout
+-- (HB.last).
 function HB.Here(level, px, py)
   if not (level and px and py) then return nil end
   local ok, readings = pcall(HB.Look, level, px, py)
@@ -385,8 +565,10 @@ function HB.Here(level, px, py)
   if band and not band[1] then band = nil end
   -- (a band of everything: no reading near enough to bound the height)
   if band and band[1][1] == -huge and band[#band][2] == huge and #band == 1 then band = nil end
+  local used
+  band, used = HB.WithExtras(band, level, px, py)
   local last = HB.last
-  HB.last = { level = level, x = px, y = py, band = band, readings = readings, at = GetTime(),
+  HB.last = { level = level, x = px, y = py, band = band, readings = readings, at = GetTime(), extras = used,
     pick = last and last.level == level and Dist(last.x, last.y, px, py) <= HB.KEEP_YD and last.pick or nil }
   return band
 end

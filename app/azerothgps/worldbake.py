@@ -1555,8 +1555,11 @@ def region_title(cont: int, r: tuple) -> str:
 
 def region_toc(cont: int, r: tuple, root: Path | None = None) -> str:
     """A region folder's toc (its data is Data.lua; its landmark fields Alt.lua when the folder has them, worldalt.py:
-    kept listed over a grid bake, an old bake's left unused by WG.LoadRegion till `agps world-grid alt --write`)."""
-    alt = ((root or addons_root()) / region_folder(cont, r) / "Alt.lua").is_file()
+    kept listed over a grid bake, an old bake's left unused by WG.LoadRegion till `agps world-grid alt --write`; its
+    buildings' grids Buildings.lua likewise, buildinggrid.py, 1.4.2)."""
+    folder = (root or addons_root()) / region_folder(cont, r)
+    alt = (folder / "Alt.lua").is_file()
+    bld = (folder / "Buildings.lua").is_file()
     return "\n".join([f"## Interface: {toc_interface()}",
                       f"## Title: {region_title(cont, r)}",
                       f"## Notes: {REGION_NOTES}",
@@ -1565,7 +1568,7 @@ def region_toc(cont: int, r: tuple, root: Path | None = None) -> str:
                       f"## IconTexture: {REGION_ICON}",
                       "## LoadOnDemand: 1",
                       "## Dependencies: AzerothGPS",
-                      "", "Data.lua"] + (["Alt.lua"] if alt else []) + [""])
+                      "", "Data.lua"] + (["Alt.lua"] if alt else []) + (["Buildings.lua"] if bld else []) + [""])
 
 
 def write_region_tocs(addon_root: Path | None = None) -> list:

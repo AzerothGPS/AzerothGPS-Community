@@ -19,7 +19,7 @@ ns.OpenXP = O
 
 O.TICK = 0.5 -- s between looks at OpenXP's step pin
 O.lastKey = nil -- the step place the route was last given (nil: none yet since turned on)
-O.OTHERS = { "RestedXP", "Zygor", "Polestar", "Questify", "AzerothPilot" } -- (the other guide routes: one guide at a time)
+O.OTHERS = { "RestedXP", "Zygor", "Polestar", "Questify", "AzerothPilot", "FlowUp" } -- (the other guide routes: one guide at a time)
 O.ICON_PREFIX = "interface\\addons\\openxp\\" -- (OpenXP's own media folder, lower case: how its pins' table is known)
 
 -- OpenXP 2.0 is loaded: its arrow frame (named "OpenXPArrow"; 1.x had none, it made RestedXP's).
@@ -153,9 +153,10 @@ function O.On()
   if cdb.openxpFollow ~= nil then return cdb.openxpFollow == true end
   for _, k in ipairs(O.OTHERS) do
     local g = ns[k]
-    if g and g.On and g.On() then return false end
+    -- (FlowUp Route, added after, asks this one first: only its saved choice here, or each would ask the other)
+    if k ~= "FlowUp" and g and g.On and g.On() then return false end
   end
-  return O.Available()
+  return O.Available() and cdb.flowupFollow ~= true
 end
 
 -- One look at OpenXP's step pin (every O.TICK while on).

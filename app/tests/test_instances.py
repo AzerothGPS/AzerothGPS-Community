@@ -911,7 +911,9 @@ def _walk_the_route(lua, ns, x, y, cont, steps=60, stride=4.0):
 
 
 @pytest.mark.parametrize("level,start,floor", [
-    (20229, (-7546.0, -1270.0), 266.0),  # Blackrock Spire: its entrance halls, floors 255 and 266 over each other
+    # Blackrock Spire: its entrance halls, floors over each other; the upper one 273 by his recorded walk (1795411101),
+    # 266 while the walk's road had its end heights only, straight between (1.4.2: Router.ZBends)
+    (20229, (-7546.0, -1270.0), 273.0),
     (20230, (-7200.0, -950.0), None),  # Blackrock Depths: the hall to its door
 ])
 def test_a_dungeons_door_in_halls_under_a_mountain_is_walked_on_their_floor_and_arrived_at(level, start, floor):

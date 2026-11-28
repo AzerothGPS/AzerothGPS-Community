@@ -129,7 +129,9 @@ function U.RouteAim(level, px, py)
     if not bd or d2 < bd then bi, bt, bd = i, t, d2 end
   end
   if not bi then return nil end
-  local left = U.AIM_YD
+  -- (on a finer grid's stretch, scaled to its cell size: Turns.ScaleOnPart, item 144)
+  local T = ns.Turns
+  local left = U.AIM_YD * (T and T.ScaleOnPart and T.ScaleOnPart(full, r.cum, bi, bt) or 1)
   local i, t = bi, bt
   local tx, ty
   while i <= #pts / 2 - 1 do

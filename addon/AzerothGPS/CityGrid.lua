@@ -525,6 +525,8 @@ end
 -- high, the Road tolerance; one cost function for both grids), its streets, or nil on a level (Undercity) or with the
 -- world grid's code missing.
 function CG.Costs(c, sx, sy, tx, ty, opts)
+  -- (a building's grid, BuildingGrid.lua: in its own frame, no streets or guards of the world's: the drops only)
+  if c.building then return { maxDrop = CG.MaxDrop() } end
   local WG = ns.WorldGrid
   if c.level or not (WG and WG.Costs) then return nil end
   local x = WG.Costs({ cont = c.cont, cell = c.cell, road = CG.ROAD_PREF, swim = 1.5 }, sx, sy, tx, ty, opts or {})
@@ -533,6 +535,14 @@ function CG.Costs(c, sx, sy, tx, ty, opts)
   return x
 end
 CG.ROAD_PREF = 0.85 -- a yard along a street costs this many (the capitals' streets; the open world's is worldgrid.ROAD_PREF), the Road tolerance's scaling on it
+
+-- A lift link's yards over its own cost: its wait by the cars' phase when known (Lifts.CostYards, item 135a), else 0.
+function CG.LiftYards(c, L)
+  local LT = ns.Lifts
+  if L.kind ~= 5 or not (LT and LT.CostYards) then return 0 end
+  local a, b = L.pts[1], L.pts[#L.pts]
+  return LT.CostYards(c.lv, a[1], a[2], ((b[3] or 0) > (a[3] or 0)) and "bottom" or "top", L.cost - 1)
+end
 
 function CG.Search(c, starts, goals, tx, ty, x)
   local Rt = R()
@@ -548,6 +558,10 @@ function CG.Search(c, starts, goals, tx, ty, x)
   local FS = ns.FallSpells
   local castDrop = Rt.ExpertJumper and Rt.ExpertJumper() and FS and FS.MaxDrop and FS.MaxDrop() > FREE_FALL
     and FS.MaxDrop() or nil
+  -- (a ghost: no fall hurts, any drop as a cast one; item 126)
+  if Rt.Ghost and Rt.Ghost() then castDrop = math.huge end
+  -- (a spell jump with a lift near for the same climb: Router.LiftFirstYards; nil, none to weigh)
+  local liftFloor = Rt.LiftFirstFloor and Rt.LiftFirstFloor(c.lv, maxDrop) or nil
   CG.TrackLinks(c)
   local t0 = debugprofilestop and debugprofilestop()
   local g, prev, via, cellOf, closed = {}, {}, {}, {}, {}
@@ -625,7 +639,7 @@ function CG.Search(c, starts, goals, tx, ty, x)
         for _, li in ipairs(tout) do
           local L = c.links[li]
           if not closed[L.b] and L.bci then
-            local cost = gs + L.cost
+            local cost = gs + L.cost + (L.kind == 5 and CG.LiftYards(c, L) or 0)
             if not g[L.b] or cost < g[L.b] then
               g[L.b], prev[L.b], via[L.b], cellOf[L.b] = cost, s, li, L.bci
               local p = L.pts[#L.pts]
@@ -646,13 +660,17 @@ function CG.Search(c, starts, goals, tx, ty, x)
               and not (L.drop and (L.drop > maxDrop or (x and x.noDrops and L.drop > stepDown)))
               and not (L.drop and L.drop > stepDown and noDropIn and CG.NoDropAt(c.name, L.pts[#L.pts][1], L.pts[#L.pts][2]))
               and not (jumpBanned and (L.drop or L.kind == 9) and jumpBanned(c.lv, L.pts[1][1], L.pts[1][2])) then
-            local cost = gs + L.cost
+            local cost = gs + L.cost + (L.kind == 5 and CG.LiftYards(c, L) or 0)
             -- (a drop past the free one dearer by the yard: the hurt fall taken only where it saves a long way round.
             -- Orgrimmar's 26 yd ledge saves about 90 yd; Darnassus's 34 yd fall into the Enclave's hollow saved 64 yd on
             -- its spiral stairs, and landed 11 yd under the Rogue Trainer's floor)
             if L.drop and L.drop > FREE_FALL then
               if castDrop and L.drop <= castDrop then cost = cost + CG.CAST_DROP_COST
               else cost = cost + (L.drop - FREE_FALL) * CG.HURT_DROP_COST end
+              -- (a spell jump with a lift near for the same climb: LIFT_FIRST_S more, Router.LiftFirstYards)
+              if liftFloor and L.drop > liftFloor then
+                cost = cost + Rt.LiftFirstYards(c.lv, L.pts[1][1], L.pts[1][2], L.drop, L.pts[1][3], liftFloor)
+              end
             end
             if not g[L.b] or cost < g[L.b] then
               g[L.b], prev[L.b], via[L.b], cellOf[L.b] = cost, s, li, L.bci
@@ -1382,19 +1400,34 @@ function CG.TrackFloor(level, px, py, navZ)
       end
     end
   end
+  -- (1.4.2, item 119 step 5: inside one of the open world's buildings with a grid of its own (BuildingGrid.lua; the
+  -- game says indoors), its floors followed the same way: in its frame, its heights the placement's z more)
+  local c, fx, fy, zoff
+  if not name then
+    local BGm = ns.BuildingGrid
+    local N0 = ns.Nav
+    if BGm and BGm.Under and N0 and N0.Indoors and N0.Indoors() == true then
+      local keep = t and t.place and t.level == level and t.place or nil
+      local p, bc, _ci, lx, ly = BGm.Under(level, px, py, keep)
+      if p then name, c, fx, fy, zoff = bc.name, bc, lx, ly, p.z end
+    end
+  end
   if not name then
     CG.track = nil
     return nil
   end
   local now = GetTime()
   if t and t.name == name and t.x == px and t.y == py and now - t.at < CG.TRACK_EVERY then return t.z end
-  local c = CG.City(name)
-  local here = CG.SurfacesAt(c, px, py)
+  c = c or CG.City(name)
+  fx, fy, zoff = fx or px, fy or py, zoff or 0
+  local function Z(c_, s) return CG.Z(c_, s) + zoff end
+  local here = CG.SurfacesAt(c, fx, fy)
   if not here[1] then
     -- (no floor of the grid here, a bare stretch (round the Great Forge's pit): the floor followed held, its surfaces
     -- kept to walk on from when there are floors again)
     if t and t.name == name and (t.z or t.pick) then return t.z or t.pick end
-    CG.track = { name = name, level = level, x = px, y = py, at = now, set = {}, n = 0 }
+    CG.track = { name = name, level = level, x = px, y = py, at = now, set = {}, n = 0, c = c.building and c or nil,
+      place = c.building and c.place or nil, zoff = zoff }
     return nil
   end
   local N = ns.Nav
@@ -1407,6 +1440,9 @@ function CG.TrackFloor(level, px, py, navZ)
   local lift = follow and N and N.AtLift and N.AtLift(level, px, py) or false
   local evidence = fell or lift or (follow and (t.swam or false) ~= swim)
   local prev = t and t.name == name and (t.z or t.pick) or nil
+  -- (into a building's grid fresh: from the floor followed outside (Nav's, the land's), never a guess: its grid has
+  -- no land, so under a balcony the only surface of a cell may be the floor over the player)
+  if not prev and c.building then prev = navZ or (N and N.FollowedZ and N.FollowedZ(level)) or nil end
   if follow and (next(t.set) or next(t.held or {})) then
     -- (the grid's way from the last surfaces, within the yards moved; a held one's from where it was last seen)
     local want = {}
@@ -1478,11 +1514,13 @@ function CG.TrackFloor(level, px, py, navZ)
       if (fell and dz < -CG.FLOOR_Z) or (not fell and abs(dz) <= CG.FLOOR_Z) then set[f.s], roots[f.s] = f.ci, f.s end
     end
   end
-  if not next(set) and not next(held) then
+  if not next(set) and not next(held) and not c.building then
     for _, f in ipairs(here) do set[f.s], roots[f.s] = f.ci, f.s end
   end
-  -- (the band, when there's a reading: the held floors too)
+  -- (the band, when there's a reading: the held floors too; HeightBand.Here's, with a landing's and the place name's
+  -- evidence, item 135d)
   local band = CG.Band(CG.Look(level, px, py), px, py)
+  if HB.WithExtras then band = HB.WithExtras(band, level, px, py) end
   local inBand, cut = {}, false
   for s, ci in pairs(set) do
     if InBand(band, Z(c, s), 1) then inBand[s] = ci else cut = true end
@@ -1528,7 +1566,8 @@ function CG.TrackFloor(level, px, py, navZ)
     end
   end
   CG.track = { name = name, level = level, x = px, y = py, at = now, set = set, roots = roots, held = held, n = n, z = z,
-    pick = pick, band = band, swam = swim, readings = #HB.readings }
+    pick = pick, band = band, swam = swim, readings = #HB.readings, c = c.building and c or nil,
+    place = c.building and c.place or nil, zoff = zoff }
   return z
 end
 
@@ -1545,10 +1584,10 @@ function CG.PlayerFloorZs(level, x, y)
   if not (t and t.level == level and not (t.z or t.pick) and Dist(t.x, t.y, x, y) <= CG.PLAYER_YD and t.set) then
     return nil
   end
-  local c = CG.City(t.name)
+  local c = t.c or CG.City(t.name)
   if not c then return nil end
   local zs = {}
-  for s in pairs(t.set) do zs[#zs + 1] = Z(c, s) end
+  for s in pairs(t.set) do zs[#zs + 1] = Z(c, s) + (t.zoff or 0) end
   for _, h in pairs(t.held or {}) do zs[#zs + 1] = h.z end
   if not zs[1] then return nil end
   table.sort(zs)

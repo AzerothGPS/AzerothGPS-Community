@@ -7,7 +7,7 @@ Alliance or the Horde (the client's FactionTemplate against the players' own, 1 
 interactive (npcflag: a goblin town's vendor). Left out: the hostile ones, the ones nobody can talk to (no npcflag:
 townsfolk, soldiers), guards and patrols with nothing to offer but gossip (the city places and the guards' own
 directions cover those), critters, the unselectable and invisible ones (triggers), the ones a seasonal event spawns,
-and placeholders by name. A spawn within SAME_YD of one of its NPC's kept is the same.
+placeholders by name, and camp NPCs players put down (the Reagent Bot: camp_npc, from every source). A spawn within SAME_YD of one of its NPC's kept is the same.
 
 Each NPC: its creature id (Layers' `ns.db.npcs` key: the one learned by talking to it is the same NPC), its name and
 subname as the game's English (names from the game stay untranslated), its services (npcflag: SERVICES), its trainer
@@ -86,6 +86,35 @@ SERVER_GUARD_FLAG = 0x8000  # (its flags_extra: a guard)
 CLASS_TRAINER = re.compile(r"^(Warrior|Paladin|Hunter|Rogue|Priest|Shaman|Mage|Warlock|Druid) Trainer$", re.I)
 NOISE = re.compile(r"\b(Trigger|DND|UNUSED|PH|Dummy|Visual|Invisible|Placeholder|Test|Bunny|Spawner)\b|Only GM|\[|\]",
                    re.I)
+# Camp NPCs: put down by players, not the world's (Kooki3z, 1.4.2: "reagent bot needs to be drop as vendor locations
+# these are camp vendors created by players and aren't always available"). Their spawns aren't marked apart in the
+# world database (the Reagent Bot's guid is in the isle's own run, 7010001 the Spirit Healer's, 7010003 on the
+# isle's quest NPCs), so they are told by what they are:
+# - a mechanical "Bot" (CreatureType MECHANICAL, "Bot" a word of its name): an engineer's or a camp's device, the
+#   Reagent Bot, the Field Repair Bot 74A (none of the world's own: the OOX homing robots, Fishbot 5000, Techbot);
+# - a player's own minion (Wowhead's "Someone's Minion" for the owner's name: Pexmit, an imp vendor; an NPC's own,
+#   "Zardeth's Minion", stays);
+# - and CAMP_NPCS by id, the backstop for one the two tests miss (the stand-ins and logged NPCs: no CreatureType).
+MECHANICAL = 9  # (CreatureType)
+CAMP_BOT = re.compile(r"\bBot\b")
+PLAYER_MINION = "Someone's Minion"
+CAMP_NPCS = {242498: "Reagent Bot", 14337: "Field Repair Bot 74A", 266901: "Pexmit"}
+
+
+def camp_npc(entry, name: str, sub: str = "", ctype=None) -> bool:
+    """Whether an NPC is a camp NPC players put down (CAMP_NPCS's note): not shipped."""
+    if entry is not None and int(entry) in CAMP_NPCS:
+        return True
+    if (sub or "").strip() == PLAYER_MINION:
+        return True
+    return ctype is not None and str(ctype).strip() != "" and int(ctype) == MECHANICAL and bool(CAMP_BOT.search(name))
+
+
+def _drop_camp(npcs: dict, report) -> None:
+    """Take the camp NPCs (camp_npc) out of `npcs`, whichever source added them (the stand-ins and logged ones too)."""
+    for i in [i for i, n in npcs.items() if camp_npc(i, n["name"], n.get("sub", ""))]:
+        del npcs[i]
+        report["camp"] += 1
 
 
 def _has(ids, faction: int) -> bool:
@@ -202,6 +231,7 @@ def build(data_dir: Path, ft: dict[int, dict] | None = None, undercity=None):
     _add_server(npcs, report, ft, alliance, horde, undercity=undercity)
     _add_logged(npcs, report)
     _add_standin(npcs, report)
+    _drop_camp(npcs, report)
     return npcs, dict(report)
 
 
@@ -296,7 +326,7 @@ def _add_server(npcs, report, ft, alliance, horde, rows=None, undercity=None):
         f = ft.get(int(r["faction"]))
         flags = int(r["npcflag"])
         extra = int(r["flags_extra"])
-        t = {"Name": r["name"], "SubName": r["subname"] or "NULL", "NpcFlags": str(flags),
+        t = {"Entry": r["id"], "Name": r["name"], "SubName": r["subname"] or "NULL", "NpcFlags": str(flags),
              "CreatureType": r["type"], "UnitFlags": r["unit_flags"],
              "ExtraFlags": str((GUARD_FLAG if extra & SERVER_GUARD_FLAG else 0) | (extra & INVISIBLE))}
         why = _left_out(t, f, {"guid": r["guid"], "MovementType": r["movement"]},
@@ -348,6 +378,8 @@ def _left_out(t, f, s, events, alliance, horde) -> str | None:
         return "unselectable"
     if NOISE.search(t["Name"]) or "|" in t["Name"] or "|" in t["SubName"]:
         return "placeholder"
+    if camp_npc(t.get("Entry"), t["Name"], "" if t["SubName"] == "NULL" else t["SubName"], t["CreatureType"]):
+        return "camp"
     if not flags & ~0x1:  # (gossip alone)
         if int(t["ExtraFlags"]) & GUARD_FLAG or GUARD_NAME.search(t["Name"]):
             return "guard"

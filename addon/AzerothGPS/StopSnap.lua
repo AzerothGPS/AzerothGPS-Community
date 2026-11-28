@@ -109,7 +109,7 @@ end
 function SS.Spot(d)
   local WG, N, Geo = ns.WorldGrid, ns.Nav, ns.Geo
   if not (d and d.x and d.y and d.cont and WG and WG.On and WG.On() and WG.CellKey and Geo) then return nil end
-  if d.corpse or d.rxp or d.zygor or d.polestar or d.questify or d.apr or d.openxp or d.boss or d.enc then return nil end
+  if d.corpse or d.rxp or d.zygor or d.polestar or d.questify or d.apr or d.openxp or d.flowup or d.boss or d.enc then return nil end
   if d.zSource == "portal" then return nil end
   local cont, x, y = d.cont, d.x, d.y
   if Geo.Base(cont) ~= cont then return nil end -- (a city's level, a dungeon: not the open world's grid)

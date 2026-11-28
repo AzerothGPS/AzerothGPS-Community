@@ -52,7 +52,7 @@ T.NODES = {
   { -75, 25, "Tin Vein", "ore" }, { -60, -50, "Earthroot", "herb" }, { 30, -70, "Copper Vein", "ore" },
 }
 -- what of the character's saved record the snapshot takes (the route, and the guide routes that put stops in it)
-T.CHAR_KEYS = { "stops", "loop", "dest", "redOk", "skipLearn", "skipRides", "rxpFollow", "zygorFollow", "polestarFollow", "questifyFollow", "aprFollow", "openxpFollow" }
+T.CHAR_KEYS = { "stops", "loop", "dest", "redOk", "skipLearn", "skipRides", "rxpFollow", "zygorFollow", "polestarFollow", "questifyFollow", "aprFollow", "openxpFollow", "flowupFollow" }
 
 local function GPS() return ns.GPS end
 local function S() return ns.settings.gps end
@@ -129,7 +129,12 @@ function T.ApplyKeep(run, final)
   local st = S()
   -- (the world map option, ticked in the map window's section: only as the tutorial ends, since it runs on the map's
   -- own window)
-  if final and run.keepOpts and run.keepOpts.useWorldMap ~= nil then st.useWorldMap = run.keepOpts.useWorldMap end
+  if final and run.keepOpts and run.keepOpts.useWorldMap ~= nil then
+    local was = st.useWorldMap == true
+    st.useWorldMap = run.keepOpts.useWorldMap
+    -- (turned on here: the No Map switch, GPSFrame's G.UseWorldMapPicked)
+    if was ~= (st.useWorldMap == true) and ns.GPS and ns.GPS.UseWorldMapPicked then ns.GPS.UseWorldMapPicked(st.useWorldMap == true) end
+  end
   for _, keys in ipairs({ T.BACK_KEYS }) do
     for _, k in ipairs(keys) do
       if run.keepOpts and run.keepOpts[k] ~= nil then st[k] = run.keepOpts[k] end

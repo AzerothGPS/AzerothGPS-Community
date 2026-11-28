@@ -173,6 +173,7 @@ local function Row(i)
     row:SetJustifyH("LEFT")
     row:SetWordWrap(false)
     ScaleText(row, TextScale())
+    if ns.UIFont then ns.UIFont.Register(row) end -- (the UI's text style, UIFont.lua)
     rows[i] = row
     PlaceRow(i)
   end
@@ -1015,6 +1016,8 @@ function A.Init()
   line4:SetPoint("RIGHT", -8, 0)
   line4:SetJustifyH("LEFT")
   rowsUnder = line4
+  -- (a supported UI's font, outline and shadow on the directions, our sizes and colors kept: UIFont.lua)
+  if ns.UIFont then ns.UIFont.Register(line1, line2, line3, line4, dist) end
 
   frame:SetScript("OnUpdate", OnUpdate)
   for _, f in ipairs({ frame, dir }) do

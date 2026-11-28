@@ -246,6 +246,8 @@ OnTaxiChanged = function()
   elseif not onTaxi and flightStart then
     local secs = GetTime() - flightStart
     flightStart = nil
+    -- (landed: on the flight master's floor, evidence for the floors followed; HeightBand.Landed, item 135d)
+    if ns.HeightBand and ns.HeightBand.Landed then pcall(ns.HeightBand.Landed) end
     if pending and pending.from and pending.to and secs > 5 then
       local flights = ns.CharDB().flights
       local key = pending.from .. " > " .. pending.to

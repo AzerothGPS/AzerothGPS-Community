@@ -92,6 +92,13 @@ REACH_YD = 4.0  # yards: an NPC's floor cut off from the city's (behind a bank's
 REACH_Z = 2.0  # ... floor this near across and in height (reach_links)
 WET_Z = 0.3  # yards: a surface this far under a liquid's top is in it (City.dry)
 REACH_COST = 10.0  # yards a reach link costs more than its own
+TRACK_XY = 1.5  # yards: a road's point this near a shipped road with heights (ns.FloorTracks: a recorded walk) ...
+TRACK_SHARE = 0.8  # ... where this share of its points or more are on one (a road along a walk: the first point's height
+# the one nearest the road's own end's) ...
+TRACK_DZ = 6.0  # ... its height there, the one nearest the point before's within this (item 140, 1.4.2: the Hall of
+# Thanes' recorded walk is one road of the Router's from the switchback's top at 491 to the tunnel at 446, its heights
+# only its ends'; walked at those, straight between, it was on none of the switchback's floors and became one road link
+# of 225 yd from the top: a start halfway down was routed back up to it, "make a U-turn ... 35 yd up")
 
 
 @dataclass
@@ -528,13 +535,20 @@ def lift_shaft_links(g: Grid, mesh: Mesh, links: list, log=print) -> list:
     return out
 
 
-def pieces(g: Grid) -> dict:
-    """Each surface's piece (links both ways), 0 the biggest: {node: piece}, and the pieces' sizes."""
+def pieces(g: Grid, both_ways: bool = False) -> dict:
+    """Each surface's piece (links either way; `both_ways`: only links walked both ways, a drop's not), 0 the biggest:
+    {node: piece}, and the pieces' sizes."""
     adj = defaultdict(set)
     for node in g.links:
         for m, _c in neighbors(g, node):
             adj[node].add(m)
             adj[m].add(node)
+    if both_ways:
+        one = defaultdict(set)
+        for node in g.links:
+            for m, _c in neighbors(g, node):
+                one[node].add(m)
+        adj = defaultdict(set, {n: {m for m in ms if m in one.get(n, ()) and n in one.get(m, ())} for n, ms in adj.items()})
     piece, sizes = {}, []
     for start in g.links:
         if start in piece:
@@ -570,6 +584,7 @@ def harness_inputs(city: City, box, cell: float, log=print):
     R.NearestEdges(gl, (x0 + x1) / 2, (y0 + y1) / 2)  # (the level's roads built)
     g = R.DebugGraph(gl)
     hz = g.z if g.z is not None else g.nz
+    track_z = floor_tracks(ns, gl, box)
     roads = []
     drops = g.drops
     for eid in g.e.keys():
@@ -601,6 +616,8 @@ def harness_inputs(city: City, box, cell: float, log=print):
                                 None if land else za + (zb - za) * (along + d * t) / length))
             along += d
         samples.append((pts[-1][0], pts[-1][1], zb))
+        if not land and track_z is not None:
+            samples = track_z(samples)
         oneway = bool(drops is not None and drops[eid]) or src == 4
         roads.append((int(eid), src, oneway, samples, float(e[3])))
     # (the NPCs' spots in the city, Data/NpcFloors.lua: halls no road goes into, Grommash Hold, count as the city's too;
@@ -637,6 +654,60 @@ def harness_inputs(city: City, box, cell: float, log=print):
         log(f"  {city.name}: {len(own)} cells of its own grid, {len(kept)} with the margin")
         keep = lambda i, j: (i, j) in kept  # noqa: E731
     return keep, roads
+
+
+def floor_tracks(ns, level: int, box):
+    """samples -> samples: a road's points (x, y, z) at the heights of the shipped roads with heights they lie on
+    (ns.FloorTracks: the recorded walks, TRACK_XY across), each the one nearest the point before's height (within
+    TRACK_DZ: a walk winding down over itself, a switchback's turns, keeps to the turn it's on); the others' as they
+    were. None when the level has no such road in `box`. The Router's graph keeps a walk's heights at its nodes only,
+    and a road's points between them are its ends', straight between (harness_inputs)."""
+    ft = ns.FloorTracks and ns.FloorTracks[level]
+    if ft is None:
+        return None
+    x0, y0, x1, y1 = box
+    B = 8.0
+    segs = defaultdict(list)
+    for i in range(1, len(ft) + 1):
+        t = ft[i]
+        pts, zs = t.pts, t.zs
+        if pts is None or zs is None or t.op in ("wall", "remove", "unwall") or len(zs) * 2 != len(pts):
+            continue
+        p = [(pts[2 * k - 1], pts[2 * k], zs[k]) for k in range(1, len(zs) + 1)]
+        if not any(x0 - B <= q[0] <= x1 + B and y0 - B <= q[1] <= y1 + B for q in p):
+            continue
+        for a, b in zip(p, p[1:]):
+            for bx in range(int((min(a[0], b[0]) - TRACK_XY) // B), int((max(a[0], b[0]) + TRACK_XY) // B) + 1):
+                for by in range(int((min(a[1], b[1]) - TRACK_XY) // B), int((max(a[1], b[1]) + TRACK_XY) // B) + 1):
+                    segs[(bx, by)].append((a, b))
+    if not segs:
+        return None
+
+    def heights(x, y):
+        out = []
+        for a, b in segs.get((int(x // B), int(y // B)), ()):
+            dx, dy = b[0] - a[0], b[1] - a[1]
+            L2 = dx * dx + dy * dy
+            f = 0.0 if L2 == 0 else max(0.0, min(1.0, ((x - a[0]) * dx + (y - a[1]) * dy) / L2))
+            if math.hypot(a[0] + dx * f - x, a[1] + dy * f - y) <= TRACK_XY:
+                out.append(a[2] + (b[2] - a[2]) * f)
+        return out
+
+    def apply(samples):
+        cands = [heights(x, y) for x, y, _z in samples]
+        if sum(1 for c in cands if c) < TRACK_SHARE * len(samples):
+            return samples  # (a road crossing a walk, or beside it a moment: not the walk)
+        out, ref = [], None
+        for (x, y, z), zs in zip(samples, cands):
+            near = ref if ref is not None else z
+            got = min(zs, key=lambda v: abs(v - near)) if zs and near is not None else None
+            if got is not None and (ref is None or abs(got - ref) <= TRACK_DZ):
+                out.append((x, y, got))
+                ref = got  # (off the walk a moment, the walk's height before is still the one to keep to)
+            else:
+                out.append((x, y, z))
+        return out
+    return apply
 
 
 # --- building ---------------------------------------------------------------------------------------------------------
@@ -718,6 +789,18 @@ def build(city: City, log=print, inputs=None) -> Grid:
             if n is not None and n in piece:
                 touched.add(piece[n])
     keep_p = {p for p in touched if sizes[p] >= MIN_PIECE} | piece_linked
+    # (an NPC's floor in a piece too small, its stairs too steep for the grid's links: Orgrimmar's X'yera and Zayus up
+    # in their loft, the Kor'kron Elite on Grommash Hold's steps, Ol' Emma upstairs; item 112. Kept when the mesh walks
+    # from it to a kept piece: that way a link of its own, anchor_links)
+    # (kept: an NPC's piece the mesh walks from to a kept one; its links come last, `join_anchors`)
+    anchored = set()
+    for _eid, src, _ow, smp, *_own in roads:
+        if src == ANCHOR_SOURCE:
+            n = surface_at(g, *smp[0])
+            if n is not None and piece.get(n) not in keep_p:
+                anchored.add(piece[n])
+    joined, _made = anchor_links(g, mesh, piece, keep_p, anchored, log, add=False)
+    keep_p |= joined
     _prune(g, lambda n: piece.get(n) in keep_p)
     n_road = len(g.road)
     reach_links(g, roads, log)
@@ -728,7 +811,120 @@ def build(city: City, log=print, inputs=None) -> Grid:
         NF.apply(g, mesh, roads, g.road[n_road:], log)
     # (the lift roads' rides as each car's own, from its platforms: last, the road links as made above otherwise)
     g.road = lift_shaft_links(g, mesh, g.road, log)
+    join_anchors(g, mesh, roads, log)
     return g
+
+
+def join_anchors(g: Grid, mesh: Mesh, roads, log=print) -> None:
+    """The NPCs' floors the finished grid doesn't walk to and back from the city's (its biggest piece, links both ways:
+    a floor reached only by the drops off it is cut off) joined by the mesh's way (anchor_links). Last, after
+    navfeatures' road links made again (NF.apply keeps no link made before): X'yera's and Zayus's loft was kept
+    but reached only by its drops, and the route there "calculating" without end in game (Kooki3z 2026-11-26)."""
+    tw, _sizes = pieces(g, both_ways=True)
+    # (the city: what its streets reach, links one way too: the piece walking both ways its roads touch most (not the
+    # biggest: Orgrimmar's was another than the Valley of Strength's); an NPC's floor outside it is cut off from a walk
+    # however its drops join it, and the mesh's way from it to the nearest of the city is its link)
+    hits = defaultdict(int)
+    for _eid, src, _ow, smp, *_own in roads:
+        if src == ANCHOR_SOURCE:
+            continue
+        for x, y, z in smp:
+            n = surface_at(g, x, y, z)
+            if n is not None and n in tw:
+                hits[tw[n]] += 1
+    root = max(hits, key=hits.get) if hits else 0
+    reach = {n for n, q in tw.items() if q == root}
+    st = list(reach)
+    while st:
+        n = st.pop()
+        for m, _c in neighbors(g, n):
+            if m not in reach:
+                reach.add(m)
+                st.append(m)
+    group = {n: (0 if n in reach else 1 + tw.get(n, -1)) for n in g.links}
+    anchored = set()
+    for _eid, src, _ow, smp, *_own in roads:
+        if src == ANCHOR_SOURCE:
+            n = surface_at(g, *smp[0])
+            if n is not None and group.get(n, 0) != 0:
+                anchored.add(group[n])
+    anchor_links(g, mesh, group, {0}, anchored, log)
+
+
+ANCHOR_WAY_YD = 120.0  # yards: an NPC's floor's way over the mesh to a kept piece, this long at most
+
+
+def anchor_links(g: Grid, mesh: Mesh, piece: dict, keep_p: set, anchored: set, log=print, add: bool = True):
+    """The anchored pieces (an NPC's floor, not kept) the mesh walks from to a kept piece within ANCHOR_WAY_YD: each a
+    road link both ways (KIND_WALK, its yards times ROAD_FACTOR) from the piece's surface where the way leaves it to
+    the kept piece's surface where it arrives, drawn through the way's polys. Returns (those pieces, kept; the links)."""
+    if not anchored:
+        return set(), []
+    node_of = {}  # poly -> a surface (the lowest-numbered) of a kept piece over it
+    by_piece = defaultdict(list)
+    for n, q in piece.items():
+        by_piece[q].append(n)
+        if q in keep_p:
+            for pid in g.surf[n[:2]][n[2]][1]:
+                node_of.setdefault(pid, n)
+    cen = {}
+
+    def mid(pid):
+        c = cen.get(pid)
+        if c is None:
+            vs = mesh.vs[pid]
+            c = cen[pid] = (sum(v[0] for v in vs) / len(vs), sum(v[1] for v in vs) / len(vs), sum(v[2] for v in vs) / len(vs))
+        return c
+    joined, made = set(), []
+    for p in sorted(anchored):
+        own = {}
+        for n in by_piece[p]:
+            for pid in g.surf[n[:2]][n[2]][1]:
+                own.setdefault(pid, n)
+        dist = {pid: 0.0 for pid in own}
+        prev = {}
+        h = [(0.0, pid) for pid in own]
+        heapq.heapify(h)
+        end = None
+        while h:
+            d, pid = heapq.heappop(h)
+            if d > dist[pid]:
+                continue
+            if pid in node_of:
+                end = pid
+                break
+            for q in mesh.nb[pid]:
+                nd = d + math.dist(mid(pid), mid(q))
+                if nd <= ANCHOR_WAY_YD and nd < dist.get(q, math.inf):
+                    dist[q], prev[q] = nd, pid
+                    heapq.heappush(h, (nd, q))
+        if end is None:
+            continue
+        way = [end]
+        while way[-1] in prev:
+            way.append(prev[way[-1]])
+        way.reverse()  # (from the anchored piece's poly to the kept one's)
+        a, b = own[way[0]], node_of[end]
+        sa, sb = g.surf[a[:2]][a[2]], g.surf[b[:2]][b[2]]
+        pts = [(sa[2], sa[3], sa[0])]
+        along = 0.0
+        for k in range(1, len(way) - 1):
+            along += math.dist(mid(way[k - 1])[:2], mid(way[k])[:2])
+            if along >= ROAD_LINK_PTS_YD:
+                pts.append(mid(way[k]))
+                along = 0.0
+        pts.append((sb[2], sb[3], sb[0]))
+        yd = sum(math.dist(pts[q], pts[q + 1]) for q in range(len(pts) - 1))
+        cost = max(yd, 1.0) * ROAD_FACTOR
+        for x, y, pp in ((a, b, pts), (b, a, list(reversed(pts)))):
+            made.append((x, y, cost, KIND_WALK, pp))
+            if add:
+                g.road.append(made[-1])
+                g.road_out[x].append(made[-1])
+        joined.add(p)
+    if add:
+        log(f"  {g.city.name}: {len(joined)} of {len(anchored)} NPC floors cut off joined by the mesh's way")
+    return joined, made
 
 
 def reach_links(g: Grid, roads, log=print) -> None:
@@ -892,7 +1088,8 @@ def encode(g: Grid) -> dict:
 BAKE_PARAMS = ("CELL", "MERGE_Z", "OFF_STEPS", "ZQ", "CLIMB", "WALK_SLOPE", "HOPS", "MARGIN_YD", "MIN_PIECE", "ROAD_STEP",
                "ROAD_ON_Z", "ROAD_DETOUR", "ROAD_DETOUR_YD", "ROAD_FACTOR", "ROAD_LINK_PTS_YD", "BLOCK", "NEAR_ROAD_YD",
                "NEAR_ROAD_Z", "NEAR_ROAD_BUCKET", "MAX_IN_CELL", "REACH_YD", "REACH_Z", "REACH_COST", "LIFT_RISE", "WET_Z",
-               "WALK_DZ", "WALK_GAP", "WALK_Z", "WALK_STEP_YD", "WALK_STEP_Z", "WALK_ROAD_YD")
+               "WALK_DZ", "WALK_GAP", "WALK_Z", "WALK_STEP_YD", "WALK_STEP_Z", "WALK_ROAD_YD", "TRACK_XY", "TRACK_SHARE",
+               "TRACK_DZ", "ANCHOR_WAY_YD")
 
 
 def bake_stamp() -> str:

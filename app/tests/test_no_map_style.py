@@ -372,3 +372,277 @@ def test_over_openmap_the_map_stays_on_its_points_every_frame_and_keeps_its_size
     finally:
         lua.execute("hooksecurefunc = AGPS_HOOKS_WAS AzerothGPSFrame.GetEffectiveScale = nil")
         lua.execute("WorldMapFrame.ScrollContainer.GetEffectiveScale = nil")
+
+
+# OpenMap's coordinates (its Map/Extras.lua, read only: a 1 x 22 bar 9000 levels over the map in its bottom-right
+# corner, its two pills to its left) on a narrow world map, across the middle where Confirm Route goes.
+OPENMAP_COORDS = """
+  local box = WorldMapFrame.ScrollContainer
+  box.GetWidth = function() return 500 end
+  box.GetHeight = function() return 400 end
+  box.GetLeft = function() return 20 end
+  box.GetRight = function() return 520 end
+  box.GetBottom = function() return 10 end
+  box.GetTop = function() return 410 end
+  local function Rect(f, l, b, w, h, level)
+    f.GetLeft = function() return l end
+    f.GetBottom = function() return b end
+    f.GetWidth = function() return w end
+    f.GetHeight = function() return h end
+    f.GetFrameLevel = function() return level end
+    return f
+  end
+  local bar = Rect(CreateFrame("Frame", nil, box), 520 - 40, 18, 1, 22, 9000)
+  Rect(CreateFrame("Frame", nil, bar), 520 - 40 - 150, 18, 150, 24, 9001)
+  Rect(CreateFrame("Frame", nil, bar), 520 - 40 - 306, 18, 150, 24, 9001)
+  local G = AGPS_NS.GPS
+  G.mapButtons.import.GetFrameLevel = function() return 4050 end
+  G.TopLayer().GetWidth = function() return 500 end
+  G.TopLayer().GetHeight = function() return 400 end
+"""
+OPENMAP_COORDS_UNDO = """
+  local box = WorldMapFrame.ScrollContainer
+  box.GetLeft, box.GetRight, box.GetBottom, box.GetTop = nil, nil, nil, nil
+  box.GetWidth = function() return 700 end
+  box.GetHeight = function() return 460 end
+  box._kids = {}
+  local G = AGPS_NS.GPS
+  G.mapButtons.import.GetFrameLevel = nil
+  G.TopLayer().GetWidth, G.TopLayer().GetHeight = nil, nil
+"""
+
+
+def _tick(lua, G):
+    lua.execute("AGPS_T = AGPS_T + 1")
+    G.Update()
+
+
+def _drag_map(lua, G, dx, dy):
+    frame = lua.globals().AzerothGPSFrame
+    lua.execute("AGPS_CUR_WAS = GetCursorPosition GetCursorPosition = function() return 300, 300 end")
+    try:
+        frame._scripts.OnMouseDown(frame, "LeftButton")
+        lua.execute(f"GetCursorPosition = function() return {300 + dx}, {300 + dy} end")
+        frame._scripts.OnUpdate(frame, 0.05)
+        frame._scripts.OnMouseUp(frame, "LeftButton")
+    finally:
+        lua.execute("GetCursorPosition = AGPS_CUR_WAS")
+    _tick(lua, G)
+
+
+@pytest.mark.parametrize("openmap", [False, True])
+def test_confirm_route_and_the_way_back_show_on_no_map(nomap, openmap):
+    """Kooki3z 2026-11-27 for 1.4.2: "using openmap addon and no map ... don't get confirm/cancel route buttons". Over
+    OpenMap's map each redraw took OpenMap's view for the map's own, dropping the player's look: a drag on the map (which
+    pans OpenMap's view) left no crosshair, so no Confirm Route, and nothing to go back with. Now, with OpenMap and
+    without it: a drag shows the crosshair, Confirm Route and Back to Your Position, kept over the redraws that follow
+    OpenMap's view; Confirm Route routes to the middle; a double-clicked stop shows Confirm Route (1), and Back to Your
+    Position drops it. Confirm Route is clear of OpenMap's coordinates on a narrow map."""
+    lua, ns = nomap
+    G, N, st = ns.GPS, ns.Nav, ns.settings.gps
+    btn, back = G.confirmRouteBtn, G.mapButtons.recenter
+    _open(lua, ns)
+    if openmap:
+        lua.execute(OPENMAP)
+        lua.execute(OPENMAP_COORDS)
+    try:
+        assert G.SetStyle("none")
+        G.ApplySettings()
+        G.Follow()
+        _tick(lua, G)
+        assert G.NoMapOn() and G.NoMapStitched() is openmap
+        assert not btn._shown and not G.crossShown
+        # a drag on the map: the crosshair, Confirm Route and the way back
+        _drag_map(lua, G, 60, 20)
+        for _ in range(3):  # (and kept as OpenMap's view is followed at each redraw)
+            assert G.crossShown and btn._shown and back._shown
+            assert btn._text == "Confirm Route"
+            _tick(lua, G)
+        if openmap:
+            # (clear of OpenMap's coordinates: their pills' top is 32 over the map's bottom)
+            y = btn._pts["BOTTOM"][3]
+            assert y >= 32 + 3 and G.routeButtonY == y
+            # (and the strip, when there's one, over it: G.mx.below's button)
+        x, y, cont = tuple(G.ViewState())[:3]
+        btn._scripts.OnClick(btn)
+        assert N.dest is not None and (N.dest.x, N.dest.y) == (pytest.approx(x), pytest.approx(y))
+        _tick(lua, G)
+        assert not G.crossShown and not btn._shown  # (routed: no crosshair)
+        N.Clear()
+        # a double-clicked stop: Confirm Route (1); Back to Your Position drops it
+        G.Follow()
+        _tick(lua, G)
+        G.AddPending(10, 10)
+        _tick(lua, G)
+        assert btn._shown and btn._text == "Confirm Route (1)" and back._shown
+        _tick(lua, G)
+        assert btn._shown and G.PendingStop(1) is not None
+        back._scripts.OnClick(back)
+        _tick(lua, G)
+        assert G.PendingStop(1) is None and not btn._shown and not G.crossShown
+        if openmap:
+            assert lua.eval("AGPS_OM.shown") is not None  # (OpenMap's view glided back to the player)
+    finally:
+        if openmap:
+            lua.execute(OPENMAP_COORDS_UNDO)
+        N.Clear()
+
+
+# ---------------------------------------------------------------------------- Options > Map > Map style: what No Map lacks
+
+
+def test_options_says_in_red_what_no_map_lacks_only_while_it_is_picked(nomap):
+    """Kooki3z 2026-11-27 for 1.4.2: "add a red notice when no map is selected and using game map that the viewing NPCs
+    in buildings and routing to places inside caves are not supported with OpenMap (and anything else you know wouldn't
+    work like follow player functions, etc)". Under the Map style list, in Options' warning red: shown only with No Map
+    picked and the GPS map in the game's world map, hidden otherwise (its room closed up); its OpenMap line only with the
+    OpenMap addon too. The style notes above it are short."""
+    lua, ns = nomap
+    O, G, st = ns.Options, ns.GPS, ns.settings.gps
+    O.Show()
+    O.ShowPage("Map")
+    red, om_red = O.noMapNotice, O.noMapOpenMapNotice
+    dd = next(c.control for c in O.settingControls.values() if c.key == "style")
+    was = st.useWorldMap
+    try:
+        text, om_text = str(red._text), str(om_red._text)
+        # (Kooki3z: "just put "NOTICE:" in red the rest of the info can be in grey": "NOTICE:" once, red, at the first
+        # line's start; the rest, and the OpenMap line, in the gray of the other notes)
+        assert O.WARN_RED == "|cffff4040" and text.startswith(O.WARN_RED + "NOTICE:|r ")
+        assert text.count("|c") == 1 and text.count("|r") == 1 and "NOTICE" not in om_text and "|c" not in om_text
+        assert str(red._fontObject) == "GameFontDisableSmall" and str(om_red._fontObject) == "GameFontDisableSmall"
+        assert text.startswith(O.WARN_RED + "NOTICE:|r No Map can't show ")
+        for item in ("building and cave maps", "floors", "NPCs inside", "stops placed inside caves"):
+            assert item in text
+        assert "OpenMap addon" in om_text and "follow you" in om_text and "zoom in near a stop" in om_text
+        assert "pan with a controller" in om_text and "controller" not in text  # (pans on the game's map: OpenMap's only)
+        # another style: hidden
+        st.useWorldMap = True
+        G.ApplySettings()
+        G.SetStyle("zone")
+        O.Refresh()
+        assert red._shown is False and om_red._shown is False
+        under = dd._pt[3]
+        # No Map with the world map: shown, live (SetStyle refreshes Options); the OpenMap line not without OpenMap
+        assert G.SetStyle("none")
+        assert red._shown is True and om_red._shown is False
+        lua.execute(OPENMAP)
+        O.Refresh()
+        assert red._shown is True and om_red._shown is True
+        # the world map option off: No Map isn't drawn, nothing said
+        st.useWorldMap = False
+        G.ApplySettings()
+        O.Refresh()
+        assert red._shown is False and om_red._shown is False
+        st.useWorldMap = True
+        G.ApplySettings()
+        O.Refresh()
+        assert red._shown is True
+        lua.execute("OpenMapAPI = nil")  # (the gold hint for OpenMap's players hidden too, for the room's check)
+        G.SetStyle("zone")
+        assert red._shown is False and om_red._shown is False and dd._pt[3] == under
+        # (the style notes: a sentence or two each)
+        notes = [str(w._text) for w in lua.eval("AGPS_WIDGETS").values() if w._kind == "FontString"]
+        for start in ("OpenMap (the default", "Terrain: the ground", "No Map (with", "Using the OpenMap addon?"):
+            n = next(t for t in notes if t.startswith(start))
+            assert len(n) <= 200, n
+        assert any(t.startswith("OpenMap (the default") and "/reload" in t for t in notes)
+    finally:
+        lua.execute("OpenMapAPI = nil")
+        st.useWorldMap = was
+        G.ApplySettings()
+        O.Refresh()
+        O.Toggle()
+
+
+BRILL_TAVERN = (2269.5, 244.9)  # (Gallows' End Tavern, Innkeeper Renee's)
+WAILING_CAVERNS = (-569.8, -2291.7)  # (over the Wailing Caverns, north of Lushwater Oasis: test_cave_clicks')
+
+
+def _hover_building(lua, ns, x, y):
+    G = ns.GPS
+    place, wmo, room = G.InteriorUnder(x, y, 0)
+    assert place is not None
+    G.hoverInside = lua.eval("function(p, w, r) return { p, w, r, cont = 0 } end")(place, wmo, room)
+    G.hoverInsideKey, G.hoverDismissKey = "nomap-test", None
+    G.LookAt(0, x, y, 60)
+    lua.execute("AGPS_T = AGPS_T + 6")
+    G.Redraw()
+    G.Update()
+    return [w for w in lua.eval("AGPS_WIDGETS").values() if w._shown and w.npc and str(w.npc.name) == "Innkeeper Renee"]
+
+
+def test_what_the_notice_lists_is_off_on_no_map(nomap):
+    """Each thing the red notice lists, checked off on No Map and on in another style: a building's inside map and its
+    NPCs (hovered), a cave's map and its floor for a stop (the route's cave, a double-click over it); and over OpenMap's
+    map, the view is OpenMap's: it doesn't follow the player or zoom in near a stop, which the game's map does."""
+    lua, ns = nomap
+    G, N, WG, st = ns.GPS, ns.Nav, ns.WorldGrid, ns.settings.gps
+    _open(lua, ns)
+    was_zoom = st.zoom
+    try:
+        # a building's inside map and the NPCs in it
+        assert G.SetStyle("minimap")
+        assert _hover_building(lua, ns, *BRILL_TAVERN) and G.shownInside is not None
+        assert G.SetStyle("none")
+        assert not _hover_building(lua, ns, *BRILL_TAVERN) and G.NoMapOn()
+        assert G.shownInside is None and G.InteriorMapShown()[0] is None
+        assert G.Seamless() is False  # (the hover over buildings and caves is the OpenMap style's: G.BuildingHover)
+        G.hoverInside, G.hoverInsideKey = None, None
+        # a cave's map (the route's cave, shown as hovered) and a stop on its floor
+        WG.Set(True)
+        cave = G.CaveAt(1, *WAILING_CAVERNS)
+        ground = ns.Ground.Sample(1, *WAILING_CAVERNS)
+        floor = G.CaveFloorZ(1, WAILING_CAVERNS[0], WAILING_CAVERNS[1], ground)
+        assert cave is not None and floor is not None
+        N.dest = lua.eval("{ x = %f, y = %f, cont = 1, z = %f }" % (WAILING_CAVERNS[0], WAILING_CAVERNS[1], floor))
+        for style, shown in (("minimap", True), ("none", False)):
+            assert G.SetStyle(style)
+            G.LookAt(1, WAILING_CAVERNS[0], WAILING_CAVERNS[1], 120)
+            _tick(lua, G)
+            assert (G.hoveredCave == cave) is shown, style  # (No Map: no cave map, not even the route's)
+            z = G.MapStopZ(1, *WAILING_CAVERNS)
+            assert (z < ground - G.CAVE_UNDER_YD) is shown, (style, z, ground)  # (No Map: the ground over it)
+        N.dest = None
+        # a controller's pan in the other styles too (only over OpenMap's map it doesn't, below)
+        for style in ("minimap", "zone", "nospoiler"):
+            assert G.SetStyle(style)
+            G.Follow()
+            _tick(lua, G)
+            xa = G.ViewState()[1]
+            G.PadPan(40, 0)
+            _tick(lua, G)
+            assert G.ViewState()[1] != pytest.approx(xa), style
+        assert G.SetStyle("none")
+        # following, the zoom near a stop and a controller's pan: on the game's map; OpenMap's view is its own
+        st.approachZoom = True
+        for openmap in (False, True):
+            if openmap:
+                lua.execute(OPENMAP)
+            G.Follow()
+            _tick(lua, G)
+            x0, y0 = tuple(G.ViewState())[:2]
+            lua.execute("AGPS_POS_NM = { AGPS_POS[1], AGPS_POS[2] } AGPS_POS[1] = AGPS_POS[1] + 120")
+            try:
+                _tick(lua, G)
+                x1, y1 = tuple(G.ViewState())[:2]
+                px, py, pc = list(lua.eval("{ AGPS_NS.Geo.PlayerWorld() }").values())[:3]
+                assert G.IsFree() is openmap
+                assert ((x1, y1) == (pytest.approx(x0), pytest.approx(y0))) is openmap  # (OpenMap's: still)
+                ns.Nav.SetStops(lua.eval("{ { x = %f, y = %f, cont = 0, name = 'Near' } }" % (px + 20, py)), False, "red")
+                assert (G.ApproachTarget(px, py, pc) is None) is openmap
+                # a controller's pan (Pad.lua's G.PadPan): moves the game's map, not OpenMap's view
+                xa = G.ViewState()[1]
+                for _ in range(3):
+                    G.PadPan(40, 0)
+                    _tick(lua, G)
+                assert (G.ViewState()[1] == pytest.approx(xa)) is openmap
+                ns.Nav.Clear()
+            finally:
+                lua.execute("AGPS_POS[1], AGPS_POS[2] = AGPS_POS_NM[1], AGPS_POS_NM[2]")
+    finally:
+        N.dest = None
+        ns.Nav.Clear()
+        G.hoverInside, G.hoverInsideKey = None, None
+        st.zoom = was_zoom
+        lua.execute("OpenMapAPI = nil")

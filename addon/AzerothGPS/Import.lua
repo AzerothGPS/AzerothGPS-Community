@@ -95,6 +95,7 @@ local function MapPoint(cont, x, y)
   local mapID, _, u, v = G.LocateWorld(Geo.Base(cont), x, y)
   return mapID, u, v
 end
+I.MapPoint = MapPoint -- (WaypointUI.lua's stop as its waypoint)
 
 function I.SetMapPin(cont, x, y)
   if not (cont and cont < 20000) then return false end
@@ -169,6 +170,10 @@ end
 -- The game's waypoint changed (USER_WAYPOINT_UPDATED): the pin follows it.
 function I.OnUserWaypoint()
   if syncing or not (C_Map and C_Map.HasUserWaypoint and ns.db) then return end
+  -- (the route's stop as Waypoint UI's waypoint, WaypointUI.lua: the game's waypoint is that one's, not a pin of the
+  -- player's; the pin they had, if any, stays as it was)
+  local W = ns.WaypointUI
+  if W and W.IsOursNow() then return end
   local cdb = ns.CharDB()
   local ok, has = pcall(C_Map.HasUserWaypoint)
   if not ok then return end

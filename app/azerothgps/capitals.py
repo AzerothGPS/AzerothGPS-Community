@@ -722,8 +722,23 @@ def build_capital(cd: ClientData, cap: Capital, ground: Ground, finder: RoadFind
         joins.append((end, pts[-1]))
     # lifts: from the city's road nearest the shaft up top, down the shaft, onto the land's road
     # nearest its foot (at the foot's height: not one up on the city's ground over it)
+    def floor_z(q):
+        r, c = u["world_to_px"](q[0], q[1])
+        ok = 0 <= r < H and 0 <= c < W and np.isfinite(u["top"][r, c])
+        return float(u["top"][r, c]) if ok else None
+
     for lx, ly, lz in cap.lifts:
         near = sorted((math.hypot(q[0] - lx, q[1] - ly), n) for n, q in g.nodes.items())
+        # (up top: a road over the foot, never the city's own road on the ground at the foot; and that road, when there
+        # is one, the lift's foot. Item 141 (1.4.2): by Thunder Bluff's north lift the ground road at its foot was the
+        # nearest, and its "lift" went from there to a land road 90 yd off under the Elder Rise's bridge, the mesa's
+        # cliff climbed by gap links instead)
+        zs = {n: floor_z(g.nodes[n]) for _d, n in near[:40]}
+        foot = [(d, n) for d, n in near[:40] if d <= LIFT_REACH and zs[n] is not None and abs(zs[n] - lz) < LIFT_FOOT_Z]
+        near = [(d, n) for d, n in near if zs.get(n) is None or zs[n] >= lz + LIFT_FOOT_Z] or near
+        if near and near[0][0] <= LIFT_REACH and foot:
+            g.add_edge(near[0][1], foot[0][1], [g.nodes[near[0][1]], (lx, ly), g.nodes[foot[0][1]]], source="lift")
+            continue
         if not near or near[0][0] > LIFT_REACH:
             # (the streets kept an edge past the shaft, not a node by it: a node on that edge there)
             best = None
